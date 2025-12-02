@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Fix Note Paths - Remove Spaces</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="shared-auth.js"></script>
+  <style>
+    body {
+      font-family: system-ui;
+      padding: 40px;
+      background: #1a1a2e;
+      color: #eee;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    button {
+      padding: 12px 24px;
+      margin: 10px 5px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #5568d3;
+    }
+    button:disabled {
+      background: #444;
+      cursor: not-allowed;
+    }
+    pre {
+      background: #0f0f1e;
+      padding: 20px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 13px;
+    }
+    .success { color: #10b981; }
+    .error { color: #ef4444; }
+    .warning { color: #f59e0b; }
+    .info { color: #3b82f6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔧 Fix Note Storage Paths</h1>
+    <p>This tool will update all existing note paths to remove spaces from folder names.</p>
+    <p><strong>Example:</strong> <code>Cardiovascular System/file.pdf</code> → <code>Cardiovascular-System/file.pdf</code></p>
+    
+    <button onclick="analyzeNotes()" id="analyzeBtn">1. Analyze Notes</button>
+    <button onclick="fixPaths()" id="fixBtn" disabled>2. Fix Paths (Update Database)</button>
+    
+    <pre id="output">Click "Analyze Notes" to start...</pre>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://pzbkznboxsckoswzfigq.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6Ymt6bmJveHNja29zd3pmaWdxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzI2NTYwNDIsImV4cCI6MjA0ODIzMjA0Mn0.cPVXo-Kd2qSNO0l63V9Q_MjbjPj_Bs88SgDwl6hR5k8';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let notesToFix = [];
+
+    function log(message, type = 'info') {
+      const output = document.getElementById('output');
+      const className = type;
+      output.innerHTML += `<div class="${className}">${message}</div>`;
+    }
+
+    function clear() {
+      document.getElementById('output').innerHTML = '';
+    }
+
+    async function analyzeNotes() {
+      clear();
+      log('🔍 Analyzing notes...\\n');
+      document.getElementById('analyzeBtn').disabled = true;
+
+      try {
+        // Ensure authenticated
+        const session = window.ArnomaAuth
+          ? await window.ArnomaAuth.ensureSession(supabase, { redirectToLogin: true })
+          : (await supabase.auth.getSession()).data.session;
+
+        if (!session) {
+          log('❌ Not authenticated. Redirecting to login...', 'error');
+          setTimeout(() => window.location.href = 'Login.html', 2000);
+          return;
+        }
+
+        // Get all system notes
+        const { data: notes, error } = await supabase
+          .from('student_notes')
+          .select('id, title, pdf_url, group_name')
+          .eq('is_system_note', true)
+          .eq('deleted', false);
+
+        if (error) throw error;
+
+        log(`✅ Found ${notes.length} system notes\\n`, 'success');
+
+        // Find notes with spaces in path
+        notesToFix = notes.filter(note => note.pdf_url && note.pdf_url.includes(' '));
+
+        if (notesToFix.length === 0) {
+          log('✨ All notes already have correct paths! No changes needed.', 'success');
+          return;
+        }
+
+        log(`⚠️ Found ${notesToFix.length} notes that need fixing:\\n`, 'warning');
+
+        notesToFix.forEach((note, i) => {
+          const newPath = note.pdf_url.replace(/\\s+/g, '-');
+          log(`\\n${i + 1}. ${note.title}`);
+          log(`   OLD: ${note.pdf_url}`, 'error');
+          log(`   NEW: ${newPath}`, 'success');
+        });
+
+        log('\\n✅ Analysis complete!', 'success');
+        log('\\n⚠️ NOTE: This will ONLY update the database paths.', 'warning');
+        log('The actual files in storage were never uploaded (upload failed silently).', 'warning');
+        log('After fixing paths, you will need to RE-UPLOAD the PDF files.\\n', 'warning');
+
+        document.getElementById('fixBtn').disabled = false;
+
+      } catch (error) {
+        log(`❌ Error: ${error.message}`, 'error');
+        console.error(error);
+      } finally {
+        document.getElementById('analyzeBtn').disabled = false;
+      }
+    }
+
+    async function fixPaths() {
+      if (notesToFix.length === 0) {
+        log('No notes to fix. Run analysis first.', 'warning');
+        return;
+      }
+
+      if (!confirm(`Fix ${notesToFix.length} note paths?\\n\\nThis will update the pdf_url field in the database.`)) {
+        return;
+      }
+
+      clear();
+      log('🔧 Fixing paths...\\n');
+      document.getElementById('fixBtn').disabled = true;
+
+      try {
+        let fixed = 0;
+
+        for (const note of notesToFix) {
+          const newPath = note.pdf_url.replace(/\\s+/g, '-');
+
+          const { error } = await supabase
+            .from('student_notes')
+            .update({ pdf_url: newPath })
+            .eq('id', note.id);
+
+          if (error) {
+            log(`❌ Failed to fix: ${note.title}`, 'error');
+            console.error(error);
+          } else {
+            fixed++;
+            log(`✅ Fixed: ${note.title}`, 'success');
+          }
+        }
+
+        log(`\\n🎉 Fixed ${fixed}/${notesToFix.length} notes!`, 'success');
+        log('\\n⚠️ IMPORTANT: Now you need to:', 'warning');
+        log('1. Go to Notes Manager', 'info');
+        log('2. Delete all existing notes (they have no files in storage)', 'info');
+        log('3. Re-upload the PDFs using bulk upload', 'info');
+        log('4. New uploads will use the correct paths without spaces', 'info');
+
+      } catch (error) {
+        log(`❌ Error: ${error.message}`, 'error');
+        console.error(error);
+      } finally {
+        document.getElementById('fixBtn').disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
