@@ -9,8 +9,8 @@
 
 -- Step 1: Create new permissions table
 CREATE TABLE IF NOT EXISTS student_note_permissions (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  note_id UUID REFERENCES student_notes(id) ON DELETE CASCADE,
+  id BIGSERIAL PRIMARY KEY,
+  note_id BIGINT REFERENCES student_notes(id) ON DELETE CASCADE,
   group_name TEXT NOT NULL,
   is_accessible BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now(),
@@ -68,7 +68,7 @@ ADD COLUMN IF NOT EXISTS is_system_note BOOLEAN DEFAULT false;
 -- HELPER FUNCTION: Grant access to all groups at once
 -- ============================================================
 CREATE OR REPLACE FUNCTION grant_note_to_all_groups(
-  p_note_id UUID,
+  p_note_id BIGINT,
   p_exclude_groups TEXT[] DEFAULT ARRAY[]::TEXT[]
 )
 RETURNS void
