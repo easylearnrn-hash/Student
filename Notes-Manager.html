@@ -917,11 +917,33 @@
     }
     
     async function deleteNote(noteId, title) {
-      if (!confirm(`Are you sure you want to delete "${title}"?\n\nThis will mark it as deleted but keep the file in storage.`)) {
+      if (!confirm(`Are you sure you want to delete "${title}"?\n\nThis will permanently delete the file from storage.`)) {
         return;
       }
       
       try {
+        // First, get the file path from the database
+        const { data: note, error: fetchError } = await supabase
+          .from('student_notes')
+          .select('file_path')
+          .eq('id', noteId)
+          .single();
+        
+        if (fetchError) throw fetchError;
+        
+        // Delete the file from storage
+        if (note?.file_path) {
+          const { error: storageError } = await supabase.storage
+            .from('student-notes')
+            .remove([note.file_path]);
+          
+          if (storageError) {
+            console.error('Storage delete error:', storageError);
+            // Continue anyway to mark as deleted in database
+          }
+        }
+        
+        // Mark as deleted in database
         const { error } = await supabase
           .from('student_notes')
           .update({ deleted: true })
@@ -929,7 +951,7 @@
         
         if (error) throw error;
         
-        showAlert('✅ Note deleted successfully', 'success');
+        showAlert('✅ Note and file deleted successfully', 'success');
         await loadNotes();
         
       } catch (error) {
