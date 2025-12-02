@@ -606,7 +606,17 @@
               <div class="system-expand">▼</div>
             </div>
             <div class="system-body">
-              <div class="notes-grid">
+              <div style="padding: 12px 16px; background: rgba(255, 255, 255, 0.02); border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                <input 
+                  type="text" 
+                  class="system-search" 
+                  placeholder="🔍 Search in ${system.name}..." 
+                  oninput="filterSystemNotes('${system.name.replace(/[^a-zA-Z0-9]/g, '')}')"
+                  onclick="event.stopPropagation()"
+                  style="width: 100%; padding: 10px 16px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 10px; color: white; font-size: 13px;"
+                />
+              </div>
+              <div class="notes-grid" id="notes-${system.name.replace(/[^a-zA-Z0-9]/g, '')}">
                 ${systemNotes.map(note => renderNoteCard(note)).join('')}
               </div>
             </div>
@@ -663,6 +673,40 @@
     function toggleSystem(systemId) {
       const section = document.getElementById(`system-${systemId}`);
       section.classList.toggle('expanded');
+    }
+
+    // ===== FILTER SYSTEM NOTES =====
+    function filterSystemNotes(systemId) {
+      const searchInput = document.querySelector(`#system-${systemId} .system-search`);
+      const searchTerm = searchInput.value.toLowerCase();
+      const notesGrid = document.getElementById(`notes-${systemId}`);
+      
+      // Get system name from the ID
+      const system = SYSTEMS.find(s => s.name.replace(/[^a-zA-Z0-9]/g, '') === systemId);
+      if (!system) return;
+      
+      // Filter notes for this system
+      let systemNotes = allNotes.filter(note => note.group_name === system.name);
+      
+      if (searchTerm) {
+        systemNotes = systemNotes.filter(note => {
+          const title = (note.title || '').toLowerCase();
+          const description = (note.description || '').toLowerCase();
+          return title.includes(searchTerm) || description.includes(searchTerm);
+        });
+      }
+      
+      // Re-render notes grid
+      if (systemNotes.length === 0) {
+        notesGrid.innerHTML = `
+          <div style="padding: 40px; text-align: center; color: #94a3b8;">
+            <div style="font-size: 48px; margin-bottom: 16px;">📭</div>
+            <div>No notes found matching "${searchTerm}"</div>
+          </div>
+        `;
+      } else {
+        notesGrid.innerHTML = systemNotes.map(note => renderNoteCard(note)).join('');
+      }
     }
 
     // ===== GRANT ACCESS =====
