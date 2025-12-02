@@ -10,28 +10,22 @@ SELECT
   file_size
 FROM student_notes
 WHERE group_name = 'Cardiovascular System'
-  AND pdf_url LIKE '%Cardiovascular System%'  -- Has spaces in filename
-  AND deleted = false
-ORDER BY class_date DESC;
+  AND pdf_url LIKE '%Cardiovascular System%';  -- Has spaces in filename
 
--- Delete the broken notes (mark as deleted)
-UPDATE student_notes
-SET deleted = true
-WHERE group_name = 'Cardiovascular System'
-  AND pdf_url LIKE '%Cardiovascular System%'  -- Has spaces in filename
-  AND deleted = false;
-
--- Also delete their permissions
+-- Delete permissions first (foreign key constraint)
 DELETE FROM student_note_permissions
 WHERE note_id IN (
   SELECT id FROM student_notes
   WHERE group_name = 'Cardiovascular System'
     AND pdf_url LIKE '%Cardiovascular System%'
-    AND deleted = true
 );
+
+-- Now delete the broken notes completely
+DELETE FROM student_notes
+WHERE group_name = 'Cardiovascular System'
+  AND pdf_url LIKE '%Cardiovascular System%';  -- Has spaces in filename
 
 -- Verify deletion
 SELECT COUNT(*) as remaining_cardiovascular_notes
 FROM student_notes
-WHERE group_name = 'Cardiovascular System'
-  AND deleted = false;
+WHERE group_name = 'Cardiovascular System';
