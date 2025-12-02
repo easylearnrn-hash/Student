@@ -846,6 +846,19 @@
         </div>
       </div>
 
+      <!-- Bulk Delete Controls -->
+      <div style="display: flex; gap: 12px; align-items: center; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 2px solid rgba(239, 68, 68, 0.3); border-radius: 12px; margin-bottom: 16px;" id="bulkDeleteControls">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+          <input type="checkbox" id="selectAllNotes" onchange="toggleSelectAll()" style="width: 18px; height: 18px; cursor: pointer;">
+          <span style="color: #fca5a5; font-weight: 600;">Select All</span>
+        </label>
+        <div style="flex: 1;"></div>
+        <span id="selectedCount" style="color: #fca5a5;">0 selected</span>
+        <button onclick="bulkDeleteNotes()" id="bulkDeleteBtn" disabled style="padding: 8px 20px; background: #ef4444; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; opacity: 0.5;">
+          🗑️ Delete Selected
+        </button>
+      </div>
+
       <div class="notes-grid" id="notesGrid">
         <div class="loading">
           <div class="spinner"></div>
@@ -1301,9 +1314,18 @@
       }
 
       grid.innerHTML = filtered.map(note => `
-        <div class="note-card">
+        <div class="note-card" data-note-id="${note.id}">
           <div class="note-card-header">
-            <div>
+            <label style="display: flex; align-items: center; cursor: pointer; margin-right: 12px;">
+              <input 
+                type="checkbox" 
+                class="note-checkbox" 
+                data-note-id="${note.id}"
+                onchange="updateSelectedCount()"
+                style="width: 18px; height: 18px; cursor: pointer;"
+              >
+            </label>
+            <div style="flex: 1;">
               <div class="note-card-title">${note.title}</div>
               <div class="note-card-system">${note.group_name}</div>
             </div>
@@ -1396,6 +1418,105 @@
       if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
       return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
     }
+
+    // ===== BULK DELETE =====
+    function toggleSelectAll() {
+      const selectAll = document.getElementById('selectAllNotes');
+      const checkboxes = document.querySelectorAll('.note-checkbox');
+      
+      checkboxes.forEach(cb => {
+        cb.checked = selectAll.checked;
+      });
+      
+      updateSelectedCount();
+    }
+
+    function updateSelectedCount() {
+      const checkboxes = document.querySelectorAll('.note-checkbox:checked');
+      const count = checkboxes.length;
+      const countEl = document.getElementById('selectedCount');
+      const deleteBtn = document.getElementById('bulkDeleteBtn');
+      const selectAll = document.getElementById('selectAllNotes');
+      
+      countEl.textContent = `${count} selected`;
+      deleteBtn.disabled = count === 0;
+      deleteBtn.style.opacity = count === 0 ? '0.5' : '1';
+      deleteBtn.style.cursor = count === 0 ? 'not-allowed' : 'pointer';
+      
+      // Update select all checkbox state
+      const allCheckboxes = document.querySelectorAll('.note-checkbox');
+      selectAll.checked = allCheckboxes.length > 0 && count === allCheckboxes.length;
+      selectAll.indeterminate = count > 0 && count < allCheckboxes.length;
+    }
+
+    async function bulkDeleteNotes() {
+      const checkboxes = document.querySelectorAll('.note-checkbox:checked');
+      const noteIds = Array.from(checkboxes).map(cb => parseInt(cb.dataset.noteId));
+      
+      if (noteIds.length === 0) {
+        alert('Please select notes to delete');
+        return;
+      }
+      
+      if (!confirm(`Delete ${noteIds.length} note(s)?\n\nThis will permanently remove the selected notes and their files from storage.`)) {
+        return;
+      }
+      
+      try {
+        const deleteBtn = document.getElementById('bulkDeleteBtn');
+        deleteBtn.textContent = '⏳ Deleting...';
+        deleteBtn.disabled = true;
+        
+        let deleted = 0;
+        let failed = 0;
+        
+        for (const noteId of noteIds) {
+          try {
+            // Get note details
+            const note = allNotes.find(n => n.id === noteId);
+            
+            // Try to delete from storage (may fail if file doesn't exist)
+            if (note?.pdf_url) {
+              const { error: storageError } = await supabase.storage
+                .from(BUCKET_NAME)
+                .remove([note.pdf_url]);
+              
+              if (storageError) console.warn(`Storage delete warning for note ${noteId}:`, storageError);
+            }
+            
+            // Mark as deleted in database
+            const { error: deleteError } = await supabase
+              .from('student_notes')
+              .update({ deleted: true })
+              .eq('id', noteId);
+            
+            if (deleteError) throw deleteError;
+            
+            deleted++;
+          } catch (error) {
+            console.error(`Failed to delete note ${noteId}:`, error);
+            failed++;
+          }
+        }
+        
+        alert(`✅ Deleted ${deleted} note(s)${failed > 0 ? `\n❌ Failed: ${failed}` : ''}`);
+        
+        // Uncheck select all
+        document.getElementById('selectAllNotes').checked = false;
+        
+        // Reload notes
+        await loadNotes();
+        
+      } catch (error) {
+        console.error('Bulk delete error:', error);
+        alert('Failed to delete notes: ' + error.message);
+      } finally {
+        const deleteBtn = document.getElementById('bulkDeleteBtn');
+        deleteBtn.textContent = '🗑️ Delete Selected';
+        updateSelectedCount();
+      }
+    }
+
 
     function logout() {
       if (confirm('Are you sure you want to logout?')) {
