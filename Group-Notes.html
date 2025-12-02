@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>📝 ARNOMA Group Notes Manager</title>
+  
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="shared-auth.js"></script>
+  <script src="shared-dialogs.js"></script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      --success: #10b981;
+      --danger: #ef4444;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      min-height: 100vh;
+      padding: 40px 20px;
+      color: white;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background:
+        radial-gradient(circle at 20% 30%, rgba(102, 126, 234, 0.15) 0%, transparent 50%),
+        radial-gradient(circle at 80% 70%, rgba(118, 75, 162, 0.12) 0%, transparent 50%);
+      animation: gradientShift 20s ease infinite;
+      z-index: -1;
+    }
+
+    @keyframes gradientShift {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.1); }
+    }
+
+    .container {
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    /* ===== HEADER ===== */
+    .header {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 20px;
+      padding: 24px;
+      margin-bottom: 30px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .page-title {
+      font-size: 28px;
+      font-weight: 800;
+      background: linear-gradient(135deg, #8ab4ff, #a855f7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin: 0;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn-secondary {
+      padding: 11px 24px;
+      background: rgba(59, 130, 246, 0.15);
+      border: 2px solid rgba(59, 130, 246, 0.4);
+      border-radius: 12px;
+      color: #93c5fd;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(59, 130, 246, 0.25);
+      border-color: #3b82f6;
+      transform: translateY(-2px);
+      box-shadow: 0 0 25px rgba(59, 130, 246, 0.4);
+    }
+
+    .logout-btn {
+      padding: 8px 16px;
+      background: rgba(239, 68, 68, 0.15);
+      border: 2px solid rgba(239, 68, 68, 0.4);
+      border-radius: 10px;
+      color: #fca5a5;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* ===== GROUP TABS ===== */
+    .group-tabs {
+      display: flex;
+      gap: 12px;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 14px;
+      flex-wrap: wrap;
+    }
+
+    .group-tab {
+      flex: 1;
+      min-width: 120px;
+      padding: 12px 20px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 2px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      color: rgba(255, 255, 255, 0.6);
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      text-align: center;
+    }
+
+    .group-tab.active {
+      background: rgba(102, 126, 234, 0.2);
+      border-color: rgba(102, 126, 234, 0.6);
+      color: #8ab4ff;
+      box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
+    }
+
+    .group-tab:hover:not(.active) {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    /* ===== SYSTEMS ACCORDION ===== */
+    .systems-container {
+      margin-top: 24px;
+    }
+
+    .system-section {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 14px;
+      margin-bottom: 16px;
+      overflow: hidden;
+      transition: all 0.3s;
+    }
+
+    .system-section.expanded {
+      border-color: rgba(102, 126, 234, 0.4);
+    }
+
+    .system-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .system-header:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .system-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .system-icon {
+      font-size: 32px;
+    }
+
+    .system-details h3 {
+      font-size: 18px;
+      color: white;
+      margin-bottom: 4px;
+    }
+
+    .system-details .note-count {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .system-expand {
+      font-size: 20px;
+      color: rgba(255, 255, 255, 0.5);
+      transition: transform 0.3s;
+    }
+
+    .system-section.expanded .system-expand {
+      transform: rotate(180deg);
+    }
+
+    .system-body {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+
+    .system-section.expanded .system-body {
+      max-height: 2000px;
+    }
+
+    /* ===== NOTES GRID ===== */
+    .notes-grid {
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+    }
+
+    .note-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 16px;
+      transition: all 0.3s;
+    }
+
+    .note-card:hover {
+      transform: translateY(-2px);
+      border-color: rgba(102, 126, 234, 0.4);
+      box-shadow: 0 4px 16px rgba(102, 126, 234, 0.2);
+    }
+
+    .note-card.accessible {
+      border-color: rgba(16, 185, 129, 0.5);
+      background: rgba(16, 185, 129, 0.05);
+    }
+
+    .note-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      margin-bottom: 12px;
+    }
+
+    .note-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: white;
+      line-height: 1.4;
+      flex: 1;
+    }
+
+    .access-badge {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+      margin-left: 8px;
+    }
+
+    .access-badge.accessible {
+      background: rgba(16, 185, 129, 0.2);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+
+    .access-badge.restricted {
+      background: rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    .note-meta {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-bottom: 12px;
+    }
+
+    .note-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-access {
+      flex: 1;
+      padding: 8px 12px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      border-radius: 8px;
+      color: #6ee7b7;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-access:hover {
+      background: rgba(16, 185, 129, 0.25);
+      box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+    }
+
+    .btn-access.revoke {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }
+
+    .btn-access.revoke:hover {
+      background: rgba(239, 68, 68, 0.25);
+    }
+
+    .btn-view {
+      padding: 8px 12px;
+      background: rgba(59, 130, 246, 0.15);
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      border-radius: 8px;
+      color: #93c5fd;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-view:hover {
+      background: rgba(59, 130, 246, 0.25);
+    }
+
+    /* ===== EMPTY STATE ===== */
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .empty-state .icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .empty-state .text {
+      font-size: 16px;
+    }
+
+    /* ===== LOADING ===== */
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: rgba(255, 255, 255, 0.7);
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(102, 126, 234, 0.2);
+      border-top-color: #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 768px) {
+      .header-row {
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .group-tabs {
+        flex-direction: column;
+      }
+
+      .notes-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="header-row">
+        <div>
+          <h1 class="page-title">📝 Group Notes Manager</h1>
+          <div style="font-size: 14px; color: rgba(138, 180, 255, 0.7); margin-top: 4px;">
+            Assign notes to groups • Students who paid can see assigned notes
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="btn-secondary" onclick="window.location.href='Student-Portal-Admin.html'">
+            ← Back to Admin
+          </button>
+          <button class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+      </div>
+
+      <!-- Group Tabs -->
+      <div class="group-tabs">
+        <button class="group-tab active" data-group="Group A" onclick="switchGroup('Group A')">
+          👥 Group A
+        </button>
+        <button class="group-tab" data-group="Group B" onclick="switchGroup('Group B')">
+          👥 Group B
+        </button>
+        <button class="group-tab" data-group="Group C" onclick="switchGroup('Group C')">
+          👥 Group C
+        </button>
+        <button class="group-tab" data-group="Group D" onclick="switchGroup('Group D')">
+          👥 Group D
+        </button>
+        <button class="group-tab" data-group="Group E" onclick="switchGroup('Group E')">
+          👥 Group E
+        </button>
+        <button class="group-tab" data-group="Group F" onclick="switchGroup('Group F')">
+          👥 Group F
+        </button>
+      </div>
+    </div>
+
+    <!-- Systems Container -->
+    <div class="systems-container" id="systemsContainer">
+      <div class="loading">
+        <div class="spinner"></div>
+        <div>Loading systems and notes...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== SUPABASE CONFIGURATION =====
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const BUCKET_NAME = 'student-notes';
+
+    const SYSTEMS = [
+      { name: 'Medical Terminology', icon: '📖' },
+      { name: 'Human Anatomy', icon: '🫀' },
+      { name: 'Medication Suffixes and Drug Classes', icon: '💊' },
+      { name: 'Cardiovascular System', icon: '❤️' },
+      { name: 'Endocrine System', icon: '⚡' },
+      { name: 'Gastrointestinal & Hepatic System', icon: '🍃' },
+      { name: 'Respiratory System', icon: '🫁' },
+      { name: 'Renal', icon: '💧' },
+      { name: 'Fluids, Electrolytes & Nutrition', icon: '⚗️' },
+      { name: 'Eye Disorders', icon: '👁️' },
+      { name: 'EENT', icon: '👂' },
+      { name: 'Burns and Skin', icon: '🔥' },
+      { name: 'Reproductive and Sexual Health System', icon: '💕' },
+      { name: 'Maternal Health', icon: '🤰' },
+      { name: 'Pediatrics', icon: '👶' },
+      { name: 'Medical-Surgical Care', icon: '🏥' },
+      { name: 'Mental Health', icon: '🧠' },
+      { name: 'Autoimmune & Infectious Disorders', icon: '🦠' },
+      { name: 'Neurology', icon: '⚡' },
+      { name: 'Cancer', icon: '🎗️' },
+      { name: 'Musculoskeletal Disorders', icon: '🦴' },
+      { name: 'Psycho-Social Aspects', icon: '🤝' },
+      { name: 'Nursing Skills and Fundamentals', icon: '⚕️' },
+      { name: 'Pharmacology', icon: '💉' }
+    ];
+
+    let currentGroup = 'Group A';
+    let allNotes = [];
+    let permissions = [];
+
+    // ===== INITIALIZATION =====
+    (async function init() {
+      try {
+        const session = window.ArnomaAuth
+          ? await window.ArnomaAuth.ensureSession(supabase, { redirectToLogin: true })
+          : (await supabase.auth.getSession()).data.session;
+
+        if (!session) {
+          window.location.href = 'Login.html';
+          return;
+        }
+
+        await loadData();
+      } catch (error) {
+        console.error('Init error:', error);
+        alert('Failed to initialize: ' + error.message);
+      }
+    })();
+
+    // ===== LOAD DATA =====
+    async function loadData() {
+      const container = document.getElementById('systemsContainer');
+      container.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading systems and notes...</div></div>';
+
+      try {
+        // Load all notes
+        const { data: notes, error: notesError } = await supabase
+          .from('student_notes')
+          .select('*')
+          .eq('deleted', false)
+          .eq('is_system_note', true)
+          .order('class_date', { ascending: false });
+
+        if (notesError) throw notesError;
+        allNotes = notes || [];
+
+        // Load all permissions
+        const { data: perms, error: permsError } = await supabase
+          .from('student_note_permissions')
+          .select('*');
+
+        if (permsError) throw permsError;
+        permissions = perms || [];
+
+        renderSystems();
+
+      } catch (error) {
+        console.error('Load data error:', error);
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="icon">❌</div>
+            <div class="text">Failed to load data: ${error.message}</div>
+          </div>
+        `;
+      }
+    }
+
+    // ===== SWITCH GROUP =====
+    function switchGroup(group) {
+      currentGroup = group;
+      
+      // Update tab styling
+      document.querySelectorAll('.group-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.group === group);
+      });
+
+      renderSystems();
+    }
+
+    // ===== RENDER SYSTEMS =====
+    function renderSystems() {
+      const container = document.getElementById('systemsContainer');
+
+      const systemsHTML = SYSTEMS.map(system => {
+        const systemNotes = allNotes.filter(note => note.group_name === system.name);
+        
+        if (systemNotes.length === 0) return '';
+
+        return `
+          <div class="system-section" id="system-${system.name.replace(/[^a-zA-Z0-9]/g, '')}">
+            <div class="system-header" onclick="toggleSystem('${system.name.replace(/[^a-zA-Z0-9]/g, '')}')">
+              <div class="system-info">
+                <div class="system-icon">${system.icon}</div>
+                <div class="system-details">
+                  <h3>${system.name}</h3>
+                  <div class="note-count">${systemNotes.length} note${systemNotes.length !== 1 ? 's' : ''}</div>
+                </div>
+              </div>
+              <div class="system-expand">▼</div>
+            </div>
+            <div class="system-body">
+              <div class="notes-grid">
+                ${systemNotes.map(note => renderNoteCard(note)).join('')}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      if (!systemsHTML) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="icon">📭</div>
+            <div class="text">No notes uploaded yet. Upload notes in the Notes Manager first.</div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = systemsHTML;
+    }
+
+    // ===== RENDER NOTE CARD =====
+    function renderNoteCard(note) {
+      const permission = permissions.find(p => 
+        p.note_id === note.id && p.group_name === currentGroup
+      );
+      const isAccessible = permission?.is_accessible || false;
+
+      return `
+        <div class="note-card ${isAccessible ? 'accessible' : ''}">
+          <div class="note-header">
+            <div class="note-title">${note.title}</div>
+            <div class="access-badge ${isAccessible ? 'accessible' : 'restricted'}">
+              ${isAccessible ? '✓ Visible' : '✕ Hidden'}
+            </div>
+          </div>
+          <div class="note-meta">
+            <span>📅 ${new Date(note.class_date).toLocaleDateString()}</span>
+            <span>${note.requires_payment ? '🔒 Paid' : '🔓 Free'}</span>
+            <span>📦 ${formatFileSize(note.file_size)}</span>
+          </div>
+          <div class="note-actions">
+            ${isAccessible 
+              ? `<button class="btn-access revoke" onclick="revokeAccess(${note.id}, '${note.title.replace(/'/g, "\\'")}')">🚫 Hide from ${currentGroup}</button>`
+              : `<button class="btn-access" onclick="grantAccess(${note.id}, '${note.title.replace(/'/g, "\\'")}')">✓ Show to ${currentGroup}</button>`
+            }
+            <button class="btn-view" onclick="viewNote('${note.file_path}')">👁️</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // ===== TOGGLE SYSTEM =====
+    function toggleSystem(systemId) {
+      const section = document.getElementById(`system-${systemId}`);
+      section.classList.toggle('expanded');
+    }
+
+    // ===== GRANT ACCESS =====
+    async function grantAccess(noteId, title) {
+      try {
+        // Check if permission record exists
+        const existing = permissions.find(p => 
+          p.note_id === noteId && p.group_name === currentGroup
+        );
+
+        if (existing) {
+          // Update existing
+          const { error } = await supabase
+            .from('student_note_permissions')
+            .update({ is_accessible: true })
+            .eq('id', existing.id);
+
+          if (error) throw error;
+
+          // Update local state
+          existing.is_accessible = true;
+        } else {
+          // Create new
+          const { data, error } = await supabase
+            .from('student_note_permissions')
+            .insert({
+              note_id: noteId,
+              group_name: currentGroup,
+              is_accessible: true
+            })
+            .select()
+            .single();
+
+          if (error) throw error;
+
+          // Add to local state
+          permissions.push(data);
+        }
+
+        renderSystems();
+
+      } catch (error) {
+        console.error('Grant access error:', error);
+        alert('Failed to grant access: ' + error.message);
+      }
+    }
+
+    // ===== REVOKE ACCESS =====
+    async function revokeAccess(noteId, title) {
+      try {
+        const permission = permissions.find(p => 
+          p.note_id === noteId && p.group_name === currentGroup
+        );
+
+        if (!permission) return;
+
+        const { error } = await supabase
+          .from('student_note_permissions')
+          .update({ is_accessible: false })
+          .eq('id', permission.id);
+
+        if (error) throw error;
+
+        // Update local state
+        permission.is_accessible = false;
+
+        renderSystems();
+
+      } catch (error) {
+        console.error('Revoke access error:', error);
+        alert('Failed to revoke access: ' + error.message);
+      }
+    }
+
+    // ===== VIEW NOTE =====
+    async function viewNote(filePath) {
+      try {
+        const { data, error } = await supabase.storage
+          .from(BUCKET_NAME)
+          .createSignedUrl(filePath, 3600);
+
+        if (error) throw error;
+        window.open(data.signedUrl, '_blank');
+      } catch (error) {
+        alert('Failed to view note: ' + error.message);
+      }
+    }
+
+    // ===== UTILITIES =====
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function logout() {
+      if (confirm('Are you sure you want to logout?')) {
+        supabase.auth.signOut();
+        window.location.href = 'Login.html';
+      }
+    }
+  </script>
+</body>
+</html>
