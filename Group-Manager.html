@@ -1,0 +1,3324 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>ARNOMA - Group Manager [Connected to Supabase]</title>
+    
+    <!-- Supabase Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+    
+    <!--
+      v2.21.0 - Complete Group Manager Redesign
+
+      DESIGN SYSTEM:
+      - Matches Student Manager NEW glassmorphism design
+      - Same card structure, neon glow, blur effects
+      - Same modal architecture (static blur + scrollable content)
+      - Same button styles and animations
+      - Same header system with gradient text
+      - Same hover/active effects
+
+      FEATURES:
+      - Group List with glassmorphism cards
+      - Add/Edit/Delete Group modals
+      - Group color picker with live preview
+      - Schedule editor (LA/Yerevan timezone support)
+      - Active/Inactive toggle
+      - Student count per group
+      - Search and filter functionality
+      - Responsive grid layout (3/2/1 columns)
+
+      MODAL FIXES (v2.20.2 - v2.20.6):
+      - Separated .modal-card (blur) from .modal-scroll (content)
+      - Removed backdrop-filter from all scrollable content
+      - Body scroll lock on modal open/close
+      - No blur flicker issues
+    -->
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        --success-gradient: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        --dark-bg: #1a1d35;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #0f172a;
+        min-height: 100vh;
+        padding: 40px 20px;
+        color: white;
+      }
+
+      body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background:
+          radial-gradient(circle at 20% 30%, rgba(102, 126, 234, 0.15) 0%, transparent 50%),
+          radial-gradient(circle at 80% 70%, rgba(118, 75, 162, 0.12) 0%, transparent 50%);
+        animation: gradientShift 20s ease infinite;
+        z-index: -1;
+      }
+
+      @keyframes gradientShift {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.85;
+          transform: scale(1.1);
+        }
+      }
+
+      /* ============================================
+         HEADER SECTION
+         ============================================ */
+
+      .header {
+        max-width: 1400px;
+        margin: 0 auto 40px;
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        position: relative;
+        z-index: 100;
+      }
+
+      .header-row-1 {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .header-row-2 {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .page-title {
+        font-size: 28px;
+        font-weight: 800;
+        background: linear-gradient(135deg, #8ab4ff, #a855f7);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin: 0;
+      }
+
+      .page-subtitle {
+        font-size: 14px;
+        color: rgba(138, 180, 255, 0.7);
+        margin-top: 4px;
+        font-weight: 600;
+      }
+
+      /* Header Buttons */
+      .btn-header-primary {
+        position: relative;
+        padding: 11px 24px;
+        background: rgba(16, 185, 129, 0.15);
+        border: 2px solid rgba(16, 185, 129, 0.4);
+        border-radius: 12px;
+        color: #6ee7b7;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow:
+          0 0 15px rgba(16, 185, 129, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        white-space: nowrap;
+        font-family: inherit;
+        border-style: solid;
+      }
+
+      .btn-header-primary:hover {
+        background: rgba(16, 185, 129, 0.25);
+        border-color: #10b981;
+        color: #d1fae5;
+        transform: translateY(-2px) scale(1.02);
+        box-shadow:
+          0 0 25px rgba(16, 185, 129, 0.4),
+          0 4px 12px rgba(16, 185, 129, 0.3);
+      }
+
+      .btn-header-secondary {
+        position: relative;
+        padding: 11px 24px;
+        background: rgba(59, 130, 246, 0.15);
+        border: 2px solid rgba(59, 130, 246, 0.4);
+        border-radius: 12px;
+        color: #93c5fd;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow:
+          0 0 15px rgba(59, 130, 246, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        white-space: nowrap;
+        font-family: inherit;
+        border-style: solid;
+      }
+
+      .btn-header-secondary:hover {
+        background: rgba(59, 130, 246, 0.25);
+        border-color: #3b82f6;
+        color: #dbeafe;
+        transform: translateY(-2px) scale(1.02);
+        box-shadow:
+          0 0 25px rgba(59, 130, 246, 0.4),
+          0 4px 12px rgba(59, 130, 246, 0.3);
+      }
+
+      .search-input {
+        flex: 1;
+        min-width: 280px;
+        padding: 12px 18px 12px 44px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        color: white;
+        font-size: 14px;
+        font-family: inherit;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='rgba(255,255,255,0.4)'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'%3E%3C/path%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: 14px center;
+        background-size: 20px 20px;
+      }
+
+      .search-input::placeholder {
+        color: rgba(255, 255, 255, 0.35);
+      }
+
+      .search-input:focus {
+        outline: none;
+        background-color: rgba(255, 255, 255, 0.06);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow:
+          inset 0 2px 4px rgba(0, 0, 0, 0.1),
+          0 0 0 4px rgba(138, 180, 255, 0.15);
+      }
+
+      .filter-select {
+        padding: 12px 36px 12px 16px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        color: white;
+        font-size: 14px;
+        font-weight: 600;
+        min-width: 170px;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='rgba(255,255,255,0.5)'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        background-size: 20px 20px;
+        font-family: inherit;
+      }
+
+      .filter-select:hover {
+        background-color: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+
+      .filter-select:focus {
+        outline: none;
+        background-color: rgba(255, 255, 255, 0.06);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow:
+          inset 0 2px 4px rgba(0, 0, 0, 0.1),
+          0 0 0 4px rgba(138, 180, 255, 0.15),
+          0 0 20px rgba(138, 180, 255, 0.2);
+      }
+
+      .filter-select option {
+        background: #1e293b;
+        color: white;
+        padding: 12px;
+      }
+
+      .btn-header-clear {
+        padding: 12px 20px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        white-space: nowrap;
+        box-shadow:
+          0 0 10px rgba(0, 0, 0, 0.1),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        font-family: inherit;
+        border-style: solid;
+      }
+
+      .btn-header-clear:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.2);
+        color: white;
+        transform: translateY(-1px);
+        box-shadow:
+          0 0 15px rgba(255, 255, 255, 0.1),
+          0 4px 8px rgba(0, 0, 0, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      }
+
+      /* ============================================
+         GROUP GRID
+         ============================================ */
+
+      .groups-grid {
+        max-width: 1400px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+        gap: 24px;
+      }
+
+      /* ============================================
+         GROUP CARD
+         ============================================ */
+
+      .group-card {
+        position: relative;
+        background: rgba(26, 29, 53, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        padding: 20px;
+        cursor: pointer;
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        display: flex;
+        flex-direction: column;
+        will-change: transform;
+        contain: layout style paint;
+        content-visibility: auto;
+        contain-intrinsic-size: 0 250px;
+      }
+
+      .group-card:hover {
+        transform: scale(1.02) translateZ(0);
+        box-shadow: 0 12px 48px rgba(102, 126, 234, 0.4);
+        border-color: rgba(102, 126, 234, 0.3);
+      }
+
+      .group-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 20px;
+      }
+
+      .group-right-section {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+        flex: 1;
+        margin-left: 20px;
+      }
+
+      .group-icon-wrapper {
+        position: relative;
+        flex-shrink: 0;
+      }
+
+      .group-icon-orbit {
+        position: absolute;
+        inset: -8px;
+        border-radius: 24px;
+        border: 2px solid transparent;
+        background: linear-gradient(
+            135deg,
+            var(--group-color, rgba(102, 126, 234, 0.6)),
+            var(--group-color-light, rgba(118, 75, 162, 0.4))
+          )
+          border-box;
+        -webkit-mask:
+          linear-gradient(#fff 0 0) padding-box,
+          linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        animation: rotate 12s linear infinite;
+        pointer-events: none;
+      }
+
+      @keyframes rotate {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .group-icon {
+        position: relative;
+        width: 72px;
+        height: 72px;
+        border-radius: 16px;
+        background: var(--group-gradient, linear-gradient(135deg, #667eea 0%, #764ba2 100%));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 40px;
+        font-weight: 900;
+        color: white;
+        border: 3px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 8px 24px var(--group-shadow, rgba(102, 126, 234, 0.4));
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        letter-spacing: -2px;
+        text-transform: uppercase;
+      }
+
+      .group-toggle-wrapper {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+      }
+
+      .group-status-pill {
+        padding: 4px 10px;
+        border-radius: 8px;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+      }
+
+      .group-status-pill.active {
+        background: rgba(16, 185, 129, 0.15);
+        color: #6ee7b7;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        text-shadow:
+          0 0 8px rgba(94, 255, 108, 0.4),
+          0 0 16px rgba(94, 255, 108, 0.26);
+        box-shadow:
+          0 0 12px rgba(76, 175, 80, 0.3),
+          0 0 24px rgba(76, 175, 80, 0.2),
+          inset 0 0 8px rgba(94, 255, 108, 0.1);
+      }
+
+      .group-status-pill.inactive {
+        background: rgba(139, 92, 246, 0.15);
+        color: #c4b5fd;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+      }
+
+      .elegant-toggle {
+        position: relative;
+        display: inline-block;
+        width: 40px;
+        height: 22px;
+      }
+
+      .elegant-toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .elegant-toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.08);
+        transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 22px;
+        border: 1.5px solid rgba(255, 255, 255, 0.15);
+        box-shadow:
+          inset 0 2px 4px rgba(0, 0, 0, 0.2),
+          0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .elegant-toggle-slider:before {
+        position: absolute;
+        content: '';
+        height: 16px;
+        width: 16px;
+        left: 2px;
+        bottom: 2px;
+        background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 100%);
+        transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 50%;
+        box-shadow:
+          0 2px 6px rgba(0, 0, 0, 0.3),
+          inset 0 1px 2px rgba(255, 255, 255, 0.8);
+      }
+
+      .elegant-toggle input:checked + .elegant-toggle-slider {
+        background: linear-gradient(135deg, #8ab4ff 0%, #667eea 100%);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow:
+          0 0 12px rgba(138, 180, 255, 0.6),
+          0 0 24px rgba(138, 180, 255, 0.4),
+          inset 0 1px 2px rgba(255, 255, 255, 0.2);
+      }
+
+      .elegant-toggle input:checked + .elegant-toggle-slider:before {
+        transform: translateX(18px);
+      }
+
+      .group-info {
+        flex: 1;
+      }
+
+      .group-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: rgba(255, 255, 255, 0.5);
+        margin-bottom: 6px;
+        font-weight: 600;
+      }
+
+      .group-name {
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1.2;
+        margin-bottom: 8px;
+        color: white;
+      }
+
+      .group-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: flex-end;
+        margin-bottom: 0;
+      }
+
+      .group-content-row {
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+        margin-bottom: 12px;
+      }
+
+      .group-content-row .group-meta {
+        margin-bottom: 0;
+        flex-shrink: 0;
+      }
+
+      .group-content-row .group-schedule {
+        flex: 1;
+        margin-bottom: 0;
+        padding: 0;
+        min-height: auto;
+      }
+
+      .meta-badge {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .meta-badge.students {
+        color: #86efac;
+        background: rgba(16, 185, 129, 0.08);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+        transition: all 0.2s ease;
+      }
+
+      .meta-badge.students:hover {
+        background: rgba(16, 185, 129, 0.15);
+        border-color: rgba(16, 185, 129, 0.4);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+      }
+
+      .meta-badge.earnings {
+        color: #fcd34d;
+        background: rgba(251, 191, 36, 0.08);
+        border: 1px solid rgba(251, 191, 36, 0.2);
+      }
+
+      .meta-badge.schedule {
+        color: #93c5fd;
+        background: rgba(59, 130, 246, 0.08);
+        border: 1px solid rgba(59, 130, 246, 0.2);
+      }
+
+      .meta-badge svg {
+        width: 14px;
+        height: 14px;
+        opacity: 0.8;
+      }
+
+      .group-schedule {
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.7);
+        line-height: 1.8;
+        margin-bottom: 14px;
+        margin-top: 8px;
+        min-height: auto;
+        padding: 0;
+        font-weight: 500;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .schedule-day {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 12px;
+        align-items: center;
+        padding: 10px 14px;
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.08) 0%, rgba(102, 126, 234, 0.08) 100%);
+        border: 1px solid rgba(138, 180, 255, 0.25);
+        border-radius: 8px;
+        width: 100%;
+        position: relative;
+      }
+
+      /* One-time class styling - amber/orange theme */
+      .schedule-day.one-time {
+        background: linear-gradient(135deg, rgba(255, 183, 77, 0.12) 0%, rgba(255, 152, 0, 0.12) 100%);
+        border: 1px solid rgba(255, 183, 77, 0.4);
+        grid-template-columns: 1fr auto 1fr;
+        grid-template-rows: auto auto;
+      }
+
+      .schedule-day.one-time .time-row:first-child {
+        grid-column: 1 / 2;
+        grid-row: 1;
+      }
+
+      .schedule-day.one-time .time-divider {
+        grid-column: 2 / 3;
+        grid-row: 1;
+        background: linear-gradient(180deg, transparent 0%, rgba(255, 183, 77, 0.5) 50%, transparent 100%);
+      }
+
+      .schedule-day.one-time .time-row.yerevan-row {
+        grid-column: 3 / 4;
+        grid-row: 1;
+      }
+
+      .one-time-date {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(255, 183, 77, 0.2);
+        color: rgba(255, 183, 77, 0.9);
+        font-size: 11px;
+        font-weight: 600;
+        text-align: center;
+        letter-spacing: 0.3px;
+      }
+
+      .schedule-day.one-time .day-name {
+        color: #ffb74d;
+      }
+
+      .schedule-day.one-time .time-value {
+        color: rgba(255, 224, 178, 0.95);
+      }
+
+      .schedule-day.one-time .la-time {
+        color: #ffd699;
+      }
+
+      .time-row {
+        display: grid;
+        grid-template-columns: 20px auto 1fr;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .time-divider {
+        width: 2px;
+        height: 30px;
+        background: linear-gradient(180deg, transparent 0%, rgba(138, 180, 255, 0.4) 50%, transparent 100%);
+        border-radius: 1px;
+      }
+
+      .day-name {
+        color: #8ab4ff;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+      }
+
+      .time-value {
+        color: rgba(255, 255, 255, 0.95);
+        font-weight: 700;
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0.3px;
+        text-align: right;
+      }
+
+      .la-time {
+        color: #b8d4ff;
+      }
+
+      .yerevan-row {
+        justify-content: flex-start;
+      }
+
+      .yerevan-day {
+        color: rgba(138, 180, 255, 0.85);
+        font-size: 11px;
+      }
+
+      .yerevan-time {
+        color: rgba(184, 212, 255, 0.85);
+        font-size: 12px;
+      }
+
+      .schedule-time {
+        color: rgba(255, 255, 255, 0.9);
+        font-weight: 700;
+        font-size: 12px;
+      }
+
+      .schedule-empty {
+        color: rgba(255, 255, 255, 0.4);
+        font-style: italic;
+        text-align: center;
+      }
+
+      .group-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .btn-group-action {
+        padding: 6px 12px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-family: inherit;
+      }
+
+      .btn-group-action:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.25);
+        color: white;
+        transform: translateY(-1px);
+      }
+
+      .btn-group-action.edit {
+        color: #93c5fd;
+        border-color: rgba(59, 130, 246, 0.3);
+      }
+
+      .btn-group-action.edit:hover {
+        background: rgba(59, 130, 246, 0.15);
+        border-color: rgba(59, 130, 246, 0.5);
+      }
+
+      .btn-group-action.delete {
+        color: #fca5a5;
+        border-color: rgba(239, 68, 68, 0.3);
+      }
+
+      .btn-group-action.delete:hover {
+        background: rgba(239, 68, 68, 0.15);
+        border-color: rgba(239, 68, 68, 0.5);
+      }
+
+      /* ============================================
+         MODALS (Add/Edit/Delete)
+         ============================================ */
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(12px);
+        z-index: 70000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        animation: fadeIn 0.3s ease;
+      }
+
+      .modal-backdrop.active {
+        display: flex;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .modal-card {
+        background: rgba(26, 29, 53, 0.95);
+        backdrop-filter: blur(40px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 32px;
+        max-width: 650px;
+        width: 100%;
+        max-height: 90vh;
+        overflow: hidden;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+        animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        display: flex;
+        flex-direction: column;
+      }
+
+      @keyframes slideUp {
+        from {
+          opacity: 0;
+          transform: scale(0.95) translateY(40px);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1) translateY(0);
+        }
+      }
+
+      .modal-scroll {
+        overflow-y: auto;
+        overflow-x: hidden;
+        max-height: 100%;
+      }
+
+      .modal-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .modal-scroll::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 0 32px 32px 0;
+      }
+
+      .modal-scroll::-webkit-scrollbar-thumb {
+        background: rgba(138, 180, 255, 0.3);
+        border-radius: 10px;
+      }
+
+      .modal-scroll::-webkit-scrollbar-thumb:hover {
+        background: rgba(138, 180, 255, 0.5);
+      }
+
+      .modal-close {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        padding: 0;
+        font-family: inherit;
+        color: white;
+        font-size: 28px;
+        line-height: 1;
+      }
+
+      .modal-close:hover {
+        background: rgba(255, 255, 255, 0.15);
+        transform: rotate(90deg);
+      }
+
+      .modal-header {
+        padding: 24px 32px;
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.15), rgba(168, 85, 247, 0.15));
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .modal-title {
+        font-size: 1.5rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #fff, #8ab4ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .modal-body {
+        padding: 28px 32px;
+      }
+
+      .form-group {
+        margin-bottom: 24px;
+      }
+
+      .form-label {
+        display: block;
+        margin-bottom: 10px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .form-input,
+      .form-textarea {
+        width: 100%;
+        padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        color: white;
+        font-size: 14px;
+        font-family: inherit;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-sizing: border-box;
+      }
+
+      .form-input::placeholder,
+      .form-textarea::placeholder {
+        color: rgba(255, 255, 255, 0.35);
+      }
+
+      .form-input:focus,
+      .form-textarea:focus {
+        outline: none;
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow:
+          0 0 0 4px rgba(138, 180, 255, 0.1),
+          0 0 20px rgba(138, 180, 255, 0.2);
+      }
+
+      .form-textarea {
+        min-height: 100px;
+        resize: vertical;
+      }
+
+      /* Color Picker */
+      .color-picker-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 12px;
+        margin-top: 12px;
+      }
+
+      .color-option {
+        width: 100%;
+        aspect-ratio: 1;
+        border-radius: 12px;
+        border: 3px solid transparent;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        position: relative;
+      }
+
+      .color-option:hover {
+        transform: scale(1.1);
+        border-color: rgba(255, 255, 255, 0.3);
+      }
+
+      .color-option.selected {
+        border-color: white;
+        box-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+      }
+
+      .color-option.selected::after {
+        content: '✓';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 20px;
+        font-weight: 900;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+      }
+
+      .color-preview {
+        width: 100%;
+        height: 60px;
+        border-radius: 12px;
+        margin-top: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 40px;
+        font-weight: 900;
+        color: white;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        border: 3px solid rgba(255, 255, 255, 0.15);
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        letter-spacing: -2px;
+        text-transform: uppercase;
+      }
+
+      .modal-footer {
+        padding: 24px 32px;
+        background: rgba(0, 0, 0, 0.15);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+      }
+
+      .btn-modal-save {
+        padding: 12px 28px;
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.3), rgba(5, 150, 105, 0.3));
+        border: 2px solid rgba(16, 185, 129, 0.5);
+        border-radius: 12px;
+        color: #6ee7b7;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        font-family: inherit;
+        box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+      }
+
+      .btn-modal-save:hover {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.4), rgba(5, 150, 105, 0.4));
+        border-color: rgba(16, 185, 129, 0.7);
+        box-shadow: 0 0 25px rgba(16, 185, 129, 0.4);
+        transform: translateY(-2px);
+      }
+
+      .btn-modal-cancel {
+        padding: 12px 28px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        font-family: inherit;
+      }
+
+      .btn-modal-cancel:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.25);
+        color: white;
+        transform: translateY(-2px);
+      }
+
+      .btn-modal-delete {
+        padding: 12px 28px;
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.3), rgba(220, 38, 38, 0.3));
+        border: 2px solid rgba(239, 68, 68, 0.5);
+        border-radius: 12px;
+        color: #fca5a5;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        font-family: inherit;
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.2);
+      }
+
+      .btn-modal-delete:hover {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.4), rgba(220, 38, 38, 0.4));
+        border-color: rgba(239, 68, 68, 0.7);
+        box-shadow: 0 0 25px rgba(239, 68, 68, 0.4);
+        transform: translateY(-2px);
+      }
+
+      /* Empty State */
+      .empty-state {
+        text-align: center;
+        padding: 80px 40px;
+        color: rgba(255, 255, 255, 0.4);
+      }
+
+      .empty-state-icon {
+        font-size: 72px;
+        margin-bottom: 20px;
+      }
+
+      .empty-state-title {
+        font-size: 24px;
+        font-weight: 700;
+        margin-bottom: 12px;
+        color: rgba(255, 255, 255, 0.6);
+      }
+
+      .empty-state-text {
+        font-size: 14px;
+        line-height: 1.6;
+      }
+
+      /* Schedule Slot Row */
+      .schedule-slot {
+        display: grid;
+        grid-template-columns: 140px 140px auto 90px 40px;
+        gap: 10px;
+        margin-bottom: 12px;
+        align-items: center;
+      }
+
+      .schedule-slot select,
+      .schedule-slot input[type='time'] {
+        padding: 10px 12px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        color: white;
+        font-size: 13px;
+        font-family: inherit;
+        transition: all 0.2s;
+        height: 42px;
+      }
+
+      .schedule-slot input[type='date'] {
+        padding: 10px 16px;
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.1) 0%, rgba(102, 126, 234, 0.1) 100%);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 2px solid rgba(138, 180, 255, 0.4);
+        border-radius: 14px;
+        color: #b8d4ff;
+        font-size: 14px;
+        font-family: inherit;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        height: 42px;
+        cursor: pointer;
+        box-shadow:
+          0 4px 16px rgba(138, 180, 255, 0.2),
+          inset 0 1px 2px rgba(255, 255, 255, 0.1);
+        position: relative;
+      }
+
+      .schedule-slot input[type='date']:hover {
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.15) 0%, rgba(102, 126, 234, 0.15) 100%);
+        border-color: rgba(138, 180, 255, 0.6);
+        box-shadow:
+          0 6px 20px rgba(138, 180, 255, 0.3),
+          0 0 0 1px rgba(138, 180, 255, 0.2),
+          inset 0 1px 3px rgba(255, 255, 255, 0.15);
+        transform: translateY(-2px);
+      }
+
+      .schedule-slot input[type='date']::-webkit-calendar-picker-indicator {
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.3), rgba(102, 126, 234, 0.3));
+        border-radius: 6px;
+        padding: 4px;
+        cursor: pointer;
+        opacity: 0.9;
+        transition: all 0.3s;
+        filter: invert(1) brightness(1.3) contrast(1.1);
+      }
+
+      .schedule-slot input[type='date']::-webkit-calendar-picker-indicator:hover {
+        opacity: 1;
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.5), rgba(102, 126, 234, 0.5));
+        transform: scale(1.1);
+      }
+
+      /* Enhanced Calendar Popup Styling */
+      .schedule-slot input[type='date']::-webkit-datetime-edit {
+        padding: 0 4px;
+      }
+
+      .schedule-slot input[type='date']::-webkit-datetime-edit-fields-wrapper {
+        padding: 0 8px;
+      }
+
+      .schedule-slot input[type='date']::-webkit-datetime-edit-text {
+        color: rgba(184, 212, 255, 0.6);
+        padding: 0 4px;
+      }
+
+      .schedule-slot input[type='date']::-webkit-datetime-edit-month-field,
+      .schedule-slot input[type='date']::-webkit-datetime-edit-day-field,
+      .schedule-slot input[type='date']::-webkit-datetime-edit-year-field {
+        color: #b8d4ff;
+        font-weight: 600;
+        padding: 2px 4px;
+        border-radius: 4px;
+        transition: all 0.2s;
+      }
+
+      .schedule-slot input[type='date']::-webkit-datetime-edit-month-field:focus,
+      .schedule-slot input[type='date']::-webkit-datetime-edit-day-field:focus,
+      .schedule-slot input[type='date']::-webkit-datetime-edit-year-field:focus {
+        background: rgba(138, 180, 255, 0.2);
+        color: #d4e4ff;
+        outline: none;
+      }
+
+      .schedule-slot select:focus,
+      .schedule-slot input:focus {
+        outline: none;
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow: 0 0 0 3px rgba(138, 180, 255, 0.1);
+      }
+
+      .schedule-slot input[type='date']:focus {
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.15) 0%, rgba(102, 126, 234, 0.15) 100%);
+        box-shadow:
+          0 0 0 4px rgba(138, 180, 255, 0.15),
+          0 8px 20px rgba(138, 180, 255, 0.3);
+      }
+
+      .schedule-slot label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.7);
+        white-space: nowrap;
+        cursor: pointer;
+        height: 42px;
+      }
+
+      .schedule-slot input[type='checkbox'] {
+        cursor: pointer;
+        width: 16px;
+        height: 16px;
+      }
+
+      .schedule-slot button {
+        padding: 0;
+        width: 40px;
+        height: 40px;
+        background: rgba(239, 68, 68, 0.15);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        border-radius: 10px;
+        color: #fca5a5;
+        font-size: 18px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: inherit;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .schedule-slot button:hover {
+        background: rgba(239, 68, 68, 0.25);
+        border-color: rgba(239, 68, 68, 0.5);
+      }
+
+      .date-picker-row {
+        grid-column: 1 / -1;
+        margin-top: 8px;
+        margin-bottom: 12px;
+        display: none;
+        padding: 18px 24px;
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.12) 0%, rgba(102, 126, 234, 0.1) 100%);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 2px solid rgba(138, 180, 255, 0.3);
+        border-radius: 16px;
+        box-shadow:
+          0 6px 20px rgba(138, 180, 255, 0.18),
+          0 2px 8px rgba(102, 126, 234, 0.12),
+          inset 0 1px 3px rgba(255, 255, 255, 0.1);
+        animation: slideDown 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .date-picker-row::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent 0%, rgba(138, 180, 255, 0.5) 50%, transparent 100%);
+      }
+
+      .date-picker-row.show {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .date-picker-row::before {
+        content: '📅';
+        font-size: 20px;
+        opacity: 0.85;
+        filter: drop-shadow(0 2px 4px rgba(138, 180, 255, 0.3));
+      }
+
+      .date-picker-row input[type='date'] {
+        flex: 1;
+        padding: 12px 18px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 2px solid rgba(138, 180, 255, 0.35);
+        border-radius: 12px;
+        color: #d4e4ff;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        box-shadow:
+          0 2px 8px rgba(0, 0, 0, 0.1),
+          inset 0 1px 2px rgba(255, 255, 255, 0.1);
+      }
+
+      .date-picker-row input[type='date']:hover {
+        border-color: rgba(138, 180, 255, 0.5);
+        background: rgba(255, 255, 255, 0.12);
+        box-shadow:
+          0 4px 12px rgba(138, 180, 255, 0.2),
+          inset 0 1px 3px rgba(255, 255, 255, 0.15);
+      }
+
+      .date-picker-row input[type='date']:focus {
+        outline: none;
+        border-color: rgba(138, 180, 255, 0.7);
+        background: rgba(255, 255, 255, 0.15);
+        box-shadow:
+          0 0 0 4px rgba(138, 180, 255, 0.15),
+          0 6px 16px rgba(138, 180, 255, 0.3);
+      }
+
+      @keyframes slideDown {
+        from {
+          opacity: 0;
+          transform: translateY(-15px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      /* Responsive */
+      @media (max-width: 1024px) {
+        .groups-grid {
+          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        }
+      }
+
+      @media (max-width: 768px) {
+        .groups-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .header-row-1,
+        .header-row-2 {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        .header-actions {
+          width: 100%;
+          flex-wrap: wrap;
+        }
+
+        .search-input {
+          min-width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Header Section -->
+    <div class="header">
+      <div class="header-row-1">
+        <div>
+          <h1 class="page-title">📚 Group Manager</h1>
+          <div class="page-subtitle">Manage class groups and schedules</div>
+        </div>
+        <div class="header-actions">
+          <button class="btn-header-primary" onclick="openAddGroupModal()">+ Add Group</button>
+          <button class="btn-header-secondary" onclick="openReorderModal()">↕️ Reorder</button>
+        </div>
+      </div>
+      <div class="header-row-2">
+        <input
+          type="text"
+          class="search-input"
+          id="searchInput"
+          placeholder="Search groups by name or schedule..."
+        />
+        <select class="filter-select" id="statusFilter">
+          <option value="">All Groups</option>
+          <option value="active" selected>Active Only</option>
+          <option value="inactive">Inactive Only</option>
+        </select>
+        <select class="filter-select" id="sortSelect">
+          <option value="name">Sort by Name</option>
+          <option value="students">Sort by Student Count</option>
+          <option value="recent">Recently Updated</option>
+        </select>
+        <button class="btn-header-clear" id="clearFiltersBtn">Clear Filters</button>
+      </div>
+    </div>
+
+    <!-- Groups Grid -->
+    <div class="groups-grid" id="groupsGrid"></div>
+
+    <!-- Add/Edit Group Modal -->
+    <div id="groupModal" class="modal-backdrop" onclick="if(event.target.id==='groupModal'){closeGroupModal();}">
+      <div class="modal-card" onclick="event.stopPropagation()">
+        <button class="modal-close" onclick="closeGroupModal()">&times;</button>
+
+        <div class="modal-scroll">
+          <!-- Header -->
+          <div class="modal-header">
+            <h2 class="modal-title" id="modalTitle">Add New Group</h2>
+          </div>
+
+          <!-- Body -->
+          <div class="modal-body">
+            <!-- Group Name -->
+            <div class="form-group">
+              <label class="form-label">Group Name *</label>
+              <input type="text" class="form-input" id="groupNameInput" placeholder="e.g., Group A, Advanced Class" />
+            </div>
+
+            <!-- Group Color -->
+            <div class="form-group" id="colorPickerSection">
+              <label class="form-label">Group Color</label>
+              <div class="color-picker-grid" id="colorPicker"></div>
+              <div class="color-preview" id="colorPreview">📚</div>
+            </div>
+
+            <!-- Schedule -->
+            <div class="form-group">
+              <label class="form-label">Regular Schedule</label>
+              <div id="scheduleItems" style="margin-bottom: 12px"></div>
+              <button
+                type="button"
+                onclick="addScheduleSlot()"
+                style="
+                  width: 100%;
+                  padding: 10px;
+                  background: rgba(138, 180, 255, 0.15);
+                  border: 2px dashed rgba(138, 180, 255, 0.4);
+                  border-radius: 10px;
+                  color: #8ab4ff;
+                  font-size: 13px;
+                  font-weight: 700;
+                  cursor: pointer;
+                  transition: all 0.2s;
+                  font-family: inherit;
+                "
+                onmouseover="this.style.background='rgba(138, 180, 255, 0.25)'; this.style.borderColor='rgba(138, 180, 255, 0.6)'"
+                onmouseout="this.style.background='rgba(138, 180, 255, 0.15)'; this.style.borderColor='rgba(138, 180, 255, 0.4)'"
+              >
+                + Add Day/Time
+              </button>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="modal-footer">
+            <button class="btn-modal-cancel" onclick="closeGroupModal()">Cancel</button>
+            <button class="btn-modal-save" onclick="saveGroup()">Save Group</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal-backdrop" onclick="if(event.target.id==='deleteModal'){closeDeleteModal();}">
+      <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 500px">
+        <button class="modal-close" onclick="closeDeleteModal()">&times;</button>
+
+        <div class="modal-scroll">
+          <!-- Header -->
+          <div class="modal-header">
+            <h2 class="modal-title">⚠️ Delete Group</h2>
+          </div>
+
+          <!-- Body -->
+          <div class="modal-body">
+            <div style="text-align: center; padding: 20px">
+              <div style="font-size: 64px; margin-bottom: 20px">🗑️</div>
+              <p style="font-size: 16px; line-height: 1.6; color: rgba(255, 255, 255, 0.8); margin-bottom: 16px">
+                Are you sure you want to delete
+                <strong id="deleteGroupName"></strong>
+                ?
+              </p>
+              <p style="font-size: 14px; color: rgba(255, 255, 255, 0.5)">This action cannot be undone.</p>
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="modal-footer">
+            <button class="btn-modal-cancel" onclick="closeDeleteModal()">Cancel</button>
+            <button class="btn-modal-delete" onclick="confirmDelete()">Delete Group</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Students List Modal -->
+    <div
+      id="studentsModal"
+      class="modal-backdrop"
+      onclick="if(event.target.id==='studentsModal'){closeStudentsModal();}"
+    >
+      <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 600px">
+        <button class="modal-close" onclick="closeStudentsModal()">&times;</button>
+
+        <div class="modal-scroll">
+          <!-- Header -->
+          <div class="modal-header">
+            <h2 class="modal-title">
+              👥 Students in
+              <span id="studentsGroupName"></span>
+            </h2>
+          </div>
+
+          <!-- Body -->
+          <div class="modal-body">
+            <div id="studentsList" style="display: flex; flex-direction: column; gap: 10px"></div>
+          </div>
+
+          <!-- Footer -->
+          <div class="modal-footer">
+            <button class="btn-modal-cancel" onclick="closeStudentsModal()">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // Group colors matching Payment-Records badges (A-F)
+      const groupColors = [
+        { name: 'Blue (A)', value: '#3b82f6', gradient: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)' },
+        { name: 'Purple (B)', value: '#a855f7', gradient: 'linear-gradient(135deg, #a855f7 0%, #c084fc 100%)' },
+        { name: 'Green (C)', value: '#22c55e', gradient: 'linear-gradient(135deg, #22c55e 0%, #10b981 100%)' },
+        { name: 'Pink (D)', value: '#ec4899', gradient: 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)' },
+        { name: 'Orange (E)', value: '#f97316', gradient: 'linear-gradient(135deg, #f97316 0%, #fb923c 100%)' },
+        { name: 'Cyan (F)', value: '#06b6d4', gradient: 'linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%)' },
+        { name: 'Soft Coral', value: '#ff9a9e', gradient: 'linear-gradient(135deg, #ffa8ae 0%, #ff9a9e 100%)' },
+        { name: 'Peach', value: '#feca9e', gradient: 'linear-gradient(135deg, #fed4ae 0%, #feca9e 100%)' },
+        { name: 'Soft Yellow', value: '#f6d365', gradient: 'linear-gradient(135deg, #fada75 0%, #f6d365 100%)' },
+        { name: 'Mint', value: '#84fab0', gradient: 'linear-gradient(135deg, #94fac0 0%, #84fab0 100%)' },
+        { name: 'Lavender', value: '#a8b4f5', gradient: 'linear-gradient(135deg, #b8c4ff 0%, #a8b4f5 100%)' },
+        { name: 'Lilac', value: '#d8b4fe', gradient: 'linear-gradient(135deg, #e8c4ff 0%, #d8b4fe 100%)' },
+      ];
+
+      // ============================================================
+      // SUPABASE CLIENT INITIALIZATION
+      // ============================================================
+      const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+
+      let supabase = null;
+      let groups = [];
+
+      // ============================================================
+      // ⚡ PERFORMANCE UTILITIES
+      // ============================================================
+      
+      // Production mode - set to false to disable debug logging
+      const DEBUG_MODE = false;
+      
+      // Debug logging wrapper (only logs when DEBUG_MODE is true)
+      function debugLog(...args) {
+        if (DEBUG_MODE) debugLog(...args);
+      }
+      
+      // DOM Cache to eliminate repeated getElementById calls
+      const DOMCache = {
+        groupsGrid: null,
+        searchInput: null,
+        sortSelect: null,
+        modals: {},
+        
+        init() {
+          this.groupsGrid = document.getElementById('groupsGrid');
+          this.searchInput = document.getElementById('searchInput');
+          this.sortSelect = document.getElementById('sortSelect');
+          
+          debugLog('✅ Group Manager DOM Cache initialized');
+        },
+        
+        get(key) {
+          return this[key] || document.getElementById(key);
+        },
+        
+        invalidate(key) {
+          if (key) {
+            this[key] = null;
+          } else {
+            Object.keys(this).forEach(k => {
+              if (typeof this[k] !== 'function') this[k] = null;
+            });
+          }
+        }
+      };
+      
+      // Data Cache for expensive computations
+      const DataCache = {
+        groups: null,
+        students: null,
+        lastFetch: {},
+        
+        TTL: 5 * 60 * 1000, // 5 minutes
+        
+        set(key, value) {
+          this[key] = value;
+          this.lastFetch[key] = Date.now();
+        },
+        
+        get(key) {
+          const age = Date.now() - (this.lastFetch[key] || 0);
+          if (age > this.TTL) {
+            this[key] = null;
+            delete this.lastFetch[key];
+            return null;
+          }
+          return this[key];
+        },
+        
+        invalidate(key) {
+          if (key) {
+            this[key] = null;
+            delete this.lastFetch[key];
+          } else {
+            Object.keys(this).forEach(k => {
+              if (typeof this[k] !== 'function') this[k] = null;
+            });
+            this.lastFetch = {};
+          }
+        }
+      };
+      
+      // RequestAnimationFrame wrapper for smooth updates
+      let rafCallbacks = {};
+      function scheduleRAF(key, callback) {
+        if (rafCallbacks[key]) {
+          cancelAnimationFrame(rafCallbacks[key]);
+        }
+        rafCallbacks[key] = requestAnimationFrame(callback);
+      }
+
+      // Debounce utility for performance
+      function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+          const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+          };
+          clearTimeout(timeout);
+          timeout = setTimeout(later, wait);
+        };
+      }
+
+      // Initialize Supabase client
+      if (window.supabase && window.supabase.createClient) {
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        debugLog('✅ Supabase client initialized');
+        
+        // Verify session on load
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (session) {
+            debugLog('✅ User session active:', session.user.email);
+          } else {
+            console.warn('⚠️ No active session - user may need to login');
+          }
+        });
+      } else {
+        console.error('❌ Supabase library not loaded');
+      }
+
+      // ============================================================
+      // LOAD GROUPS FROM SUPABASE
+      // ============================================================
+      async function loadGroups() {
+        if (!supabase) {
+          console.error('❌ Supabase not initialized');
+          groups = [];
+          return;
+        }
+
+        try {
+          const { data, error } = await supabase
+            .from('groups')
+            .select('*')
+            .order('id', { ascending: true });
+
+          if (error) throw error;
+
+          if (data) {
+            debugLog('🔍 GROUP MANAGER DEBUG: Raw Supabase data:', data);
+            
+            // Convert Supabase format to internal format
+            groups = data.map(g => {
+              // Map group name letter to color
+              let colorObj;
+              const groupLetter = (g.group_name || g.name || '').trim();
+              
+              if (groupLetter === 'A') {
+                colorObj = groupColors[0]; // Blue
+              } else if (groupLetter === 'B') {
+                colorObj = groupColors[1]; // Purple
+              } else if (groupLetter === 'C') {
+                colorObj = groupColors[2]; // Green
+              } else if (groupLetter === 'D') {
+                colorObj = groupColors[3]; // Pink
+              } else if (groupLetter === 'E') {
+                colorObj = groupColors[4]; // Orange
+              } else if (groupLetter === 'F') {
+                colorObj = groupColors[5]; // Cyan
+              } else {
+                // Try to find by name or use first color
+                colorObj = groupColors.find(c => c.name === g.color) || 
+                           groupColors.find(c => c.value === g.color) || 
+                           groupColors[0];
+              }
+              
+              const mappedGroup = {
+                id: g.id,
+                name: g.group_name || g.name || `Group ${g.id}`,
+                color: colorObj,
+                schedule: g.schedule || '',
+                one_time_schedules: g.one_time_schedules || [],
+                studentCount: g.student_count || 0,
+                pricePerClass: g.price_per_class || 0,
+                active: g.active !== false,
+                updated_at: g.updated_at ? new Date(g.updated_at) : new Date(),
+                students: g.students || []
+              };
+              
+              debugLog(`📋 Group ${mappedGroup.id} (${mappedGroup.name}):`, {
+                supabase_id: g.id,
+                supabase_group_name: g.group_name,
+                supabase_name: g.name,
+                mapped_id: mappedGroup.id,
+                mapped_name: mappedGroup.name,
+                schedule: mappedGroup.schedule,
+                one_time_schedules: mappedGroup.one_time_schedules,
+                active: mappedGroup.active,
+                student_count: mappedGroup.studentCount
+              });
+              
+              return mappedGroup;
+            });
+            debugLog(`✅ Loaded ${groups.length} groups from Supabase`);
+            debugLog('📊 All Groups Summary:', groups.map(g => ({ id: g.id, name: g.name, schedule: g.schedule })));
+          } else {
+            groups = [];
+          }
+
+          renderGroups();
+        } catch (e) {
+          console.error('❌ Error loading groups from Supabase:', e);
+          groups = [];
+          renderGroups();
+        }
+      }
+
+      // ============================================================
+      // SAVE GROUP TO SUPABASE
+      // ============================================================
+      async function saveGroupToSupabase(group) {
+        if (!supabase) {
+          console.error('❌ Supabase not initialized');
+          return false;
+        }
+
+        try {
+          const groupData = {
+            name: group.name,
+            color: group.color.value,
+            schedule: group.schedule || '',
+            one_time_schedules: group.one_time_schedules || [],
+            student_count: group.studentCount || 0,
+            price_per_class: group.pricePerClass || 0,
+            active: group.active !== false,
+            students: group.students || [],
+            updated_at: new Date().toISOString()
+          };
+
+          let result;
+          if (group.id) {
+            // Update existing group
+            result = await supabase
+              .from('groups')
+              .update(groupData)
+              .eq('id', group.id)
+              .select();
+          } else {
+            // Insert new group
+            result = await supabase
+              .from('groups')
+              .insert([groupData])
+              .select();
+          }
+
+          if (result.error) throw result.error;
+
+          debugLog('✅ Group saved to Supabase:', result.data[0]);
+          return result.data[0];
+        } catch (e) {
+          console.error('❌ Error saving group to Supabase:', e);
+          return false;
+        }
+      }
+
+      // ============================================================
+      // DELETE GROUP FROM SUPABASE
+      // ============================================================
+      async function deleteGroupFromDB(groupId) {
+        if (!supabase) {
+          console.error('❌ Supabase not initialized');
+          return false;
+        }
+
+        try {
+          const { error } = await supabase
+            .from('groups')
+            .delete()
+            .eq('id', groupId);
+
+          if (error) throw error;
+
+          debugLog('✅ Group deleted from Supabase:', groupId);
+          return true;
+        } catch (e) {
+          console.error('❌ Error deleting group from Supabase:', e);
+          return false;
+        }
+      }
+
+      // DEMO DATA REMOVED - Now loading from Supabase
+      /* OLD DEMO DATA:
+      let groups = [
+        {
+          id: 1,
+          name: 'Group A',
+          color: groupColors[0],
+          schedule: 'Monday 8:00 PM, Wednesday 8:00 PM',
+          one_time_schedules: [],
+          studentCount: 12,
+          pricePerClass: 20,
+          active: true,
+          updated_at: new Date(),
+          students: [
+            { name: 'Alice Johnson', status: 'active' },
+            { name: 'Bob Smith', status: 'active' },
+            { name: 'Charlie Brown', status: 'paused' },
+            { name: 'Diana Prince', status: 'active' },
+            { name: 'Ethan Hunt', status: 'active' },
+            { name: 'Fiona Apple', status: 'active' },
+            { name: 'George Lucas', status: 'paused' },
+            { name: 'Hannah Montana', status: 'active' },
+            { name: 'Ian Malcolm', status: 'active' },
+            { name: 'Julia Roberts', status: 'active' },
+            { name: 'Kevin Hart', status: 'active' },
+            { name: 'Luna Lovegood', status: 'active' },
+          ],
+        },
+        {
+          id: 2,
+          name: 'Group B',
+          color: groupColors[1],
+          schedule: 'Tuesday 7:00 PM, Thursday 7:00 PM',
+          one_time_schedules: [{ day: 'Friday', time: '6:00 PM', date: '2025-11-28' }],
+          studentCount: 8,
+          pricePerClass: 25,
+          active: true,
+          updated_at: new Date(),
+          students: [
+            { name: 'Michael Scott', status: 'active' },
+            { name: 'Pam Beesly', status: 'active' },
+            { name: 'Jim Halpert', status: 'active' },
+            { name: 'Dwight Schrute', status: 'active' },
+            { name: 'Stanley Hudson', status: 'paused' },
+            { name: 'Phyllis Vance', status: 'active' },
+            { name: 'Angela Martin', status: 'active' },
+            { name: 'Oscar Martinez', status: 'active' },
+          ],
+        },
+        {
+          id: 3,
+          name: 'Group C',
+          color: groupColors[2],
+          schedule: 'Monday 6:00 PM, Friday 6:00 PM',
+          one_time_schedules: [],
+          studentCount: 15,
+          pricePerClass: 18,
+          active: false,
+          updated_at: new Date(),
+          students: [
+            { name: 'Noah Anderson', status: 'active' },
+            { name: 'Emma Wilson', status: 'active' },
+            { name: 'Liam Davis', status: 'active' },
+            { name: 'Olivia Martinez', status: 'paused' },
+            { name: 'William Garcia', status: 'active' },
+            { name: 'Ava Rodriguez', status: 'active' },
+            { name: 'James Lopez', status: 'active' },
+            { name: 'Isabella Hernandez', status: 'paused' },
+            { name: 'Benjamin Moore', status: 'active' },
+            { name: 'Sophia Taylor', status: 'active' },
+            { name: 'Lucas Thomas', status: 'active' },
+            { name: 'Mia Jackson', status: 'active' },
+            { name: 'Henry White', status: 'active' },
+            { name: 'Charlotte Harris', status: 'active' },
+            { name: 'Alexander Clark', status: 'active' },
+          ],
+        },
+        {
+          id: 4,
+          name: 'Advanced Class',
+          color: groupColors[4],
+          schedule: 'Saturday 10:00 AM',
+          one_time_schedules: [],
+          studentCount: 5,
+          pricePerClass: 30,
+          active: true,
+          updated_at: new Date(),
+          students: [
+            { name: 'Tony Stark', status: 'active' },
+            { name: 'Bruce Banner', status: 'active' },
+            { name: 'Natasha Romanoff', status: 'active' },
+            { name: 'Steve Rogers', status: 'active' },
+            { name: 'Thor Odinson', status: 'paused' },
+          ],
+        },
+        {
+          id: 5,
+          name: 'One-Time Workshop',
+          color: groupColors[6],
+          schedule: '',
+          one_time_schedules: [{ day: 'Sunday', time: '2:00 PM', date: '2025-11-24' }],
+          studentCount: 10,
+          pricePerClass: 35,
+          active: true,
+          updated_at: new Date(),
+          students: [
+            { name: 'Sarah Connor', status: 'active' },
+            { name: 'John Connor', status: 'active' },
+            { name: 'Kyle Reese', status: 'active' },
+            { name: 'Miles Dyson', status: 'active' },
+            { name: 'Danny Dyson', status: 'active' },
+            { name: 'Enrique Salceda', status: 'active' },
+            { name: 'Tim', status: 'active' },
+            { name: 'Gibbons', status: 'paused' },
+            { name: 'Todd Voight', status: 'active' },
+            { name: 'Tarissa Dyson', status: 'active' },
+          ],
+        },
+      ];
+      */
+
+      let currentGroup = null;
+      let groupToDelete = null;
+      let selectedColor = groupColors[0];
+
+      // === SCHEDULE SLOT MANAGEMENT ===
+
+      // Add a schedule slot (day + time + optional one-time date)
+      function addScheduleSlot(day = 'Monday', time = '19:00', isOneTime = false, date = '') {
+        const container = document.getElementById('scheduleItems');
+        if (!container) return;
+
+        const slotDiv = document.createElement('div');
+        slotDiv.style.marginBottom = '8px';
+
+        slotDiv.innerHTML = `
+          <div class="schedule-slot">
+            <select class="slot-day">
+              ${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+                .map(d => `<option ${d === day ? 'selected' : ''}>${d}</option>`)
+                .join('')}
+            </select>
+            <input type="time" class="slot-time" value="${time}" />
+            <label>
+              <input type="checkbox" class="slot-one-time" ${isOneTime ? 'checked' : ''} onchange="toggleDatePicker(this)" />
+              One-time
+            </label>
+            <button type="button" onclick="this.closest('div').parentElement.remove()">🗑️</button>
+          </div>
+          <div class="date-picker-row ${isOneTime ? 'show' : ''}">
+            <span style="font-size: 12px; font-weight: 600; color: rgba(138, 180, 255, 0.9); letter-spacing: 0.5px;">Select Date:</span>
+            <input type="date" class="slot-date" value="${date}" placeholder="Select date" />
+          </div>
+        `;
+
+        container.appendChild(slotDiv);
+      }
+
+      // Toggle date picker visibility
+      function toggleDatePicker(checkbox) {
+        const slotDiv = checkbox.closest('div').parentElement;
+        const dateRow = slotDiv.querySelector('.date-picker-row');
+        if (checkbox.checked) {
+          dateRow.classList.add('show');
+          const dateInput = dateRow.querySelector('.slot-date');
+          if (!dateInput.value) {
+            // Set to today by default
+            const today = new Date().toISOString().split('T')[0];
+            dateInput.value = today;
+          }
+        } else {
+          dateRow.classList.remove('show');
+        }
+      }
+
+      // Parse schedule slots from container
+      function parseScheduleSlots() {
+        const container = document.getElementById('scheduleItems');
+        if (!container) return { regular: [], oneTime: [] };
+
+        const slots = [...container.children];
+        const regular = [];
+        const oneTime = [];
+
+        slots.forEach(slotDiv => {
+          const daySelect = slotDiv.querySelector('.slot-day');
+          const timeInput = slotDiv.querySelector('.slot-time');
+          const oneTimeCheckbox = slotDiv.querySelector('.slot-one-time');
+          const dateInput = slotDiv.querySelector('.slot-date');
+
+          if (!daySelect || !timeInput) return;
+
+          const day = daySelect.value;
+          const time = convert24to12(timeInput.value);
+
+          if (oneTimeCheckbox && oneTimeCheckbox.checked && dateInput && dateInput.value) {
+            oneTime.push({
+              day,
+              time,
+              date: dateInput.value,
+            });
+          } else {
+            regular.push({ day, time });
+          }
+        });
+
+        return { regular, oneTime };
+      }
+
+      // Convert 24h time to 12h AM/PM
+      function convert24to12(time24) {
+        if (!time24) return '7:00 PM';
+        const [hours, minutes] = time24.split(':').map(Number);
+        if (isNaN(hours) || isNaN(minutes)) return time24;
+
+        let period = 'AM';
+        let hours12 = hours;
+
+        if (hours >= 12) {
+          period = 'PM';
+          if (hours > 12) hours12 = hours - 12;
+        }
+        if (hours === 0) hours12 = 12;
+
+        return `${hours12}:${minutes.toString().padStart(2, '0')} ${period}`;
+      }
+
+      // Convert 12h AM/PM to 24h
+      function convert12to24(time12) {
+        if (!time12) return '19:00';
+
+        // If already 24h format
+        if (!time12.includes('AM') && !time12.includes('PM')) {
+          return time12.length === 5 ? time12 : '19:00';
+        }
+
+        const match = time12.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (!match) return '19:00';
+
+        let hours = parseInt(match[1]);
+        const minutes = match[2];
+        const period = match[3].toUpperCase();
+
+        if (period === 'PM' && hours !== 12) hours += 12;
+        if (period === 'AM' && hours === 12) hours = 0;
+
+        return `${hours.toString().padStart(2, '0')}:${minutes}`;
+      }
+
+      const DAY_NAME_MAP = {
+        sun: 'Sunday',
+        sunday: 'Sunday',
+        mon: 'Monday',
+        monday: 'Monday',
+        tue: 'Tuesday',
+        tues: 'Tuesday',
+        tuesday: 'Tuesday',
+        wed: 'Wednesday',
+        weds: 'Wednesday',
+        wednesday: 'Wednesday',
+        thu: 'Thursday',
+        thur: 'Thursday',
+        thurs: 'Thursday',
+        thursday: 'Thursday',
+        fri: 'Friday',
+        friday: 'Friday',
+        sat: 'Saturday',
+        saturday: 'Saturday'
+      };
+
+      function normalizeDayName(value) {
+        if (!value) return '';
+        const key = value.toString().trim().toLowerCase();
+        return DAY_NAME_MAP[key] || '';
+      }
+
+      function normalizeTimeLabel(value) {
+        if (!value) return '';
+        const match = value.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+        if (!match) return value.toString().trim();
+        const hours = parseInt(match[1], 10);
+        const minutes = match[2];
+        const period = match[3].toUpperCase();
+        return `${hours}:${minutes} ${period}`;
+      }
+
+      // === END SCHEDULE SLOT MANAGEMENT ===
+
+      // Convert LA time to Yerevan time with DST awareness
+      function convertLAtoYerevan(day, time12) {
+        const normalizedDay = normalizeDayName(day) || day || 'Sunday';
+        const normalizedTime = normalizeTimeLabel(time12);
+
+        // LA time zones: PST (UTC-8) from Nov to Mar, PDT (UTC-7) from Mar to Nov
+        // Yerevan time zones: AMT (UTC+4) all year (no DST since 2011)
+
+        // Current month to determine DST (simplified - actual DST dates vary by year)
+        const currentDate = new Date();
+        const month = currentDate.getMonth(); // 0-11
+
+        // PST to AMT: +12 hours, PDT to AMT: +11 hours
+        // DST in LA: March (2nd Sunday) to November (1st Sunday)
+        const isDST = month >= 2 && month < 10; // Approximate: Mar-Oct is DST
+        const hourDiff = isDST ? 11 : 12;
+
+        // Parse 12-hour time
+        const timeSource = normalizedTime || time12 || '';
+        const timeMatch = timeSource.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+        if (!timeMatch) {
+          return { day: normalizedDay, time: timeSource };
+        }
+
+        let hours = parseInt(timeMatch[1]);
+        const minutes = timeMatch[2];
+        const meridiem = timeMatch[3].toUpperCase();
+
+        // Convert to 24-hour
+        if (meridiem === 'PM' && hours !== 12) hours += 12;
+        if (meridiem === 'AM' && hours === 12) hours = 0;
+
+        // Add hour difference
+        hours += hourDiff;
+
+        // Day mapping
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const baseDayIndex = days.indexOf(normalizedDay);
+        let newDayIndex = baseDayIndex === -1 ? 0 : baseDayIndex;
+
+        // Handle day overflow
+        if (hours >= 24) {
+          hours -= 24;
+          newDayIndex = (newDayIndex + 1) % 7;
+        } else if (hours < 0) {
+          hours += 24;
+          newDayIndex = (newDayIndex - 1 + 7) % 7;
+        }
+
+        // Convert back to 12-hour format
+        const newMeridiem = hours >= 12 ? 'PM' : 'AM';
+        let displayHours = hours % 12;
+        if (displayHours === 0) displayHours = 12;
+
+        return {
+          day: days[newDayIndex],
+          time: `${displayHours}:${minutes} ${newMeridiem}`,
+        };
+      }
+
+      // Convert day name to 3-letter abbreviation
+      function abbreviateDay(day) {
+        const abbrev = {
+          Sunday: 'SUN',
+          Monday: 'MON',
+          Tuesday: 'TUE',
+          Wednesday: 'WED',
+          Thursday: 'THU',
+          Friday: 'FRI',
+          Saturday: 'SAT',
+        };
+        return abbrev[day] || day;
+      }
+
+      // Format schedule elegantly
+      function formatSchedule(scheduleString, oneTimeSchedules = []) {
+        // Check if we have any schedules at all
+        const hasRegularSchedule = scheduleString && scheduleString.trim() !== '';
+        const hasOneTimeSchedule = oneTimeSchedules && oneTimeSchedules.length > 0;
+
+        if (!hasRegularSchedule && !hasOneTimeSchedule) {
+          return '<div class="schedule-empty">No schedule set</div>';
+        }
+
+        // Define day order for sorting
+        const dayOrder = { Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6, Sunday: 7 };
+
+        const expandSchedulePart = part => {
+          if (!part) return [];
+          const trimmed = part.trim();
+          if (!trimmed) return [];
+
+          const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})\s*(?:AM|PM)/i);
+          if (timeMatch) {
+            const timeValue = normalizeTimeLabel(timeMatch[0]);
+            const daySectionRaw = trimmed.slice(0, timeMatch.index).trim();
+            const sanitized = daySectionRaw
+              .replace(/\band\b/gi, ' ')
+              .replace(/\bat\b/gi, ' ')
+              .replace(/\bon\b/gi, ' ')
+              .trim();
+
+            const chunks = sanitized
+              .split(/[\/,&]+/)
+              .map(token => token.trim())
+              .filter(Boolean);
+
+            const normalizedDays = [];
+            chunks.forEach(chunk => {
+              chunk
+                .split(/\s+/)
+                .map(token => token.trim())
+                .filter(Boolean)
+                .forEach(token => {
+                  const normalized = normalizeDayName(token);
+                  if (normalized) {
+                    normalizedDays.push(normalized);
+                  }
+                });
+            });
+
+            if (normalizedDays.length) {
+              return normalizedDays.map(dayName => ({ day: dayName, time: timeValue }));
+            }
+
+            if (daySectionRaw) {
+              return [{ day: daySectionRaw, time: timeValue }];
+            }
+          }
+
+          const fallbackMatch = trimmed.match(/^(\w+)\s+(.+)$/);
+          if (fallbackMatch) {
+            return [{ day: fallbackMatch[1], time: fallbackMatch[2].trim() }];
+          }
+
+          return [{ day: trimmed, time: '' }];
+        };
+
+        // Parse regular schedules if they exist
+        let parsed = [];
+        if (hasRegularSchedule) {
+          const parts = scheduleString
+            .split(',')
+            .map(part => part.trim())
+            .filter(Boolean);
+
+          parsed = parts
+            .reduce((acc, part) => acc.concat(expandSchedulePart(part)), [])
+            .map(entry => {
+              const laDay = normalizeDayName(entry.day) || entry.day;
+              const laTime = normalizeTimeLabel(entry.time);
+              const yerevan = convertLAtoYerevan(laDay, laTime);
+
+              return {
+                day: laDay,
+                time: laTime,
+                yerevanDay: yerevan.day,
+                yerevanTime: yerevan.time,
+                order: dayOrder[laDay] || 999,
+                isOneTime: false,
+              };
+            })
+            .sort((a, b) => a.order - b.order);
+        }
+
+        // Add one-time schedules
+        const oneTimeParsed = (oneTimeSchedules || [])
+          .map(schedule => {
+            const laDay = normalizeDayName(schedule.day) || schedule.day;
+            const laTime = normalizeTimeLabel(schedule.time);
+            const yerevan = convertLAtoYerevan(laDay, laTime);
+
+            return {
+              day: laDay,
+              time: laTime,
+              date: schedule.date,
+              yerevanDay: yerevan.day,
+              yerevanTime: yerevan.time,
+              order: dayOrder[laDay] || 999,
+              isOneTime: true,
+            };
+          })
+          .sort((a, b) => a.order - b.order);
+
+        // Combine and render
+        const allSchedules = [...parsed, ...oneTimeParsed];
+
+        return allSchedules
+          .map(({ day, time, yerevanDay, yerevanTime, isOneTime, date }) => {
+            if (time) {
+              const classType = isOneTime ? 'schedule-day one-time' : 'schedule-day';
+              const dateLabel = isOneTime ? `<span class="one-time-date">📅 ${date}</span>` : '';
+
+              return `
+                <div class="${classType}">
+                  <div class="time-row">
+                    <span style="font-size: 16px; margin-right: 4px;">🇺🇸</span>
+                    <span class="day-name">${abbreviateDay(day)}</span>
+                    <span class="time-value la-time">${time}</span>
+                  </div>
+                  <div class="time-divider"></div>
+                  <div class="time-row yerevan-row">
+                    <span style="font-size: 16px; margin-right: 4px;">🇦🇲</span>
+                    <span class="day-name yerevan-day">${abbreviateDay(yerevanDay)}</span>
+                    <span class="time-value yerevan-time">${yerevanTime}</span>
+                  </div>
+                  ${dateLabel}
+                </div>`;
+            }
+            return `<div class="schedule-day">${day}</div>`;
+          })
+          .join('');
+      }
+
+      function normalizeGroupKey(value) {
+        return (value || '').trim().toLowerCase();
+      }
+
+      // Load students from Supabase and hydrate each group with student details
+      async function loadStudentsForGroupCount() {
+        if (!supabase) return;
+
+        try {
+          const { data, error } = await supabase
+            .from('students')
+            .select('id, name, group_name, status, price_per_class');
+
+          if (error) throw error;
+
+          const groupedStudents = {};
+
+          const registerStudentForKeys = (keys, studentEntry) => {
+            keys.forEach(key => {
+              if (!key) return;
+              if (!groupedStudents[key]) {
+                groupedStudents[key] = [];
+              }
+              groupedStudents[key].push(studentEntry);
+            });
+          };
+
+          const dedupeStudentsByIdentity = studentsArray => {
+            if (!Array.isArray(studentsArray)) return [];
+            const seen = new Set();
+            const result = [];
+            studentsArray.forEach(student => {
+              if (!student) return;
+              const key = student.id
+                ? `id:${student.id}`
+                : student.name
+                  ? `name:${student.name.toLowerCase()}`
+                  : null;
+              if (!key || seen.has(key)) {
+                return;
+              }
+              seen.add(key);
+              result.push(student);
+            });
+            return result;
+          };
+
+          if (data) {
+            data.forEach(student => {
+              const rawGroupName = (student.group_name || '').trim();
+              if (!rawGroupName) return;
+
+              const studentEntry = {
+                id: student.id,
+                name: student.name || 'Unnamed Student',
+                status: student.status || 'active',
+                pricePerClass: typeof student.price_per_class === 'number'
+                  ? student.price_per_class
+                  : parseFloat(student.price_per_class) || 0,
+              };
+
+              const possibleKeysForStudent = new Set();
+              const normalizedFullName = normalizeGroupKey(rawGroupName);
+              if (normalizedFullName) {
+                possibleKeysForStudent.add(normalizedFullName);
+              }
+
+              const strippedName = rawGroupName.replace(/^group\s+/i, '');
+              const normalizedStripped = normalizeGroupKey(strippedName);
+              if (normalizedStripped) {
+                possibleKeysForStudent.add(normalizedStripped);
+              }
+
+              const trailingLetterMatch = rawGroupName.match(/([A-Za-z])$/);
+              if (trailingLetterMatch) {
+                possibleKeysForStudent.add(trailingLetterMatch[1].toLowerCase());
+              }
+
+              registerStudentForKeys(possibleKeysForStudent, studentEntry);
+            });
+          }
+
+          groups.forEach(group => {
+            const possibleKeys = [];
+            const rawName = (group.name || '').trim();
+            if (rawName) {
+              possibleKeys.push(rawName.toLowerCase());
+              if (/^group\s+/i.test(rawName)) {
+                possibleKeys.push(rawName.replace(/^group\s+/i, '').toLowerCase());
+              }
+              if (rawName.length) {
+                possibleKeys.push(rawName.slice(-1).toLowerCase());
+              }
+            }
+
+            const studentsForGroup = possibleKeys.reduce((acc, key) => acc || groupedStudents[key], null) || [];
+            const uniqueStudents = dedupeStudentsByIdentity(studentsForGroup);
+            group.students = uniqueStudents;
+            group.studentCount = uniqueStudents.length;
+          });
+
+          debugLog('✅ Loaded students for groups:', groupedStudents);
+        } catch (e) {
+          console.error('❌ Error loading students for count:', e);
+        }
+      }
+
+      function extractScheduleDays(scheduleString) {
+        if (!scheduleString) return [];
+
+        const parts = scheduleString
+          .split(',')
+          .map(part => part.trim())
+          .filter(Boolean);
+
+        const days = [];
+
+        parts.forEach(part => {
+          if (!part) return;
+          const timeMatch = part.match(/(\d{1,2}):(\d{2})\s*(?:AM|PM)/i);
+
+          if (timeMatch) {
+            const daySectionRaw = part.slice(0, timeMatch.index).trim();
+            if (daySectionRaw) {
+              daySectionRaw
+                .replace(/\band\b/gi, ' ')
+                .replace(/\bat\b/gi, ' ')
+                .replace(/\bon\b/gi, ' ')
+                .split(/[\/,&]+/)
+                .map(token => token.trim())
+                .filter(Boolean)
+                .forEach(token => {
+                  const normalized = normalizeDayName(token) || token;
+                  days.push(normalized);
+                });
+              return;
+            }
+          }
+
+          const fallbackMatch = part.match(/([A-Za-z]+)/);
+          if (fallbackMatch) {
+            const normalized = normalizeDayName(fallbackMatch[1]) || fallbackMatch[1];
+            days.push(normalized);
+          }
+        });
+
+        return days;
+      }
+
+      function calculateClassesPerWeek(group) {
+        if (!group || !group.schedule) return 0;
+        const days = extractScheduleDays(group.schedule);
+        if (days.length > 0) return days.length;
+        return (group.schedule && group.schedule.trim()) ? 1 : 0;
+      }
+
+      function calculateGroupRevenue(group) {
+        if (!group) return 0;
+        const classesPerWeek = calculateClassesPerWeek(group);
+        const multiplier = classesPerWeek > 0 ? classesPerWeek : 1;
+        const fallbackPrice = group.pricePerClass || 0;
+
+        const activeStudents = (group.students || []).filter(student => (student.status || 'active') === 'active');
+        if (activeStudents.length === 0) return 0;
+
+        return activeStudents.reduce((total, student) => {
+          const studentPrice = typeof student.pricePerClass === 'number'
+            ? student.pricePerClass
+            : parseFloat(student.pricePerClass) || 0;
+          const effectivePrice = studentPrice > 0 ? studentPrice : fallbackPrice;
+          return total + (effectivePrice * multiplier);
+        }, 0);
+      }
+
+      // Initialize
+      async function init() {
+        // ⚡ Performance: Initialize DOM cache first
+        DOMCache.init();
+        
+        await loadGroups(); // Load from Supabase
+        await loadStudentsForGroupCount(); // Count students per group
+        renderGroups();
+        renderColorPicker();
+        setupEventDelegation();
+      }
+
+      // Event delegation for better performance
+      function setupEventDelegation() {
+        // ⚡ Performance: Use cached grid element
+        const grid = DOMCache.groupsGrid || document.getElementById('groupsGrid');
+        
+        grid.addEventListener('click', (e) => {
+          const target = e.target.closest('[data-action]');
+          if (!target) {
+            // If clicked on card but not on specific action, open edit modal
+            const card = e.target.closest('.group-card');
+            if (card && !e.target.closest('.elegant-toggle') && !e.target.closest('.btn-group-action')) {
+              const groupId = parseInt(card.dataset.groupId);
+              openEditGroupModal(groupId);
+            }
+            return;
+          }
+
+          const action = target.dataset.action;
+          const groupId = parseInt(target.dataset.groupId);
+
+          switch (action) {
+            case 'toggle-active':
+              toggleGroupActive(groupId, target.checked);
+              break;
+            case 'view-students':
+              e.stopPropagation();
+              openStudentsModal(groupId);
+              break;
+            case 'edit-group':
+              e.stopPropagation();
+              openEditGroupModal(groupId);
+              break;
+            case 'delete-group':
+              e.stopPropagation();
+              openDeleteModal(groupId);
+              break;
+          }
+        });
+
+        // Filter and sort controls
+        document.getElementById('searchInput').addEventListener('input', filterGroups);
+        document.getElementById('statusFilter').addEventListener('change', () => renderGroups());
+        document.getElementById('sortSelect').addEventListener('change', sortGroups);
+        document.getElementById('clearFiltersBtn').addEventListener('click', clearFilters);
+      }
+
+      // Render Groups
+      function renderGroups() {
+        // ⚡ Performance: Use cached grid element
+        const grid = DOMCache.groupsGrid || document.getElementById('groupsGrid');
+        const filtered = getFilteredGroups();
+
+        if (filtered.length === 0) {
+          grid.innerHTML = `
+            <div class="empty-state" style="grid-column: 1 / -1;">
+              <div class="empty-state-icon">📚</div>
+              <div class="empty-state-title">No Groups Found</div>
+              <div class="empty-state-text">Click "Add Group" to create your first group</div>
+            </div>
+          `;
+          return;
+        }
+
+        // Use DocumentFragment for better performance
+        const fragment = document.createDocumentFragment();
+        const tempDiv = document.createElement('div');
+
+        const cardsHTML = filtered
+          .map(
+            group => `
+          <div class="group-card" data-group-id="${group.id}" style="--group-color: ${group.color.value}; --group-color-light: ${group.color.value}88; --group-gradient: ${group.color.gradient}; --group-shadow: ${group.color.value}66">
+            <div class="group-card-header">
+              <div class="group-icon-wrapper">
+                <div class="group-icon-orbit"></div>
+                <div class="group-icon">${group.name.charAt(group.name.length - 1)}</div>
+              </div>
+
+              <div class="group-right-section">
+                <div class="group-toggle-wrapper">
+                  <label class="elegant-toggle" onclick="event.stopPropagation()">
+                    <input type="checkbox" ${group.active ? 'checked' : ''} data-action="toggle-active" data-group-id="${group.id}" />
+                    <span class="elegant-toggle-slider"></span>
+                  </label>
+                </div>
+
+                <div class="group-status-pill ${group.active ? 'active' : 'inactive'}">
+                  ${group.active ? 'Active' : 'Inactive'}
+                </div>
+
+                <div class="group-meta">
+                  <div class="meta-badge students" data-action="view-students" data-group-id="${group.id}" style="cursor: pointer;" title="Click to view students">
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
+                    </svg>
+                    ${group.studentCount} students - $${calculateGroupRevenue(group).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="group-schedule">
+              ${formatSchedule(group.schedule, group.one_time_schedules)}
+            </div>
+
+            <div class="group-actions">
+              <button class="btn-group-action edit" data-action="edit-group" data-group-id="${group.id}">
+                ✏️ Edit
+              </button>
+              <button class="btn-group-action delete" data-action="delete-group" data-group-id="${group.id}">
+                🗑️ Delete
+              </button>
+            </div>
+          </div>
+        `
+          )
+          .join('');
+
+        // Single DOM update
+        tempDiv.innerHTML = cardsHTML;
+        while (tempDiv.firstChild) {
+          fragment.appendChild(tempDiv.firstChild);
+        }
+
+        grid.innerHTML = '';
+        grid.appendChild(fragment);
+
+        // Update schedule item hover handlers after rendering
+        setTimeout(() => updateScheduleItemStates(), 100);
+      }
+
+      // Render Color Picker
+      function renderColorPicker() {
+        const picker = document.getElementById('colorPicker');
+        picker.innerHTML = groupColors
+          .map(
+            (color, index) => `
+          <div
+            class="color-option ${selectedColor.value === color.value ? 'selected' : ''}"
+            style="background: ${color.gradient}"
+            onclick="selectColor(${index})"
+          ></div>
+        `
+          )
+          .join('');
+        updateColorPreview();
+      }
+
+      // Select Color
+      function selectColor(index) {
+        selectedColor = groupColors[index];
+        renderColorPicker();
+      }
+
+      // Update Color Preview
+      function updateColorPreview() {
+        const preview = document.getElementById('colorPreview');
+        const nameInput = document.getElementById('groupNameInput');
+        if (preview) {
+          preview.style.background = selectedColor.gradient;
+          preview.style.boxShadow = `0 8px 24px ${selectedColor.value}66`;
+          // Show first letter of group name, or 📚 if empty
+          const displayText =
+            nameInput && nameInput.value.trim()
+              ? nameInput.value.trim().charAt(nameInput.value.trim().length - 1)
+              : '📚';
+          preview.textContent = displayText;
+        }
+      }
+
+      // Toggle Group Active Status
+      function toggleGroupActive(id, active) {
+        const group = groups.find(g => g.id === id);
+        if (group) {
+          group.active = active;
+          renderGroups();
+          debugLog(`Group ${group.name} set to ${active ? 'active' : 'inactive'}`);
+        }
+      }
+
+      // Filter Groups
+      function getFilteredGroups() {
+        const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+        const statusFilter = document.getElementById('statusFilter').value;
+
+        return groups.filter(group => {
+          const matchesSearch =
+            group.name.toLowerCase().includes(searchTerm) || (group.schedule || '').toLowerCase().includes(searchTerm);
+
+          const matchesStatus =
+            statusFilter === '' ||
+            (statusFilter === 'active' && group.active) ||
+            (statusFilter === 'inactive' && !group.active);
+
+          return matchesSearch && matchesStatus;
+        });
+      }
+
+      // Debounced filter for search input (300ms delay)
+      const debouncedFilterGroups = debounce(() => {
+        renderGroups();
+      }, 300);
+
+      function filterGroups() {
+        debouncedFilterGroups();
+      }
+
+      // Sort Groups
+      function sortGroups() {
+        const sortBy = document.getElementById('sortSelect').value;
+
+        if (sortBy === 'name') {
+          groups.sort((a, b) => a.name.localeCompare(b.name));
+        } else if (sortBy === 'students') {
+          groups.sort((a, b) => b.studentCount - a.studentCount);
+        } else if (sortBy === 'recent') {
+          groups.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+        }
+
+        renderGroups();
+      }
+
+      // Clear Filters
+      function clearFilters() {
+        document.getElementById('searchInput').value = '';
+        document.getElementById('statusFilter').value = 'active';
+        document.getElementById('sortSelect').value = 'name';
+        renderGroups();
+      }
+
+      // Open Add Group Modal
+      function openAddGroupModal() {
+        currentGroup = null;
+        document.getElementById('modalTitle').textContent = 'Add New Group';
+        document.getElementById('groupNameInput').value = '';
+
+        // Auto-assign next color in rotation
+        const nextColorIndex = groups.length % groupColors.length;
+        selectedColor = groupColors[nextColorIndex];
+
+        // Show color picker for new groups
+        document.getElementById('colorPickerSection').style.display = 'block';
+        renderColorPicker();
+
+        // Clear schedule slots and add one default
+        const container = document.getElementById('scheduleItems');
+        container.innerHTML = '';
+        addScheduleSlot('Monday', '19:00', false, '');
+
+        openGroupModal();
+      }
+
+      // Open Edit Group Modal
+      function openEditGroupModal(id) {
+        const group = groups.find(g => g.id === id);
+        if (!group) return;
+
+        currentGroup = group;
+        document.getElementById('modalTitle').textContent = 'Edit Group';
+        document.getElementById('groupNameInput').value = group.name;
+        selectedColor = group.color;
+
+        // Hide color picker when editing (color is locked)
+        document.getElementById('colorPickerSection').style.display = 'none';
+
+        // Parse and populate schedule slots
+        const container = document.getElementById('scheduleItems');
+        container.innerHTML = '';
+
+        // Parse regular schedule
+        if (group.schedule) {
+          const parts = group.schedule.split(',').map(p => p.trim());
+          parts.forEach(part => {
+            const match = part.match(/^(\w+)\s+(.+)$/);
+            if (match) {
+              const day = match[1];
+              const time = match[2];
+              const time24 = convert12to24(time);
+              addScheduleSlot(day, time24, false, '');
+            }
+          });
+        }
+
+        // Add one-time schedules if they exist
+        if (group.one_time_schedules && Array.isArray(group.one_time_schedules)) {
+          group.one_time_schedules.forEach(override => {
+            const time24 = convert12to24(override.time);
+            addScheduleSlot(override.day, time24, true, override.date);
+          });
+        }
+
+        // If no slots, add one default
+        if (container.children.length === 0) {
+          addScheduleSlot('Monday', '19:00', false, '');
+        }
+
+        openGroupModal();
+      }
+
+      // Open Group Modal
+      function openGroupModal() {
+        const modal = document.getElementById('groupModal');
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+
+        // Update preview when group name changes
+        const nameInput = document.getElementById('groupNameInput');
+        if (nameInput) {
+          nameInput.addEventListener('input', updateColorPreview);
+        }
+        updateColorPreview();
+      }
+
+      // Close Group Modal
+      function closeGroupModal() {
+        const modal = document.getElementById('groupModal');
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
+      }
+
+      // Save Group
+      async function saveGroup() {
+        const name = document.getElementById('groupNameInput').value.trim();
+
+        if (!name) {
+          alert('Please enter a group name');
+          return;
+        }
+
+        // Parse schedule slots
+        const { regular, oneTime } = parseScheduleSlots();
+
+        // Build schedule string from regular slots
+        const schedule = regular.map(slot => `${slot.day} ${slot.time}`).join(', ');
+
+        if (currentGroup) {
+          // Update existing group
+          currentGroup.name = name;
+          currentGroup.schedule = schedule;
+          currentGroup.one_time_schedules = oneTime;
+          // Keep existing active status
+          currentGroup.updated_at = new Date();
+          debugLog('Group updated:', currentGroup);
+          
+          // Save to Supabase
+          await saveGroupToSupabase(currentGroup);
+        } else {
+          // Add new group
+          const newGroup = {
+            name,
+            schedule,
+            one_time_schedules: oneTime,
+            color: selectedColor,
+            studentCount: 0,
+            pricePerClass: 20, // Default price
+            active: true, // New groups are active by default
+            updated_at: new Date(),
+          };
+          
+          // Save to Supabase and get returned ID
+          const savedGroup = await saveGroupToSupabase(newGroup);
+          if (savedGroup) {
+            newGroup.id = savedGroup.id;
+            groups.push(newGroup);
+            debugLog('Group added:', newGroup);
+          }
+        }
+
+        renderGroups();
+        closeGroupModal();
+      }
+
+      // Open Delete Modal
+      function openDeleteModal(id) {
+        groupToDelete = groups.find(g => g.id === id);
+        if (!groupToDelete) return;
+
+        document.getElementById('deleteGroupName').textContent = groupToDelete.name;
+        const modal = document.getElementById('deleteModal');
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+      }
+
+      // Close Delete Modal
+      function closeDeleteModal() {
+        const modal = document.getElementById('deleteModal');
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
+        groupToDelete = null;
+      }
+
+      // Confirm Delete
+      async function confirmDelete() {
+        if (!groupToDelete) return;
+
+        // Delete from Supabase
+        await deleteGroupFromDB(groupToDelete.id);
+
+        groups = groups.filter(g => g.id !== groupToDelete.id);
+        debugLog('Group deleted:', groupToDelete.name);
+        renderGroups();
+        closeDeleteModal();
+      }
+
+      // ===== STUDENTS LIST MODAL =====
+      // Toggle student status
+      function toggleStudentStatus(groupId, studentIndex) {
+        const group = groups.find(g => g.id === groupId);
+        if (!group || !group.students[studentIndex]) return;
+
+        const student = group.students[studentIndex];
+        student.status = student.status === 'active' ? 'paused' : 'active';
+
+        // Re-render the modal
+        openStudentsModal(groupId);
+        renderGroups();
+      }
+
+      // Open Students Modal
+      function openStudentsModal(groupId) {
+        const group = groups.find(g => g.id === groupId);
+        if (!group) return;
+
+        const modal = document.getElementById('studentsModal');
+        const groupNameSpan = document.getElementById('studentsGroupName');
+        const studentsList = document.getElementById('studentsList');
+
+        groupNameSpan.textContent = group.name;
+
+        // Calculate classes per week
+        const classesPerWeek = calculateClassesPerWeek(group);
+        const activeStudents = (group.students || []).filter(student => (student.status || 'active') === 'active');
+
+        // Render students list
+        if (activeStudents.length > 0) {
+          studentsList.innerHTML = activeStudents
+            .map(student => {
+              let actualIndex = group.students.indexOf(student);
+              if (actualIndex === -1) {
+                actualIndex = group.students.findIndex(s => s.id === student.id || s.name === student.name);
+              }
+              if (actualIndex === -1) {
+                console.warn('Student not found in group list for toggle', student);
+                return '';
+              }
+              const isActive = (student.status || 'active') === 'active';
+              const studentPrice = typeof student.pricePerClass === 'number'
+                ? student.pricePerClass
+                : parseFloat(student.pricePerClass) || group.pricePerClass || 0;
+              const weeklyPayment = classesPerWeek > 0 ? studentPrice * classesPerWeek : studentPrice;
+
+              return `
+              <div style="
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 12px 16px;
+                background: linear-gradient(135deg, rgba(138, 180, 255, 0.06) 0%, rgba(102, 126, 234, 0.06) 100%);
+                border: 1px solid rgba(138, 180, 255, 0.15);
+                border-radius: 10px;
+                transition: all 0.2s;
+              "
+              onmouseover="this.style.background='linear-gradient(135deg, rgba(138, 180, 255, 0.12) 0%, rgba(102, 126, 234, 0.12) 100%)'; this.style.borderColor='rgba(138, 180, 255, 0.3)'"
+              onmouseout="this.style.background='linear-gradient(135deg, rgba(138, 180, 255, 0.06) 0%, rgba(102, 126, 234, 0.06) 100%)'; this.style.borderColor='rgba(138, 180, 255, 0.15)'"
+              >
+                <div style="
+                  width: 40px;
+                  height: 40px;
+                  border-radius: 50%;
+                  background: linear-gradient(135deg, ${group.color.value}88 0%, ${group.color.value}AA 100%);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  font-weight: 700;
+                  font-size: 16px;
+                  color: white;
+                  flex-shrink: 0;
+                ">
+                  ${student.name.charAt(0).toUpperCase()}
+                </div>
+                <div style="flex: 1;">
+                  <div style="font-weight: 600; color: rgba(255, 255, 255, 0.95); font-size: 14px; margin-bottom: 4px;">
+                    ${student.name}
+                  </div>
+                  <div style="display: flex; gap: 8px; font-size: 11px; color: rgba(255, 255, 255, 0.6);">
+                    <span style="
+                      padding: 2px 8px;
+                      background: rgba(59, 130, 246, 0.15);
+                      border: 1px solid rgba(59, 130, 246, 0.3);
+                      border-radius: 4px;
+                      color: #93c5fd;
+                    "'>$${studentPrice}/class</span>
+                    <span style="
+                      padding: 2px 8px;
+                      background: rgba(168, 85, 247, 0.15);
+                      border: 1px solid rgba(168, 85, 247, 0.3);
+                      border-radius: 4px;
+                      color: #c4b5fd;
+                    "'>$${weeklyPayment}/week</span>
+                  </div>
+                </div>
+                <button
+                  onclick="event.stopPropagation(); toggleStudentStatus(${group.id}, ${actualIndex})"
+                  style="
+                    padding: 6px 14px;
+                    background: ${isActive ? 'rgba(251, 191, 36, 0.15)' : 'rgba(34, 197, 94, 0.15)'};
+                    border: 1px solid ${isActive ? 'rgba(251, 191, 36, 0.3)' : 'rgba(34, 197, 94, 0.3)'};
+                    border-radius: 6px;
+                    font-size: 11px;
+                    font-weight: 600;
+                    color: ${isActive ? '#fbbf24' : '#6ee7b7'};
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    white-space: nowrap;
+                  "
+                  onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 12px ${isActive ? 'rgba(251, 191, 36, 0.3)' : 'rgba(34, 197, 94, 0.3)'}';"
+                  onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none';"
+                >
+                  ${isActive ? '⏸ Pause' : '▶ Active'}
+                </button>
+              </div>
+            `;
+            })
+            .join('');
+        } else if (group.students && group.students.length > 0) {
+          studentsList.innerHTML = `
+            <div style="text-align: center; padding: 40px 20px; color: rgba(255, 255, 255, 0.6);">
+              <div style="font-size: 48px; margin-bottom: 12px; opacity: 0.6;">⏸️</div>
+              <p>All students in this group are paused</p>
+            </div>
+          `;
+        } else {
+          studentsList.innerHTML = `
+            <div style="text-align: center; padding: 40px 20px; color: rgba(255, 255, 255, 0.5);">
+              <div style="font-size: 48px; margin-bottom: 12px; opacity: 0.5;">👥</div>
+              <p>No students in this group yet</p>
+            </div>
+          `;
+        }
+
+        modal.style.display = 'flex';
+      }
+
+      // Close Students Modal
+      function closeStudentsModal() {
+        const modal = document.getElementById('studentsModal');
+        modal.style.display = 'none';
+      }
+
+      // Open Reorder Modal (placeholder)
+      function openReorderModal() {
+        alert('Demo Mode: Reorder functionality would allow drag-and-drop group ordering');
+      }
+
+      // ===== COUNTDOWN TIMER FUNCTIONALITY =====
+      // EXACT LOGIC FROM INDEX.HTML
+      let countdownTimer;
+      let countdownTargetElement = null; // Track the element being hovered
+      let countdownFixedPosition = null; // Store fixed position where hover started
+      const LA_TIMEZONE = 'America/Los_Angeles';
+
+      // Get current date/time in LA timezone
+      function getNowLA() {
+        return new Date(new Date().toLocaleString('en-US', { timeZone: LA_TIMEZONE }));
+      }
+
+      // Calculate minutes until next class (EXACT LOGIC FROM INDEX.HTML)
+      function getMinutesUntilClass(day, time) {
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const now = getNowLA(); // Use LA timezone
+
+        // Parse the day index
+        const targetDayIndex = days.findIndex(d => d.startsWith(day));
+        if (targetDayIndex === -1) return 10080; // 1 week fallback
+
+        // Parse the time (handle both "10:00 AM" and "10:00" formats)
+        let targetHours = 0;
+        let targetMinutes = 0;
+
+        if (time.includes('AM') || time.includes('PM')) {
+          // 12-hour format: "10:00 AM" or "3:30 PM"
+          const match = time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+          if (match) {
+            targetHours = parseInt(match[1]);
+            targetMinutes = parseInt(match[2]);
+            const period = match[3].toUpperCase();
+
+            if (period === 'PM' && targetHours !== 12) targetHours += 12;
+            if (period === 'AM' && targetHours === 12) targetHours = 0;
+          }
+        } else {
+          // 24-hour format: "14:30"
+          const [hh, mm] = time.split(':');
+          targetHours = parseInt(hh) || 0;
+          targetMinutes = parseInt(mm) || 0;
+        }
+
+        // Create target date for this week
+        const target = new Date(now);
+        target.setHours(targetHours, targetMinutes, 0, 0);
+
+        // Calculate days until target
+        const currentDay = now.getDay();
+        let daysUntil = targetDayIndex - currentDay;
+
+        // If target day is today, check if time has passed
+        if (daysUntil === 0) {
+          if (target <= now) {
+            // Time passed today, move to next week
+            daysUntil = 7;
+          }
+        } else if (daysUntil < 0) {
+          // Target day already passed this week, move to next week
+          daysUntil += 7;
+        }
+
+        // Set the correct date
+        target.setDate(now.getDate() + daysUntil);
+
+        // Calculate minutes difference
+        const diffMs = target - now;
+        const diffMinutes = Math.floor(diffMs / 60000);
+
+        return diffMinutes > 0 ? diffMinutes : 0;
+      }
+
+      // Update countdown panel position
+      function updateCountdownPosition() {
+        const panel = document.getElementById('countdownPanel');
+        if (!panel || panel.style.display === 'none' || !countdownFixedPosition) return;
+
+        const left = window.scrollX + countdownFixedPosition.x;
+        const top = window.scrollY + countdownFixedPosition.y;
+
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+      }
+
+      // Show countdown panel on hover
+      function showCountdownPanel(e, day, time) {
+        const panel = document.getElementById('countdownPanel');
+        if (!panel) return;
+
+        // Store the target element
+        countdownTargetElement = e.currentTarget;
+        
+        // Capture the VIEWPORT position where cursor is right now
+        // These are relative to the viewport, NOT the page
+        countdownFixedPosition = {
+          x: e.clientX + 15,
+          y: e.clientY - 10
+        };
+        
+        panel.style.display = 'block';
+        panel.style.opacity = '1';
+        panel.style.position = 'absolute';
+        panel.style.zIndex = 60000;
+        panel.style.pointerEvents = 'none';
+        updateCountdownPosition();
+        
+        clearInterval(countdownTimer);
+
+        const update = () => {
+          const mins = getMinutesUntilClass(day, time);
+          const totalHours = Math.floor(mins / 60);
+          const remainingMins = Math.floor(mins % 60);
+
+          // Format display based on time remaining
+          let displayText = '';
+          let timeColor = '#8ab4ff'; // Default blue
+
+          if (totalHours >= 24) {
+            const days = Math.floor(totalHours / 24);
+            const hours = totalHours % 24;
+            displayText = `${days}d ${hours}h ${remainingMins}m`;
+            timeColor = '#6ee7b7'; // Green for safe time
+          } else if (totalHours >= 6) {
+            displayText = `${totalHours}h ${remainingMins}m`;
+            timeColor = '#6ee7b7'; // Green
+          } else if (totalHours >= 2) {
+            displayText = `${totalHours}h ${remainingMins}m`;
+            timeColor = '#fbbf24'; // Orange for upcoming
+          } else {
+            displayText = `${totalHours}h ${remainingMins}m`;
+            timeColor = '#f87171'; // Red for critical
+          }
+
+          panel.innerHTML = `
+            <div style="color: rgba(255, 255, 255, 0.7); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">
+              ⏰ Next Class
+            </div>
+            <div style="color: rgba(255, 255, 255, 0.95); font-weight: 600; margin-bottom: 8px; font-size: 14px;">
+              ${day} at ${time}
+            </div>
+            <div style="
+              color: ${timeColor};
+              font-weight: 700;
+              font-size: 20px;
+              text-shadow: 0 2px 8px ${timeColor}40;
+              font-variant-numeric: tabular-nums;
+              letter-spacing: 0.5px;
+            ">
+              ${displayText}
+            </div>
+          `;
+          
+          // No need to update position - it's fixed now
+        };
+        update();
+        countdownTimer = setInterval(update, 1000); // Update content only, not position
+      }
+
+      // Hide countdown panel
+      function hideCountdownPanel() {
+        const panel = document.getElementById('countdownPanel');
+        if (panel) {
+          panel.style.display = 'none';
+          panel.style.opacity = '0';
+        }
+        clearInterval(countdownTimer);
+        countdownTargetElement = null;
+        countdownFixedPosition = null; // Clear fixed position
+      }
+
+      // Update schedule items with hover handlers
+      function updateScheduleItemStates() {
+        const scheduleItems = document.querySelectorAll('.schedule-day:not(.one-time)');
+        
+        scheduleItems.forEach(item => {
+          // Get the LA time row specifically (first time-row)
+          const laTimeRow = item.querySelector('.time-row:first-child');
+          if (!laTimeRow) return;
+
+          const daySpan = laTimeRow.querySelector('.day-name');
+          const timeSpan = laTimeRow.querySelector('.time-value');
+
+          if (!daySpan || !timeSpan) return;
+
+          const day = daySpan.textContent.trim();
+          const time = timeSpan.textContent.trim();
+
+          // Convert abbreviated day to full name
+          const dayMap = {
+            SUN: 'Sunday',
+            MON: 'Monday',
+            TUE: 'Tuesday',
+            WED: 'Wednesday',
+            THU: 'Thursday',
+            FRI: 'Friday',
+            SAT: 'Saturday',
+          };
+          const fullDay = dayMap[day] || day;
+
+          item.onmouseenter = e => showCountdownPanel(e, fullDay, time);
+          item.onmouseleave = hideCountdownPanel;
+        });
+      }
+
+      // Initialize on load
+      init();
+    </script>
+
+    <!-- Countdown Panel -->
+    <div
+      id="countdownPanel"
+      style="
+        display: none;
+        opacity: 0;
+        position: absolute;
+        background: linear-gradient(135deg, rgba(17, 24, 39, 0.92) 0%, rgba(31, 41, 55, 0.88) 100%);
+        backdrop-filter: blur(16px) saturate(180%);
+        -webkit-backdrop-filter: blur(16px) saturate(180%);
+        border: 1px solid rgba(138, 180, 255, 0.25);
+        border-radius: 16px;
+        padding: 14px 20px;
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.95);
+        z-index: 60000;
+        box-shadow:
+          0 8px 32px rgba(0, 0, 0, 0.4),
+          0 2px 8px rgba(138, 180, 255, 0.15),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        pointer-events: none;
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease;
+        line-height: 1.5;
+        transform: translateZ(0);
+      "
+    ></div>
+  </body>
+</html>

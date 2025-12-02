@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PharmaQuest 💊 — NCLEX Study Game</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+  
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    text-align: center;
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 80, 0.95));
+    min-height: 100vh;
+    overflow-x: hidden;
+    margin: 0;
+    padding: 20px;
+    position: relative;
+  }
+  
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle at 20% 50%, rgba(102,126,234,0.08) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(147,51,234,0.08) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  
+  .card {
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 80, 0.95));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 24px;
+    box-shadow: 0 25px 60px rgba(13, 16, 35, 0.7), 
+                inset 0 1px 0 rgba(255,255,255,0.05);
+    width: 700px;
+    max-width: 90vw;
+    padding: 40px;
+    margin: 10vh auto;
+    position: relative;
+    z-index: 1;
+  }
+  
+  h1 { 
+    margin-top: 0; 
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    font-size: 2.5rem;
+    font-weight: 700;
+  }
+  
+  h2 { 
+    color: rgba(255,255,255,0.9);
+    font-weight: 600;
+  }
+  
+  /* Level Buttons */
+  .level-btn {
+    display: block;
+    width: 100%;
+    padding: 20px;
+    margin: 15px 0;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    font-size: 20px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: white;
+  }
+  .level-btn:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.4);
+    border-color: rgba(255,255,255,0.2);
+  }
+  .level-easy { 
+    background: linear-gradient(135deg, rgba(251,191,36,0.25), rgba(245,158,11,0.25));
+    border-color: rgba(251,191,36,0.3);
+  }
+  .level-easy:hover {
+    background: linear-gradient(135deg, rgba(251,191,36,0.35), rgba(245,158,11,0.35));
+  }
+  .level-medium { 
+    background: linear-gradient(135deg, rgba(59,130,246,0.25), rgba(37,99,235,0.25));
+    border-color: rgba(59,130,246,0.3);
+  }
+  .level-medium:hover {
+    background: linear-gradient(135deg, rgba(59,130,246,0.35), rgba(37,99,235,0.35));
+  }
+  .level-hard { 
+    background: linear-gradient(135deg, rgba(147,51,234,0.25), rgba(126,34,206,0.25));
+    border-color: rgba(147,51,234,0.3);
+  }
+  .level-hard:hover {
+    background: linear-gradient(135deg, rgba(147,51,234,0.35), rgba(126,34,206,0.35));
+  }
+  
+  /* Modal/Popup */
+  .modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 1000;
+    animation: fadeIn 0.3s ease;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .modal-content {
+    background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 80, 0.95));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 24px;
+    padding: 40px;
+    max-width: 500px;
+    margin: 15vh auto;
+    box-shadow: 0 25px 60px rgba(13, 16, 35, 0.7), 
+                inset 0 1px 0 rgba(255,255,255,0.05);
+    animation: slideDown 0.4s ease;
+  }
+  @keyframes slideDown {
+    from { transform: translateY(-50px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  .modal-close {
+    float: right;
+    font-size: 32px;
+    font-weight: bold;
+    cursor: pointer;
+    color: rgba(255,255,255,0.6);
+    line-height: 20px;
+    transition: all 0.2s ease;
+  }
+  .modal-close:hover { 
+    color: rgba(255,255,255,0.9);
+    transform: rotate(90deg);
+  }
+  
+  .category-btn {
+    display: block;
+    width: 100%;
+    padding: 18px;
+    margin: 12px 0;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    background: linear-gradient(135deg, rgba(102,126,234,0.25), rgba(118,75,162,0.25));
+    color: white;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  }
+  .category-btn:hover {
+    transform: translateX(8px);
+    background: linear-gradient(135deg, rgba(102,126,234,0.35), rgba(118,75,162,0.35));
+    border-color: rgba(147,51,234,0.4);
+    box-shadow: 0 6px 20px rgba(147,51,234,0.3);
+  }
+  
+  /* Game Screen */
+  .character {
+    font-size: 80px;
+    animation: bounce 1.5s infinite ease-in-out;
+    margin: 20px 0;
+    filter: drop-shadow(0 4px 15px rgba(147,51,234,0.3));
+  }
+  @keyframes bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-12px); }
+  }
+  .speech-bubble {
+    position: relative;
+    display: inline-block;
+    background: linear-gradient(145deg, rgba(30, 41, 80, 0.6), rgba(45, 55, 100, 0.4));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    padding: 14px 24px;
+    margin: 15px 0;
+    font-size: 16px;
+    font-weight: 500;
+    color: rgba(255,255,255,0.95);
+    animation: bubble 0.5s ease;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+  }
+  @keyframes bubble {
+    0% { opacity: 0; transform: translateY(10px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  
+  .answers {
+    margin: 20px 0;
+  }
+  .answers button {
+    display: block;
+    width: 100%;
+    margin: 12px 0;
+    padding: 18px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(102,126,234,0.2), rgba(118,75,162,0.2));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: white;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  }
+  .answers button:hover {
+    background: linear-gradient(135deg, rgba(102,126,234,0.35), rgba(118,75,162,0.35));
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(147,51,234,0.3);
+    border-color: rgba(147,51,234,0.4);
+  }
+  .answers button.correct {
+    background: linear-gradient(135deg, rgba(34,197,94,0.3), rgba(22,163,74,0.3));
+    border-color: rgba(34,197,94,0.5);
+    color: #4ade80;
+    box-shadow: 0 0 30px rgba(34,197,94,0.4);
+  }
+  .answers button.wrong {
+    background: linear-gradient(135deg, rgba(239,68,68,0.3), rgba(220,38,38,0.3));
+    border-color: rgba(239,68,68,0.5);
+    color: #f87171;
+    box-shadow: 0 0 30px rgba(239,68,68,0.4);
+  }
+  .answers button:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+  
+  .feedback {
+    font-size: 18px;
+    margin: 20px 0;
+    min-height: 30px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+  }
+  .score {
+    margin-top: 15px;
+    font-weight: 700;
+    font-size: 22px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  
+  .next-btn {
+    padding: 16px 32px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    font-size: 18px;
+    font-weight: 600;
+    margin: 15px 8px;
+    cursor: pointer;
+    background: linear-gradient(135deg, rgba(34,197,94,0.25), rgba(22,163,74,0.25));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: white;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  }
+  .next-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(34,197,94,0.3);
+    background: linear-gradient(135deg, rgba(34,197,94,0.35), rgba(22,163,74,0.35));
+    border-color: rgba(34,197,94,0.4);
+  }
+  
+  .back-btn {
+    padding: 14px 28px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    font-size: 16px;
+    margin: 10px;
+    cursor: pointer;
+    background: linear-gradient(135deg, rgba(148,163,184,0.2), rgba(100,116,139,0.2));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: rgba(255,255,255,0.9);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-weight: 600;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+  }
+  .back-btn:hover {
+    background: linear-gradient(135deg, rgba(148,163,184,0.3), rgba(100,116,139,0.3));
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    border-color: rgba(255,255,255,0.2);
+  }
+  
+  .hidden { display: none; }
+  
+  .access-denied {
+    text-align: center;
+    padding: 40px 20px;
+  }
+  .access-denied h2 {
+    color: #f87171;
+    margin-bottom: 20px;
+  }
+  .access-denied p {
+    color: rgba(255,255,255,0.8);
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div class="card" id="loadingScreen">
+  <h2>🔄 Loading...</h2>
+  <p>Checking your access...</p>
+</div>
+
+<!-- Access Denied Screen -->
+<div class="card hidden" id="accessDenied">
+  <div class="access-denied">
+    <h2>🚫 Access Restricted</h2>
+    <p style="font-size: 18px;">Your instructor has temporarily restricted access to the games.</p>
+    <p style="color: #666;">Please contact your instructor if you believe this is an error.</p>
+  </div>
+</div>
+
+<!-- Main Menu -->
+<div class="card hidden" id="mainMenu">
+  <h1>🎉 Welcome to PharmaQuest 💊</h1>
+  <p style="font-size: 18px; color: #666;">Choose your difficulty level to start studying!</p>
+  
+  <button class="level-btn level-easy" onclick="showCategories('easy')">
+    🌼 Easy RN
+  </button>
+  <button class="level-btn level-medium" onclick="showCategories('medium')">
+    ⚡ Medium RN
+  </button>
+  <button class="level-btn level-hard" onclick="showCategories('hard')">
+    🔥 Hard RN
+  </button>
+</div>
+
+<!-- Category Selection Modal -->
+<div class="modal" id="categoryModal">
+  <div class="modal-content">
+    <span class="modal-close" onclick="closeModal()">&times;</span>
+    <h2>📚 Choose a Category</h2>
+    <p style="color: #666;">Select what you want to study:</p>
+    
+    <button class="category-btn" onclick="startGame('medications')">
+      💊 Medications
+    </button>
+    
+    <!-- ADD MORE CATEGORIES HERE LATER -->
+    <!-- <button class="category-btn" onclick="startGame('lab-values')">
+      🧪 Lab Values
+    </button>
+    <button class="category-btn" onclick="startGame('procedures')">
+      🏥 Nursing Procedures
+    </button> -->
+    
+    <button class="back-btn" onclick="closeModal()">← Back</button>
+  </div>
+</div>
+
+<!-- Game Screen -->
+<div class="card hidden" id="gameScreen">
+  <div class="character" id="character">🤒</div>
+  <div id="speech"></div>
+  <h2 id="question">Loading...</h2>
+  <div class="answers" id="answers"></div>
+  <div class="feedback" id="feedback"></div>
+  <button class="next-btn hidden" id="nextButton" onclick="nextQuestion()">➡️ Next Question</button>
+  <div class="score" id="score">Score: 0 ⭐</div>
+  <button class="back-btn" onclick="backToMenu()">🏠 Back to Menu</button>
+</div>
+
+<script>
+// ========================================================
+// SUPABASE CONFIGURATION
+// ========================================================
+
+const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzA4MzQ4NTksImV4cCI6MjA0NjQxMDg1OX0.4KUuL4bn2hvl-WBb4XBvzLVaJMIpPPp7_-eEUQN16wM';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const ADMIN_EMAIL = 'hrachfilm@gmail.com';
+
+let currentStudent = null;
+let currentEmail = null;
+let isAdmin = false;
+
+// ========================================================
+// ACCESS CONTROL - Check on page load
+// ========================================================
+
+async function checkAccess() {
+  try {
+    // Get current Supabase Auth session
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      // Not logged in - redirect to login
+      window.location.href = 'Login.html';
+      return false;
+    }
+    
+    currentEmail = session.user.email;
+    isAdmin = currentEmail === ADMIN_EMAIL;
+    
+    // Admin always has access
+    if (isAdmin) {
+      console.log('✅ Admin access granted');
+      return true;
+    }
+    
+    // Look up student profile
+    const { data: student, error } = await supabase
+      .from('students')
+      .select('*')
+      .eq('email', currentEmail)
+      .single();
+    
+    if (error || !student) {
+      console.error('❌ Student not found:', error);
+      window.location.href = 'Login.html';
+      return false;
+    }
+    
+    currentStudent = student;
+    
+    // Check if student has games access (default true if field doesn't exist)
+    const hasAccess = student.games_access !== false;
+    
+    if (!hasAccess) {
+      console.log('🚫 Access denied for student:', student.name);
+      showAccessDenied();
+      return false;
+    }
+    
+    console.log('✅ Access granted for student:', student.name);
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Access check failed:', error);
+    window.location.href = 'Login.html';
+    return false;
+  }
+}
+
+function showAccessDenied() {
+  document.getElementById('loadingScreen').classList.add('hidden');
+  document.getElementById('accessDenied').classList.remove('hidden');
+}
+
+function showMainMenu() {
+  document.getElementById('loadingScreen').classList.add('hidden');
+  document.getElementById('mainMenu').classList.remove('hidden');
+}
+
+// Initialize on page load
+window.addEventListener('DOMContentLoaded', async () => {
+  const hasAccess = await checkAccess();
+  if (hasAccess) {
+    showMainMenu();
+  }
+});
+
+// ========================================================
+// MEDICATION QUESTION BANK
+// You can easily add more medications here!
+// ========================================================
+
+const medicationQuestions = {
+  easy: [
+    {scene: "😷", name: "Lisinopril", use: "Hypertension", wrong: ["Type 2 diabetes", "Asthma", "Hypothyroidism"], rationale: "Lisinopril is an ACE inhibitor that blocks angiotensin-converting enzyme, reducing blood pressure by preventing vasoconstriction and aldosterone secretion."},
+    {scene: "🫀", name: "Losartan", use: "ARB medication", wrong: ["Beta blocker", "Anticoagulant", "Diuretic"], rationale: "Losartan is an Angiotensin Receptor Blocker (ARB) that blocks angiotensin II receptors, lowering blood pressure without affecting bradykinin levels like ACE inhibitors."},
+    {scene: "💓", name: "Metoprolol", use: "Lower heart rate", wrong: ["Lower WBC count", "Lower respiratory rate", "Lower temperature"], rationale: "Metoprolol is a beta-blocker that blocks beta-1 receptors in the heart, decreasing heart rate and contractility, which reduces cardiac workload and oxygen demand."},
+    {scene: "🩺", name: "Amlodipine", use: "Calcium channel blocker", wrong: ["Beta blocker", "ACE inhibitor", "Thrombolytic"], rationale: "Amlodipine blocks calcium channels in vascular smooth muscle, causing vasodilation and reduced blood pressure without significantly affecting heart rate."},
+    {scene: "🩹", name: "Aspirin", use: "Prevent platelet aggregation", wrong: ["Increase BP", "Treat anemia", "Stop cough"], rationale: "Aspirin irreversibly inhibits COX-1 enzyme, preventing thromboxane A2 production and platelet aggregation, reducing risk of blood clots in cardiovascular disease."},
+    {scene: "🧷", name: "Clopidogrel", use: "Prevent platelet clumping", wrong: ["Asthma attacks", "Constipation", "Fluid retention"], rationale: "Clopidogrel inhibits ADP-induced platelet aggregation by blocking P2Y12 receptors, preventing clot formation in patients with coronary stents or cardiovascular disease."},
+    {scene: "🧂", name: "Atorvastatin", use: "Lower cholesterol", wrong: ["Stop bleeding", "Lower potassium", "Increase appetite"], rationale: "Atorvastatin is an HMG-CoA reductase inhibitor (statin) that reduces cholesterol synthesis in the liver, lowering LDL and total cholesterol levels."},
+    {scene: "💧", name: "Furosemide", use: "Loop diuretic", wrong: ["Antibiotic", "Steroid", "Beta blocker"], rationale: "Furosemide blocks sodium-potassium-chloride reabsorption in the loop of Henle, promoting rapid fluid excretion to reduce edema and blood pressure."},
+    {scene: "🚰", name: "Hydrochlorothiazide", use: "Hypertension", wrong: ["Arrhythmias", "Seizures", "Allergies"], rationale: "HCTZ is a thiazide diuretic that inhibits sodium reabsorption in the distal tubule, decreasing blood volume and lowering blood pressure."},
+    {scene: "🦵", name: "Spironolactone", use: "Spare potassium", wrong: ["Spare calcium", "Spare sodium", "Spare magnesium"], rationale: "Spironolactone is a potassium-sparing diuretic that blocks aldosterone receptors, preventing potassium excretion while promoting sodium and water loss."},
+    {scene: "❤️", name: "Digoxin", use: "Strengthen cardiac contractility", wrong: ["Lung expansion", "Liver function", "Renal perfusion"], rationale: "Digoxin inhibits the sodium-potassium ATPase pump, increasing intracellular calcium and enhancing myocardial contractility while slowing AV node conduction."},
+    {scene: "🫀", name: "Nitroglycerin", use: "Chest pain", wrong: ["Diabetes", "Fever", "Weight loss"], rationale: "Nitroglycerin is a nitrate that dilates coronary arteries and reduces preload, decreasing myocardial oxygen demand and relieving angina pain."},
+    {scene: "💉", name: "Enoxaparin", use: "Low-molecular-weight heparin", wrong: ["Statin", "Beta blocker", "ACE inhibitor"], rationale: "Enoxaparin enhances antithrombin III activity to inhibit factor Xa, preventing clot formation with more predictable dosing than unfractionated heparin."},
+    {scene: "🩸", name: "Heparin", use: "Prevent clot formation", wrong: ["Bronchospasm", "Constipation", "Kidney stones"], rationale: "Heparin activates antithrombin III to inhibit thrombin and factor Xa, preventing and treating venous thromboembolism and requiring aPTT monitoring."},
+    {scene: "🧪", name: "Warfarin", use: "Monitor with INR", wrong: ["Monitor with aPTT", "Monitor with creatinine", "Monitor with amylase"], rationale: "Warfarin inhibits vitamin K-dependent clotting factors (II, VII, IX, X), requiring INR monitoring to maintain therapeutic anticoagulation (goal 2-3 for most indications)."},
+    {scene: "💊", name: "Apixaban", use: "Stroke prevention in AFib", wrong: ["Sinus infections", "Cough", "UTI"]},
+    {scene: "🩺", name: "Diltiazem", use: "Control heart rate", wrong: ["Control blood sugar", "Control urine output", "Control platelet count"]},
+    {scene: "😌", name: "Verapamil", use: "Hypertension", wrong: ["COVID-19", "Kidney stones", "Hypothermia"]},
+    {scene: "🫁", name: "Propranolol", use: "Should NOT be used in asthma", wrong: ["Migraines", "Hypertension", "Tremors"]},
+    {scene: "💗", name: "Isosorbide", use: "Prevent angina", wrong: ["Prevent anemia", "Prevent seizures", "Prevent pneumonia"]},
+    {scene: "💗", name: "Hydralazine", use: "Lower blood pressure", wrong: ["Lower WBC count", "Lower heart rate", "Lower oxygen demand"]},
+    {scene: "🧘", name: "Clonidine", use: "Hypertension", wrong: ["Asthma", "GERD", "UTI"]},
+    {scene: "❤️‍🔥", name: "Ranolazine", use: "Chronic angina", wrong: ["Acute MI", "Asthma", "Seizures"]},
+    {scene: "🧂", name: "Niacin", use: "Raise HDL", wrong: ["Stop bleeding", "Lower potassium", "Increase HR"]},
+    {scene: "🍔", name: "Ezetimibe", use: "Reduce cholesterol absorption", wrong: ["Increase excretion", "Block liver receptors", "Stop insulin"]},
+    {scene: "⚡", name: "Amiodarone", use: "Serious arrhythmias", wrong: ["Pneumonia", "Thyroid disease", "Arthritis"]},
+    {scene: "😌", name: "Atenolol", use: "Beta-1 blocker", wrong: ["ACE inhibitor", "Diuretic", "Anticoagulant"]},
+    {scene: "🫀", name: "Carvedilol", use: "Heart failure", wrong: ["Constipation", "Anemia", "Edema"]},
+    {scene: "💪", name: "Dobutamine", use: "Increase cardiac output", wrong: ["Increase urine acidity", "Increase blood sugar", "Increase platelet count"]},
+    {scene: "🏥", name: "Milrinone", use: "Severe heart failure", wrong: ["Asthma", "Fever", "Hypoglycemia"]},
+    {scene: "🧠", name: "Alteplase (tPA)", use: "Dissolve clots", wrong: ["Dissolve kidney stones", "Dissolve gallstones", "Dissolve mucus"]},
+    {scene: "🧂", name: "Rosuvastatin", use: "Lower LDL", wrong: ["Stop coughing", "Raise potassium", "Treat pain"]},
+    {scene: "🧪", name: "Fenofibrate", use: "Target triglycerides", wrong: ["Target hemoglobin", "Target sodium", "Target calcium"]},
+    {scene: "🩺", name: "Nifedipine", use: "Calcium channel blocker", wrong: ["Beta blocker", "Statin", "Anticoagulant"]},
+    {scene: "😷", name: "Benazepril", use: "ACE inhibitor", wrong: ["Statin", "Thiazide", "Nitrate"]},
+    {scene: "💗", name: "Captopril", use: "Lower BP", wrong: ["Raise HR", "Treat anemia", "Lower temp"]},
+    {scene: "🫀", name: "Valsartan", use: "ARB medication", wrong: ["Diuretic", "Antiplatelet", "Statin"]},
+    {scene: "🦵", name: "Eplerenone", use: "Spare potassium", wrong: ["Spare calcium", "Spare magnesium", "Spare iron"]},
+    {scene: "💧", name: "Bumetanide", use: "Loop diuretic", wrong: ["Thrombolytic", "ACE inhibitor", "Statin"]},
+    {scene: "🚰", name: "Torsemide", use: "Fluid removal", wrong: ["Infection control", "Seizures", "Asthma"]},
+    {scene: "🚑", name: "Nitroprusside", use: "Hypertensive crisis", wrong: ["Flu", "Anxiety", "Dehydration"]},
+    {scene: "💓", name: "Ivabradine", use: "Lower heart rate", wrong: ["Lower potassium", "Lower sodium", "Lower cholesterol"]},
+    {scene: "❤️", name: "Entresto", use: "Heart failure", wrong: ["Thyroid disorders", "COPD", "GERD"]},
+    {scene: "💉", name: "Fondaparinux", use: "Anticoagulant", wrong: ["Beta blocker", "ACE inhibitor", "Diuretic"]},
+    {scene: "💊", name: "Edoxaban", use: "Prevent stroke in AFib", wrong: ["Prevent asthma", "Prevent hypertension", "Prevent thyroid disease"]},
+    {scene: "🚑", name: "Labetalol", use: "Hypertensive emergencies", wrong: ["Diabetes", "Anemia", "Migraines"]},
+    {scene: "😌", name: "Verapamil", use: "May cause constipation", wrong: ["Hair loss", "Seizures", "Hypothermia"]}
+  ],
+  medium: [
+    {scene: "⚠️", name: "Lisinopril", use: "Report swelling of lips and tongue", wrong: ["Elevate head and reassess", "Give acetaminophen", "Document as expected effect"]},
+    {scene: "🧪", name: "Lisinopril", use: "Monitor potassium levels", wrong: ["Monitor calcium", "Monitor magnesium", "Monitor bicarbonate"]},
+    {scene: "🤰", name: "Losartan", use: "Stop if pregnant", wrong: ["Safe in all pregnancy stages", "Stop abruptly when better", "No BP monitoring needed"]},
+    {scene: "💓", name: "Metoprolol", use: "Hold if pulse below 60", wrong: ["Hold if BP above 140/90", "Stop if dizzy", "Cures hypertension permanently"]},
+    {scene: "🫁", name: "Propranolol", use: "Assess for wheezing in asthma patients", wrong: ["HR 78/min is concerning", "BP 132/80 is concerning", "Mild edema is concerning"]},
+    {scene: "🦵", name: "Amlodipine", use: "May cause ankle swelling", wrong: ["Increased urination", "Hair loss", "Metallic taste"]},
+    {scene: "🩺", name: "Diltiazem", use: "Control ventricular rate in AFib", wrong: ["Increase heart rate", "Convert AFib to sinus rhythm", "Prevent blood clots"]},
+    {scene: "💧", name: "Furosemide", use: "Monitor for low potassium (2.9 mEq/L)", wrong: ["Monitor sodium 138", "Monitor calcium 9.1", "Monitor hemoglobin 13.5"]},
+    {scene: "🚰", name: "Furosemide", use: "Change positions slowly to avoid dizziness", wrong: ["Limit potassium foods", "Stop if weight gain", "No need to monitor weight"]},
+    {scene: "🦵", name: "Spironolactone", use: "Avoid extra potassium foods", wrong: ["Avoid salt substitutes is wrong", "Check potassium regularly is wrong", "Report muscle weakness is wrong"]},
+    {scene: "☀️", name: "Hydrochlorothiazide", use: "Use sunscreen outdoors", wrong: ["Avoid dairy products", "Restrict fluids to 1 liter/day", "Expect orange urine"]},
+    {scene: "💊", name: "Nitroglycerin", use: "Take sublingual at first sign of chest pain", wrong: ["Swallow with water", "Use after 30 minutes rest", "Store in pill organizer"]},
+    {scene: "📞", name: "Nitroglycerin", use: "Call EMS if 3 doses don't relieve pain", wrong: ["Wait 1 hour after 1 tablet", "Chew the tablet", "Take unlimited tablets"]},
+    {scene: "🥴", name: "Nitroglycerin", use: "Report lightheadedness and fainting", wrong: ["Mild headache is concerning", "Keep in dark container is wrong", "Sit down before taking is wrong"]},
+    {scene: "�", name: "Digoxin", use: "Assess apical pulse for full minute", wrong: ["Check temperature", "Assess pedal pulses", "Measure abdominal girth"]},
+    {scene: "👁️", name: "Digoxin", use: "Report loss of appetite and yellow halos", wrong: ["Mild ankle edema", "Dry cough", "Increased urination"]},
+    {scene: "💪", name: "Atorvastatin", use: "Report muscle pain and weakness", wrong: ["Reassure it's expected", "Increase exercise", "Double the dose"]},
+    {scene: "⏰", name: "Atorvastatin", use: "Report unexplained muscle pain", wrong: ["Avoid all fruits", "Stop when cholesterol improves", "Take only with chest pain"]},
+    {scene: "🩹", name: "Aspirin", use: "Avoid taking with ibuprofen daily", wrong: ["Take with food is wrong", "Report bruising is wrong", "Black stools = bleeding is wrong"]},
+    {scene: "🧷", name: "Clopidogrel", use: "Use soft toothbrush and electric razor", wrong: ["Increase vitamin K", "Stop if gums bleed", "Take only with chest pain"]},
+    {scene: "🧪", name: "Warfarin", use: "INR 2.5 is therapeutic", wrong: ["INR 0.8 is therapeutic", "INR 6.0 is therapeutic", "INR 1.0 is therapeutic"]},
+    {scene: "🥬", name: "Warfarin", use: "Keep green leafy vegetables consistent", wrong: ["Keep blood tests regular is wrong", "Inform dentist is wrong", "Don't double missed dose is CORRECT"]},
+    {scene: "🩸", name: "Heparin", use: "Monitor aPTT", wrong: ["Monitor INR", "Monitor creatinine", "Monitor potassium"]},
+    {scene: "💉", name: "Enoxaparin", use: "Inject into fatty abdomen tissue", wrong: ["Massage site after", "Inject into arm muscle", "Aspirate before injecting"]},
+    {scene: "💊", name: "Apixaban", use: "No routine lab monitoring needed", wrong: ["No bleeding risk", "Stop abruptly when better", "Restrict vitamin K diet"]},
+    {scene: "⚡", name: "Amiodarone", use: "Report shortness of breath and cough", wrong: ["Mild photosensitivity normal", "Blue-gray skin normal", "Occasional nausea normal"]},
+    {scene: "☀️", name: "Amiodarone", use: "Use sunscreen and protective clothing", wrong: ["No serious side effects", "Ignore vision changes", "Stop abruptly if tired"]},
+    {scene: "💓", name: "Hydralazine", use: "Monitor for reflex tachycardia", wrong: ["Monitor for bradycardia", "Monitor for urinary retention", "Monitor for hearing loss"]},
+    {scene: "🛌", name: "Prazosin", use: "Take first dose at bedtime to prevent fainting", wrong: ["Take while driving", "Avoid water with dose", "Double first dose if BP high"]},
+    {scene: "🩹", name: "Clonidine patch", use: "Apply to clean hairless skin", wrong: ["Remove before bathing", "Cut patch in half", "Stop abruptly if dizzy"]},
+    {scene: "⚠️", name: "Clonidine", use: "Don't stop suddenly - causes rebound hypertension", wrong: ["Causes severe bradycardia", "Causes hypoglycemia", "Causes metabolic acidosis"]},
+    {scene: "💪", name: "Dobutamine", use: "Improves cardiac contractility and output", wrong: ["Decreases heart rate", "Causes peripheral vasoconstriction", "Lowers potassium"]},
+    {scene: "🏥", name: "Milrinone", use: "Short-term management of severe HF", wrong: ["Long-term angina control", "First-line for hypertension", "Replaces beta blockers"]},
+    {scene: "⏰", name: "Isosorbide", use: "Scheduled earlier prevents tolerance", wrong: ["Only works in morning", "Nighttime doses unsafe", "Take extra doses at night"]},
+    {scene: "💊", name: "Ranolazine", use: "Reduces angina but doesn't treat acute pain", wrong: ["Take instead of nitroglycerin", "Don't report dizziness", "Stop abruptly if pain decreases"]},
+    {scene: "🧠", name: "Alteplase (tPA)", use: "Best candidate: 1 hour onset, no recent surgery", wrong: ["12 hours onset", "Recent surgery 2 days ago", "Active GI bleeding"]},
+    {scene: "🧪", name: "ACE inhibitors", use: "Monitor potassium - may increase", wrong: ["Monitor sodium - drops severely", "Monitor WBC for infection", "Only check cholesterol"]},
+    {scene: "💓", name: "Beta blockers", use: "Can mask hypoglycemia signs like tachycardia", wrong: ["Prevent hypoglycemia entirely", "Increase insulin production", "Take only when sugar high"]},
+    {scene: "�", name: "Loop diuretics", use: "High-dose can cause hearing difficulty", wrong: ["Mild thirst", "Increased urination", "Slight decreased appetite"]},
+    {scene: "📊", name: "Thiazide diuretics", use: "May increase blood glucose", wrong: ["Permanently normalizes glucose", "No effect on glucose", "Always causes low glucose"]},
+    {scene: "⚠️", name: "Nitrates", use: "Don't take with sildenafil - severe hypotension risk", wrong: ["Taking together improves BP", "Take sildenafil after nitroglycerin", "Safe if BP above 120/80"]},
+    {scene: "💩", name: "Verapamil", use: "Constipation is common side effect", wrong: ["Polyuria", "Hair loss", "Severe hyperactivity"]},
+    {scene: "🧪", name: "Statins", use: "Monitor for elevated liver enzymes", wrong: ["Hemoglobin 13.2 normal", "Normal creatinine", "Normal potassium"]},
+    {scene: "⚠️", name: "Beta blockers", use: "Don't stop abruptly - rebound tachycardia risk", wrong: ["BP stays low permanently", "Lung function stops improving", "Causes immediate hypoglycemia"]},
+    {scene: "🔪", name: "Antiplatelets", use: "Stop several days before surgery", wrong: ["Continue until surgery day", "Double dose before surgery", "Stop morning of surgery only"]},
+    {scene: "⚖️", name: "Heart failure meds", use: "Weigh daily, report 2-3 lb gain", wrong: ["Check temperature every 4 hours", "Measure abdominal girth weekly", "Avoid all fluids after 6 PM"]}
+  ],
+  hard: [
+    {scene: "🚨", name: "ACE inhibitors", use: "K 5.9 + peaked T waves - notify provider immediately", wrong: ["Hold next dose only", "Encourage high-K foods", "Document and recheck later"]},
+    {scene: "⚠️", name: "Lisinopril", use: "Risk with spironolactone + potassium = hyperkalemia", wrong: ["Furosemide + calcium safe", "Aspirin + atorvastatin safe", "Metoprolol + digoxin safe"]},
+    {scene: "🤰", name: "Losartan", use: "Don't give if 8 weeks pregnant", wrong: ["Client with mild edema OK", "Client with controlled diabetes OK", "Client with seasonal allergies OK"]},
+    {scene: "⏰", name: "Captopril", use: "Take 1 hour before meals for absorption", wrong: ["Take only when BP >160/90", "Take with high-sodium meal", "Take at bedtime only"]},
+    {scene: "❤️", name: "Entresto", use: "Wait 36 hours after stopping ACE inhibitor", wrong: ["Wait 6 hours", "Wait 7 days", "No interval needed"]},
+    {scene: "😰", name: "ACE inhibitors", use: "Face swelling + difficulty breathing = angioedema", wrong: ["Mild ankle swelling at night", "Dry mouth on awakening", "Pruritic rash on trunk"]},
+    {scene: "�", name: "ARBs", use: "Preferred if chronic ACE-induced cough", wrong: ["Client with active GI bleeding", "Client with severe bradycardia", "Client with recurrent seizures"]},
+    {scene: "🩺", name: "Valsartan", use: "Creatinine rising from 0.9 to 2.1 - priority report", wrong: ["Mild fatigue", "Occasional dizziness", "BP 130/84"]},
+    {scene: "🫁", name: "Propranolol", use: "Highest risk: bronchospasm and asthma", wrong: ["Controlled hypertension", "Migraines", "Performance anxiety"]},
+    {scene: "⚠️", name: "Beta blockers", use: "Stopping abruptly causes rebound tachycardia and angina", wrong: ["Constipation", "Hyperglycemia", "Insomnia"]},
+    {scene: "💓", name: "Metoprolol", use: "Effective if fewer chest pain episodes with exertion", wrong: ["Increased appetite", "No HR/BP change", "Weight gain 5 lb in week"]},
+    {scene: "🚑", name: "Labetalol IV", use: "Frequent BP monitoring is priority", wrong: ["Skin turgor", "Pupil size", "Abdominal girth"]},
+    {scene: "🫀", name: "Carvedilol", use: "Question order if decompensated acute HF with pulmonary edema", wrong: ["Chronic stable HF on diuretics", "Controlled AFib", "History of MI"]},
+    {scene: "💉", name: "Beta blockers", use: "Diabetic may have sweating/confusion without tachycardia", wrong: ["Severe tachycardia and palpitations", "Tingling lips with tremors", "Pruritus and rash"]},
+    {scene: "💓", name: "Ivabradine", use: "Contraindicated if resting HR <70 bpm", wrong: ["Use of ACE inhibitor", "Use of diuretic", "NYHA Class II HF"]},
+    {scene: "🔪", name: "Beta blockers", use: "Clarify order to HOLD morning of surgery", wrong: ["Continue as prescribed", "Check BP/HR before giving", "Notify anesthesia of use"]},
+    {scene: "🚑", name: "Nifedipine", use: "Dangerous in hypertensive emergency with unstable angina", wrong: ["Chronic mild HTN in clinic", "Raynaud phenomenon", "Stable angina with normal BP"]},
+    {scene: "💓", name: "Diltiazem IV", use: "HR 42 + BP 82/50 - stop infusion and notify", wrong: ["Slow infusion by half", "Document and continue", "Give nitroglycerin"]},
+    {scene: "⚠️", name: "Verapamil", use: "Question when prescribed with beta blocker - AV block risk", wrong: ["Loop diuretic OK", "Statin OK", "Antiplatelet OK"]},
+    {scene: "💊", name: "Nitroglycerin + Sildenafil", use: "Taking both same day requires teaching", wrong: ["Sit down before taking NTG OK", "Expect headache OK", "Store in dark bottle OK"]},
+    {scene: "🧪", name: "Nitroprusside", use: "Confusion + metabolic acidosis = cyanide toxicity", wrong: ["Mild hypertension", "Increased appetite", "Polyuria"]},
+    {scene: "💊", name: "Hydralazine", use: "Long-term high-dose risk: drug-induced lupus", wrong: ["Acute pancreatitis", "Rhabdomyolysis", "Anaphylaxis"]},
+    {scene: "⚡", name: "Ranolazine", use: "Monitor cardiac rhythm and QT interval", wrong: ["Bowel sounds", "Skin turgor", "Pupil response"]},
+    {scene: "🚑", name: "Clonidine", use: "BP 210/120 + headache = rebound from withdrawal", wrong: ["Kidney disease progression", "Usual BP response", "Measurement error"]},
+    {scene: "🧪", name: "Warfarin", use: "INR 6.2 requires immediate action", wrong: ["INR 2.4 OK", "INR 2.0 OK", "INR 1.8 OK"]},
+    {scene: "🌿", name: "Warfarin", use: "Ginkgo biloba is most concerning supplement", wrong: ["Peppermint", "Chamomile tea occasionally", "Ginger candy once a week"]},
+    {scene: "🩸", name: "Heparin IV", use: "Severe back pain + hypotension = retroperitoneal bleed", wrong: ["Kidney stone", "Muscle sprain", "Simple muscle spasm"]},
+    {scene: "💉", name: "Enoxaparin", use: "Inject into abdomen and do NOT massage", wrong: ["Inject into deltoid and massage", "Aspirate 10 seconds prior", "Massage site 2 minutes after"]},
+    {scene: "�", name: "Apixaban", use: "Teaching needed: can't stop whenever feeling okay", wrong: ["Tell dentist OK", "Watch for bleeding OK", "Avoid NSAIDs OK"]},
+    {scene: "🧠", name: "Alteplase", use: "Absolute contraindication: active intracranial hemorrhage", wrong: ["Controlled type 2 diabetes", "Mild anemia", "Hyperlipidemia"]},
+    {scene: "🔪", name: "Clopidogrel", use: "Surgeon/cardiologist may stop several days before surgery", wrong: ["Never stop for any surgery", "Stop morning of surgery", "Double dose before surgery"]},
+    {scene: "🔪", name: "Fondaparinux", use: "Don't give immediately post-op spinal surgery", wrong: ["Post-op abdominal surgery OK", "History of GERD OK", "Mild anemia OK"]},
+    {scene: "⚡", name: "Digoxin", use: "Hypokalemia greatly increases toxicity risk", wrong: ["Hypernatremia", "Hypercalcemia", "Hypermagnesemia"]},
+    {scene: "🤢", name: "Digoxin", use: "Nausea + vomiting + halos - check pulse and notify", wrong: ["Give another digoxin dose", "Encourage oral fluids only", "Give antacid"]},
+    {scene: "🫁", name: "Amiodarone", use: "Pulmonary fibrosis is life-threatening long-term risk", wrong: ["Dry mouth", "Mild photosensitivity", "Hair loss"]},
+    {scene: "🧪", name: "Amiodarone", use: "Monitor thyroid and liver function", wrong: ["Pancreas and spleen", "Kidneys only", "Adrenal glands only"]},
+    {scene: "💓", name: "Dobutamine", use: "Tachycardia + ectopic beats = infusion too high", wrong: ["Improved urine output", "Decreased crackles", "Warm extremities"]},
+    {scene: "🏥", name: "Milrinone", use: "Home infusion requires pump and aseptic technique", wrong: ["Shower with pump disconnected loosely", "Not checking pump alarms", "Leaving line open to air"]},
+    {scene: "💓", name: "Ivabradine", use: "Requires sinus rhythm before starting", wrong: ["Atrial fibrillation", "Ventricular tachycardia", "Junctional rhythm"]},
+    {scene: "⚠️", name: "HF drugs", use: "ACE + ARB + K-sparing diuretic = hyperkalemia risk", wrong: ["Loop diuretic alone", "Thiazide diuretic alone", "ACE inhibitor alone low dose"]},
+    {scene: "🧪", name: "Statins", use: "Markedly elevated CK is most concerning", wrong: ["Slightly low HDL", "Mildly elevated glucose", "Normal AST/ALT"]},
+    {scene: "🌙", name: "Statins", use: "Take in evening or bedtime for best effect", wrong: ["Early morning before breakfast", "Every 2 hours while awake", "Only when cholesterol feels high"]},
+    {scene: "🔥", name: "Niacin", use: "Flushing reduced by aspirin 30 minutes prior", wrong: ["Constipation", "Nausea", "Hypotension"]},
+    {scene: "💧", name: "Loop diuretic + Digoxin", use: "High risk for hypokalemia and arrhythmias", wrong: ["ACE inhibitor alone", "ARBs alone", "Statin + aspirin"]},
+    {scene: "📊", name: "Thiazide diuretics", use: "Risk in client with uncontrolled diabetes", wrong: ["Seasonal allergies", "Mild GERD", "History of migraine only"]},
+    {scene: "😵", name: "Prazosin", use: "Syncope after first dose is dangerous", wrong: ["Mild nasal congestion", "Slight fatigue", "Soft stools"]},
+    {scene: "🩹", name: "Clonidine patch", use: "Don't cut patch in half to reduce cost", wrong: ["Rotate sites weekly on hairless skin", "Press patch firmly 10-30 seconds", "Leave old patch until new applied"]},
+    {scene: "💗", name: "Nitrates", use: "Effective if can walk farther with less chest pain", wrong: ["Daily severe headaches and syncope", "Sustained BP 70/40", "More frequent palpitations"]},
+    {scene: "⚡", name: "HF multi-drug regimen", use: "K 6.1 + peaked T waves most concerning", wrong: ["Mild fatigue in afternoon", "BP 118/70", "Weight loss 2 lb over week"]},
+    {scene: "⚠️", name: "Cardio meds general", use: "Don't stop abruptly - call for dizziness/syncope/bleeding", wrong: ["Double dose if forget one", "Stop all if BP normal once", "Only take when symptomatic"]}
+  ]
+};
+
+// ========================================================
+// FEEDBACK MESSAGES (with student name)
+// ========================================================
+
+function getStudentFirstName() {
+  if (!currentStudent || !currentStudent.name) return 'Student';
+  // Get first name from full name
+  return currentStudent.name.split(' ')[0];
+}
+
+const praiseTemplates = [
+  "YESSS {name}! See, I told you you're smart! Keep this energy going! 🌟 - Richy",
+  "{name}, wow... even I couldn't answer that fast. You're showing off now! 😎 - Hrach",
+  "Look at you {name}! That's exactly what I wanted to see. I'm genuinely proud right now 💖 - Richy",
+  "{name}, you just answered that like you're already an RN. Zero hesitation. That's what I'm talking about! 🩺🔥 - Hrach",
+  "Okay {name}, now you're just making me emotional. This is beautiful! ✨ - Richy",
+  "{name}, listen... NCLEX doesn't stand a chance against you. I'm calling it now 💪 - Hrach",
+  "WAIT {name}! Did you just... YES! That's my student right there! 🥹👏 - Richy",
+  "Perfect {name}. This is EXACTLY the level I expect from you 🎓 - Hrach",
+  "{name}, your brain is on fire right now. Don't stop! 🧠💥 - Richy",
+  "Clean answer {name}. That's professional nurse thinking right there 😌 - Hrach",
+  "I'm getting RN vibes from you {name}... you feel it too? 🌈 - Richy",
+  "{name}, honestly? That deserves a standing ovation ☕🔥 - Hrach",
+  "Oyyy {name}, you're studying so well I might cry! Keep going baby! 💞 - Richy",
+  "{name}, you're becoming a threat to that NCLEX exam. They should be scared 😤📘 - Hrach",
+  "AGAIN {name}?! You're on a roll! Don't stop now! 🌟 - Richy",
+  "This is how real nurses think {name}. You're getting it! 🤝 - Hrach",
+  "{name}, you're literally on FIRE today! What did you eat for breakfast?! 🔥💖 - Richy",
+  "Spot on {name}! You're becoming unstoppable... I love it 💯 - Hrach",
+  "{name}, you don't need luck. You need confidence. And you're showing it right now! 💗 - Richy",
+  "Now THAT {name}... that's what I call a correct answer 👌 - Hrach",
+  "STUNNING {name}! Your brain is working perfectly! 🧠✨ - Richy",
+  "Perfect execution {name}. I'm so proud of you right now 🥇 - Hrach",
+  "{name}, NCLEX is going to give you bonus points just for showing up 😭💖 - Richy",
+  "Another patient saved thanks to {name}! This is why we do this! 🏥👏 - Hrach",
+  "{name}, you're studying like a true champion. This is the way! 😊 - Richy"
+];
+
+const funnyTemplates = [
+  "Ayyy {name}... what was THAT?! I'm not telling Hrach but... girl, you gotta study more 😭 - Richy",
+  "{name}, okay listen... I didn't see that. Let's just pretend this never happened 😅 - Hrach",
+  "OMG {name}, did you click too fast again?! Please tell me you clicked too fast... 😭💀 - Richy",
+  "{name}, the patient would've literally transferred to another hospital 😭 - Hrach",
+  "NOOOO {name}! My heart can't take this! 😭 - Richy",
+  "{name}, even good students have glitchy moments... but seriously, what happened? 🤖 - Hrach",
+  "Okay {name}, I'm going to pretend I didn't just see that answer 😂 - Richy",
+  "{name}, wrong answer but... I appreciate the confidence? 😆 - Hrach",
+  "Oyyy {name}, this one hurt my heart a little. We need to review this topic 💔 - Richy",
+  "{name}, you know what? Let's blame the WiFi. Yeah, definitely the WiFi's fault 😭 - Hrach",
+  "{name}, that answer just hurt my soul. But I still believe in you! 🥲 - Richy",
+  "{name}, wrong answer, strong confidence. I respect it but... no 😂 - Hrach",
+  "{name}, I think we need to refresh our brain cells real quick 😅 - Richy",
+  "{name}, NCLEX would send you a warning letter for that one 📘😭 - Hrach",
+  "NOOOO {name}, not that one! I hope Hrach doesn't see this 😭 - Richy",
+  "{name}, hmm... you need more studying. And coffee. Definitely more coffee ☕😆 - Hrach",
+  "{name}, that was... cute attempt but super incorrect baby 😭 - Richy",
+  "{name}, thank GOD this isn't the hospital right now 💀 - Hrach",
+  "{name}, let's call this 'practice' okay? Just practice 😅 - Richy",
+  "{name}, wrong answer but I still believe in you! We got this! 😌 - Hrach",
+  "{name}, be honest... did you even read the question? 😭 - Richy",
+  "{name}, that wasn't even close! But it's okay, we're learning 😅 - Hrach",
+  "{name}, read it again... slowly... very slowly this time 😭 - Richy",
+  "{name}, the patient literally asked 'Who taught them that??' 😳 - Hrach",
+  "{name}, okay next question before I start crying 😂 - Richy"
+];
+
+// Get random message with student name inserted
+function getRandomPraise() {
+  const firstName = getStudentFirstName();
+  const template = praiseTemplates[Math.floor(Math.random() * praiseTemplates.length)];
+  return template.replace(/{name}/g, firstName);
+}
+
+function getRandomFunny() {
+  const firstName = getStudentFirstName();
+  const template = funnyTemplates[Math.floor(Math.random() * funnyTemplates.length)];
+  return template.replace(/{name}/g, firstName);
+}
+
+// ========================================================
+// GAME STATE
+// ========================================================
+
+let currentLevel = '';
+let currentCategory = '';
+let questionPool = [];
+let score = 0;
+
+// ========================================================
+// NAVIGATION FUNCTIONS
+// ========================================================
+
+function showCategories(level) {
+  currentLevel = level;
+  document.getElementById('categoryModal').style.display = 'block';
+}
+
+function closeModal() {
+  document.getElementById('categoryModal').style.display = 'none';
+}
+
+function backToMenu() {
+  document.getElementById('gameScreen').classList.add('hidden');
+  document.getElementById('mainMenu').classList.remove('hidden');
+  score = 0;
+}
+
+// ========================================================
+// GAME FUNCTIONS
+// ========================================================
+
+function startGame(category) {
+  currentCategory = category;
+  closeModal();
+  
+  // Load questions based on category
+  if (category === 'medications') {
+    questionPool = [...medicationQuestions[currentLevel]];
+  }
+  // ADD MORE CATEGORIES HERE LATER:
+  // else if (category === 'lab-values') {
+  //   questionPool = [...labValueQuestions[currentLevel]];
+  // }
+  
+  score = 0;
+  document.getElementById('mainMenu').classList.add('hidden');
+  document.getElementById('gameScreen').classList.remove('hidden');
+  nextQuestion();
+}
+
+function showSpeech(text) {
+  const speechDiv = document.getElementById('speech');
+  speechDiv.innerHTML = `<div class='speech-bubble'>${text}</div>`;
+}
+
+function nextQuestion() {
+  const questionDiv = document.getElementById('question');
+  const answersDiv = document.getElementById('answers');
+  const feedbackDiv = document.getElementById('feedback');
+  const nextBtn = document.getElementById('nextButton');
+  
+  nextBtn.classList.add('hidden');
+  feedbackDiv.textContent = '';
+  answersDiv.innerHTML = '';
+  
+  // Check if level complete
+  if (questionPool.length === 0) {
+    questionDiv.textContent = '🎉 You finished this level!';
+    feedbackDiv.textContent = 'You\'re amazing! 💖';
+    showSpeech('Great job! Try another level! 🎓');
+    return;
+  }
+  
+  // Get random question
+  const randomIndex = Math.floor(Math.random() * questionPool.length);
+  const question = questionPool.splice(randomIndex, 1)[0];
+  
+  // Update character and question
+  document.getElementById('character').textContent = question.scene;
+  questionDiv.textContent = `Help this patient! Which medication helps with ${question.use.toLowerCase()}?`;
+  
+  // Create answer options
+  const options = [question.name, ...question.wrong].sort(() => Math.random() - 0.5);
+  
+  options.forEach(option => {
+    const btn = document.createElement('button');
+    btn.textContent = option;
+    btn.onclick = () => checkAnswer(option, question, answersDiv, feedbackDiv, nextBtn);
+    answersDiv.appendChild(btn);
+  });
+}
+
+function checkAnswer(selected, question, answersDiv, feedbackDiv, nextBtn) {
+  // Disable all buttons
+  Array.from(answersDiv.children).forEach(btn => btn.disabled = true);
+  
+  if (selected === question.name) {
+    // CORRECT ANSWER
+    const correctBtn = Array.from(answersDiv.children).find(btn => btn.textContent === selected);
+    correctBtn.classList.add('correct');
+    
+    score += 10;
+    const msg = getRandomPraise();
+    const rationale = question.rationale || '';
+    feedbackDiv.innerHTML = `
+      <div style="margin-bottom: 10px;">🎉 ${selected} cured the patient! ${msg}</div>
+      ${rationale ? `<div style="font-size: 0.9em; color: rgba(255,255,255,0.8); background: rgba(102,126,234,0.15); padding: 12px; border-radius: 12px; border-left: 3px solid #667eea; margin-top: 10px;">💡 <strong>Why?</strong> ${rationale}</div>` : ''}
+    `;
+    showSpeech(msg);
+  } else {
+    // WRONG ANSWER
+    const wrongBtn = Array.from(answersDiv.children).find(btn => btn.textContent === selected);
+    wrongBtn.classList.add('wrong');
+    
+    const correctBtn = Array.from(answersDiv.children).find(btn => btn.textContent === question.name);
+    correctBtn.classList.add('correct');
+    
+    const msg = getRandomFunny();
+    const rationale = question.rationale || '';
+    feedbackDiv.innerHTML = `
+      <div style="margin-bottom: 10px;">💖 Not quite! ${question.name} was right. ${msg}</div>
+      ${rationale ? `<div style="font-size: 0.9em; color: rgba(255,255,255,0.8); background: rgba(34,197,94,0.15); padding: 12px; border-radius: 12px; border-left: 3px solid #22c55e; margin-top: 10px;">💡 <strong>Correct Answer:</strong> ${rationale}</div>` : ''}
+    `;
+    showSpeech(msg);
+  }
+  
+  document.getElementById('score').textContent = 'Score: ' + score + ' ⭐';
+  nextBtn.classList.remove('hidden');
+}
+
+// ========================================================
+// INSTRUCTIONS FOR ADDING MORE QUESTIONS
+// ========================================================
+
+/*
+
+TO ADD MORE MEDICATIONS:
+
+1. Scroll to the medicationQuestions object (line 182)
+2. Find the difficulty level (easy, medium, or hard)
+3. Add a new object with this format:
+
+{scene:'😷', name:'Drug Name', use:'What it treats', wrong:['Wrong1','Wrong2','Wrong3']}
+
+Example:
+{scene:'🤧', name:'Diphenhydramine', use:'Allergies', wrong:['Diabetes','Pain','Infection']},
+
+
+TO ADD MORE CATEGORIES (Lab Values, Procedures, etc.):
+
+1. Create a new question bank similar to medicationQuestions:
+
+const labValueQuestions = {
+  easy: [
+    {scene:'🩸', name:'Normal Sodium', use:'135-145 mEq/L', wrong:['100-120','150-170','80-100']},
+  ],
+  medium: [...],
+  hard: [...]
+};
+
+2. Add a new button in the Category Modal (line 243):
+
+<button class="category-btn" onclick="startGame('lab-values')">
+  🧪 Lab Values
+</button>
+
+3. Update startGame() function (line 313) to load the new category:
+
+else if (category === 'lab-values') {
+  questionPool = [...labValueQuestions[currentLevel]];
+}
+
+*/
+
+</script>
+</body>
+</html>

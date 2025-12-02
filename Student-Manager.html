@@ -1,0 +1,4301 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>ARNOMA - Student Manager [Connected to Supabase]</title>
+    
+    <!-- Supabase Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+    
+    <!-- Shared Dialogs -->
+    <script src="shared-dialogs.js"></script>
+    
+    <!--
+      v2.20.6 - Complete Student Manager NEW Features Applied:
+
+      HEADER SYSTEM:
+      - Two-row glassmorphism header
+      - Title with gradient text
+      - Action buttons: Add Student, Bulk Add, Waiting List, Find Duplicates
+      - Search input with icon
+      - Filter dropdowns: Group, Status, Payment, Sort
+      - Clear Filters button
+      - All button hover effects and glassmorphism design
+
+      ACTION MODALS (All 4 Modals):
+      1. Add Student Modal:
+         - Complete form with all fields (Name, Group, Pay, Credit, Phone, Email, Notes)
+         - Group toggle buttons (A-F) + custom input
+         - Pay amount quick select ($25, $50, $75, $100) + custom
+         - Credit balance with gold styling
+
+      2. Bulk Add Students Modal:
+         - Large textarea for pasting student records
+         - Flexible format support (comma-separated)
+         - Info box with format examples
+         - Monospace font for better readability
+
+      3. Waiting List Modal:
+         - Wide layout (1100px) for student grid
+         - Add to waiting list button
+         - Empty state with icon
+
+      4. Find Duplicates Modal:
+         - Success state (no duplicates found)
+         - Clean empty state design
+
+      Modal Features:
+      - Glassmorphism design matching main app
+      - Modal open/close with body scroll lock
+      - Smooth animations (fadeIn, slideUp)
+      - Click outside to close
+      - Scrollable content areas
+
+      CARD UI:
+      - Subtle hover zoom (scale 1.02)
+      - Fixed badge sizing with min-width
+      - $ after amount (900 $)
+      - Credit K formatting (1000+ = 1K $)
+      - Active pill glow reduced 20%
+      - Cursor pointer on cards
+
+      EMAIL & PHONE:
+      - Email one per line in display
+      - Comma/newline separated in edit
+      - Phone auto-format xxx-xxx-xxxx
+
+      SELECTION LOGIC:
+      - Amount buttons match numeric value
+      - Toggle OFF sets price to 0 $
+
+      MODAL FIXES:
+      - Separated .modal-card (blur) from .modal-scroll (content)
+      - Removed backdrop-filter from stats grid
+      - Body scroll lock on modal open/close
+      - All scrollable content has NO backdrop-filter
+    -->
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        --success-gradient: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        --dark-bg: #1a1d35;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: #0f172a;
+        min-height: 100vh;
+        padding: 40px 20px;
+        color: white;
+      }
+
+      body::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background:
+          radial-gradient(circle at 20% 30%, rgba(102, 126, 234, 0.15) 0%, transparent 50%),
+          radial-gradient(circle at 80% 70%, rgba(118, 75, 162, 0.12) 0%, transparent 50%);
+        animation: gradientShift 20s ease infinite;
+        z-index: -1;
+      }
+
+      @keyframes gradientShift {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.85;
+          transform: scale(1.1);
+        }
+      }
+
+      /* Header Section */
+      .header {
+        max-width: 1400px;
+        margin: 0 auto 40px;
+        background: rgba(255, 255, 255, 0.03);
+        backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        position: relative;
+        z-index: 100;
+      }
+
+      .header-row-1 {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+
+      .header-actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .header-row-2 {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .demo-title {
+        font-size: 28px;
+        font-weight: 800;
+        background: linear-gradient(135deg, #8ab4ff, #a855f7);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        margin: 0;
+      }
+
+      /* Header Buttons */
+      .btn-header-primary {
+        position: relative;
+        padding: 11px 24px;
+        background: rgba(16, 185, 129, 0.15);
+        border: 2px solid rgba(16, 185, 129, 0.4);
+        border-radius: 12px;
+        color: #6ee7b7;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow:
+          0 0 15px rgba(16, 185, 129, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        white-space: nowrap;
+        font-family: inherit;
+        border-style: solid;
+      }
+
+      .btn-header-primary:hover {
+        background: rgba(16, 185, 129, 0.25);
+        border-color: #10b981;
+        color: #d1fae5;
+        transform: translateY(-2px) scale(1.02);
+        box-shadow:
+          0 0 25px rgba(16, 185, 129, 0.4),
+          0 4px 12px rgba(16, 185, 129, 0.3);
+      }
+
+      .btn-header-secondary {
+        position: relative;
+        padding: 11px 24px;
+        background: rgba(59, 130, 246, 0.15);
+        border: 2px solid rgba(59, 130, 246, 0.4);
+        border-radius: 12px;
+        color: #93c5fd;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow:
+          0 0 15px rgba(59, 130, 246, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        white-space: nowrap;
+        font-family: inherit;
+        border-style: solid;
+      }
+
+      .btn-header-secondary:hover {
+        background: rgba(59, 130, 246, 0.25);
+        border-color: #3b82f6;
+        color: #dbeafe;
+        transform: translateY(-2px) scale(1.02);
+        box-shadow:
+          0 0 25px rgba(59, 130, 246, 0.4),
+          0 4px 12px rgba(59, 130, 246, 0.3);
+      }
+
+      /* Notification Badge */
+      .notification-badge {
+        position: absolute;
+        top: -8px;
+        right: -8px;
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        color: white;
+        font-size: 11px;
+        font-weight: 700;
+        min-width: 20px;
+        height: 20px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 6px;
+        box-shadow: 0 0 12px rgba(239, 68, 68, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3);
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.8;
+          transform: scale(1.1);
+        }
+      }
+
+      /* Button blinking effect */
+      .btn-header-secondary.has-notification {
+        animation: buttonBlink 2s ease-in-out infinite;
+      }
+
+      @keyframes buttonBlink {
+        0%,
+        100% {
+          background: rgba(59, 130, 246, 0.15);
+          border-color: rgba(59, 130, 246, 0.4);
+          box-shadow:
+            0 0 15px rgba(59, 130, 246, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+        50% {
+          background: rgba(239, 68, 68, 0.2);
+          border-color: rgba(239, 68, 68, 0.5);
+          box-shadow:
+            0 0 25px rgba(239, 68, 68, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+      }
+
+      .search-input {
+        flex: 1;
+        min-width: 280px;
+        padding: 12px 18px 12px 44px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        color: white;
+        font-size: 14px;
+        font-family: inherit;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='rgba(255,255,255,0.4)'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'%3E%3C/path%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: 14px center;
+        background-size: 20px 20px;
+      }
+
+      .search-input::placeholder {
+        color: rgba(255, 255, 255, 0.35);
+      }
+
+      .search-input:focus {
+        outline: none;
+        background-color: rgba(255, 255, 255, 0.06);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow:
+          inset 0 2px 4px rgba(0, 0, 0, 0.1),
+          0 0 0 4px rgba(138, 180, 255, 0.15);
+      }
+
+      .filter-select {
+        padding: 12px 36px 12px 16px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        color: white;
+        font-size: 14px;
+        font-weight: 600;
+        min-width: 170px;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='rgba(255,255,255,0.5)'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        background-size: 20px 20px;
+        font-family: inherit;
+      }
+
+      .filter-select:hover {
+        background-color: rgba(255, 255, 255, 0.06);
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+
+      .filter-select:focus {
+        outline: none;
+        background-color: rgba(255, 255, 255, 0.06);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow:
+          inset 0 2px 4px rgba(0, 0, 0, 0.1),
+          0 0 0 4px rgba(138, 180, 255, 0.15),
+          0 0 20px rgba(138, 180, 255, 0.2);
+      }
+
+      .filter-select option {
+        background: #1e293b;
+        color: white;
+        padding: 12px;
+      }
+
+      .btn-header-clear {
+        padding: 12px 20px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        white-space: nowrap;
+        box-shadow:
+          0 0 10px rgba(0, 0, 0, 0.1),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        font-family: inherit;
+        border-style: solid;
+      }
+
+      .btn-header-clear:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.2);
+        color: white;
+        transform: translateY(-1px);
+        box-shadow:
+          0 0 15px rgba(255, 255, 255, 0.1),
+          0 4px 8px rgba(0, 0, 0, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      }
+
+      .btn-header-clear:active {
+        transform: translateY(0);
+      }
+
+      .students-grid {
+        max-width: 1400px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+        gap: 24px;
+        contain: layout style;
+        content-visibility: auto;
+      }
+
+      /* ============================================
+         ACTION BUTTON MODALS (Add Student, etc.)
+         ============================================ */
+
+      .action-modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(12px);
+        z-index: 70000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        animation: fadeInNew 0.3s ease;
+      }
+
+      .action-modal-backdrop.active {
+        display: flex;
+      }
+
+      @keyframes fadeInNew {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .action-modal-card {
+        background: rgba(26, 29, 53, 0.95);
+        backdrop-filter: blur(40px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 32px;
+        max-width: 600px;
+        width: 100%;
+        max-height: 90vh;
+        overflow: hidden;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+        animation: slideUpNew 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        display: flex;
+        flex-direction: column;
+      }
+
+      @keyframes slideUpNew {
+        from {
+          opacity: 0;
+          transform: scale(0.95) translateY(40px);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1) translateY(0);
+        }
+      }
+
+      .action-modal-scroll {
+        overflow-y: auto;
+        overflow-x: hidden;
+        max-height: 100%;
+      }
+
+      .action-modal-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .action-modal-scroll::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 0 32px 32px 0;
+      }
+
+      .action-modal-scroll::-webkit-scrollbar-thumb {
+        background: rgba(138, 180, 255, 0.3);
+        border-radius: 10px;
+      }
+
+      .action-modal-scroll::-webkit-scrollbar-thumb:hover {
+        background: rgba(138, 180, 255, 0.5);
+      }
+
+      .action-modal-close {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        padding: 0;
+        font-family: inherit;
+        color: white;
+        font-size: 28px;
+        line-height: 1;
+      }
+
+      .action-modal-close:hover {
+        background: rgba(255, 255, 255, 0.15);
+        transform: rotate(90deg);
+      }
+
+      .action-modal-header {
+        padding: 24px 32px;
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.15), rgba(168, 85, 247, 0.15));
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .action-modal-title {
+        font-size: 1.5rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #fff, #8ab4ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .action-modal-body {
+        padding: 28px 32px;
+      }
+
+      .form-group {
+        margin-bottom: 24px;
+      }
+
+      .form-label {
+        display: block;
+        margin-bottom: 10px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .form-input,
+      .form-textarea {
+        width: 100%;
+        padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        color: white;
+        font-size: 14px;
+        font-family: inherit;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-sizing: border-box;
+      }
+
+      .form-input::placeholder,
+      .form-textarea::placeholder {
+        color: rgba(255, 255, 255, 0.35);
+      }
+
+      .form-input:focus,
+      .form-textarea:focus {
+        outline: none;
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow: 0 0 0 4px rgba(138, 180, 255, 0.1), 0 0 20px rgba(138, 180, 255, 0.2);
+      }
+
+      .form-textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+
+      .toggle-btn {
+        padding: 10px 18px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        color: rgba(255, 255, 255, 0.5);
+        font-weight: 700;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        font-family: inherit;
+        will-change: transform, background, border-color;
+      }
+
+      .toggle-btn:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(138, 180, 255, 0.3);
+        color: rgba(255, 255, 255, 0.75);
+        transform: translateY(-2px);
+      }
+
+      .toggle-btn.active {
+        background: rgba(138, 180, 255, 0.25);
+        border-color: rgba(138, 180, 255, 0.6);
+        color: #8ab4ff;
+        box-shadow: 0 0 15px rgba(138, 180, 255, 0.3), inset 0 1px 3px rgba(138, 180, 255, 0.2);
+      }
+
+      .action-modal-footer {
+        padding: 24px 32px;
+        background: rgba(0, 0, 0, 0.15);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+      }
+
+      .btn-modal-save {
+        padding: 12px 28px;
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.3), rgba(5, 150, 105, 0.3));
+        border: 2px solid rgba(16, 185, 129, 0.5);
+        border-radius: 12px;
+        color: #6ee7b7;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        font-family: inherit;
+        box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);
+      }
+
+      .btn-modal-save:hover {
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.4), rgba(5, 150, 105, 0.4));
+        border-color: rgba(16, 185, 129, 0.7);
+        box-shadow: 0 0 25px rgba(16, 185, 129, 0.4);
+        transform: translateY(-2px);
+      }
+
+      .btn-modal-cancel {
+        padding: 12px 28px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 2px solid rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        font-family: inherit;
+      }
+
+      .btn-modal-cancel:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.25);
+        color: white;
+        transform: translateY(-2px);
+      }
+
+      /* ============================================
+         STUDENT CARD (Grid Item with Orbital Ring)
+         ============================================ */
+
+      .student-card {
+        position: relative;
+        background: rgba(26, 29, 53, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 24px;
+        padding: 28px;
+        cursor: pointer;
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        will-change: transform;
+        contain: layout style paint;
+        content-visibility: auto;
+        contain-intrinsic-size: 0 200px;
+      }
+
+      .student-card:hover {
+        transform: scale(1.02) translateZ(0);
+        box-shadow: 0 12px 48px rgba(102, 126, 234, 0.4);
+        border-color: rgba(102, 126, 234, 0.3);
+      }
+
+      /* Toggle in top-right corner */
+      .card-toggle {
+        position: absolute;
+        top: 16px;
+        right: 16px;
+        z-index: 10;
+      }
+      .student-card-content {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+      }
+
+      /* Avatar with Orbital Ring */
+      .avatar-container {
+        position: relative;
+        flex-shrink: 0;
+      }
+
+      .avatar-orbit {
+        position: absolute;
+        inset: -8px;
+        border-radius: 24px;
+        border: 2px solid transparent;
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.6), rgba(118, 75, 162, 0.4)) border-box;
+        -webkit-mask:
+          linear-gradient(#fff 0 0) padding-box,
+          linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+        animation: rotate 12s linear infinite;
+        pointer-events: none;
+      }
+
+      @keyframes rotate {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .avatar {
+        position: relative;
+        width: 88px;
+        height: 88px;
+        border-radius: 20px;
+        background: var(--primary-gradient);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 34px;
+        font-weight: 800;
+        color: white;
+        border: 3px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 8px 24px rgba(102, 126, 234, 0.4);
+      }
+
+      .status-badge {
+        position: absolute;
+        bottom: -6px;
+        right: -6px;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background: var(--success-gradient);
+        border: 3px solid #1a1d35;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: statusPulse 3s ease-in-out infinite;
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.6);
+      }
+
+      .status-badge svg {
+        width: 16px;
+        height: 16px;
+        color: white;
+      }
+
+      .status-badge.paused {
+        background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+        box-shadow: 0 4px 12px rgba(251, 191, 36, 0.6);
+        animation: statusPulsePaused 3s ease-in-out infinite;
+      }
+
+      .status-badge.graduated {
+        background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+        box-shadow: 0 4px 12px rgba(139, 92, 246, 0.6);
+        animation: statusPulseGraduated 3s ease-in-out infinite;
+      }
+
+      @keyframes statusPulse {
+        0%,
+        100% {
+          transform: scale(1);
+          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.6);
+        }
+        50% {
+          transform: scale(1.1);
+          box-shadow: 0 6px 20px rgba(16, 185, 129, 0.9);
+        }
+      }
+
+      @keyframes statusPulsePaused {
+        0%,
+        100% {
+          transform: scale(1);
+          box-shadow: 0 4px 12px rgba(251, 191, 36, 0.6);
+        }
+        50% {
+          transform: scale(1.1);
+          box-shadow: 0 6px 20px rgba(251, 191, 36, 0.9);
+        }
+      }
+
+      @keyframes statusPulseGraduated {
+        0%,
+        100% {
+          transform: scale(1);
+          box-shadow: 0 4px 12px rgba(139, 92, 246, 0.6);
+        }
+        50% {
+          transform: scale(1.1);
+          box-shadow: 0 6px 20px rgba(139, 92, 246, 0.9);
+        }
+      }
+
+      /* Identity Section */
+      .identity-section {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .profile-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: rgba(255, 255, 255, 0.5);
+        margin-bottom: 6px;
+        font-weight: 600;
+      }
+
+      .student-name {
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1.3;
+        margin-bottom: 12px;
+        color: white;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 100%;
+      }
+
+      .meta-badges {
+        display: flex;
+        gap: 8px;
+        flex-wrap: nowrap;
+        align-items: center;
+      }
+
+      .meta-badge {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        padding: 6px 12px;
+        font-size: 13px;
+        font-weight: 600;
+        min-width: 85px;
+        justify-content: center;
+      }
+
+      .meta-badge.credit {
+        color: #ffd700;
+        text-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+        background: rgba(255, 215, 0, 0.08);
+        border: 1px solid rgba(255, 215, 0, 0.2);
+      }
+
+      .meta-badge.credit svg {
+        stroke: #ffd700;
+        filter: drop-shadow(0 0 4px rgba(255, 215, 0, 0.3));
+      }
+
+      .meta-badge.price {
+        color: #86efac;
+        background: rgba(16, 185, 129, 0.08);
+        border: 1px solid rgba(16, 185, 129, 0.2);
+      }
+
+      .meta-badge.price svg {
+        stroke: #86efac;
+      }
+
+      .meta-badge svg {
+        width: 14px;
+        height: 14px;
+        opacity: 0.8;
+      }
+
+      /* Elegant toggle in top-right */
+      .elegant-toggle {
+        position: relative;
+        display: inline-block;
+        width: 40px;
+        height: 22px;
+      }
+
+      .elegant-toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .elegant-toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255, 255, 255, 0.08);
+        transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 22px;
+        border: 1.5px solid rgba(255, 255, 255, 0.15);
+        box-shadow:
+          inset 0 2px 4px rgba(0, 0, 0, 0.2),
+          0 2px 8px rgba(0, 0, 0, 0.1);
+      }
+
+      .elegant-toggle-slider:before {
+        position: absolute;
+        content: '';
+        height: 16px;
+        width: 16px;
+        left: 2px;
+        bottom: 2px;
+        background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 100%);
+        transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-radius: 50%;
+        box-shadow:
+          0 2px 6px rgba(0, 0, 0, 0.3),
+          inset 0 1px 2px rgba(255, 255, 255, 0.8);
+      }
+
+      .elegant-toggle input:checked + .elegant-toggle-slider {
+        background: linear-gradient(135deg, #8ab4ff 0%, #667eea 100%);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow:
+          0 0 12px rgba(138, 180, 255, 0.6),
+          0 0 24px rgba(138, 180, 255, 0.4),
+          inset 0 1px 2px rgba(255, 255, 255, 0.2);
+      }
+
+      .elegant-toggle input:checked + .elegant-toggle-slider:before {
+        transform: translateX(18px);
+        box-shadow:
+          0 2px 8px rgba(0, 0, 0, 0.4),
+          inset 0 1px 2px rgba(255, 255, 255, 0.9);
+      }
+
+      .elegant-toggle:hover .elegant-toggle-slider {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(255, 255, 255, 0.25);
+      }
+
+      .elegant-toggle input:checked:hover + .elegant-toggle-slider {
+        background: linear-gradient(135deg, #9ec4ff 0%, #7a92f0 100%);
+        box-shadow:
+          0 0 16px rgba(138, 180, 255, 0.8),
+          0 0 32px rgba(138, 180, 255, 0.5),
+          inset 0 1px 2px rgba(255, 255, 255, 0.3);
+      }
+
+      /* Status pill on right - CLICKABLE */
+      .status-pill {
+        padding: 8px 16px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        user-select: none;
+      }
+
+      .status-pill:hover {
+        transform: scale(1.05);
+      }
+
+      .status-pill.active {
+        background: rgba(16, 185, 129, 0.15);
+        color: #6ee7b7;
+        border: 1px solid rgba(16, 185, 129, 0.3);
+        text-shadow:
+          0 0 8px rgba(94, 255, 108, 0.4),
+          0 0 16px rgba(94, 255, 108, 0.26);
+        box-shadow:
+          0 0 12px rgba(76, 175, 80, 0.3),
+          0 0 24px rgba(76, 175, 80, 0.2),
+          0 0 36px rgba(76, 175, 80, 0.1),
+          inset 0 0 8px rgba(94, 255, 108, 0.1);
+      }
+
+      .status-pill.paused {
+        background: rgba(251, 191, 36, 0.15);
+        color: #fde047;
+        border: 1px solid rgba(251, 191, 36, 0.3);
+        text-shadow:
+          0 0 8px rgba(253, 224, 71, 0.4),
+          0 0 16px rgba(253, 224, 71, 0.26);
+        box-shadow:
+          0 0 12px rgba(251, 191, 36, 0.3),
+          0 0 24px rgba(251, 191, 36, 0.2),
+          0 0 36px rgba(251, 191, 36, 0.1),
+          inset 0 0 8px rgba(253, 224, 71, 0.1);
+      }
+
+      .status-pill.graduated {
+        background: rgba(168, 85, 247, 0.15);
+        color: #c4b5fd;
+        border: 1px solid rgba(168, 85, 247, 0.3);
+        text-shadow:
+          0 0 8px rgba(196, 181, 253, 0.4),
+          0 0 16px rgba(196, 181, 253, 0.26);
+        box-shadow:
+          0 0 12px rgba(139, 92, 246, 0.3),
+          0 0 24px rgba(139, 92, 246, 0.2),
+          0 0 36px rgba(139, 92, 246, 0.1),
+          inset 0 0 8px rgba(196, 181, 253, 0.1);
+      }
+
+      /* ============================================
+         MODAL (Full Screen Edit Card)
+         ============================================ */
+
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(12px);
+        z-index: 50000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        animation: fadeIn 0.3s ease;
+      }
+
+      .modal-backdrop.active {
+        display: flex;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .modal-card {
+        background: rgba(26, 29, 53, 0.95);
+        backdrop-filter: blur(40px);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 32px;
+        max-width: 600px;
+        width: 100%;
+        max-height: 90vh;
+        overflow: hidden;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+        animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        display: flex;
+        flex-direction: column;
+      }
+
+      .modal-scroll {
+        overflow-y: auto;
+        overflow-x: hidden;
+        max-height: 100%;
+      }
+
+      .modal-scroll::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .modal-scroll::-webkit-scrollbar-track {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 0 32px 32px 0;
+      }
+
+      .modal-scroll::-webkit-scrollbar-thumb {
+        background: rgba(138, 180, 255, 0.3);
+        border-radius: 10px;
+      }
+
+      .modal-scroll::-webkit-scrollbar-thumb:hover {
+        background: rgba(138, 180, 255, 0.5);
+      }
+
+      @keyframes slideUp {
+        from {
+          opacity: 0;
+          transform: scale(0.95) translateY(40px);
+        }
+        to {
+          opacity: 1;
+          transform: scale(1) translateY(0);
+        }
+      }
+
+      /* Modal Close Button */
+      .modal-close {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        padding: 0;
+        font-family: inherit;
+      }
+
+      .modal-close:hover {
+        background: rgba(255, 255, 255, 0.15);
+        transform: rotate(90deg);
+      }
+
+      /* Glass Header (inside modal) */
+      .glass-header-modal {
+        padding: 24px 32px;
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.15), rgba(168, 85, 247, 0.15));
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .glass-name {
+        font-size: 2rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #fff, #8ab4ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .glass-subtitle {
+        font-size: 16px;
+        color: rgba(138, 180, 255, 0.7);
+        margin-top: 4px;
+        font-weight: 600;
+      }
+
+      .glass-meta {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        margin-right: 50px;
+      }
+
+      .status-badge-modal {
+        padding: 6px 16px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        display: inline-block;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-family: inherit;
+        background: transparent;
+      }
+
+      .status-badge-modal:hover {
+        transform: scale(1.05);
+      }
+
+      .status-badge-modal.active {
+        background: rgba(76, 175, 80, 0.25);
+        border: 2px solid #4caf50;
+        color: #5eff6c;
+        text-shadow:
+          0 0 10px rgba(94, 255, 108, 0.5),
+          0 0 20px rgba(94, 255, 108, 0.32);
+        box-shadow:
+          0 0 15px rgba(76, 175, 80, 0.38),
+          0 0 30px rgba(76, 175, 80, 0.25),
+          0 0 45px rgba(76, 175, 80, 0.13),
+          inset 0 0 10px rgba(94, 255, 108, 0.13);
+      }
+
+      .status-badge-modal.paused {
+        background: rgba(251, 191, 36, 0.25);
+        border: 2px solid #fbbf24;
+        color: #fde047;
+        text-shadow:
+          0 0 10px rgba(253, 224, 71, 0.5),
+          0 0 20px rgba(253, 224, 71, 0.32);
+        box-shadow:
+          0 0 15px rgba(251, 191, 36, 0.38),
+          0 0 30px rgba(251, 191, 36, 0.25),
+          0 0 45px rgba(251, 191, 36, 0.13),
+          inset 0 0 10px rgba(253, 224, 71, 0.13);
+      }
+
+      .status-badge-modal.graduated {
+        background: rgba(139, 92, 246, 0.25);
+        border: 2px solid #8b5cf6;
+        color: #c4b5fd;
+        text-shadow:
+          0 0 10px rgba(196, 181, 253, 0.5),
+          0 0 20px rgba(196, 181, 253, 0.32);
+        box-shadow:
+          0 0 15px rgba(139, 92, 246, 0.38),
+          0 0 30px rgba(139, 92, 246, 0.25),
+          0 0 45px rgba(139, 92, 246, 0.13),
+          inset 0 0 10px rgba(196, 181, 253, 0.13);
+      }
+
+      /* Toggle Switch */
+      .toggle {
+        position: relative;
+        display: inline-block;
+        width: 44px;
+        height: 24px;
+      }
+
+      .toggle input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(255, 255, 255, 0.1);
+        transition: 0.3s;
+        border-radius: 24px;
+        border: 2px solid rgba(255, 255, 255, 0.2);
+      }
+
+      .toggle-slider:before {
+        position: absolute;
+        content: '';
+        height: 16px;
+        width: 16px;
+        left: 2px;
+        bottom: 2px;
+        background-color: white;
+        transition: 0.3s;
+        border-radius: 50%;
+      }
+
+      input:checked + .toggle-slider {
+        background-color: #8ab4ff;
+        border-color: #8ab4ff;
+        box-shadow:
+          0 0 10px hsla(145, 100%, 50%, 0.5),
+          0 0 20px hsla(145, 100%, 50%, 0.3),
+          0 0 30px hsla(145, 100%, 50%, 0.15);
+      }
+
+      input:checked + .toggle-slider:before {
+        transform: translateX(20px);
+      }
+
+      /* Glass Stats Grid */
+      .glass-stats {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1px;
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .glass-stat {
+        padding: 20px;
+        background: rgba(0, 0, 0, 0.2);
+        text-align: center;
+        box-shadow:
+          inset 2px 2px 4px rgba(0, 0, 0, 0.15),
+          inset -2px -2px 4px rgba(255, 255, 255, 0.05);
+      }
+
+      .glass-stat-label {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.5);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 8px;
+      }
+
+      .glass-stat-value {
+        font-size: 1.3rem;
+        font-weight: 800;
+        color: #8ab4ff;
+        line-height: 1.3;
+        padding: 9px 12px 7px 12px;
+        min-height: 40px;
+        box-sizing: border-box;
+      }
+
+      /* Editable input fields in stats */
+      .glass-stat-input {
+        font-size: 1.3rem;
+        font-weight: 800;
+        color: #8ab4ff;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        padding: 8px 12px;
+        text-align: center;
+        width: 100%;
+        outline: none;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        line-height: 1.3;
+        resize: none;
+        min-height: 40px;
+        white-space: pre-wrap;
+      }
+
+      .glass-stat-input:focus {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(138, 180, 255, 0.5);
+        box-shadow: 0 0 12px rgba(138, 180, 255, 0.3);
+        cursor: text;
+      }
+
+      .glass-stat-input::placeholder {
+        color: transparent;
+        font-weight: 600;
+      }
+
+      /* Glass Actions Section */
+      .glass-actions {
+        padding: 24px 32px;
+        background: rgba(0, 0, 0, 0.15);
+      }
+
+      .glass-section-title {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.5);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 12px;
+        text-align: center;
+      }
+
+      .glass-buttons {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 16px;
+      }
+
+      .glass-buttons:last-child {
+        margin-bottom: 0;
+      }
+
+      /* WHITE EMBOSS BUTTONS */
+      .btn-wrapper {
+        --size: 50px;
+        --padding: 5px;
+        --hue: 142deg;
+        width: var(--size);
+        height: var(--size);
+        border-radius: 50%;
+        background: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow:
+          0 10px 22px rgba(0, 0, 0, 0.12),
+          0 4px 10px rgba(0, 0, 0, 0.06),
+          inset 2px 2px 5px rgba(255, 255, 255, 0.8),
+          inset -2px -2px 6px rgba(0, 0, 0, 0.04);
+        transition: all 0.3s ease;
+      }
+
+      .btn-wrapper:has(.btn.active) {
+        --size: 60px;
+        box-shadow:
+          0 0 15px hsla(var(--hue), 100%, 60%, 0.35),
+          0 0 30px hsla(var(--hue), 100%, 60%, 0.21),
+          0 0 45px hsla(var(--hue), 100%, 60%, 0.1),
+          0 10px 22px rgba(0, 0, 0, 0.12),
+          0 4px 10px rgba(0, 0, 0, 0.06),
+          inset 2px 2px 5px rgba(255, 255, 255, 0.8),
+          inset -2px -2px 6px rgba(0, 0, 0, 0.04);
+      }
+
+      .btn-wrapper.group-A {
+        --hue: 346deg;
+      }
+      .btn-wrapper.group-B {
+        --hue: 23deg;
+      }
+      .btn-wrapper.group-C {
+        --hue: 50deg;
+      }
+      .btn-wrapper.group-D {
+        --hue: 145deg;
+      }
+      .btn-wrapper.group-E {
+        --hue: 204deg;
+      }
+      .btn-wrapper.group-F {
+        --hue: 260deg;
+      }
+      .btn-wrapper.amount {
+        --hue: 145deg;
+      }
+
+      .btn-wrapper.amount .btn.active .btn-txt {
+        background: linear-gradient(180deg, hsla(145, 80%, 40%, 1), hsla(145, 75%, 28%, 1));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        filter: drop-shadow(0 0 7px hsla(145, 80%, 35%, 0.85)) drop-shadow(0 0 12px hsla(145, 75%, 28%, 0.75));
+      }
+
+      .btn {
+        width: calc(100% - 2 * var(--padding));
+        height: calc(100% - 2 * var(--padding));
+        border-radius: 50%;
+        border: none;
+        cursor: pointer;
+        background: #f5f5f5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow:
+          inset 3px 3px 6px rgba(0, 0, 0, 0.12),
+          inset -3px -3px 7px rgba(255, 255, 255, 0.9),
+          0 3px 6px rgba(0, 0, 0, 0.08);
+        transition:
+          transform 0.15s ease,
+          box-shadow 0.25s ease;
+      }
+
+      .btn-txt {
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        color: #333;
+        transition: all 0.3s ease;
+      }
+
+      .btn-txt.small {
+        font-size: 13px;
+      }
+
+      .btn.active {
+        box-shadow:
+          inset 2px 2px 6px rgba(255, 255, 255, 0.9),
+          inset -4px -4px 12px rgba(0, 0, 0, 0.08),
+          0 0 18px hsla(var(--hue), 80%, 65%, 0.25);
+      }
+
+      .btn.active .btn-txt {
+        background: linear-gradient(180deg, hsla(var(--hue), 100%, 48%, 1), hsla(var(--hue), 90%, 35%, 1));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        filter: drop-shadow(0 0 7px hsla(var(--hue), 100%, 48%, 0.95))
+          drop-shadow(0 0 12px hsla(var(--hue), 100%, 38%, 0.85));
+      }
+
+      .btn:active {
+        transform: scale(0.96);
+      }
+
+      @media (max-width: 768px) {
+        .students-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ============================================================
+         NOTIFICATION CENTER STYLES
+         ============================================================ */
+      .notification-badge-bell {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 9px;
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        color: white;
+        font-size: 11px;
+        font-weight: 700;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 8px rgba(239, 68, 68, 0.6);
+        animation: badgePulse 2s ease-in-out infinite;
+      }
+
+      .btn-header-secondary.has-unread .notification-badge-bell {
+        display: flex;
+      }
+
+      @keyframes badgePulse {
+        0%, 100% {
+          transform: scale(1);
+          box-shadow: 0 2px 8px rgba(239, 68, 68, 0.6);
+        }
+        50% {
+          transform: scale(1.1);
+          box-shadow: 0 2px 12px rgba(239, 68, 68, 0.9);
+        }
+      }
+
+      .notification-center-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(8px);
+        z-index: 10000;
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        padding-top: 80px;
+        animation: fadeIn 0.2s ease;
+      }
+
+      .notification-center-overlay.active {
+        display: flex;
+      }
+
+      .notification-center-panel {
+        width: 100%;
+        max-width: 520px;
+        max-height: calc(100vh - 100px);
+        background: linear-gradient(135deg, rgba(31, 20, 60, 0.95), rgba(20, 15, 40, 0.95));
+        border: 1px solid rgba(138, 180, 255, 0.3);
+        border-radius: 24px;
+        backdrop-filter: blur(16px);
+        box-shadow:
+          0 0 40px rgba(138, 180, 255, 0.3),
+          0 0 80px rgba(168, 85, 247, 0.2),
+          0 20px 60px rgba(0, 0, 0, 0.4);
+        display: flex;
+        flex-direction: column;
+        animation: slideDown 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        overflow: hidden;
+      }
+
+      @keyframes slideDown {
+        from {
+          transform: translateY(-50px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      @keyframes fadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+      }
+
+      .notification-center-header {
+        padding: 24px 28px;
+        border-bottom: 1px solid rgba(138, 180, 255, 0.2);
+        background: linear-gradient(135deg, rgba(138, 180, 255, 0.08), rgba(168, 85, 247, 0.08));
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(12px);
+      }
+
+      .notification-center-title {
+        font-size: 20px;
+        font-weight: 700;
+        background: linear-gradient(135deg, #8ab4ff, #a855f7);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .notification-center-close {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 20px;
+        padding: 0;
+        font-family: inherit;
+        line-height: 1;
+      }
+
+      .notification-center-close:hover {
+        background: rgba(239, 68, 68, 0.2);
+        border-color: rgba(239, 68, 68, 0.4);
+        color: #ef4444;
+        transform: rotate(90deg);
+      }
+
+      .clear-notifications-btn {
+        padding: 8px 14px;
+        border-radius: 10px;
+        background: rgba(239, 68, 68, 0.1);
+        border: 1px solid rgba(239, 68, 68, 0.3);
+        color: #ef4444;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+      }
+
+      .clear-notifications-btn:hover {
+        background: rgba(239, 68, 68, 0.2);
+        border-color: rgba(239, 68, 68, 0.5);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+      }
+
+      .notification-center-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px 0;
+      }
+
+      .notification-center-body::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .notification-center-body::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 3px;
+      }
+
+      .notification-center-body::-webkit-scrollbar-thumb {
+        background: rgba(138, 180, 255, 0.3);
+        border-radius: 3px;
+      }
+
+      .notification-center-body::-webkit-scrollbar-thumb:hover {
+        background: rgba(138, 180, 255, 0.5);
+      }
+
+      .notification-group {
+        margin-bottom: 24px;
+      }
+
+      .notification-group-label {
+        padding: 8px 28px;
+        font-size: 12px;
+        font-weight: 700;
+        color: rgba(138, 180, 255, 0.7);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        position: sticky;
+        top: 0;
+        background: linear-gradient(135deg, rgba(31, 20, 60, 0.95), rgba(20, 15, 40, 0.95));
+        backdrop-filter: blur(12px);
+        z-index: 5;
+      }
+
+      .notification-item {
+        margin: 8px 16px;
+        padding: 16px 20px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(138, 180, 255, 0.15);
+        border-radius: 16px;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        position: relative;
+      }
+
+      .notification-item:hover {
+        background: rgba(138, 180, 255, 0.08);
+        border-color: rgba(138, 180, 255, 0.3);
+        transform: scale(1.02);
+        box-shadow: 0 4px 16px rgba(138, 180, 255, 0.2);
+      }
+
+      .notification-item.unread {
+        background: rgba(138, 180, 255, 0.05);
+        border-color: rgba(138, 180, 255, 0.25);
+      }
+
+      .notification-item-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .notification-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+
+      .notification-icon.student {
+        background: linear-gradient(135deg, rgba(251, 146, 60, 0.2), rgba(249, 115, 22, 0.2));
+        border: 1px solid rgba(251, 146, 60, 0.3);
+      }
+
+      .notification-icon.system {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.2));
+        border: 1px solid rgba(239, 68, 68, 0.3);
+      }
+
+      .notification-icon.success {
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(16, 185, 129, 0.2));
+        border: 1px solid rgba(34, 197, 94, 0.3);
+      }
+
+      .notification-icon.info {
+        background: linear-gradient(135deg, rgba(96, 165, 250, 0.2), rgba(59, 130, 246, 0.2));
+        border: 1px solid rgba(96, 165, 250, 0.3);
+      }
+
+      .notification-content {
+        flex: 1;
+      }
+
+      .notification-title {
+        font-size: 14px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.95);
+        margin-bottom: 4px;
+      }
+
+      .notification-message {
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.65);
+        line-height: 1.4;
+      }
+
+      .notification-meta {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 8px;
+      }
+
+      .notification-time {
+        font-size: 11px;
+        color: rgba(138, 180, 255, 0.6);
+        font-weight: 600;
+      }
+
+      .notification-new-badge {
+        padding: 3px 8px;
+        border-radius: 6px;
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        font-size: 10px;
+        font-weight: 700;
+        color: white;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+
+      .notification-empty {
+        padding: 60px 28px;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.4);
+      }
+
+      .notification-empty-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+        opacity: 0.3;
+      }
+
+      .notification-empty-text {
+        font-size: 14px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Header Section -->
+    <div class="header">
+      <div class="header-row-1">
+        <h1 class="demo-title">👥 Student Manager (NEW)</h1>
+        <div class="header-actions">
+          <button class="btn-header-primary" onclick="openAddStudentModal()">➕ Add Student</button>
+          <button class="btn-header-secondary" onclick="openBulkAddModal()">📥 Bulk Add</button>
+          <button class="btn-header-secondary" onclick="openUploadNotesModal()">📄 Upload Notes</button>
+          <button class="btn-header-secondary" onclick="openWaitingListModal()" id="waitingListBtn">
+            ⏳ Waiting List
+            <span class="notification-badge" id="waitingListBadge" style="display: none;">0</span>
+          </button>
+          <button class="btn-header-secondary" onclick="openDuplicatesModal()">🔍 Find Duplicates</button>
+          <button class="btn-header-secondary" onclick="toggleNotificationCenter()" id="notificationBellBtn" title="Notifications" style="position: relative;">
+            🔔
+            <span class="notification-badge-bell" id="notificationBadge" style="display: none;">0</span>
+          </button>
+        </div>
+      </div>
+      <div class="header-row-2">
+        <input
+          type="text"
+          id="searchInput"
+          class="search-input"
+          placeholder="Search by name, group, phone, email, notes, aliases, credit, price..."
+        />
+        <select id="groupFilter" class="filter-select">
+          <option value="">All Groups</option>
+          <option value="A">Group A</option>
+          <option value="B">Group B</option>
+          <option value="C">Group C</option>
+          <option value="D">Group D</option>
+          <option value="E">Group E</option>
+          <option value="F">Group F</option>
+          <option value="no-group">No Group</option>
+        </select>
+        <select id="statusFilter" class="filter-select">
+          <option value="" selected>All Statuses</option>
+          <option value="active">Active</option>
+          <option value="paused">Paused</option>
+          <option value="graduated">Graduated</option>
+        </select>
+        <select id="paymentFilter" class="filter-select">
+          <option value="">All Payment Status</option>
+          <option value="unpaid">Unpaid Classes</option>
+          <option value="credit">Has Credit Balance</option>
+        </select>
+        <select id="sortFilter" class="filter-select">
+          <option value="">Default Sort (Group + Name)</option>
+          <option value="highest">Price: Highest First</option>
+          <option value="lowest">Price: Lowest First</option>
+        </select>
+        <button class="btn-header-clear" id="clearFiltersBtn">Clear Filters</button>
+      </div>
+    </div>
+
+    <div class="students-grid" id="studentsGrid"></div>
+
+    <!-- Add Student Modal -->
+    <div id="addStudentModal" class="action-modal-backdrop" onclick="if(event.target.id==='addStudentModal'){closeAddStudentModal();}">
+      <div class="action-modal-card" onclick="event.stopPropagation()">
+        <!-- Header -->
+        <div class="action-modal-header">
+          <h2 class="action-modal-title">Add New Student</h2>
+          <button class="action-modal-close" onclick="closeAddStudentModal()">&times;</button>
+        </div>
+
+        <!-- Scrollable Content -->
+        <div class="action-modal-scroll">
+          <div class="action-modal-body">
+            <!-- Student Name -->
+            <div class="form-group">
+              <label class="form-label">Student Name *</label>
+              <input type="text" id="newStudentName" class="form-input" placeholder="Enter full name" />
+            </div>
+
+            <!-- Group Selection -->
+            <div class="form-group">
+              <label class="form-label">Group(s)</label>
+              <div class="button-group" id="newStudentGroupButtons">
+                <button class="toggle-btn" onclick="this.classList.toggle('active')">A</button>
+                <button class="toggle-btn" onclick="this.classList.toggle('active')">B</button>
+                <button class="toggle-btn" onclick="this.classList.toggle('active')">C</button>
+                <button class="toggle-btn" onclick="this.classList.toggle('active')">D</button>
+                <button class="toggle-btn" onclick="this.classList.toggle('active')">E</button>
+                <button class="toggle-btn" onclick="this.classList.toggle('active')">F</button>
+              </div>
+              <input type="text" id="newStudentCustomGroup" class="form-input" placeholder="Or enter custom groups (comma-separated)" />
+            </div>
+
+            <!-- Pay Per Class -->
+            <div class="form-group">
+              <label class="form-label">Pay Per Class</label>
+              <div class="button-group" id="newStudentPriceButtons">
+                <button class="toggle-btn" data-value="25" onclick="this.classList.toggle('active')">$25</button>
+                <button class="toggle-btn" data-value="50" onclick="this.classList.toggle('active')">$50</button>
+                <button class="toggle-btn" data-value="75" onclick="this.classList.toggle('active')">$75</button>
+                <button class="toggle-btn" data-value="100" onclick="this.classList.toggle('active')">$100</button>
+              </div>
+              <input type="number" id="newStudentCustomPrice" class="form-input" placeholder="Or enter custom amount" />
+            </div>
+
+            <!-- Credit Balance -->
+            <div class="form-group">
+              <label class="form-label" style="color: #eab308">💰 Credit Balance</label>
+              <input
+                type="number"
+                id="newStudentBalance"
+                class="form-input"
+                placeholder="0.00"
+                style="background: rgba(234, 179, 8, 0.1); border-color: rgba(234, 179, 8, 0.3); color: #eab308"
+              />
+            </div>
+
+            <!-- Phone -->
+            <div class="form-group">
+              <label class="form-label">Phone</label>
+              <input type="tel" id="newStudentPhone" class="form-input" placeholder="(555) 123-4567" />
+            </div>
+
+            <!-- Email -->
+            <div class="form-group">
+              <label class="form-label">Email(s)</label>
+              <input type="text" id="newStudentEmail" class="form-input" placeholder="email1@example.com, email2@example.com" />
+            </div>
+
+            <!-- Notes -->
+            <div class="form-group">
+              <label class="form-label">Notes</label>
+              <textarea id="newStudentNotes" class="form-textarea" placeholder="Additional notes..."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="action-modal-footer">
+          <button class="btn-modal-cancel" onclick="closeAddStudentModal()">Cancel</button>
+          <button class="btn-modal-save" onclick="handleAddStudent()">Save Student</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk Add Students Modal -->
+    <div id="bulkAddModal" class="action-modal-backdrop" onclick="if(event.target.id==='bulkAddModal'){closeBulkAddModal();}">
+      <div class="action-modal-card" onclick="event.stopPropagation()" style="max-width: 750px">
+        <!-- Header -->
+        <div class="action-modal-header">
+          <div>
+            <h2 class="action-modal-title">📋 Bulk Add Students</h2>
+            <div style="font-size: 14px; color: rgba(138, 180, 255, 0.7); margin-top: 4px; font-weight: 600">Paste or Type Below</div>
+          </div>
+          <button class="action-modal-close" onclick="closeBulkAddModal()">&times;</button>
+        </div>
+
+        <!-- Scrollable Content -->
+        <div class="action-modal-scroll">
+          <div class="action-modal-body">
+            <div style="padding: 14px 16px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 10px; color: rgba(147, 197, 253, 0.9); font-size: 13px; line-height: 1.6; margin-bottom: 20px">
+              <strong style="color: #60a5fa">Flexible Format:</strong> One student per line — comma-separated or labeled
+              <br />
+              <code style="background: rgba(0, 0, 0, 0.3); padding: 2px 8px; border-radius: 4px; color: #e5e7eb; font-size: 12px">Name, Email, Phone, Group, $Amount</code>
+              <br />
+              <code style="background: rgba(0, 0, 0, 0.3); padding: 2px 8px; border-radius: 4px; color: #e5e7eb; font-size: 12px">Name (Alias), Email, Phone, Group, $Amount</code>
+            </div>
+
+            <div style="margin-bottom: 16px; padding: 10px; background: rgba(255, 255, 255, 0.03); border-radius: 10px; border: 1px solid rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.5); font-size: 12px">
+              <strong style="color: rgba(255, 255, 255, 0.7)">Examples:</strong>
+              <br />
+              <span style="font-family: monospace; color: #8ab4ff">
+                Hasmik Antonova (Level Up), Hasmik.Antonova@gmail.com, 909-555-4321, A, $100
+              </span>
+              <br />
+              <span style="font-family: monospace; color: #8ab4ff">
+                Varduni Nerseyan, Varduni1982@yahoo.com, (818)299-7867, E, $100
+              </span>
+            </div>
+
+            <textarea
+              class="form-textarea"
+              placeholder="Paste student records here (one per line)..."
+              style="min-height: 280px; font-family: monospace; line-height: 1.8"
+            ></textarea>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="action-modal-footer">
+          <button class="btn-modal-cancel" onclick="closeBulkAddModal()">Cancel</button>
+          <button class="btn-modal-save" onclick="customAlert('Demo Mode', 'Students added!'); closeBulkAddModal()">Add Students</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Waiting List Modal -->
+    <div id="waitingListModal" class="action-modal-backdrop" onclick="if(event.target.id==='waitingListModal'){closeWaitingListModal();}">
+      <div class="action-modal-card" onclick="event.stopPropagation()" style="max-width: 1100px">
+        <!-- Header -->
+        <div class="action-modal-header">
+          <h2 class="action-modal-title">⏳ Student Waiting List</h2>
+          <button class="action-modal-close" onclick="closeWaitingListModal()">&times;</button>
+        </div>
+
+        <!-- Scrollable Content -->
+        <div class="action-modal-scroll">
+          <div class="action-modal-body">
+            <button class="btn-modal-save" onclick="customAlert('Demo Mode', 'Added to waiting list')" style="width: 100%; margin-bottom: 24px">
+              + Add to Waiting List
+            </button>
+            <div style="padding: 40px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 14px">
+              <div style="font-size: 48px; margin-bottom: 16px">⏳</div>
+              <div>No students in waiting list</div>
+              <div style="font-size: 12px; margin-top: 8px">Click "Add to Waiting List" to add students</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Find Duplicates Modal -->
+    <div id="duplicatesModal" class="action-modal-backdrop" onclick="if(event.target.id==='duplicatesModal'){closeDuplicatesModal();}">
+      <div class="action-modal-card" onclick="event.stopPropagation()" style="max-width: 950px">
+        <!-- Header -->
+        <div class="action-modal-header">
+          <h2 class="action-modal-title">🔍 Duplicate Students</h2>
+          <button class="action-modal-close" onclick="closeDuplicatesModal()">&times;</button>
+        </div>
+
+        <!-- Scrollable Content -->
+        <div class="action-modal-scroll">
+          <div class="action-modal-body">
+            <div style="padding: 40px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 14px">
+              <div style="font-size: 48px; margin-bottom: 16px">✓</div>
+              <div style="color: #6ee7b7; font-size: 16px; font-weight: 600">No Duplicates Found</div>
+              <div style="font-size: 12px; margin-top: 8px">All student records are unique</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload Notes Modal -->
+    <div id="uploadNotesModal" class="action-modal-backdrop" onclick="if(event.target.id==='uploadNotesModal'){closeUploadNotesModal();}">
+      <div class="action-modal-card" onclick="event.stopPropagation()" style="max-width: 650px">
+        <div style="padding: 32px 32px 24px">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px">
+            <h2 class="action-modal-title">📄 Upload Class Notes (PDF)</h2>
+            <button class="modal-close-button" onclick="closeUploadNotesModal()">✕</button>
+          </div>
+
+          <!-- Form -->
+          <div style="display: flex; flex-direction: column; gap: 20px">
+            <!-- Title -->
+            <div>
+              <label class="form-label">Note Title *</label>
+              <input type="text" id="noteTitle" class="form-input" placeholder="e.g., Lecture 1 - Introduction" />
+            </div>
+
+            <!-- Description -->
+            <div>
+              <label class="form-label">Description (Optional)</label>
+              <textarea id="noteDescription" class="form-input" rows="2" placeholder="Brief description of the content..."></textarea>
+            </div>
+
+            <!-- Group Selection -->
+            <div>
+              <label class="form-label">For Group *</label>
+              <div class="group-buttons" style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px">
+                <button type="button" class="group-btn" onclick="selectNoteGroup('A')" data-group="A">A</button>
+                <button type="button" class="group-btn" onclick="selectNoteGroup('B')" data-group="B">B</button>
+                <button type="button" class="group-btn" onclick="selectNoteGroup('C')" data-group="C">C</button>
+                <button type="button" class="group-btn" onclick="selectNoteGroup('D')" data-group="D">D</button>
+                <button type="button" class="group-btn" onclick="selectNoteGroup('E')" data-group="E">E</button>
+                <button type="button" class="group-btn" onclick="selectNoteGroup('F')" data-group="F">F</button>
+              </div>
+            </div>
+
+            <!-- Class Date -->
+            <div>
+              <label class="form-label">Class Date *</label>
+              <input type="date" id="noteDate" class="form-input" />
+            </div>
+
+            <!-- PDF Upload -->
+            <div>
+              <label class="form-label">PDF File *</label>
+              <div style="position: relative">
+                <input 
+                  type="file" 
+                  id="pdfFileInput" 
+                  accept=".pdf" 
+                  class="form-input"
+                  onchange="handlePDFSelect(event)"
+                  style="cursor: pointer"
+                />
+                <div id="pdfFileName" style="margin-top: 8px; font-size: 13px; color: rgba(255,255,255,0.6); display: none;">
+                  <span id="pdfFileNameText"></span>
+                  <span id="pdfFileSize" style="color: rgba(255,255,255,0.4); margin-left: 8px"></span>
+                </div>
+              </div>
+              <div style="margin-top: 8px; padding: 10px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; color: rgba(147, 197, 253, 0.9); font-size: 12px; line-height: 1.5">
+                <div><strong>Note:</strong> Students can only view this PDF if they have a paid payment record for this class date.</div>
+                <div style="margin-top: 4px">The PDF will be protected (no download, copy disabled, watermarked).</div>
+              </div>
+            </div>
+
+            <!-- Upload Progress -->
+            <div id="uploadProgress" style="display: none;">
+              <div style="background: rgba(255,255,255,0.05); border-radius: 8px; height: 6px; overflow: hidden;">
+                <div id="uploadProgressBar" style="background: linear-gradient(90deg, #667eea, #764ba2); height: 100%; width: 0%; transition: width 0.3s;"></div>
+              </div>
+              <div id="uploadProgressText" style="margin-top: 8px; text-align: center; font-size: 13px; color: rgba(255,255,255,0.6);"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="action-modal-footer">
+          <button class="btn-modal-cancel" onclick="closeUploadNotesModal()">Cancel</button>
+          <button class="btn-modal-save" onclick="uploadNote()" id="uploadNoteBtn">📤 Upload Note</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-backdrop" id="modalBackdrop">
+      <div
+        class="modal-card"
+        id="modalCard"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modalName"
+        onclick="event.stopPropagation()"
+      >
+        <button class="modal-close" onclick="closeModal()" aria-label="Close modal">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" width="20" height="20">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+
+        <div class="modal-scroll">
+          <!-- Glass Header -->
+          <div class="glass-header-modal">
+            <div>
+              <div class="glass-name" id="modalName"></div>
+              <div class="glass-subtitle" id="modalGroup"></div>
+            </div>
+            <div class="glass-meta">
+              <button
+                class="status-badge-modal active"
+                id="modalStatusBadge"
+                onclick="cycleModalStatus()"
+                aria-label="Toggle student status"
+              ></button>
+            </div>
+          </div>
+
+          <!-- Glass Stats -->
+          <div class="glass-stats">
+            <div class="glass-stat">
+              <div class="glass-stat-label">Pay/Class</div>
+              <div class="glass-stat-value" id="modalPrice"></div>
+            </div>
+            <div class="glass-stat">
+              <div class="glass-stat-label">Credit</div>
+              <input type="text" class="glass-stat-input" id="modalCredit" style="color: #fbbf24" />
+            </div>
+            <div class="glass-stat">
+              <div class="glass-stat-label">Phone</div>
+              <input type="tel" class="glass-stat-input" id="modalPhone" style="font-size: 1.1rem; color: #c084fc" />
+            </div>
+            <div class="glass-stat">
+              <div class="glass-stat-label">Email</div>
+              <input
+                type="text"
+                class="glass-stat-input"
+                id="modalEmail"
+                style="font-size: 0.9rem; color: #94a3b8; white-space: nowrap; overflow-x: auto; text-overflow: ellipsis"
+              />
+            </div>
+            <div class="glass-stat">
+              <div class="glass-stat-label">Aliases</div>
+              <textarea
+                class="glass-stat-input"
+                id="modalAliases"
+                style="font-size: 0.85rem; color: #fbbf24"
+                rows="2"
+              ></textarea>
+            </div>
+            <div class="glass-stat">
+              <div class="glass-stat-label">Notes</div>
+              <textarea
+                class="glass-stat-input"
+                id="modalNotes"
+                style="font-size: 0.85rem; color: #a78bfa"
+                rows="2"
+              ></textarea>
+            </div>
+          </div>
+
+          <!-- Glass Actions with White Emboss Buttons -->
+          <div class="glass-actions">
+            <div class="glass-buttons" id="groupButtons">
+              <div class="btn-wrapper group-A">
+                <button class="btn" onclick="selectGroup('A', this)">
+                  <span class="btn-txt">A</span>
+                </button>
+              </div>
+              <div class="btn-wrapper group-B">
+                <button class="btn" onclick="selectGroup('B', this)">
+                  <span class="btn-txt">B</span>
+                </button>
+              </div>
+              <div class="btn-wrapper group-C">
+                <button class="btn" onclick="selectGroup('C', this)">
+                  <span class="btn-txt">C</span>
+                </button>
+              </div>
+              <div class="btn-wrapper group-D">
+                <button class="btn" onclick="selectGroup('D', this)">
+                  <span class="btn-txt">D</span>
+                </button>
+              </div>
+              <div class="btn-wrapper group-E">
+                <button class="btn" onclick="selectGroup('E', this)">
+                  <span class="btn-txt">E</span>
+                </button>
+              </div>
+              <div class="btn-wrapper group-F">
+                <button class="btn" onclick="selectGroup('F', this)">
+                  <span class="btn-txt">F</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="glass-buttons" id="amountButtons" style="margin-top: 16px">
+              <div class="btn-wrapper amount">
+                <button class="btn" onclick="selectAmount('25 $', this)">
+                  <span class="btn-txt small">25 $</span>
+                </button>
+              </div>
+              <div class="btn-wrapper amount">
+                <button class="btn" onclick="selectAmount('50 $', this)">
+                  <span class="btn-txt small">50 $</span>
+                </button>
+              </div>
+              <div class="btn-wrapper amount">
+                <button class="btn" onclick="selectAmount('75 $', this)">
+                  <span class="btn-txt small">75 $</span>
+                </button>
+              </div>
+              <div class="btn-wrapper amount">
+                <button class="btn" onclick="selectAmount('100 $', this)">
+                  <span class="btn-txt small">100 $</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      // ============================================================
+      // UTILITY FUNCTIONS
+      // ============================================================
+      
+      // Debounce function to limit how often a function is called
+      function debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+          const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+          };
+          clearTimeout(timeout);
+          timeout = setTimeout(later, wait);
+        };
+      }
+      
+      // Throttle function to ensure function is called at most once per interval
+      function throttle(func, limit) {
+        let inThrottle;
+        return function(...args) {
+          if (!inThrottle) {
+            func.apply(this, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+          }
+        };
+      }
+
+      function canonicalizeGroupCode(value) {
+        if (!value) return '';
+        const raw = value.toString().trim();
+        if (!raw) return '';
+        let normalized = raw.replace(/^group\s+/i, '');
+        normalized = normalized.replace(/[^a-z0-9]/gi, '');
+        return normalized.toUpperCase();
+      }
+
+      function formatGroupDisplay(code) {
+        if (!code) return 'No Group';
+        return `Group ${code}`;
+      }
+
+      async function normalizeStudentGroupNames(fixes = []) {
+        if (!Array.isArray(fixes) || fixes.length === 0 || !supabase) {
+          return;
+        }
+
+        const chunkSize = 10;
+        for (let i = 0; i < fixes.length; i += chunkSize) {
+          const chunk = fixes.slice(i, i + chunkSize);
+          const updates = chunk.map(async fix => {
+            const { error } = await supabase
+              .from('students')
+              .update({ group_name: fix.groupCode })
+              .eq('id', fix.id);
+
+            if (error) {
+              console.error('❌ Failed to normalize group name', fix, error);
+            }
+          });
+
+          await Promise.allSettled(updates);
+        }
+      }
+
+      async function normalizeStudentEmails(fixes = []) {
+        if (!Array.isArray(fixes) || fixes.length === 0 || !supabase) {
+          return;
+        }
+
+        const chunkSize = 10;
+        for (let i = 0; i < fixes.length; i += chunkSize) {
+          const chunk = fixes.slice(i, i + chunkSize);
+          const updates = chunk.map(async fix => {
+            const { error } = await supabase
+              .from('students')
+              .update({ email: fix.email })
+              .eq('id', fix.id);
+
+            if (error) {
+              console.error('❌ Failed to normalize email address', fix, error);
+            }
+          });
+
+          await Promise.allSettled(updates);
+        }
+      }
+      
+      // ============================================================
+      // ⚡ PERFORMANCE OPTIMIZATION UTILITIES
+      // ============================================================
+      
+      // Production mode flag - set to false to disable debug logging
+      const DEBUG_MODE = true;
+      
+      // Debug logging wrapper
+      function debugLog(...args) {
+        if (DEBUG_MODE) console.log(...args);
+      }
+      
+      // DOM Cache for frequently accessed elements
+      const DOMCache = {
+        studentsGrid: null,
+        searchInput: null,
+        groupFilter: null,
+        statusFilter: null,
+        paymentFilter: null,
+        sortSelect: null,
+        modals: {},
+        modalFields: {}, // Cache modal form fields
+        
+        init() {
+          this.studentsGrid = document.getElementById('studentsGrid');
+          this.searchInput = document.getElementById('searchInput');
+          this.groupFilter = document.getElementById('groupFilter');
+          this.statusFilter = document.getElementById('statusFilter');
+          this.paymentFilter = document.getElementById('paymentFilter');
+          this.sortSelect = document.getElementById('sortSelect');
+          
+          // Cache modal backdrop
+          this.modalBackdrop = document.getElementById('modalBackdrop');
+          
+          // Cache modal form fields for instant access
+          const modalFieldIds = [
+            'modalName', 'modalGroup', 'modalPrice', 'modalCredit',
+            'modalPhone', 'modalEmail', 'modalAliases', 'modalNotes',
+            'modalStatusBadge', 'groupButtons', 'amountButtons'
+          ];
+          modalFieldIds.forEach(id => {
+            this.modalFields[id] = document.getElementById(id);
+          });
+          
+          // Cache modal elements
+          ['addStudentModal', 'bulkAddModal', 'waitingListModal', 'duplicatesModal', 'studentModal'].forEach(id => {
+            const modal = document.getElementById(id);
+            if (modal) {
+              this.modals[id] = {
+                element: modal,
+                title: modal.querySelector('.action-modal-title, .modal-title'),
+                body: modal.querySelector('.action-modal-body, .modal-body'),
+                content: modal.querySelector('.modal-content')
+              };
+            }
+          });
+          
+          debugLog('✅ DOM Cache initialized');
+        },
+        
+        get(key) {
+          return this[key] || document.getElementById(key);
+        },
+        
+        invalidate(key) {
+          if (key) {
+            this[key] = null;
+          } else {
+            Object.keys(this).forEach(k => {
+              if (typeof this[k] !== 'function') this[k] = null;
+            });
+          }
+        }
+      };
+      
+      // Data Cache for expensive computations
+      const DataCache = {
+        students: null,
+        groups: null,
+        lastFetch: {},
+        computedValues: new Map(),
+        
+        TTL: 5 * 60 * 1000, // 5 minutes
+        
+        set(key, value) {
+          this[key] = value;
+          this.lastFetch[key] = Date.now();
+        },
+        
+        get(key) {
+          const now = Date.now();
+          const lastFetch = this.lastFetch[key] || 0;
+          
+          if (this[key] && (now - lastFetch) < this.TTL) {
+            debugLog(`✅ Cache HIT: ${key}`);
+            return this[key];
+          }
+          
+          debugLog(`⚠️ Cache MISS: ${key}`);
+          return null;
+        },
+        
+        invalidate(key) {
+          if (key) {
+            this[key] = null;
+            this.lastFetch[key] = 0;
+            debugLog(`🔄 Cache invalidated: ${key}`);
+          } else {
+            Object.keys(this).forEach(k => {
+              if (typeof this[k] !== 'function' && k !== 'TTL' && k !== 'computedValues') {
+                this[k] = null;
+              }
+            });
+            this.lastFetch = {};
+            this.computedValues.clear();
+            debugLog('🔄 All caches cleared');
+          }
+        }
+      };
+      
+      // RequestAnimationFrame wrapper for smooth UI updates
+      let rafCallbacks = {};
+      
+      function scheduleRAF(key, callback) {
+        if (rafCallbacks[key]) {
+          cancelAnimationFrame(rafCallbacks[key]);
+        }
+        
+        rafCallbacks[key] = requestAnimationFrame(() => {
+          callback();
+          delete rafCallbacks[key];
+        });
+      }
+      
+      function cancelRAF(key) {
+        if (rafCallbacks[key]) {
+          cancelAnimationFrame(rafCallbacks[key]);
+          delete rafCallbacks[key];
+        }
+      }
+      
+      // ============================================================
+      // SUPABASE CLIENT INITIALIZATION
+      // ============================================================
+      const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+
+      let supabase = null;
+      let students = [];
+      let filteredStudents = [];
+      
+      // Make variables globally accessible for debugging
+      window.students = students;
+      window.filteredStudents = filteredStudents;
+
+      // Initialize Supabase client
+      if (window.supabase && window.supabase.createClient) {
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        debugLog('✅ Supabase client initialized');
+        
+        // AUTHENTICATION CHECK - Require login for admin access
+        supabase.auth.getSession().then(async ({ data: { session } }) => {
+          if (!session) {
+            // No session - redirect to login
+            debugLog('❌ No active session - redirecting to login');
+            window.location.href = 'Login.html';
+            return;
+          }
+          
+          debugLog('✅ User session active:', session.user.email);
+          
+          // Check if this is the hardcoded admin email
+          const ADMIN_EMAIL = 'hrachfilm@gmail.com';
+          
+          if (session.user.email === ADMIN_EMAIL) {
+            // Admin email - grant access without checking students table
+            debugLog('✅ Admin access granted (hardcoded admin email)');
+            loadStudents();
+            return;
+          }
+          
+          // Otherwise, check if user has admin role in students table
+          const { data: studentData, error } = await supabase
+            .from('students')
+            .select('role, name')
+            .eq('auth_user_id', session.user.id)
+            .single();
+          
+          if (error || !studentData || studentData.role !== 'admin') {
+            // Not an admin - redirect to student portal
+            debugLog('❌ User is not admin - redirecting to student portal');
+            alert('Access denied. This area is for administrators only.');
+            window.location.href = 'student-portal.html';
+            return;
+          }
+          
+          debugLog('✅ Admin access granted:', studentData.name);
+          
+          // Load students after auth check passes
+          loadStudents();
+        });
+      } else {
+        // Keep errors visible even in production
+        console.error('❌ Supabase library not loaded');
+      }
+
+      // ============================================================
+      // LOAD STUDENTS FROM SUPABASE
+      // ============================================================
+      
+      // Helper function to format price for display
+      function formatPrice(value) {
+        if (typeof value === 'string') {
+          // If already formatted like "100 $", return as-is
+          if (value.includes('$')) return value;
+          // Otherwise parse and format
+          const num = parseInt(value.replace(/[^0-9]/g, '')) || 0;
+          return `${num} $`;
+        }
+        // If number, format it
+        return `${value || 0} $`;
+      }
+
+      // Helper function to format credit for display
+      function formatCredit(value) {
+        return formatPrice(value);  // Same format
+      }
+      
+      // Helper function to parse email field (handles JSON strings, arrays, and regular strings)
+      function parseEmailField(emailData) {
+        if (!emailData) return [];
+        
+        // If it's already an array, return it
+        if (Array.isArray(emailData)) {
+          return emailData;
+        }
+        
+        // If it's a string that looks like JSON array
+        if (typeof emailData === 'string') {
+          // Try to parse as JSON
+          if (emailData.startsWith('[') && emailData.endsWith(']')) {
+            try {
+              const parsed = JSON.parse(emailData);
+              return Array.isArray(parsed) ? parsed : [emailData];
+            } catch (e) {
+              // If parsing fails, treat as single email
+              return [emailData];
+            }
+          }
+          // Regular string email
+          return [emailData];
+        }
+        
+        return [];
+      }
+
+      function toEmailEntryArray(emailData) {
+        if (!emailData) return [];
+        if (Array.isArray(emailData)) return emailData;
+        if (typeof emailData === 'string') {
+          return emailData.split(/[\n,]/);
+        }
+        return [];
+      }
+
+      function normalizeEmailList(emailData) {
+        const seen = new Set();
+        return toEmailEntryArray(emailData)
+          .map(entry => typeof entry === 'string' ? entry.trim().toLowerCase() : '')
+          .filter(entry => entry && !seen.has(entry) && (seen.add(entry) || true));
+      }
+
+      function getPrimaryEmailValue(emailData) {
+        const normalized = normalizeEmailList(emailData);
+        return normalized.length ? normalized[0] : null;
+      }
+
+      function requiresEmailNormalization(rawEmailValue) {
+        if (!rawEmailValue) return false;
+        if (Array.isArray(rawEmailValue)) return true;
+        if (typeof rawEmailValue === 'string') {
+          const trimmed = rawEmailValue.trim();
+          return trimmed.startsWith('[') && trimmed.endsWith(']');
+        }
+        return false;
+      }
+
+      async function loadStudents() {
+        if (!supabase) {
+          console.error('❌ Supabase not initialized');
+          students = [];
+          return;
+        }
+
+        try {
+          const { data, error } = await supabase
+            .from('students')
+            .select('*')
+            .order('group_name', { ascending: true })
+            .order('name', { ascending: true });
+
+          if (error) throw error;
+
+          const pendingGroupFixes = [];
+          const pendingEmailFixes = [];
+
+          if (data) {
+            debugLog('🔍 STUDENT MANAGER DEBUG: Raw Supabase data:', data);
+            
+            // Convert Supabase format to internal format
+            students = data.map(s => {
+              const groupCode = canonicalizeGroupCode(s.group_name || s.group || '');
+              if (
+                s.group_name &&
+                groupCode &&
+                s.group_name !== groupCode
+              ) {
+                pendingGroupFixes.push({ id: s.id, groupCode });
+              }
+              const existingEmailList = parseEmailField(s.email);
+              const normalizedEmails = normalizeEmailList(existingEmailList);
+              const primaryEmail = normalizedEmails[0] || '';
+              if (primaryEmail && requiresEmailNormalization(s.email)) {
+                pendingEmailFixes.push({ id: s.id, email: primaryEmail });
+              }
+              const mappedStudent = {
+                id: s.id,
+                name: s.name,
+                group: formatGroupDisplay(groupCode),
+                groupCode,
+                price_per_class: s.price_per_class || 0,
+                balance: s.balance || 0,
+                phone: s.phone || '',
+                email: primaryEmail,
+                aliases: s.aliases || [],
+                notes: s.notes || '',
+                status: s.status || 'active',
+                showInCalendar: s.show_in_grid !== false
+              };
+              
+              debugLog(`👤 Student ${mappedStudent.id} (${mappedStudent.name}):`, {
+                supabase_show_in_grid: s.show_in_grid,
+                mapped_showInCalendar: mappedStudent.showInCalendar,
+                calculation: `${s.show_in_grid} !== false = ${s.show_in_grid !== false}`
+              });
+              
+              return mappedStudent;
+            });
+
+            if (pendingGroupFixes.length) {
+              debugLog(`🧹 Normalizing ${pendingGroupFixes.length} legacy group names...`);
+              await normalizeStudentGroupNames(pendingGroupFixes);
+            }
+            if (pendingEmailFixes.length) {
+              debugLog(`✉️ Normalizing ${pendingEmailFixes.length} legacy email entries...`);
+              await normalizeStudentEmails(pendingEmailFixes);
+            }
+            debugLog(`✅ Loaded ${students.length} students from Supabase`);
+            debugLog('📊 Students by Group:', students.reduce((acc, s) => {
+              acc[s.groupCode] = (acc[s.groupCode] || 0) + 1;
+              return acc;
+            }, {}));
+          } else {
+            students = [];
+          }
+
+          // Initialize filtered students
+          filteredStudents = students;
+          
+          // Update window references for console debugging
+          window.students = students;
+          window.filteredStudents = filteredStudents;
+          
+          debugLog(`✅ Students loaded and accessible via console: window.students (${students.length}), window.filteredStudents (${filteredStudents.length})`);
+          
+          // Apply default filters (active status)
+          applyFilters();
+        } catch (e) {
+          console.error('❌ Error loading students from Supabase:', e);
+          students = [];
+          filteredStudents = [];
+          renderStudentCards();
+        }
+      }
+
+      // ============================================================
+      // SAVE STUDENT TO SUPABASE
+      // ============================================================
+      async function saveStudent(student) {
+        if (!supabase) {
+          console.error('❌ Supabase not initialized');
+          return false;
+        }
+
+        try {
+          const resolvedGroupCode = student.groupCode || canonicalizeGroupCode(student.group || '');
+          const resolvedGroupName = formatGroupDisplay(resolvedGroupCode);
+          student.groupCode = resolvedGroupCode;
+          student.group = resolvedGroupName;
+          const normalizedEmailList = normalizeEmailList(student.email);
+          const primaryEmail = normalizedEmailList[0] || null;
+          student.email = primaryEmail;
+
+          const studentData = {
+            name: student.name,
+            group_name: resolvedGroupCode || null,
+            price_per_class: typeof student.price_per_class === 'number' 
+              ? student.price_per_class 
+              : parseInt(student.price_per_class) || 0,
+            balance: typeof student.balance === 'number'
+              ? student.balance
+              : parseInt(student.balance) || 0,
+            phone: student.phone,
+            email: primaryEmail,
+            aliases: student.aliases || [],
+            notes: student.notes || '',
+            status: student.status || 'active',
+            show_in_grid: student.showInCalendar !== false
+          };
+
+          debugLog(`💾 Saving ${student.name}:`, {
+            showInCalendar_JS: student.showInCalendar,
+            show_in_grid_DB: studentData.show_in_grid
+          });
+
+          let result;
+          if (student.id) {
+            // Update existing student
+            result = await supabase
+              .from('students')
+              .update(studentData)
+              .eq('id', student.id)
+              .select();
+          } else {
+            // Insert new student
+            result = await supabase
+              .from('students')
+              .insert([studentData])
+              .select();
+          }
+
+          if (result.error) throw result.error;
+
+          debugLog('✅ Student saved to Supabase:', result.data[0]);
+          debugLog(`   show_in_grid saved as:`, result.data[0].show_in_grid);
+          return result.data[0];
+        } catch (e) {
+          console.error('❌ Error saving student to Supabase:', e);
+          return false;
+        }
+      }
+
+      // ============================================================
+      // DELETE STUDENT FROM SUPABASE
+      // ============================================================
+      async function deleteStudentFromDB(studentId) {
+        if (!supabase) {
+          console.error('❌ Supabase not initialized');
+          return false;
+        }
+
+        try {
+          const { error } = await supabase
+            .from('students')
+            .delete()
+            .eq('id', studentId);
+
+          if (error) throw error;
+
+          debugLog('✅ Student deleted from Supabase:', studentId);
+          return true;
+        } catch (e) {
+          console.error('❌ Error deleting student from Supabase:', e);
+          return false;
+        }
+      }
+
+      // ============================================================
+      // STUDENT UI FUNCTIONS
+      // ============================================================
+
+      function getGroupLetter(groupValue) {
+        const source = typeof groupValue === 'string'
+          ? groupValue
+          : groupValue?.groupCode || groupValue?.group || '';
+        const normalized = canonicalizeGroupCode(source);
+        if (!normalized) return '?';
+        const trailingLetters = normalized.match(/[A-Z]+$/);
+        if (trailingLetters && trailingLetters[0]) {
+          return trailingLetters[0];
+        }
+        return normalized.slice(-2) || normalized;
+      }
+
+      let currentStudent = null;
+
+      // ✅ formatCredit() and formatPrice() now defined at line ~1928 (removed duplicates)
+
+      // Format phone to xxx-xxx-xxxx
+      function formatPhone(phone) {
+        if (!phone) return '';
+        const cleaned = phone.replace(/\D/g, '');
+        if (cleaned.length === 10) {
+          return `${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+        }
+        return phone;
+      }
+
+      function getStatusIcon(status) {
+        if (status === 'active') {
+          return `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>`;
+        } else if (status === 'paused') {
+          return `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M10 9v6m4-6v6"></path></svg>`;
+        } else {
+          return `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>`;
+        }
+      }
+
+      // Cache for SVG icons to avoid recreating them
+      const svgIconCache = {
+        dollar: `<svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>`
+      };
+
+      // Lazy loading configuration
+      let currentlyRenderedCount = 30; // Initial cards to render
+      const cardsPerBatch = 20; // Load this many more when scrolling
+      let isLoadingMore = false;
+
+      function renderStudentCards(forceFullRender = false) {
+        // ⚡ Performance: Use cached DOM element
+        const grid = DOMCache.studentsGrid || document.getElementById('studentsGrid');
+        
+        // Use filtered students if filters are active, otherwise use all students
+        const sourceStudents = filteredStudents.length > 0 || 
+                               DOMCache.searchInput?.value || 
+                               DOMCache.groupFilter?.value ||
+                               DOMCache.paymentFilter?.value ||
+                               DOMCache.sortFilter?.value
+          ? filteredStudents 
+          : students;
+        
+        // DEBUG: Check which array we're using
+        debugLog(`📋 Rendering from:`, filteredStudents.length > 0 ? 'filteredStudents' : 'students');
+        debugLog(`   Total students: ${students.length}, Filtered students: ${filteredStudents.length}`);
+        debugLog(`   Source students to render: ${sourceStudents.length}`);
+        const hiddenStudents = students.filter(s => !sourceStudents.includes(s));
+        if (hiddenStudents.length > 0) {
+          debugLog(`   ⚠️ Hidden students (${hiddenStudents.length}):`, hiddenStudents.map(s => `${s.name} (showInCalendar=${s.showInCalendar})`));
+        }
+        
+        // Determine how many cards to render
+        const studentsToRender = forceFullRender ? sourceStudents : sourceStudents.slice(0, currentlyRenderedCount);
+        
+        // Debug: Log first 3 students' toggle states
+        debugLog('🎨 Rendering cards - Toggle states:');
+        studentsToRender.slice(0, 3).forEach(s => {
+          debugLog(`  ${s.name}: showInCalendar=${s.showInCalendar}, will render as ${s.showInCalendar ? 'CHECKED' : 'UNCHECKED'}`);
+        });
+        
+        // Use DocumentFragment for better performance
+        const fragment = document.createDocumentFragment();
+        const tempDiv = document.createElement('div');
+        
+        // Show "no results" message if filtered and empty
+        if (studentsToRender.length === 0) {
+          grid.innerHTML = '<div style="grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: rgba(255,255,255,0.5); font-size: 16px;">No students found matching your filters.</div>';
+          return;
+        }
+        
+        // Build HTML string (faster than creating elements one by one)
+        const cardsHTML = studentsToRender
+          .map(student => `
+          <div class="student-card" data-student-id="${student.id}">
+            <div class="card-toggle">
+              <label class="elegant-toggle" onclick="event.stopPropagation()">
+                <input type="checkbox" ${student.showInCalendar ? 'checked' : ''} data-action="toggle-calendar" data-student-id="${student.id}" />
+                <span class="elegant-toggle-slider"></span>
+              </label>
+            </div>
+            <div class="student-card-content">
+              <div class="avatar-container">
+                <div class="avatar-orbit"></div>
+                <div class="avatar">${getGroupLetter(student.groupCode || student.group)}</div>
+                <div class="status-badge ${student.status}">
+                  ${getStatusIcon(student.status)}
+                </div>
+              </div>
+              <div class="identity-section">
+                <div class="profile-label">STUDENT PROFILE</div>
+                <div class="student-name" title="${student.name}">${student.name}</div>
+                <div class="meta-badges">
+                  <div class="meta-badge credit">
+                    ${svgIconCache.dollar}
+                    ${formatCredit(student.balance)}
+                  </div>
+                  <div class="meta-badge price">
+                    ${svgIconCache.dollar}
+                    ${formatPrice(student.price_per_class)}
+                  </div>
+                </div>
+              </div>
+              <div class="status-pill ${student.status}" data-action="cycle-status" data-student-id="${student.id}">${student.status}</div>
+            </div>
+          </div>
+        `)
+          .join('');
+        
+        // Single DOM update instead of multiple
+        tempDiv.innerHTML = cardsHTML;
+        while (tempDiv.firstChild) {
+          fragment.appendChild(tempDiv.firstChild);
+        }
+        
+        // Clear and append in one operation
+        grid.innerHTML = '';
+        grid.appendChild(fragment);
+        
+        // Show loading indicator if there are more students to load
+        if (!forceFullRender && studentsToRender.length < sourceStudents.length) {
+          const loadingDiv = document.createElement('div');
+          loadingDiv.style.cssText = 'grid-column: 1 / -1; text-align: center; padding: 20px; color: rgba(255,255,255,0.5); font-size: 14px;';
+          loadingDiv.textContent = `Showing ${studentsToRender.length} of ${sourceStudents.length} students`;
+          grid.appendChild(loadingDiv);
+        }
+      }
+      
+      // Throttled scroll handler for lazy loading
+      const handleScroll = throttle(() => {
+        const sourceStudents = filteredStudents.length > 0 || 
+                               document.getElementById('searchInput')?.value || 
+                               document.getElementById('groupFilter')?.value ||
+                               document.getElementById('paymentFilter')?.value ||
+                               document.getElementById('sortFilter')?.value
+          ? filteredStudents 
+          : students;
+          
+        if (isLoadingMore || currentlyRenderedCount >= sourceStudents.length) return;
+        
+        const scrollPosition = window.scrollY + window.innerHeight;
+        const documentHeight = document.documentElement.scrollHeight;
+        
+        // Load more when user is 300px from bottom
+        if (scrollPosition > documentHeight - 300) {
+          isLoadingMore = true;
+          currentlyRenderedCount += cardsPerBatch;
+          renderStudentCards();
+          isLoadingMore = false;
+        }
+      }, 200);
+
+      async function cycleStatus(studentId) {
+        const student = students.find(s => s.id === studentId);
+        if (!student) return;
+
+        const statusOrder = ['active', 'paused', 'graduated'];
+        const currentIndex = statusOrder.indexOf(student.status);
+        student.status = statusOrder[(currentIndex + 1) % statusOrder.length];
+
+        debugLog(`Status changed to: ${student.status}`);
+        
+        // Save to Supabase
+        await saveStudent(student);
+        
+        renderStudentCards();
+      }
+
+      // ============================================
+      //  SEARCH AND FILTER FUNCTIONS
+      // ============================================
+      
+      function applyFilters() {
+        const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
+        const groupFilter = document.getElementById('groupFilter')?.value || '';
+        const statusFilter = document.getElementById('statusFilter')?.value || '';
+        const paymentFilter = document.getElementById('paymentFilter')?.value || '';
+        const sortFilter = document.getElementById('sortFilter')?.value || '';
+        
+        // Start with all students
+        filteredStudents = students.filter(student => {
+          // Search filter - searches across all fields
+          if (searchTerm) {
+            const searchableText = [
+              student.name,
+              student.group,
+              student.phone,
+              Array.isArray(student.email) ? student.email.join(' ') : student.email,
+              student.notes,
+              Array.isArray(student.aliases) ? student.aliases.join(' ') : student.aliases,
+              student.balance,
+              student.price_per_class,
+              student.status
+            ].filter(Boolean).join(' ').toLowerCase();
+            
+            if (!searchableText.includes(searchTerm)) {
+              return false;
+            }
+          }
+          
+          // Group filter
+          if (groupFilter) {
+            const normalizedCode = student.groupCode || canonicalizeGroupCode(student.group || '');
+            if (groupFilter === 'no-group') {
+              if (normalizedCode) return false;
+            } else {
+              const studentGroup = getGroupLetter(normalizedCode);
+              if (studentGroup !== groupFilter) return false;
+            }
+          }
+          
+          // Status filter
+          if (statusFilter && student.status !== statusFilter) {
+            return false;
+          }
+          
+          // Payment filter
+          if (paymentFilter === 'unpaid') {
+            const credit = student.balance || 0;
+            if (credit >= 0) return false;
+          } else if (paymentFilter === 'credit') {
+            const credit = student.balance || 0;
+            if (credit <= 0) return false;
+          }
+          
+          return true;
+        });
+        
+        // Apply sorting
+        if (sortFilter === 'highest') {
+          filteredStudents.sort((a, b) => {
+            const priceA = a.price_per_class || 0;
+            const priceB = b.price_per_class || 0;
+            return priceB - priceA;
+          });
+        } else if (sortFilter === 'lowest') {
+          filteredStudents.sort((a, b) => {
+            const priceA = a.price_per_class || 0;
+            const priceB = b.price_per_class || 0;
+            return priceA - priceB;
+          });
+        }
+        
+        // Reset pagination
+        currentlyRenderedCount = 30;
+        
+        // Render filtered results
+        renderStudentCards();
+      }
+      
+      // Debounced search for better performance
+      // Debounced version of applyFilters (optimized to 150ms for better UX)
+      const debouncedApplyFilters = debounce(applyFilters, 150);
+      
+      function clearAllFilters() {
+        document.getElementById('searchInput').value = '';
+        document.getElementById('groupFilter').value = '';
+        document.getElementById('statusFilter').value = '';
+        document.getElementById('paymentFilter').value = '';
+        document.getElementById('sortFilter').value = '';
+        applyFilters();
+      }
+
+      // ============================================
+      //  MODAL FUNCTIONS
+      // ============================================
+
+      function openAddStudentModal() {
+        const modal = document.getElementById('addStudentModal');
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+      }
+
+      function closeAddStudentModal() {
+        const modal = document.getElementById('addStudentModal');
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
+        // Clear form fields
+        document.getElementById('newStudentName').value = '';
+        document.getElementById('newStudentCustomGroup').value = '';
+        document.getElementById('newStudentCustomPrice').value = '';
+        document.getElementById('newStudentBalance').value = '';
+        document.getElementById('newStudentPhone').value = '';
+        document.getElementById('newStudentEmail').value = '';
+        document.getElementById('newStudentNotes').value = '';
+        // Clear active buttons
+        document.querySelectorAll('#newStudentGroupButtons .toggle-btn.active').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('#newStudentPriceButtons .toggle-btn.active').forEach(btn => btn.classList.remove('active'));
+      }
+
+      async function handleAddStudent() {
+        // Get form values
+        const name = document.getElementById('newStudentName').value.trim();
+        
+        if (!name) {
+          await customAlert('Validation Error', 'Please enter a student name.', 'error');
+          return;
+        }
+
+        // Get selected groups
+        const activeGroupButtons = document.querySelectorAll('#newStudentGroupButtons .toggle-btn.active');
+        const selectedGroups = Array.from(activeGroupButtons).map(btn => btn.textContent);
+        const customGroups = document.getElementById('newStudentCustomGroup').value.trim();
+        let groupCode = '';
+        if (selectedGroups.length > 0) {
+          groupCode = selectedGroups.join('');
+        } else if (customGroups) {
+          groupCode = customGroups;
+        }
+
+        // Get price
+        const activePriceButton = document.querySelector('#newStudentPriceButtons .toggle-btn.active');
+        const customPrice = document.getElementById('newStudentCustomPrice').value;
+        let pricePerClass = 0;
+        if (activePriceButton) {
+          pricePerClass = parseInt(activePriceButton.getAttribute('data-value')) || 0;
+        } else if (customPrice) {
+          pricePerClass = parseInt(customPrice) || 0;
+        }
+
+        // Create student object
+        const newStudent = {
+          name: name,
+          groupCode: groupCode,
+          price_per_class: pricePerClass,
+          balance: parseInt(document.getElementById('newStudentBalance').value) || 0,
+          phone: document.getElementById('newStudentPhone').value.trim(),
+          email: document.getElementById('newStudentEmail').value.trim(),
+          notes: document.getElementById('newStudentNotes').value.trim(),
+          status: 'active',
+          showInCalendar: true
+        };
+
+        // Save to database
+        const result = await saveStudent(newStudent);
+        
+        if (result) {
+          await customAlert('Success', 'Student added successfully!', 'success');
+          closeAddStudentModal();
+          // Reload students list
+          await loadStudents();
+        } else {
+          await customAlert('Error', 'Failed to add student. Please try again.', 'error');
+        }
+      }
+
+      function openBulkAddModal() {
+        const modal = document.getElementById('bulkAddModal');
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+      }
+
+      function closeBulkAddModal() {
+        const modal = document.getElementById('bulkAddModal');
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
+      }
+
+      function openWaitingListModal() {
+        const modal = document.getElementById('waitingListModal');
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+      }
+
+      function closeWaitingListModal() {
+        const modal = document.getElementById('waitingListModal');
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
+      }
+
+      function openDuplicatesModal() {
+        const modal = document.getElementById('duplicatesModal');
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+      }
+
+      function closeDuplicatesModal() {
+        const modal = document.getElementById('duplicatesModal');
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
+      }
+
+      function openModal(studentId) {
+        currentStudent = students.find(s => s.id === studentId);
+        if (!currentStudent) return;
+
+        // ⚡ Performance: Use cached modal fields
+        const fields = DOMCache.modalFields;
+        
+        // Populate modal
+        fields.modalName.textContent = currentStudent.name;
+  const modalGroupDisplay = formatGroupDisplay(currentStudent.groupCode || currentStudent.group || '');
+  currentStudent.group = modalGroupDisplay;
+  fields.modalGroup.textContent = modalGroupDisplay;
+        fields.modalPrice.textContent = formatPrice(currentStudent.price_per_class);
+        fields.modalCredit.value = currentStudent.balance;
+
+        // Format and display phone
+        const formattedPhone = formatPhone(currentStudent.phone);
+        fields.modalPhone.value = formattedPhone;
+
+        // Handle email array - show one per line in display mode
+        const emailArray = Array.isArray(currentStudent.email) ? currentStudent.email : [currentStudent.email];
+        fields.modalEmail.value = emailArray.join('\n');
+
+        // Handle aliases array - convert to comma-separated for editing
+        const aliasesArray = Array.isArray(currentStudent.aliases)
+          ? currentStudent.aliases
+          : currentStudent.aliases
+            ? [currentStudent.aliases]
+            : [];
+        fields.modalAliases.value = aliasesArray.join(', ');
+
+        // Handle notes - can be string or already have line breaks
+        const notesValue = currentStudent.notes || '';
+        fields.modalNotes.value = notesValue;
+
+        // Set status badge
+        fields.modalStatusBadge.textContent = currentStudent.status.toUpperCase();
+        fields.modalStatusBadge.className = `status-badge-modal ${currentStudent.status}`;
+
+        // Set active group button
+  const groupLetter = (currentStudent.groupCode || '').replace(/[^A-Z]/gi, '').charAt(0);
+        fields.groupButtons.querySelectorAll('.btn').forEach((btn, index) => {
+          const letter = String.fromCharCode(65 + index); // A, B, C, D, E, F
+          btn.classList.toggle('active', letter === groupLetter);
+        });
+
+        // Set active amount button - match by numeric value only
+        const currentPriceNumeric = currentStudent.price_per_class || 0;
+        fields.amountButtons.querySelectorAll('.btn').forEach(btn => {
+          const btnText = btn.querySelector('.btn-txt').textContent;
+          const btnNumeric = parseInt(btnText.replace(/[^0-9]/g, '')) || 0;
+          btn.classList.toggle('active', btnNumeric === currentPriceNumeric);
+        });
+
+        // Add auto-save on blur for input fields
+        fields.modalCredit.onblur = autoSaveField;
+        fields.modalPhone.onblur = autoSaveField;
+        fields.modalEmail.onblur = autoSaveField;
+        fields.modalAliases.onblur = autoSaveField;
+        fields.modalNotes.onblur = autoSaveField;
+
+        // Add focus handler to show comma-separated format for email
+        fields.modalEmail.onfocus = function () {
+          const emailArray = Array.isArray(currentStudent.email) ? currentStudent.email : [currentStudent.email];
+          this.value = emailArray.join(', ');
+        };
+
+        // Add focus handler to show comma-separated format for aliases
+        fields.modalAliases.onfocus = function () {
+          const aliasesArray = Array.isArray(currentStudent.aliases)
+            ? currentStudent.aliases
+            : currentStudent.aliases
+              ? [currentStudent.aliases]
+              : [];
+          this.value = aliasesArray.join(', ');
+        };
+
+        // Lock body scroll
+        document.body.style.overflow = 'hidden';
+
+        DOMCache.modalBackdrop.classList.add('active');
+      }
+
+      function validateEmail(email) {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
+      }
+
+      // Optimized auto-save with debouncing and batch updates
+      const autoSaveField = (function() {
+        let pendingUpdates = new Set();
+        let updateTimer = null;
+        
+        const performUpdate = () => {
+          if (!currentStudent || pendingUpdates.size === 0) return;
+          
+          // Save to database once for all fields
+          saveStudent(currentStudent);
+          
+          // Update UI once
+          renderStudentCards();
+          
+          // Clear pending updates
+          pendingUpdates.clear();
+          updateTimer = null;
+        };
+        
+        const debouncedUpdate = debounce(performUpdate, 500);
+        
+        return async function(event) {
+          if (!currentStudent) return;
+
+          const fieldId = event.target.id;
+          const value = event.target.value;
+          
+          // Track that this field needs updating
+          pendingUpdates.add(fieldId);
+
+          // Update student data based on which field was edited
+          if (fieldId === 'modalCredit') {
+            currentStudent.balance = typeof value === 'number' ? value : parseInt(value) || 0;
+            debugLog('✅ Credit balance queued for save:', currentStudent.balance);
+          } else if (fieldId === 'modalPhone') {
+            // Format phone on save
+            const formatted = formatPhone(value);
+            currentStudent.phone = formatted;
+            event.target.value = formatted;
+            debugLog('✅ Phone queued for save:', formatted);
+          } else if (fieldId === 'modalEmail') {
+            const emailsRaw = value
+              .split(/[\n,]/)
+              .map(e => e.trim())
+              .filter(e => e);
+
+            if (emailsRaw.length > 0) {
+              const invalidEmails = emailsRaw.filter(email => !validateEmail(email));
+
+              if (invalidEmails.length > 0) {
+                console.error('❌ Invalid email format:', invalidEmails);
+                await customAlert('Invalid Email', `Invalid email format: ${invalidEmails.join(', ')}`);
+                pendingUpdates.delete(fieldId);
+                return;
+              }
+
+              if (emailsRaw.length > 1) {
+                await customAlert('Multiple Emails Detected', 'Only the first email will be saved for registration. Additional entries will be ignored.');
+              }
+
+              const primaryEmail = emailsRaw[0].toLowerCase();
+              currentStudent.email = primaryEmail;
+              debugLog('✅ Primary email queued for save:', primaryEmail);
+              event.target.value = primaryEmail;
+            } else {
+              currentStudent.email = '';
+              event.target.value = '';
+              debugLog('🧹 Email cleared for student.');
+            }
+          } else if (fieldId === 'modalAliases') {
+            // Parse comma-separated aliases into array
+            const aliasesRaw = value
+              .split(',')
+              .map(a => a.trim())
+              .filter(a => a);
+
+            // Validate that no alias is empty after trimming
+            if (aliasesRaw.length === 0 && value.trim() !== '') {
+              console.error('❌ Invalid aliases: empty values found');
+              await customAlert('Invalid Input', 'Aliases cannot be empty');
+              pendingUpdates.delete(fieldId);
+              return;
+            }
+
+            // Save as array
+            currentStudent.aliases = aliasesRaw;
+            debugLog('✅ Aliases queued for save:', aliasesRaw);
+
+            // Update display to show stacked format
+            event.target.value = aliasesRaw.join('\n');
+          } else if (fieldId === 'modalNotes') {
+            // Notes are saved as-is (can have line breaks)
+            currentStudent.notes = value;
+            debugLog('✅ Notes queued for save:', value);
+          }
+
+          // Debounce the actual save and render
+          debouncedUpdate();
+        };
+      })();
+
+      function cycleModalStatus() {
+        if (!currentStudent) return;
+
+        const statusOrder = ['active', 'paused', 'graduated'];
+        const currentIndex = statusOrder.indexOf(currentStudent.status);
+        currentStudent.status = statusOrder[(currentIndex + 1) % statusOrder.length];
+
+        const statusBadge = document.getElementById('modalStatusBadge');
+        statusBadge.textContent = currentStudent.status.toUpperCase();
+        statusBadge.className = `status-badge-modal ${currentStudent.status}`;
+
+        debugLog(`Modal status changed to: ${currentStudent.status}`);
+        renderStudentCards();
+      }
+
+      function selectGroup(letter, btn) {
+        const normalizedLetter = canonicalizeGroupCode(letter);
+        // Remove active from all group buttons
+        document.querySelectorAll('#groupButtons .btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        if (currentStudent) {
+          currentStudent.groupCode = normalizedLetter;
+          currentStudent.group = formatGroupDisplay(normalizedLetter);
+          document.getElementById('modalGroup').textContent = currentStudent.group;
+          debugLog(`Group changed to: ${currentStudent.group}`);
+          saveStudent(currentStudent);
+          renderStudentCards();
+        }
+      }
+
+      function selectAmount(amount, btn) {
+        // Remove active from all amount buttons
+        document.querySelectorAll('#amountButtons .btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        if (currentStudent) {
+          // Parse amount if it's a string like "100 $"
+          const numericAmount = typeof amount === 'string'
+            ? parseInt(amount.replace(/[^0-9]/g, '')) || 0
+            : amount;
+          
+          currentStudent.price_per_class = numericAmount;
+          document.getElementById('modalPrice').textContent = formatPrice(numericAmount);
+          debugLog(`Price per class changed to: ${numericAmount}`);
+          saveStudent(currentStudent);
+          renderStudentCards();
+        }
+      }
+
+      async function toggleCalendarVisibility(studentId, isVisible) {
+        debugLog(`🔄 toggleCalendarVisibility called: studentId=${studentId}, isVisible=${isVisible}`);
+        
+        const student = students.find(s => s.id === studentId);
+        if (!student) {
+          console.error(`❌ Student with ID ${studentId} not found!`);
+          return;
+        }
+
+        debugLog(`📝 BEFORE toggle: ${student.name} - showInCalendar=${student.showInCalendar}`);
+        student.showInCalendar = isVisible;
+        debugLog(`📝 AFTER toggle: ${student.name} - showInCalendar=${student.showInCalendar}`);
+
+        // If toggled OFF, set price_per_class to 0
+        if (!isVisible) {
+          student.price_per_class = 0;
+          debugLog(`${student.name} calendar visibility: OFF - price_per_class set to 0`);
+        } else {
+          debugLog(`${student.name} calendar visibility: ON`);
+        }
+
+        // Save to Supabase
+        debugLog(`💾 About to save ${student.name} to Supabase...`);
+        try {
+          const result = await saveStudent(student);
+          debugLog(`✅ Save successful for ${student.name}:`, result);
+        } catch (error) {
+          console.error(`❌ Save FAILED for ${student.name}:`, error);
+          return;
+        }
+
+        // 🔄 UPDATE CALENDAR'S STUDENT CACHE AND REFRESH CALENDAR
+        // If Calendar module is loaded, update its studentsCache
+        if (window.studentsCache && Array.isArray(window.studentsCache)) {
+          const cachedStudent = window.studentsCache.find(s => s.id === studentId);
+          if (cachedStudent) {
+            cachedStudent.show_in_grid = isVisible;
+            debugLog(`✅ Updated Calendar cache for ${student.name}: show_in_grid=${isVisible}`);
+            
+            // Clear month cache to force recalculation
+            if (typeof window.clearMonthCache === 'function') {
+              window.clearMonthCache();
+              debugLog(`🔄 Cleared month cache`);
+            }
+            
+            // Trigger calendar re-render if function exists
+            if (typeof window.renderCalendar === 'function') {
+              window.renderCalendar();
+              debugLog(`🔄 Re-rendered calendar`);
+            }
+          }
+        }
+
+        renderStudentCards();
+      }
+
+      function closeModal() {
+        // Restore body scroll
+        document.body.style.overflow = '';
+
+        // ⚡ Performance: Use cached backdrop
+        DOMCache.modalBackdrop.classList.remove('active');
+        currentStudent = null;
+      }
+
+      // Close on backdrop click - use cached element
+      DOMCache.modalBackdrop?.addEventListener('click', closeModal);
+
+      // Close on ESC key
+      document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') closeModal();
+      });
+
+      // Initial render - Load students from Supabase
+      // NOTE: loadStudents() is now called after auth check passes (see Supabase init section)
+
+      // ============================================================
+      // REAL-TIME NOTIFICATIONS FOR NEW STUDENT REGISTRATIONS
+      // ============================================================
+      let newRegistrationsCount = 0;
+      const waitingListBtn = document.getElementById('waitingListBtn');
+      const waitingListBadge = document.getElementById('waitingListBadge');
+
+      // Update notification badge
+      function updateNotificationBadge(count) {
+        if (count > 0) {
+          waitingListBadge.textContent = count;
+          waitingListBadge.style.display = 'flex';
+          waitingListBtn.classList.add('has-notification');
+        } else {
+          waitingListBadge.style.display = 'none';
+          waitingListBtn.classList.remove('has-notification');
+        }
+      }
+
+      // Subscribe to real-time changes on student_waiting_list table
+      async function subscribeToRegistrations() {
+        if (!supabase) {
+          console.warn('⚠️ Supabase not initialized, skipping real-time subscription');
+          return null;
+        }
+
+        try {
+          debugLog('👂 Subscribing to student_waiting_list real-time updates...');
+
+          // Get current count of uncontacted students
+          const { data: initialData, error: initialError } = await supabase
+            .from('student_waiting_list')
+            .select('id')
+            .is('contacted_at', null);
+
+          if (!initialError && initialData) {
+            newRegistrationsCount = initialData.length;
+            updateNotificationBadge(newRegistrationsCount);
+            debugLog(`📊 Initial pending registrations: ${newRegistrationsCount}`);
+          }
+
+          // Subscribe to INSERT events on student_waiting_list
+          const subscription = supabase
+            .channel('student_registrations')
+            .on(
+              'postgres_changes',
+              {
+                event: 'INSERT',
+                schema: 'public',
+                table: 'student_waiting_list',
+              },
+              payload => {
+                debugLog('🔔 New registration received!', payload);
+
+                const newStudent = payload.new;
+                const studentName = `${newStudent.first_name} ${newStudent.last_name}`;
+
+                // Increment counter
+                newRegistrationsCount++;
+                updateNotificationBadge(newRegistrationsCount);
+
+                // Add to notification center
+                addNotification(
+                  'New Student Registration! 🎓',
+                  `${studentName} has registered and is waiting for approval.`,
+                  'student'
+                );
+
+                // Log to console
+                debugLog(`✨ New student registered: ${studentName} (${newStudent.email})`);
+              }
+            )
+            .subscribe(status => {
+              if (status === 'SUBSCRIBED') {
+                debugLog('✅ Successfully subscribed to student registration notifications');
+              } else if (status === 'CHANNEL_ERROR') {
+                console.warn('⚠️ Real-time channel error - continuing without live notifications');
+              } else if (status === 'TIMED_OUT') {
+                console.warn('⚠️ Real-time subscription timed out - continuing without live notifications');
+              } else if (status === 'CLOSED') {
+                console.warn('⚠️ Real-time channel closed');
+              }
+            });
+
+          return subscription;
+        } catch (error) {
+          console.warn('⚠️ Could not subscribe to real-time updates:', error.message);
+          debugLog('💡 App will continue to work without live notifications');
+          return null;
+        }
+      }
+
+      // Clear notifications when waiting list is opened
+      const originalOpenWaitingListModal = window.openWaitingListModal;
+      window.openWaitingListModal = function () {
+        // Reset counter and hide badge
+        newRegistrationsCount = 0;
+        updateNotificationBadge(0);
+
+        // Call original function
+        if (originalOpenWaitingListModal) {
+          originalOpenWaitingListModal();
+        }
+      };
+
+      // Initialize notifications on page load
+      window.addEventListener('DOMContentLoaded', async () => {
+        // ⚡ Initialize performance optimizations
+        DOMCache.init();
+        debugLog('⚡ Performance optimizations initialized');
+        
+        try {
+          await loadNotifications();
+        } catch (error) {
+          console.warn('⚠️ Could not load notifications:', error);
+        }
+        
+        try {
+          await subscribeToRegistrations();
+        } catch (error) {
+          console.warn('⚠️ Could not subscribe to registrations:', error);
+        }
+        
+        // Add scroll listener for lazy loading
+        window.addEventListener('scroll', handleScroll, { passive: true });
+        
+        // NOTE: filteredStudents will be initialized in loadStudents() after auth check
+        // Don't initialize here as students array is still empty
+        
+        // Use cached DOM elements instead of querying again
+        if (DOMCache.searchInput) {
+          DOMCache.searchInput.addEventListener('input', debouncedApplyFilters);
+        }
+        
+        if (DOMCache.groupFilter) {
+          DOMCache.groupFilter.addEventListener('change', applyFilters);
+        }
+        
+        if (DOMCache.statusFilter) {
+          DOMCache.statusFilter.addEventListener('change', applyFilters);
+        }
+        
+        if (DOMCache.paymentFilter) {
+          DOMCache.paymentFilter.addEventListener('change', applyFilters);
+        }
+        
+        const sortFilter = document.getElementById('sortFilter');
+        if (sortFilter) {
+          sortFilter.addEventListener('change', applyFilters);
+        }
+        
+        const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+        if (clearFiltersBtn) {
+          clearFiltersBtn.addEventListener('click', clearAllFilters);
+        }
+        
+        // Add event delegation for student cards
+        const studentsGrid = document.getElementById('studentsGrid');
+        if (studentsGrid) {
+          // ⚡ Performance: Event delegation - single listener for all cards
+          studentsGrid.addEventListener('click', function(e) {
+            // Find the closest student card
+            const card = e.target.closest('.student-card');
+            if (!card) return;
+            
+            const studentId = parseInt(card.dataset.studentId);
+            
+            // Check if clicked on toggle calendar checkbox
+            if (e.target.type === 'checkbox' && e.target.dataset.action === 'toggle-calendar') {
+              debugLog(`🖱️ Toggle clicked! studentId=${studentId}, checked=${e.target.checked}`);
+              toggleCalendarVisibility(studentId, e.target.checked);
+              return;
+            }
+            
+            // Check if clicked on status pill
+            if (e.target.dataset.action === 'cycle-status') {
+              e.stopPropagation();
+              cycleStatus(studentId);
+              return;
+            }
+            
+            // Otherwise open modal
+            if (!e.target.closest('.card-toggle') && !e.target.closest('.status-pill')) {
+              openModal(studentId);
+            }
+          });
+
+          // Also listen for change events on checkboxes (backup)
+          studentsGrid.addEventListener('change', function(e) {
+            if (e.target.type === 'checkbox' && e.target.dataset.action === 'toggle-calendar') {
+              const card = e.target.closest('.student-card');
+              if (!card) return;
+              const studentId = parseInt(card.dataset.studentId);
+              debugLog(`🔄 Toggle changed! studentId=${studentId}, checked=${e.target.checked}`);
+              toggleCalendarVisibility(studentId, e.target.checked);
+            }
+          });
+        }
+      });
+
+      // ============================================================
+      // NOTIFICATION CENTER SYSTEM
+      // ============================================================
+
+      let allNotifications = [];
+      let unreadCount = 0;
+
+      // Load notifications from Supabase
+      async function loadNotifications() {
+        try {
+          debugLog('🔔 Loading notifications from Supabase...');
+
+          const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(100);
+
+          if (error) {
+            console.error('❌ Error loading notifications:', error);
+            return;
+          }
+
+          allNotifications = data || [];
+          unreadCount = allNotifications.filter(n => !n.read).length;
+
+          debugLog(`✅ Loaded ${allNotifications.length} notifications (${unreadCount} unread)`);
+
+          updateNotificationBadge();
+          renderNotificationCenter();
+
+        } catch (err) {
+          console.error('❌ Exception loading notifications:', err);
+        }
+      }
+
+      // Update notification badge
+      function updateNotificationBadge() {
+        const badge = document.getElementById('notificationBadge');
+        const bellBtn = document.getElementById('notificationBellBtn');
+
+        if (!badge || !bellBtn) return;
+
+        if (unreadCount > 0) {
+          badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+          badge.style.display = 'flex';
+          bellBtn.classList.add('has-unread');
+        } else {
+          badge.style.display = 'none';
+          bellBtn.classList.remove('has-unread');
+        }
+      }
+
+      // Toggle notification center
+      function toggleNotificationCenter() {
+        const overlay = document.getElementById('notificationCenterOverlay');
+        if (!overlay) return;
+
+        if (overlay.classList.contains('active')) {
+          closeNotificationCenter();
+        } else {
+          openNotificationCenter();
+        }
+      }
+
+      // Open notification center
+      async function openNotificationCenter() {
+        debugLog('🔔 Opening Notification Center');
+
+        const overlay = document.getElementById('notificationCenterOverlay');
+        if (!overlay) return;
+
+        overlay.classList.add('active');
+
+        // Mark all as read after 2 seconds
+        setTimeout(async () => {
+          await markAllAsRead();
+        }, 2000);
+      }
+
+      // Close notification center
+      function closeNotificationCenter() {
+        const overlay = document.getElementById('notificationCenterOverlay');
+        if (!overlay) return;
+
+        overlay.classList.remove('active');
+        debugLog('🔔 Notification Center closed');
+      }
+
+      // Mark all notifications as read
+      async function markAllAsRead() {
+        try {
+          const unreadIds = allNotifications.filter(n => !n.read).map(n => n.id);
+
+          if (unreadIds.length === 0) return;
+
+          debugLog(`🔔 Marking ${unreadIds.length} notifications as read`);
+
+          const { error } = await supabase
+            .from('notifications')
+            .update({ read: true })
+            .in('id', unreadIds);
+
+          if (error) {
+            console.error('❌ Error marking notifications as read:', error);
+            return;
+          }
+
+          // Update local state
+          allNotifications.forEach(n => {
+            if (unreadIds.includes(n.id)) {
+              n.read = true;
+            }
+          });
+
+          unreadCount = 0;
+          updateNotificationBadge();
+        } catch (err) {
+          console.error('❌ Error in markAllAsRead:', err);
+        }
+      }
+
+      // Clear all notifications
+      async function clearAllNotifications() {
+        if (allNotifications.length === 0) {
+          await customAlert('No Notifications', 'There are no notifications to clear.');
+          return;
+        }
+
+        const confirmed = await customConfirm(
+          'Clear All Notifications',
+          `Are you sure you want to permanently delete all ${allNotifications.length} notifications?`,
+          true
+        );
+
+        if (!confirmed) return;
+
+        try {
+          debugLog(`🗑️ Deleting ${allNotifications.length} notifications from database`);
+
+          const { error } = await supabase
+            .from('notifications')
+            .delete()
+            .neq('id', 0);
+
+          if (error) {
+            console.error('❌ Error deleting notifications:', error);
+            await customAlert('Error', 'Failed to clear notifications. Please try again.');
+            return;
+          }
+
+          // Clear local state
+          allNotifications = [];
+          unreadCount = 0;
+
+          // Update UI
+          updateNotificationBadge();
+          renderNotificationCenter();
+
+          debugLog('✅ All notifications cleared');
+
+        } catch (err) {
+          console.error('❌ Error in clearAllNotifications:', err);
+          await customAlert('Error', 'Failed to clear notifications. Please try again.');
+        }
+      }
+
+      // Add notification to database
+      async function addNotification(title, message, category = 'system') {
+        try {
+          const { data, error } = await supabase
+            .from('notifications')
+            .insert([
+              {
+                title: title,
+                message: message,
+                category: category,
+                read: false,
+                created_at: new Date().toISOString()
+              }
+            ])
+            .select();
+
+          if (error) {
+            console.error('❌ Error adding notification:', error);
+            return;
+          }
+
+          debugLog('✅ Notification added:', title);
+
+          // Reload notifications to update UI
+          await loadNotifications();
+
+        } catch (err) {
+          console.error('❌ Error in addNotification:', err);
+        }
+      }
+
+      // Get category icon
+      function getCategoryIcon(category) {
+        const icons = {
+          student: '👤',
+          system: '⚠️',
+          success: '✅',
+          info: 'ℹ️',
+          error: '❌'
+        };
+        return icons[category] || '🔔';
+      }
+
+      // Format notification time
+      function formatNotificationTime(timestamp) {
+        const now = new Date();
+        const date = new Date(timestamp);
+        const diff = now - date;
+
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+
+        if (minutes < 1) return 'Just now';
+        if (minutes < 60) return `${minutes}m ago`;
+        if (hours < 24) return `${hours}h ago`;
+        if (days < 7) return `${days}d ago`;
+
+        return date.toLocaleDateString();
+      }
+
+      // Group notifications by time period
+      function groupNotifications(notifications) {
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const thisWeek = new Date(today);
+        thisWeek.setDate(thisWeek.getDate() - 7);
+
+        const groups = {
+          today: [],
+          yesterday: [],
+          thisWeek: [],
+          older: []
+        };
+
+        notifications.forEach(notification => {
+          const date = new Date(notification.created_at);
+
+          if (date >= today) {
+            groups.today.push(notification);
+          } else if (date >= yesterday) {
+            groups.yesterday.push(notification);
+          } else if (date >= thisWeek) {
+            groups.thisWeek.push(notification);
+          } else {
+            groups.older.push(notification);
+          }
+        });
+
+        return groups;
+      }
+
+      // Render notification center
+      function renderNotificationCenter() {
+        const container = document.getElementById('notificationCenterBody');
+        if (!container) return;
+
+        if (allNotifications.length === 0) {
+          container.innerHTML = `
+            <div class="notification-empty">
+              <div class="notification-empty-icon">🔔</div>
+              <div class="notification-empty-text">No notifications yet</div>
+            </div>
+          `;
+          return;
+        }
+
+        const groups = groupNotifications(allNotifications);
+        let html = '';
+
+        const groupLabels = {
+          today: 'Today',
+          yesterday: 'Yesterday',
+          thisWeek: 'This Week',
+          older: 'Older'
+        };
+
+        Object.entries(groups).forEach(([key, notifications]) => {
+          if (notifications.length === 0) return;
+
+          html += `<div class="notification-group">`;
+          html += `<div class="notification-group-label">${groupLabels[key]}</div>`;
+
+          notifications.forEach(notification => {
+            const icon = getCategoryIcon(notification.category);
+            const time = formatNotificationTime(notification.created_at);
+            const unreadClass = notification.read ? '' : 'unread';
+            
+            html += `
+              <div class="notification-item ${unreadClass}">
+                <div class="notification-item-header">
+                  <div class="notification-icon ${notification.category}">
+                    ${icon}
+                  </div>
+                  <div class="notification-content">
+                    <div class="notification-title">${notification.title}</div>
+                    <div class="notification-message">${notification.message}</div>
+                    <div class="notification-meta">
+                      <span class="notification-time">${time}</span>
+                      ${!notification.read ? '<span class="notification-new-badge">NEW</span>' : ''}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          });
+
+          html += `</div>`;
+        });
+
+        container.innerHTML = html;
+      }
+
+      // Close notification center on overlay click
+      document.addEventListener('click', (e) => {
+        const overlay = document.getElementById('notificationCenterOverlay');
+        if (overlay && e.target === overlay) {
+          closeNotificationCenter();
+        }
+      });
+
+      // ============================================================
+      // UPLOAD NOTES MODAL
+      // ============================================================
+      let selectedNoteGroup = '';
+      let selectedPDFFile = null;
+
+      function openUploadNotesModal() {
+        document.getElementById('uploadNotesModal').style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+        resetUploadForm();
+      }
+
+      function closeUploadNotesModal() {
+        document.getElementById('uploadNotesModal').style.display = 'none';
+        document.body.style.overflow = 'auto';
+        resetUploadForm();
+      }
+
+      function resetUploadForm() {
+        document.getElementById('noteTitle').value = '';
+        document.getElementById('noteDescription').value = '';
+        document.getElementById('noteDate').value = '';
+        document.getElementById('pdfFileInput').value = '';
+        document.getElementById('pdfFileName').style.display = 'none';
+        document.getElementById('uploadProgress').style.display = 'none';
+        selectedNoteGroup = '';
+        selectedPDFFile = null;
+        
+        // Reset group buttons
+        document.querySelectorAll('#uploadNotesModal .group-btn').forEach(btn => {
+          btn.classList.remove('active');
+        });
+      }
+
+      function selectNoteGroup(group) {
+        selectedNoteGroup = group;
+        
+        // Update button states
+        document.querySelectorAll('#uploadNotesModal .group-btn').forEach(btn => {
+          if (btn.getAttribute('data-group') === group) {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        });
+      }
+
+      function handlePDFSelect(event) {
+        const file = event.target.files[0];
+        if (!file) {
+          selectedPDFFile = null;
+          document.getElementById('pdfFileName').style.display = 'none';
+          return;
+        }
+
+        // Check if it's a PDF
+        if (file.type !== 'application/pdf') {
+          customAlert('Invalid File', 'Please select a PDF file.');
+          event.target.value = '';
+          return;
+        }
+
+        // Check file size (limit to 50MB)
+        const maxSize = 50 * 1024 * 1024; // 50MB
+        if (file.size > maxSize) {
+          customAlert('File Too Large', 'PDF file must be smaller than 50MB.');
+          event.target.value = '';
+          return;
+        }
+
+        selectedPDFFile = file;
+        const fileSize = formatFileSize(file.size);
+        document.getElementById('pdfFileNameText').textContent = file.name;
+        document.getElementById('pdfFileSize').textContent = `(${fileSize})`;
+        document.getElementById('pdfFileName').style.display = 'block';
+      }
+
+      function formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      }
+
+      async function uploadNote() {
+        const title = document.getElementById('noteTitle').value.trim();
+        const description = document.getElementById('noteDescription').value.trim();
+        const classDate = document.getElementById('noteDate').value;
+
+        // Validation
+        if (!title) {
+          customAlert('Missing Title', 'Please enter a note title.');
+          return;
+        }
+
+        if (!selectedNoteGroup) {
+          customAlert('Missing Group', 'Please select a group.');
+          return;
+        }
+
+        if (!classDate) {
+          customAlert('Missing Date', 'Please select a class date.');
+          return;
+        }
+
+        if (!selectedPDFFile) {
+          customAlert('Missing File', 'Please select a PDF file to upload.');
+          return;
+        }
+
+        try {
+          // Disable upload button
+          const uploadBtn = document.getElementById('uploadNoteBtn');
+          uploadBtn.disabled = true;
+          uploadBtn.textContent = '⏳ Uploading...';
+
+          // Show progress
+          document.getElementById('uploadProgress').style.display = 'block';
+          updateProgress(0, 'Preparing upload...');
+
+          // Upload PDF to storage
+          const fileName = `${selectedNoteGroup}/${classDate}_${Date.now()}.pdf`;
+          updateProgress(25, 'Uploading PDF...');
+
+          const { data: fileData, error: uploadError } = await supabase.storage
+            .from('student-notes')
+            .upload(fileName, selectedPDFFile, {
+              contentType: 'application/pdf',
+              cacheControl: '3600',
+              upsert: false
+            });
+
+          if (uploadError) {
+            console.error('Upload error:', uploadError);
+            throw new Error('Failed to upload PDF: ' + uploadError.message);
+          }
+
+          updateProgress(50, 'Saving note record...');
+
+          // Get current user email
+          const { data: { user } } = await supabase.auth.getUser();
+
+          // Save note metadata to database
+          const { data: noteData, error: dbError } = await supabase
+            .from('student_notes')
+            .insert({
+              title: title,
+              description: description || null,
+              group_name: selectedNoteGroup,
+              class_date: classDate,
+              pdf_url: fileName,
+              file_name: selectedPDFFile.name,
+              file_size: selectedPDFFile.size,
+              uploaded_by: user?.email || 'admin',
+              deleted: false
+            })
+            .select()
+            .single();
+
+          if (dbError) {
+            console.error('Database error:', dbError);
+            // Try to delete the uploaded file
+            await supabase.storage.from('student-notes').remove([fileName]);
+            throw new Error('Failed to save note record: ' + dbError.message);
+          }
+
+          updateProgress(100, 'Upload complete!');
+
+          // Success
+          setTimeout(() => {
+            customAlert('Upload Successful', `Note "${title}" uploaded successfully for Group ${selectedNoteGroup}!`);
+            closeUploadNotesModal();
+          }, 500);
+
+        } catch (error) {
+          console.error('Error uploading note:', error);
+          customAlert('Upload Failed', error.message || 'An error occurred while uploading the note. Please try again.');
+          
+          // Re-enable button
+          const uploadBtn = document.getElementById('uploadNoteBtn');
+          uploadBtn.disabled = false;
+          uploadBtn.textContent = '📤 Upload Note';
+          document.getElementById('uploadProgress').style.display = 'none';
+        }
+      }
+
+      function updateProgress(percent, text) {
+        document.getElementById('uploadProgressBar').style.width = percent + '%';
+        document.getElementById('uploadProgressText').textContent = text;
+      }
+    </script>
+
+    <!-- ============================================================
+         NOTIFICATION CENTER
+         ============================================================ -->
+    <div id="notificationCenterOverlay" class="notification-center-overlay">
+      <div class="notification-center-panel">
+        <div class="notification-center-header">
+          <div class="notification-center-title">🔔 Notification Center</div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <button class="clear-notifications-btn" onclick="clearAllNotifications()" title="Clear all notifications">
+              🗑️ Clear All
+            </button>
+            <button class="notification-center-close" onclick="closeNotificationCenter()" aria-label="Close notification center">×</button>
+          </div>
+        </div>
+        <div class="notification-center-body" id="notificationCenterBody">
+          <!-- Notifications will be rendered here -->
+          <div class="notification-empty">
+            <div class="notification-empty-icon">🔔</div>
+            <div class="notification-empty-text">No notifications yet</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
