@@ -3345,6 +3345,61 @@
     
     // AUTHENTICATION CHECK - Require login for student portal
     async function checkAuthentication() {
+      // Check for impersonation mode first
+      const urlParams = new URLSearchParams(window.location.search);
+      const impersonateId = urlParams.get('impersonate');
+      
+      if (impersonateId) {
+        console.debug('🎭 Impersonation mode detected, skipping auth check');
+        // Load impersonated student directly
+        const tokenData = sessionStorage.getItem('impersonation_token');
+        
+        if (tokenData) {
+          const impersonationToken = JSON.parse(tokenData);
+          
+          // Validate token hasn't expired
+          if (impersonationToken.expiresAt < Date.now()) {
+            alert('Impersonation session has expired. Returning to admin panel.');
+            sessionStorage.removeItem('impersonation_token');
+            window.location.href = 'Student-Manager.html';
+            return null;
+          }
+          
+          // Validate student ID matches
+          if (impersonationToken.studentId != impersonateId) {
+            console.error('❌ Student ID mismatch!');
+            alert('Invalid impersonation token. Returning to admin panel.');
+            sessionStorage.removeItem('impersonation_token');
+            window.location.href = 'Student-Manager.html';
+            return null;
+          }
+          
+          // Load the impersonated student's data
+          const { data: student, error } = await supabase
+            .from('students')
+            .select('*')
+            .eq('id', impersonateId)
+            .single();
+          
+          if (error || !student) {
+            console.error('Impersonated student not found:', error);
+            alert('Student not found. Returning to admin panel.');
+            sessionStorage.removeItem('impersonation_token');
+            window.location.href = 'Student-Manager.html';
+            return null;
+          }
+          
+          console.debug('✅ Impersonation authenticated for:', student.name);
+          return student;
+        } else {
+          console.error('❌ No impersonation token found');
+          alert('Invalid impersonation session. Returning to admin panel.');
+          window.location.href = 'Student-Manager.html';
+          return null;
+        }
+      }
+      
+      // Normal authentication flow
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
@@ -4176,7 +4231,7 @@
             .select('id, class_date, template_id')
             .eq('group_id', normalizedGroup)
             .eq('is_open', true)
-            .is('deleted_at', null)
+            .eq('deleted', false)
             .order('class_date', { ascending: false })
             .limit(10)
         ]);
@@ -5661,7 +5716,7 @@
           .select('id, class_date, is_open, sort_order, template_id')
           .eq('group_id', studentGroup)
           .eq('is_open', true)
-          .is('deleted_at', null)
+          .eq('deleted', false)
           .order('sort_order', { ascending: true });
         
         if (error) {
@@ -6188,7 +6243,7 @@
             is_current,
             note_templates (id)
           `)
-          .is('deleted_at', null)
+          .eq('deleted', false)
           .order('sort_order', { ascending: true });
 
         if (error) {
