@@ -56,12 +56,12 @@ ORDER BY policyname;
 -- =====================================================
 SELECT 
   email,
-  role,
   created_at
 FROM admin_accounts
 ORDER BY created_at DESC;
 
 -- Check that admin emails are listed here
+-- Note: admin_accounts table tracks which emails have admin access
 
 -- =====================================================
 -- 5. TEST STUDENT ACCESS (Replace with actual auth_user_id)
