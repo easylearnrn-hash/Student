@@ -55,13 +55,13 @@ ORDER BY policyname;
 -- 4. VERIFY ADMIN ACCESS (admin_accounts TABLE)
 -- =====================================================
 SELECT 
-  email,
-  created_at
+  auth_user_id,
+  email
 FROM admin_accounts
-ORDER BY created_at DESC;
+ORDER BY email;
 
 -- Check that admin emails are listed here
--- Note: admin_accounts table tracks which emails have admin access
+-- Note: admin_accounts table only has auth_user_id and email columns
 
 -- =====================================================
 -- 5. TEST STUDENT ACCESS (Replace with actual auth_user_id)
