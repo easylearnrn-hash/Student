@@ -78,7 +78,7 @@ SELECT
   id,
   name,
   aliases,
-  array_length(aliases::jsonb::text[]::text[], 1) as alias_count
+  jsonb_array_length(aliases) as alias_count
 FROM students
 WHERE aliases IS NOT NULL 
   AND aliases::text != '[]'
