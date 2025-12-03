@@ -3716,10 +3716,12 @@
 
           function collectPaymentsForStudent(student, idKey) {
             const matches = [];
-            const studentNameLower = (student?.name || student?.student_name || '').toLowerCase().trim();
+            
+            // Normalize student name and aliases using the SAME function as payment matching
+            const studentNameNormalized = normalizeNameKey(student?.name || student?.student_name);
             const aliases = student?.aliases || student?.alias;
             const aliasList = Array.isArray(aliases) ? aliases : aliases ? [aliases] : [];
-            const aliasLower = aliasList.map(alias => (alias || '').toLowerCase().trim()).filter(Boolean);
+            const aliasNormalized = aliasList.map(alias => normalizeNameKey(alias)).filter(Boolean);
 
             (payments || []).forEach(payment => {
               if (!payment || payment.ignored) return;
@@ -3741,29 +3743,38 @@
                 }
               }
 
-              // Priority 2: Name matching (student_name, payer_name, payer_name_raw)
-              const paymentStudentName = (payment.student_name || payment.studentName || '').toLowerCase().trim();
-              const paymentPayerName = (payment.payer_name || payment.payerName || payment.payer || '').toLowerCase().trim();
-              const paymentPayerRaw = (payment.payer_name_raw || payment.payerNameRaw || '').toLowerCase().trim();
-              
-              // CRITICAL FIX: Add resolved_student_name matching
-              const paymentResolvedName = (payment.resolved_student_name || '').toLowerCase().trim();
+              // Priority 2: Name matching using NORMALIZED keys (handles Unicode, special chars)
+              // Normalize ALL payment name fields using the same normalizeNameKey function
+              const paymentStudentNameNorm = normalizeNameKey(payment.student_name || payment.studentName);
+              const paymentPayerNameNorm = normalizeNameKey(payment.payer_name || payment.payerName || payment.payer);
+              const paymentPayerRawNorm = normalizeNameKey(payment.payer_name_raw || payment.payerNameRaw);
+              const paymentResolvedNameNorm = normalizeNameKey(payment.resolved_student_name);
+              const paymentSenderNameNorm = normalizeNameKey(payment.sender_name);
 
               if (
-                studentNameLower &&
-                (paymentStudentName === studentNameLower ||
-                  paymentPayerName === studentNameLower ||
-                  paymentPayerRaw === studentNameLower ||
-                  paymentResolvedName === studentNameLower)
+                studentNameNormalized &&
+                (paymentStudentNameNorm === studentNameNormalized ||
+                  paymentPayerNameNorm === studentNameNormalized ||
+                  paymentPayerRawNorm === studentNameNormalized ||
+                  paymentResolvedNameNorm === studentNameNormalized ||
+                  paymentSenderNameNorm === studentNameNormalized)
               ) {
                 matches.push(payment);
                 return;
               }
 
-              // Priority 3: Alias matching
+              // Priority 3: Alias matching using NORMALIZED keys
               if (
-                aliasLower.length &&
-                aliasLower.some(alias => alias && (alias === paymentStudentName || alias === paymentPayerName || alias === paymentPayerRaw || alias === paymentResolvedName))
+                aliasNormalized.length &&
+                aliasNormalized.some(alias => 
+                  alias && (
+                    alias === paymentStudentNameNorm || 
+                    alias === paymentPayerNameNorm || 
+                    alias === paymentPayerRawNorm || 
+                    alias === paymentResolvedNameNorm ||
+                    alias === paymentSenderNameNorm
+                  )
+                )
               ) {
                 matches.push(payment);
                 return;
@@ -3964,11 +3975,13 @@
             // Pass 2: Match late payments for UNPAID past classes (within 7 days after)
             // CRITICAL: Only apply to classes that are NOT already covered
             // PRIORITY: Pay off past unpaid classes BEFORE applying to future classes
+            // RULE: Late payments can ONLY match PAST classes, never future/today
             classDatesDesc.forEach(classDate => {
               if (coveredClasses.has(classDate)) return; // Already covered by exact match
 
-              // Only process past classes that are UNPAID
-              if (classDate >= todayStr) return; // Skip future classes for now
+              // CRITICAL FIX: Only process PAST classes (not today, not future)
+              // This prevents late payments from matching future classes
+              if (classDate >= todayStr) return; // Skip today and future classes
 
               const latePayment = studentPayments.find(p => {
                 const paymentId = p.id || p.gmail_id || p.payment_id;
@@ -3982,8 +3995,10 @@
                 const payDt = new Date(paymentDateStr + 'T12:00:00');
                 const daysDiff = Math.floor((payDt - classDt) / (1000 * 60 * 60 * 24));
 
-                // Late payment: 0-7 days after class
-                return daysDiff >= 0 && daysDiff <= 7;
+                // Late payment: 1-7 days AFTER class date
+                // Payment must be AFTER the class (daysDiff > 0)
+                // NEVER match if payment is before class
+                return daysDiff > 0 && daysDiff <= 7;
               });
 
               if (latePayment) {
@@ -3997,7 +4012,8 @@
                   amount: paymentAmount,
                   payDate: paymentDateStr,
                   paymentIds: [paymentId],
-                  matchType: 'late'
+                  matchType: 'late',
+                  daysLate: daysAfter
                 });
               }
             });
