@@ -75,8 +75,8 @@ SELECT
   s.name as actual_student_name
 FROM payments p
 LEFT JOIN students s ON (
-  p.linked_student_id = s.id 
-  OR p.student_id = s.id
+  p.linked_student_id::bigint = s.id 
+  OR p.student_id::bigint = s.id
 )
 WHERE 
   s.name ILIKE '%beatrisa%arushanyan%'
