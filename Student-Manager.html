@@ -2643,6 +2643,84 @@
         return false;
       }
 
+      // ============================================================
+      // ALIAS PARSING & CLEANING UTILITIES
+      // ============================================================
+      
+      /**
+       * Parse aliases field from database - handles arrays, JSON strings, and comma-separated strings
+       * Also CLEANS weird characters that shouldn't be in names
+       */
+      function parseAliasesField(aliasData) {
+        if (!aliasData) return [];
+        
+        let rawAliases = [];
+        
+        // If it's already an array, use it
+        if (Array.isArray(aliasData)) {
+          rawAliases = aliasData;
+        }
+        // If it's a string that looks like JSON array
+        else if (typeof aliasData === 'string') {
+          const trimmed = aliasData.trim();
+          
+          // Try to parse as JSON array
+          if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+            try {
+              const parsed = JSON.parse(trimmed);
+              rawAliases = Array.isArray(parsed) ? parsed : [trimmed];
+            } catch (e) {
+              // If parsing fails, treat as comma-separated
+              rawAliases = trimmed.split(',');
+            }
+          }
+          // Comma-separated string
+          else if (trimmed.includes(',')) {
+            rawAliases = trimmed.split(',');
+          }
+          // Single alias string
+          else {
+            rawAliases = [trimmed];
+          }
+        }
+        
+        // Clean each alias: remove weird characters, trim whitespace
+        return rawAliases
+          .map(alias => {
+            if (typeof alias !== 'string') return '';
+            
+            return alias
+              .trim()
+              // Remove control characters, zero-width spaces, etc.
+              .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g, '')
+              // Remove any other weird invisible characters
+              .replace(/\s+/g, ' ') // Normalize multiple spaces to single space
+              .trim();
+          })
+          .filter(alias => alias && alias.length > 0); // Remove empty strings
+      }
+      
+      /**
+       * Clean and normalize aliases before saving to database
+       */
+      function cleanAliasesForSave(aliases) {
+        if (!Array.isArray(aliases)) return [];
+        
+        return aliases
+          .map(alias => {
+            if (typeof alias !== 'string') return '';
+            
+            return alias
+              .trim()
+              // Remove ALL control characters, zero-width spaces, invisible chars
+              .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g, '')
+              // Normalize whitespace
+              .replace(/\s+/g, ' ')
+              .trim();
+          })
+          .filter(alias => alias && alias.length > 0); // Remove empty entries
+      }
+
       async function loadStudents() {
         if (!supabase) {
           console.error('❌ Supabase not initialized');
@@ -2690,7 +2768,7 @@
                 balance: s.balance || 0,
                 phone: s.phone || '',
                 email: primaryEmail,
-                aliases: s.aliases || [],
+                aliases: parseAliasesField(s.aliases),
                 notes: s.notes || '',
                 status: s.status || 'active',
                 showInCalendar: s.show_in_grid !== false
@@ -2770,7 +2848,7 @@
               : parseInt(student.balance) || 0,
             phone: student.phone,
             email: primaryEmail,
-            aliases: student.aliases || [],
+            aliases: cleanAliasesForSave(student.aliases || []),
             notes: student.notes || '',
             status: student.status || 'active',
             show_in_grid: student.showInCalendar !== false
