@@ -4861,12 +4861,16 @@
      * @returns {Promise<void>}
      * 
      * @description
-     * Loads and initializes all portal sections in sequence:
+     * OPTIMIZED LOADING STRATEGY:
      * 1. Validates currentStudent exists
-     * 2. Loads payment history from all sources
-     * 3. Loads student profile data and displays schedule countdown
-     * 4. Loads classroom notes (filtered by payment status)
-     * 5. Loads NCLEX systems progress
+     * 2. Shows basic student info IMMEDIATELY (name, welcome message)
+     * 3. Loads everything else IN PARALLEL (non-blocking):
+     *    - Payment history
+     *    - Classroom notes
+     *    - Systems progress
+     * 
+     * This ensures students see the page instantly and can access Practice Tests
+     * while data loads in the background.
      * 
      * Handles errors by signing out user and redirecting to login.
      * 
@@ -4886,21 +4890,56 @@
           return;
         }
         
-        // Load student data
-        const payments = await loadPaymentHistory(currentStudent);
-        currentPayments = payments; // Store globally for other functions
-        await loadStudentData(currentStudent, payments);
+        // PHASE 1: Show basic student info IMMEDIATELY (non-blocking)
+        showBasicStudentInfo(currentStudent);
         
-        // Load notes based on payment status (then sync carousel)
-        await loadClassroomUpdates(payments);
-        await loadSystemsProgress();
+        // PHASE 2: Load everything else IN PARALLEL (non-blocking)
+        // This allows the page to be interactive while data loads
+        Promise.all([
+          // Load payments and update payment stats
+          loadPaymentHistory(currentStudent).then(payments => {
+            currentPayments = payments;
+            loadStudentData(currentStudent, payments);
+            return payments;
+          }).then(payments => {
+            // Load notes after payments (needs payment data)
+            return loadClassroomUpdates(payments);
+          }),
+          
+          // Load systems progress independently
+          loadSystemsProgress()
+        ]).catch(error => {
+          console.error('Error loading portal data:', error);
+          // Don't redirect on partial failures - let students use what loaded
+        });
         
       } catch (error) {
-        console.error('Error loading portal:', error);
-        // Sign out and redirect instead of showing alert
+        console.error('Critical error loading portal:', error);
+        // Sign out and redirect only on critical failures
         await supabase.auth.signOut();
         window.location.href = 'Login.html';
       }
+    }
+    
+    /**
+     * Shows basic student info immediately without waiting for database queries.
+     * This makes the page feel instant and interactive.
+     */
+    function showBasicStudentInfo(student) {
+      // Update welcome message immediately
+      const welcomeMessage = document.getElementById('welcomeMessage');
+      if (welcomeMessage) {
+        welcomeMessage.innerHTML = `
+          <span class="title-line">Welcome,</span>
+          <span class="name-line">Nurse ${student.name}</span>
+        `;
+        welcomeMessage.style.opacity = '1';
+      }
+      
+      // Show loading state for stats
+      document.getElementById('lastPaid').textContent = '...';
+      document.getElementById('lastPaidDate').textContent = 'Loading';
+      document.getElementById('totalUnpaid').textContent = '...';
     }
     
     // ==========================================================================
@@ -5134,18 +5173,6 @@
       currentGroupScheduleData = null;
       currentGroupScheduleSummary = null;
       setProfileScheduleText('Loading latest schedule...');
-      // Update welcome message
-      const welcomeMessage = document.getElementById('welcomeMessage');
-      if (welcomeMessage) {
-        welcomeMessage.innerHTML = `
-          <span class="title-line">Welcome,</span>
-          <span class="name-line">Nurse ${student.name}</span>
-        `;
-        // Fade in the message now that it has the correct name
-        setTimeout(() => {
-          welcomeMessage.style.opacity = '1';
-        }, 50);
-      }
       
       // SIMPLE: Just calculate totals from payments array
       const currentMonth = new Date().getMonth();
