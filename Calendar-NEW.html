@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ARNOMA Calendar - Official Payment Logic</title>
+  
+  <!-- Supabase Configuration -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+  <script>
+    // Supabase Client Initialization
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    // ============================================================
+    // 🎯 OFFICIAL PAYMENT ALLOCATION LOGIC
+    // ============================================================
+    // This is the ONLY correct implementation as per specification
+    
+    /**
+     * Allocate payments to classes using REVERSE CHRONOLOGICAL logic
+     * 
+     * RULES:
+     * 1. Payments apply to CLASS DATES, not payment dates
+     * 2. Apply from NEWEST → OLDEST classes (reverse chronological)
+     * 3. Credits apply FIRST before any cash payment
+     * 4. Never skip a class
+     * 5. Use student.price_per_class for all calculations
+     * 
+     * @param {Object} student - Student record with id, name, price_per_class, balance (credit)
+     * @param {Array} classes - Array of class dates for this student (sorted old→new for display)
+     * @param {Array} payments - Array of payment records (amount, date, id)
+     * @returns {Array} - Classes with status: 'paid', 'credit', or 'unpaid'
+     */
+    function allocatePaymentsToClasses(student, classes, payments) {
+      const pricePerClass = parseFloat(student.price_per_class) || 50;
+      let availableCredit = parseFloat(student.balance) || 0;
+      
+      // Calculate total payment amount
+      const totalPaid = payments.reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+      let remainingPayment = totalPaid;
+      
+      // Create a copy sorted NEWEST → OLDEST for allocation
+      const sortedForAllocation = [...classes].sort((a, b) => 
+        new Date(b.date) - new Date(a.date)
+      );
+      
+      // Map to store each class status
+      const classStatusMap = new Map();
+      
+      // Process classes from newest to oldest
+      for (const classDate of sortedForAllocation) {
+        const dateKey = classDate.date; // YYYY-MM-DD format
+        let classStatus = {
+          date: dateKey,
+          status: 'unpaid',
+          paidAmount: 0,
+          creditUsed: 0,
+          remaining: pricePerClass
+        };
+        
+        // STEP 1: Apply credit FIRST
+        if (availableCredit > 0) {
+          const creditToApply = Math.min(availableCredit, pricePerClass);
+          classStatus.creditUsed = creditToApply;
+          classStatus.paidAmount += creditToApply;
+          classStatus.remaining -= creditToApply;
+          availableCredit -= creditToApply;
+          
+          if (classStatus.remaining <= 0) {
+            classStatus.status = 'credit'; // Fully covered by credit
+          }
+        }
+        
+        // STEP 2: Apply cash payment if class still has remaining balance
+        if (classStatus.remaining > 0 && remainingPayment > 0) {
+          const paymentToApply = Math.min(remainingPayment, classStatus.remaining);
+          classStatus.paidAmount += paymentToApply;
+          classStatus.remaining -= paymentToApply;
+          remainingPayment -= paymentToApply;
+          
+          if (classStatus.remaining <= 0) {
+            classStatus.status = 'paid'; // Fully paid by cash
+          }
+        }
+        
+        // If class is fully paid (either by credit or cash or both), mark as paid
+        if (classStatus.remaining <= 0) {
+          if (classStatus.creditUsed === pricePerClass) {
+            classStatus.status = 'credit'; // Yellow dot - fully credit
+          } else {
+            classStatus.status = 'paid'; // Green dot - cash payment (may include some credit)
+          }
+        }
+        
+        classStatusMap.set(dateKey, classStatus);
+      }
+      
+      // Return classes in original display order (old→new) with status attached
+      return classes.map(c => ({
+        ...c,
+        ...classStatusMap.get(c.date)
+      }));
+    }
+    
+    /**
+     * Get all scheduled class dates for a student in a given month
+     * 
+     * @param {Object} student - Student record
+     * @param {Array} groups - All group schedules
+     * @param {number} year - Year
+     * @param {number} month - Month (0-11)
+     * @returns {Array} - Array of class objects with date, groupName, etc.
+     */
+    function getStudentClassesForMonth(student, groups, year, month) {
+      // Find student's group
+      const studentGroup = groups.find(g => 
+        (g.group_code && g.group_code === student.group) ||
+        (g.group_name && g.group_name.toLowerCase().includes(student.group?.toLowerCase()))
+      );
+      
+      if (!studentGroup || !studentGroup.schedule) {
+        return [];
+      }
+      
+      const classes = [];
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      
+      // Generate class dates based on schedule
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day);
+        const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        
+        // Check if this day matches the group's schedule
+        // Assuming schedule has days like: { monday: true, wednesday: true, ... }
+        const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dayOfWeek];
+        
+        if (studentGroup.schedule[dayName]) {
+          const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+          
+          classes.push({
+            date: dateStr,
+            groupName: studentGroup.group_name || studentGroup.name,
+            groupCode: studentGroup.group_code,
+            dayOfWeek: dayName,
+            // Add time info if available
+            time: studentGroup.time || '12:00 PM'
+          });
+        }
+      }
+      
+      return classes;
+    }
+    
+    /**
+     * Load all data and build calendar
+     */
+    async function loadCalendarData(year, month) {
+      try {
+        // Load students
+        const { data: students, error: studentsError } = await supabase
+          .from('students')
+          .select('*')
+          .eq('show_in_grid', true);
+        
+        if (studentsError) throw studentsError;
+        
+        // Load groups
+        const { data: groups, error: groupsError } = await supabase
+          .from('groups')
+          .select('*');
+        
+        if (groupsError) throw groupsError;
+        
+        // Load all payments (both manual and Zelle)
+        const { data: manualPayments, error: manualError } = await supabase
+          .from('payment_records')
+          .select('*')
+          .eq('status', 'paid');
+        
+        const { data: zellePayments, error: zelleError } = await supabase
+          .from('payments')
+          .select('*');
+        
+        if (manualError) throw manualError;
+        if (zelleError) throw zelleError;
+        
+        // Build calendar data for each student
+        const calendarData = students.map(student => {
+          // Get this student's classes for the month
+          const classes = getStudentClassesForMonth(student, groups, year, month);
+          
+          // Get this student's payments (match by student_id, linked_student_id, or name)
+          const studentPayments = [
+            ...(manualPayments || []).filter(p => 
+              p.student_id === student.id || 
+              p.student_name?.toLowerCase() === student.name?.toLowerCase()
+            ),
+            ...(zellePayments || []).filter(p => 
+              p.linked_student_id === student.id || 
+              p.student_name?.toLowerCase() === student.name?.toLowerCase()
+            )
+          ].map(p => ({
+            amount: parseFloat(p.amount) || 0,
+            date: p.payment_date || p.email_date || p.created_at,
+            id: p.id,
+            source: p.payment_method || 'zelle'
+          }));
+          
+          // Allocate payments to classes using OFFICIAL LOGIC
+          const classesWithStatus = allocatePaymentsToClasses(student, classes, studentPayments);
+          
+          return {
+            student,
+            classes: classesWithStatus,
+            totalClasses: classesWithStatus.length,
+            paidClasses: classesWithStatus.filter(c => c.status === 'paid' || c.status === 'credit').length,
+            unpaidClasses: classesWithStatus.filter(c => c.status === 'unpaid').length
+          };
+        });
+        
+        return calendarData;
+        
+      } catch (error) {
+        console.error('❌ Failed to load calendar data:', error);
+        return [];
+      }
+    }
+    
+    /**
+     * Render calendar grid
+     */
+    function renderCalendar(year, month, calendarData) {
+      // TODO: Build HTML calendar grid with:
+      // - Green dots for 'paid' classes
+      // - Yellow dots for 'credit' classes  
+      // - Red dots for 'unpaid' classes
+      
+      console.log('📅 Calendar data for', year, month, calendarData);
+    }
+    
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', async () => {
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = today.getMonth();
+      
+      const calendarData = await loadCalendarData(year, month);
+      renderCalendar(year, month, calendarData);
+    });
+  </script>
+  
+  <style>
+    /* Minimal calendar styles */
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #0f172a;
+      color: white;
+    }
+    
+    .calendar-container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+    
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      margin: 0 2px;
+    }
+    
+    .status-dot.paid {
+      background: #22c55e; /* Green */
+    }
+    
+    .status-dot.credit {
+      background: #eab308; /* Yellow */
+    }
+    
+    .status-dot.unpaid {
+      background: #ef4444; /* Red */
+    }
+  </style>
+</head>
+<body>
+  <div class="calendar-container">
+    <h1>🗓️ ARNOMA Calendar - New Payment Logic</h1>
+    <div id="calendar-grid"></div>
+  </div>
+</body>
+</html>

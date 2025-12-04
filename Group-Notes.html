@@ -666,7 +666,7 @@
               ? `<button class="btn-access revoke" onclick="revokeAccess(${note.id}, '${note.title.replace(/'/g, "\\'")}')">🚫 Hide from ${currentGroup}</button>`
               : `<button class="btn-access" onclick="grantAccess(${note.id}, '${note.title.replace(/'/g, "\\'")}')">✓ Show to ${currentGroup}</button>`
             }
-            <button class="btn-view" onclick="viewNote('${note.pdf_url}')">👁️</button>
+            <button class="btn-view" onclick="viewNote(${note.id})">👁️</button>
           </div>
         </div>
       `;
@@ -785,10 +785,28 @@
     }
 
     // ===== VIEW NOTE =====
-    async function viewNote(filePath) {
+    async function viewNote(noteId) {
       try {
+        console.log('Attempting to view note id:', noteId);
+
+        const { data: note, error: noteError } = await supabase
+          .from('student_notes')
+          .select('pdf_url')
+          .eq('id', noteId)
+          .single();
+
+        if (noteError) {
+          console.error('Failed to fetch note metadata:', noteError);
+          throw noteError;
+        }
+
+        const filePath = note?.pdf_url;
+        if (!filePath) {
+          throw new Error('Missing file path for note');
+        }
+
         console.log('Attempting to view file at path:', filePath);
-        
+
         const { data, error } = await supabase.storage
           .from(BUCKET_NAME)
           .createSignedUrl(filePath, 3600);
@@ -802,7 +820,7 @@
         window.open(data.signedUrl, '_blank');
       } catch (error) {
         console.error('Full error:', error);
-        alert('Failed to view note: ' + error.message + '\nPath: ' + filePath);
+        alert('Failed to view note: ' + error.message);
       }
     }
 

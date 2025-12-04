@@ -58,7 +58,7 @@
     /* ===== HEADER ===== */
     .header {
       background: rgba(255, 255, 255, 0.03);
-      backdrop-filter: blur(16px);
+      backdrop-filter: blur(var(--modal-blur));
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 20px;
       padding: 24px;
@@ -206,7 +206,7 @@
     /* ===== UPLOAD SECTION ===== */
     .upload-card {
       background: rgba(255, 255, 255, 0.03);
-      backdrop-filter: blur(16px);
+      backdrop-filter: blur(var(--modal-blur));
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 16px;
       padding: 30px;
@@ -415,7 +415,7 @@
 
     .note-card {
       background: rgba(255, 255, 255, 0.03);
-      backdrop-filter: blur(16px);
+      backdrop-filter: blur(var(--modal-blur));
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 14px;
       padding: 20px;
@@ -600,6 +600,7 @@
       }
     }
   </style>
+<style>:root{--panel-blur:8px;--card-blur:8px;--modal-blur:14px;--list-blur:0px;}</style>
 </head>
 <body>
   <div class="container">
@@ -865,19 +866,27 @@
           <div>Loading notes...</div>
         </div>
       </div>
+      <input 
+        type="file" 
+        id="replaceFileInput" 
+        accept=".pdf" 
+        style="display: none;" 
+        onchange="handleReplaceFile(event)"
+      />
     </div>
   </div>
 
-  <script>
+    <script>
     // ===== SUPABASE CONFIGURATION =====
     const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const BUCKET_NAME = 'student-notes';
 
-    let singleFile = null;
-    let bulkFiles = [];
-    let allNotes = [];
+  let singleFile = null;
+  let bulkFiles = [];
+  let allNotes = [];
+  let replaceTarget = null;
 
     // ===== INITIALIZATION =====
     (async function init() {
@@ -1344,6 +1353,9 @@
             <button class="note-action-btn" onclick="viewNote('${note.pdf_url}')">
               👁️ View
             </button>
+            <button class="note-action-btn" onclick="openReplaceFileDialog(${note.id}, '${encodeURIComponent(note.pdf_url || '')}', '${note.title.replace(/'/g, "\\'")}')">
+              ♻️ Replace PDF
+            </button>
             <button class="note-action-btn danger" onclick="deleteNote(${note.id}, '${note.title.replace(/'/g, "\\'")}')">
               🗑️ Delete
             </button>
@@ -1371,6 +1383,97 @@
       } catch (error) {
         console.error('Full error:', error);
         alert('Failed to view note: ' + error.message + '\nPath: ' + filePath);
+      }
+    }
+
+    // ===== REPLACE NOTE FILE =====
+    function openReplaceFileDialog(noteId, encodedPdfUrl, title) {
+      const pdfUrl = decodeURIComponent(encodedPdfUrl || '');
+      if (!pdfUrl) {
+        alert('This note is missing a file path. Please delete and re-upload it instead.');
+        return;
+      }
+
+      replaceTarget = { noteId, pdfUrl, title };
+      const input = document.getElementById('replaceFileInput');
+      if (!input) {
+        alert('Replace input not found. Please reload the page and try again.');
+        return;
+      }
+
+      input.value = '';
+      input.click();
+    }
+
+    async function handleReplaceFile(event) {
+      const file = event.target.files[0];
+
+      if (!file) {
+        replaceTarget = null;
+        return;
+      }
+
+      if (!replaceTarget) {
+        alert('Select a note to replace before choosing a file.');
+        event.target.value = '';
+        return;
+      }
+
+      if (file.type !== 'application/pdf') {
+        alert('Please select a PDF file.');
+        event.target.value = '';
+        replaceTarget = null;
+        return;
+      }
+
+      if (file.size > 50 * 1024 * 1024) {
+        alert('Files larger than 50MB are not supported.');
+        event.target.value = '';
+        replaceTarget = null;
+        return;
+      }
+
+      const confirmed = confirm(`Replace "${replaceTarget.title}" with "${file.name}"?`);
+      if (!confirmed) {
+        event.target.value = '';
+        replaceTarget = null;
+        return;
+      }
+
+      try {
+        const { error: uploadError } = await supabase.storage
+          .from(BUCKET_NAME)
+          .upload(replaceTarget.pdfUrl, file, {
+            cacheControl: '3600',
+            upsert: true
+          });
+
+        if (uploadError) throw uploadError;
+
+        const { error: dbError } = await supabase
+          .from('student_notes')
+          .update({
+            file_name: file.name,
+            file_size: file.size
+          })
+          .eq('id', replaceTarget.noteId);
+
+        if (dbError) throw dbError;
+
+        const note = allNotes.find(n => n.id === replaceTarget.noteId);
+        if (note) {
+          note.file_name = file.name;
+          note.file_size = file.size;
+        }
+
+        filterNotes();
+        alert('✅ PDF replaced successfully!');
+      } catch (error) {
+        console.error('Replace file error:', error);
+        alert('Failed to replace PDF: ' + error.message);
+      } finally {
+        event.target.value = '';
+        replaceTarget = null;
       }
     }
 

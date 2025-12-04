@@ -2670,13 +2670,18 @@
         <div class="modal-body" id="creditModalBody" style="max-height: calc(80vh - 240px);">
           <!-- Content will be dynamically inserted here -->
         </div>
-        <div class="modal-footer" style="padding: 20px 30px; border-top: 1px solid var(--card-border); display: flex; gap: 12px; justify-content: flex-end;">
-          <button class="btn-secondary" id="cancelCreditBtn" style="padding: 12px 24px; border-radius: 12px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-primary); cursor: pointer; font-weight: 600; transition: var(--transition);">
-            Skip
+        <div class="modal-footer" style="padding: 20px 30px; border-top: 1px solid var(--card-border); display: flex; gap: 12px; justify-content: space-between;">
+          <button class="btn-danger" id="skipAllCreditBtn" style="padding: 12px 24px; border-radius: 12px; border: 1px solid #ff4757; background: rgba(255, 71, 87, 0.1); color: #ff4757; cursor: pointer; font-weight: 600; transition: var(--transition);">
+            Skip All
           </button>
-          <button class="btn-primary" id="applyCreditBtn" style="padding: 12px 24px; border-radius: 12px; border: none; background: var(--primary-gradient); color: #000; cursor: pointer; font-weight: 600; transition: var(--transition);">
-            Confirm
-          </button>
+          <div style="display: flex; gap: 12px;">
+            <button class="btn-secondary" id="cancelCreditBtn" style="padding: 12px 24px; border-radius: 12px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text-primary); cursor: pointer; font-weight: 600; transition: var(--transition);">
+              Skip Student
+            </button>
+            <button class="btn-primary" id="applyCreditBtn" style="padding: 12px 24px; border-radius: 12px; border: none; background: var(--primary-gradient); color: #000; cursor: pointer; font-weight: 600; transition: var(--transition);">
+              Confirm
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2963,7 +2968,7 @@
         }
 
         if (typeof scheduleStr !== 'string') {
-          console.warn('Invalid schedule string:', scheduleStr);
+          // console.warn('Invalid schedule string:', scheduleStr);
           return [];
         }
 
@@ -3023,7 +3028,7 @@
           // More flexible regex to handle various formats
           const match = part.match(/^([A-Za-z/]+)\s+(.+)$/);
           if (!match) {
-            console.warn('Failed to parse schedule part:', part);
+            // console.warn('Failed to parse schedule part:', part);
             return;
           }
 
@@ -3031,7 +3036,7 @@
           const timeSegment = ensureAMPMFormatLocal(match[2]);
 
           if (!timeSegment) {
-            console.warn('Failed to parse time:', match[2]);
+            // console.warn('Failed to parse time:', match[2]);
             return;
           }
 
@@ -3040,7 +3045,7 @@
             if (fullDay) {
               sessions.push({ day: fullDay, time: timeSegment });
             } else {
-              console.warn('Unrecognized day name:', day);
+              // console.warn('Unrecognized day name:', day);
             }
           });
         });
@@ -3060,12 +3065,9 @@
       }
 
       function formatDateYYYYMMDD(dateInput) {
-        // Match the working index.html: use toISOString().split('T')[0]
-        // This extracts the UTC date part which is already LA time (due to -12hr offset)
-        const date = dateInput instanceof Date ? dateInput : new Date(dateInput);
-        if (isNaN(date.getTime())) return '';
-        
-        return date.toISOString().split('T')[0];
+        const parts = getLAParts(dateInput);
+        if (!parts) return '';
+        return `${parts.year}-${parts.month}-${parts.day}`;
       }
 
       const monthCache = new Map();
@@ -3092,7 +3094,7 @@
           const raw = localStorage.getItem(PAYMENT_ALLOCATION_RESOLUTIONS_KEY);
           paymentAllocationResolutionsCache = raw ? JSON.parse(raw) : {};
         } catch (error) {
-          console.warn('Unable to read payment allocation resolutions from localStorage', error);
+          // console.warn('Unable to read payment allocation resolutions from localStorage', error);
           paymentAllocationResolutionsCache = {};
         }
         return paymentAllocationResolutionsCache;
@@ -3104,7 +3106,7 @@
         try {
           localStorage.setItem(PAYMENT_ALLOCATION_RESOLUTIONS_KEY, JSON.stringify(resolutions));
         } catch (error) {
-          console.warn('Unable to persist payment allocation resolutions', error);
+          // console.warn('Unable to persist payment allocation resolutions', error);
         }
       }
 
@@ -3228,13 +3230,14 @@
         const payments = window.paymentsCache || [];
         const creditLookup = creditPaymentsLookup || {};
 
-        const studentIndexes = buildStudentIndexes(students);
-        aggregates.activeStudents = studentIndexes.activeIds.size;
-        const studentsByGroup = buildStudentsByGroup(students);
-        const paymentIndexes = buildPaymentIndexes(payments, studentIndexes);
-  const creditEventsByDate = buildCreditEventsByDate(creditLookup, studentIndexes.byId);
-  const ambiguousPaymentAllocations = [];
-  buildStudentPaymentCoverage({ students, groups, payments });
+    const studentIndexes = buildStudentIndexes(students);
+    aggregates.activeStudents = studentIndexes.activeIds.size;
+    const studentsByGroup = buildStudentsByGroup(students);
+    const paymentIndexes = buildPaymentIndexes(payments, studentIndexes);
+    const studentPaymentMatchCache = new Map();
+    const creditEventsByDate = buildCreditEventsByDate(creditLookup, studentIndexes.byId);
+    const ambiguousPaymentAllocations = [];
+    window.excessPaymentsForCredit = [];
 
         addPaymentEvents(paymentIndexes.byDate);
         addCreditEvents(creditEventsByDate);
@@ -3305,19 +3308,20 @@
 
         if (unresolvedAllocations.length) {
           window.paymentAllocationAlerts = unresolvedAllocations;
-          console.group('⚠️ Payment allocation requires review');
-          const sample = unresolvedAllocations.slice(0, 25);
-          sample.forEach(entry => {
-            console.warn(
-              `Student ${entry.studentName || entry.studentId} has $${entry.amount.toFixed(2)} from payment on ${entry.payDate || 'unknown date'} that could not be assigned between Nov 1 and today.`
-            );
-          });
-          if (unresolvedAllocations.length > sample.length) {
-            console.warn(
-              `+${unresolvedAllocations.length - sample.length} additional payment${unresolvedAllocations.length - sample.length === 1 ? '' : 's'} require review. Use the on-screen review drawer to inspect all of them.`
-            );
-          }
-          console.groupEnd();
+          // Payment allocation alerts handled by UI drawer
+          // console.group('⚠️ Payment allocation requires review');
+          // const sample = unresolvedAllocations.slice(0, 25);
+          // sample.forEach(entry => {
+          //   console.warn(
+          //     `Student ${entry.studentName || entry.studentId} has $${entry.amount.toFixed(2)} from payment on ${entry.payDate || 'unknown date'} that could not be assigned between Nov 1 and today.`
+          //   );
+          // });
+          // if (unresolvedAllocations.length > sample.length) {
+          //   console.warn(
+          //     `+${unresolvedAllocations.length - sample.length} additional payment${unresolvedAllocations.length - sample.length === 1 ? '' : 's'} require review. Use the on-screen review drawer to inspect all of them.`
+          //   );
+          // }
+          // console.groupEnd();
         } else {
           window.paymentAllocationAlerts = [];
         }
@@ -3329,23 +3333,38 @@
         // ===== Helper Functions (scoped to computeMonthData) =====
 
         function normalizeNameKey(value) {
+          if (!value) return '';
+          
           return value
-            ? value
-                .toString()
-                .trim()
-                .toLowerCase()
-                .replace(/[^a-z0-9\s]/g, '')
-                .replace(/\s+/g, '') // Remove ALL spaces for consistent matching
-            : '';
+            .toString()
+            .trim()
+            .toLowerCase()
+            // Normalize Unicode characters (handles accents, Armenian, Cyrillic, etc.)
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '') // Remove diacritics/accents
+            // Keep letters (including Unicode), numbers, and spaces - remove only punctuation
+            .replace(/[^\p{L}\p{N}\s]/gu, '')
+            .replace(/\s+/g, ''); // Remove ALL spaces for consistent matching
         }
 
         function parseAliasList(value) {
           if (!value) return [];
           if (Array.isArray(value)) return value;
           if (typeof value === 'string') {
-            if (value.includes('|||')) return value.split('|||').map(v => v.trim()).filter(Boolean);
-            if (value.includes(',')) return value.split(',').map(v => v.trim()).filter(Boolean);
-            return [value];
+            const trimmed = value.trim();
+            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+              try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed)) {
+                  return parsed.map(entry => (typeof entry === 'string' ? entry.trim() : entry)).filter(Boolean);
+                }
+              } catch (err) {
+                // Not valid JSON, fall back to delimiter parsing
+              }
+            }
+            if (trimmed.includes('|||')) return trimmed.split('|||').map(v => v.trim()).filter(Boolean);
+            if (trimmed.includes(',')) return trimmed.split(',').map(v => v.trim()).filter(Boolean);
+            return [trimmed];
           }
           return [];
         }
@@ -3639,504 +3658,166 @@
           return byDate;
         }
 
-  function buildStudentPaymentCoverage(options = {}) {
-          const students = options.students || window.studentsCache || [];
-          const groups = options.groups || window.groupsCache || [];
-          const payments = options.payments || window.paymentsCache || [];
-          const coverageStart = options.coverageStart || COVERAGE_WINDOW_START || CALENDAR_START_DATE_STR;
-          const coverageMap = new Map();
-          const stats = {
-            studentsEvaluated: 0,
-            studentsWithPayments: 0,
-            classesCovered: 0,
-            totalPayments: payments.length,
-          };
+        function normalizePaymentDate(payment) {
+          if (!payment) return '';
+          const source =
+            payment.emailDate ||
+            payment.email_date ||
+            payment.payDate ||
+            payment.payment_date ||
+            payment.date ||
+            payment.timestamp ||
+            payment.created_at ||
+            payment.raw?.email_date ||
+            payment.raw?.date;
+          if (!source) return '';
+          return normalizeDateInput(source) || '';
+        }
 
-          // Make results globally accessible for status checks
-          window.studentPaymentCoverage = coverageMap;
-          window.studentPaymentCoverageStats = stats;
+        function normalizeSimpleName(value) {
+          if (!value) return '';
+          return normalizeNameKey(value);
+        }
 
-          if (!Array.isArray(students) || !students.length || !Array.isArray(payments) || !payments.length) {
-            return coverageMap;
+        function getStudentAliasNames(student) {
+          const aliasFields = [student?.aliases, student?.alias_list, student?.alias];
+          const names = new Set();
+          aliasFields.forEach(value => {
+            parseAliasList(value).forEach(alias => {
+              const normalized = normalizeSimpleName(alias);
+              if (normalized) names.add(normalized);
+            });
+          });
+          return Array.from(names);
+        }
+
+        function getStudentPaymentCacheKeys(student) {
+          const keys = [];
+          if (student?.id != null) {
+            keys.push(`id:${student.id}`);
           }
+          const normalizedName = normalizeSimpleName(student?.name || student?.student_name);
+          if (normalizedName) {
+            keys.push(`name:${normalizedName}`);
+          }
+          return keys;
+        }
+
+        function collectPaymentsForStudentSimple(student) {
+          if (!student) return [];
+          const cacheKeys = getStudentPaymentCacheKeys(student);
+          const existingKey = cacheKeys.find(key => studentPaymentMatchCache.has(key));
+          if (existingKey) {
+            return studentPaymentMatchCache.get(existingKey);
+          }
+
+          const matchNames = new Set();
+          const studentName = normalizeSimpleName(student?.name || student?.student_name);
+          if (studentName) {
+            matchNames.add(studentName);
+          }
+          getStudentAliasNames(student).forEach(alias => matchNames.add(alias));
+
+          const idKey = student?.id != null ? String(student.id) : null;
+          const matchedPayments = (payments || [])
+            .filter(payment => doesPaymentBelongToStudent(payment, idKey, matchNames))
+            .map(payment => {
+              const dateStr = normalizePaymentDate(payment);
+              if (!dateStr) return null;
+              const amount =
+                Number(payment.amount) ||
+                Number(payment.amountUSD) ||
+                Number(payment.amount_paid_usd) ||
+                Number(payment.total) ||
+                0;
+              const paymentId =
+                payment.id ||
+                payment.gmail_id ||
+                payment.payment_id ||
+                payment.resend_id ||
+                payment.record_id ||
+                `payment-${dateStr}-${Math.random().toString(36).slice(2, 8)}`;
+              return {
+                id: paymentId,
+                amount,
+                dateStr,
+                raw: payment,
+              };
+            })
+            .filter(Boolean);
+
+          if (cacheKeys.length) {
+            cacheKeys.forEach(key => {
+              studentPaymentMatchCache.set(key, matchedPayments);
+            });
+          }
+
+          return matchedPayments;
+        }
+
+        function doesPaymentBelongToStudent(payment, idKey, matchNames) {
+          if (!payment || payment.ignored) return false;
+
+          if (idKey) {
+            const candidateIds = [
+              payment.student_id,
+              payment.studentid,
+              payment.studentId,
+              payment.linked_student_id,
+              payment.derived_student_id,
+            ]
+              .map(value => (value != null ? String(value) : null))
+              .filter(Boolean);
+            if (candidateIds.includes(idKey)) {
+              return true;
+            }
+          }
+
+          if (!matchNames || !matchNames.size) return false;
+
+          const paymentNames = [
+            payment.student_name,
+            payment.studentName,
+            payment.resolved_student_name,
+            payment.payer_name,
+            payment.payerName,
+            payment.payer,
+            payment.payer_name_raw,
+            payment.sender_name,
+          ]
+            .map(normalizeSimpleName)
+            .filter(Boolean);
+
+          return paymentNames.some(name => matchNames.has(name));
+        }
+
+        function findPaymentMatchForClass(student, dateStr) {
+          const studentPayments = collectPaymentsForStudentSimple(student);
+          if (!studentPayments.length) return null;
 
           const todayStr = formatDateYYYYMMDD(new Date());
-          const coverageStartStr = coverageStart || '2025-11-01';
-          const groupLookup = new Map();
-          const groupDatesCache = new Map();
-          const studentDatesCache = new Map();
+          const classDate = createDateFromDateStr(dateStr);
+          if (!classDate) return null;
 
-          (groups || []).forEach(group => {
-            const key = normalizeGroupKey(group?.group_code || group?.group_name || group?.name || '');
-            if (key) {
-              groupLookup.set(key, group);
-            }
+          const exactMatch = studentPayments.find(payment => payment.dateStr === dateStr);
+          if (exactMatch) {
+            return exactMatch;
+          }
+
+          if (dateStr >= todayStr) {
+            return null;
+          }
+
+          const classTime = classDate.getTime();
+          const lateMatch = studentPayments.find(payment => {
+            if (!payment.dateStr) return false;
+            const paymentDate = createDateFromDateStr(payment.dateStr);
+            if (!paymentDate) return false;
+            const daysDiff = Math.floor((paymentDate.getTime() - classTime) / (1000 * 60 * 60 * 24));
+            return daysDiff > 0 && daysDiff <= 7;
           });
 
-          const validStudents = students.filter(shouldIncludeStudent);
-
-          validStudents.forEach(student => {
-            stats.studentsEvaluated++;
-            const idKey = student?.id != null ? String(student.id) : null;
-            const classPrice = Math.max(getStudentPricePerClass(student), 0);
-            if (!classPrice) return;
-
-            const studentPayments = collectPaymentsForStudent(student, idKey);
-            if (!studentPayments.length) return;
-
-            const classDatesDesc = getClassDatesForStudent(student);
-            if (!classDatesDesc.length) return;
-
-            const coverage = allocatePaymentsToClasses(studentPayments, classDatesDesc, classPrice);
-            if (!coverage.size) return;
-
-            const keys = [];
-            if (idKey) keys.push(idKey);
-            const nameKey = normalizeNameKey(student?.name || student?.student_name);
-            if (nameKey) keys.push(`name:${nameKey}`);
-            keys.forEach(key => {
-              coverageMap.set(key, coverage);
-            });
-
-            stats.studentsWithPayments += 1;
-            stats.classesCovered += coverage.size;
-          });
-
-          return coverageMap;
-
-          function collectPaymentsForStudent(student, idKey) {
-            const matches = [];
-            const studentNameLower = (student?.name || student?.student_name || '').toLowerCase().trim();
-            const aliases = student?.aliases || student?.alias;
-            const aliasList = Array.isArray(aliases) ? aliases : aliases ? [aliases] : [];
-            const aliasLower = aliasList.map(alias => (alias || '').toLowerCase().trim()).filter(Boolean);
-
-            (payments || []).forEach(payment => {
-              if (!payment || payment.ignored) return;
-
-              // Priority 1: Direct ID matches take priority
-              if (idKey) {
-                const candidateIds = [
-                  payment.student_id,
-                  payment.studentid,
-                  payment.studentId,
-                  payment.linked_student_id,
-                  payment.derived_student_id,
-                ]
-                  .map(value => (value != null ? String(value) : null))
-                  .filter(Boolean);
-                if (candidateIds.includes(idKey)) {
-                  matches.push(payment);
-                  return;
-                }
-              }
-
-              // Priority 2: Name matching (student_name, payer_name, payer_name_raw)
-              const paymentStudentName = (payment.student_name || payment.studentName || '').toLowerCase().trim();
-              const paymentPayerName = (payment.payer_name || payment.payerName || payment.payer || '').toLowerCase().trim();
-              const paymentPayerRaw = (payment.payer_name_raw || payment.payerNameRaw || '').toLowerCase().trim();
-              
-              // CRITICAL FIX: Add resolved_student_name matching
-              const paymentResolvedName = (payment.resolved_student_name || '').toLowerCase().trim();
-
-              if (
-                studentNameLower &&
-                (paymentStudentName === studentNameLower ||
-                  paymentPayerName === studentNameLower ||
-                  paymentPayerRaw === studentNameLower ||
-                  paymentResolvedName === studentNameLower)
-              ) {
-                matches.push(payment);
-                return;
-              }
-
-              // Priority 3: Alias matching
-              if (
-                aliasLower.length &&
-                aliasLower.some(alias => alias && (alias === paymentStudentName || alias === paymentPayerName || alias === paymentPayerRaw || alias === paymentResolvedName))
-              ) {
-                matches.push(payment);
-                return;
-              }
-            });
-
-            return matches;
-          }
-
-          function getClassDatesForStudent(student) {
-            const cacheKey = student?.id != null ? String(student.id) : normalizeNameKey(student?.name || student?.student_name);
-            if (cacheKey && studentDatesCache.has(cacheKey)) {
-              return studentDatesCache.get(cacheKey);
-            }
-
-            const groupCodes = deriveStudentGroups(student);
-            
-            const classDates = new Set();
-            groupCodes.forEach(code => {
-              const normalized = normalizeGroupKey(code);
-              const groupRecord = groupLookup.get(normalized);
-              if (!groupRecord) return;
-              const groupDates = getGroupDates(groupRecord);
-              groupDates.forEach(dateStr => classDates.add(dateStr));
-            });
-
-            // Get student's absence data
-            const idKey = student?.id != null ? String(student.id) : normalizeNameKey(student?.name || student?.student_name);
-            const studentAbsences = (idKey && absencesData[idKey]) ? absencesData[idKey] : {};
-
-            const filtered = Array.from(classDates)
-              .filter(date => {
-                // Filter out dates beyond today or before coverage start
-                if (!date || date > todayStr || (coverageStartStr && date < coverageStartStr)) {
-                  return false;
-                }
-                // CRITICAL: Filter out absent dates - these should NOT count as classes for payment allocation
-                if (studentAbsences[date]) {
-                  return false;
-                }
-                return true;
-              })
-              .sort((a, b) => b.localeCompare(a));
-
-            if (cacheKey) {
-              studentDatesCache.set(cacheKey, filtered);
-            }
-
-            return filtered;
-          }
-
-          function getGroupDates(groupRecord) {
-            if (!groupRecord) return [];
-            const key = groupRecord.id != null
-              ? `id:${groupRecord.id}`
-              : normalizeGroupKey(groupRecord.group_code || groupRecord.group_name || groupRecord.name);
-
-            if (key && groupDatesCache.has(key)) {
-              return groupDatesCache.get(key);
-            }
-
-            const classDates = new Set();
-            const sessions = parseScheduleString(groupRecord.schedule || '');
-            
-            // CRITICAL FIX: Expand date range to include 6 months of historical data
-            // This allows historical payments from July-October to match classes
-            const today = new Date();
-            const sixMonthsAgo = new Date(today);
-            sixMonthsAgo.setMonth(today.getMonth() - 6);
-            
-            // Use the earlier of coverageStartStr or 6 months ago
-            const coverageDate = createDateFromDateStr(coverageStartStr);
-            const startDate = (coverageDate && coverageDate < sixMonthsAgo) ? coverageDate : sixMonthsAgo;
-            
-            // Get today's date in LA timezone using formatDateYYYYMMDD (which uses getLAParts internally)
-            const todayStrLA = formatDateYYYYMMDD(new Date());
-            
-            // Create endDate from today's date string to ensure it's at start of day
-            const endDate = createDateFromDateStr(todayStrLA);
-            if (!endDate) {
-              console.error('🔴 getGroupDates: Failed to create endDate from:', todayStrLA);
-              return [];
-            }
-            
-            const cursor = new Date(startDate);
-            cursor.setHours(0, 0, 0, 0);
-            
-            // Set endDate to end of day to ensure today is included
-            endDate.setHours(23, 59, 59, 999);
-
-            const groupName = groupRecord.group_name || groupRecord.name || groupRecord.group_code || 'Unknown';
-
-            if (sessions.length) {
-              let loopCount = 0;
-              const endDateStr = formatDateYYYYMMDD(endDate);
-              
-              while (true) {
-                const cursorDateStr = formatDateYYYYMMDD(cursor);
-                
-                // Break if we've passed the end date
-                if (cursorDateStr > endDateStr) {
-                  break;
-                }
-                
-                const laWeekdayIndex = getLAWeekdayIndex(cursor);
-                
-                sessions.forEach(session => {
-                  const weekdayIndex = dayNames.indexOf(session.day);
-                  if (weekdayIndex === laWeekdayIndex) {
-                    classDates.add(cursorDateStr);
-                  }
-                });
-                
-                cursor.setDate(cursor.getDate() + 1);
-                loopCount++;
-                
-                // Safety check to prevent infinite loops
-                if (loopCount > 1000) {
-                  console.error('🔴 getGroupDates: Loop exceeded 1000 iterations, breaking');
-                  break;
-                }
-              }
-            }
-
-            (Array.isArray(groupRecord.one_time_schedules) ? groupRecord.one_time_schedules : []).forEach(override => {
-              const normalizedDate = normalizeDateInput(override?.date);
-              if (
-                normalizedDate &&
-                normalizedDate >= coverageStartStr &&
-                normalizedDate <= todayStr
-              ) {
-                classDates.add(normalizedDate);
-              }
-            });
-
-            const sorted = Array.from(classDates).sort((a, b) => b.localeCompare(a));
-            if (key) {
-              groupDatesCache.set(key, sorted);
-            }
-            return sorted;
-          }
-
-          /**
-           * IMPROVED PAYMENT ALLOCATION LOGIC
-           * Matches payments to classes by date proximity with conflict detection
-           * Priority: Early payments for upcoming classes > Exact matches > Late payments for past classes
-           * 
-           * CONFLICT RESOLUTION:
-           * - Each payment can only be used once (prevents double-counting)
-           * - Detects when a payment could match multiple classes (overlap)
-           * - Logs ambiguous allocations for manual review
-           */
-          function allocatePaymentsToClasses(studentPayments, classDatesDesc, classPrice) {
-            if (!studentPayments.length || !classDatesDesc.length || !classPrice) return new Map();
-
-            // Initialize coverage map
-            const coverage = new Map();
-            const usedPaymentIds = new Set(); // Track which payments have been used
-            const coveredClasses = new Set(); // Track which classes are covered
-            const todayStr = formatDateYYYYMMDD(new Date());
-            
-            // STRATEGY: Process in order that prevents "wasting" payments
-            // 1. Exact matches for PAST classes only (already happened, no ambiguity)
-            // 2. Late payments for unpaid past classes (0-7 days late)
-            // 3. Early payments for future classes (1-5 days early)
-            // 4. Exact matches for TODAY/FUTURE classes (use remaining exact matches)
-            // 5. Mark remaining as unpaid/future
-            
-            // Pass 1: Exact matches for PAST classes only
-            classDatesDesc.forEach(classDate => {
-              if (classDate >= todayStr) return; // Skip today/future classes for now
-              
-              const exactPayment = studentPayments.find(p => {
-                const paymentId = p.id || p.gmail_id || p.payment_id;
-                if (usedPaymentIds.has(paymentId)) return false;
-
-                const paymentTimestamp = p.emailDate || p.email_date || p.date || p.timestamp;
-                if (!paymentTimestamp) return false;
-
-                const paymentDateStr = normalizeDateInput(paymentTimestamp);
-                return paymentDateStr === classDate;
-              });
-
-              if (exactPayment) {
-                const paymentId = exactPayment.id || exactPayment.gmail_id || exactPayment.payment_id;
-                usedPaymentIds.add(paymentId);
-                coveredClasses.add(classDate);
-                const paymentAmount = Number(exactPayment.amount || exactPayment.amountUSD || exactPayment.amount_paid_usd || 0);
-                coverage.set(classDate, {
-                  amount: paymentAmount,
-                  payDate: classDate,
-                  paymentIds: [paymentId],
-                  matchType: 'exact'
-                });
-              }
-            });
-            
-            // Pass 2: Match late payments for UNPAID past classes (within 7 days after)
-            // CRITICAL: Only apply to classes that are NOT already covered
-            // PRIORITY: Pay off past unpaid classes BEFORE applying to future classes
-            classDatesDesc.forEach(classDate => {
-              if (coveredClasses.has(classDate)) return; // Already covered by exact match
-
-              // Only process past classes that are UNPAID
-              if (classDate >= todayStr) return; // Skip future classes for now
-
-              const latePayment = studentPayments.find(p => {
-                const paymentId = p.id || p.gmail_id || p.payment_id;
-                if (usedPaymentIds.has(paymentId)) return false;
-
-                const paymentTimestamp = p.emailDate || p.email_date || p.date || p.timestamp;
-                if (!paymentTimestamp) return false;
-
-                const paymentDateStr = normalizeDateInput(paymentTimestamp);
-                const classDt = new Date(classDate + 'T12:00:00');
-                const payDt = new Date(paymentDateStr + 'T12:00:00');
-                const daysDiff = Math.floor((payDt - classDt) / (1000 * 60 * 60 * 24));
-
-                // Late payment: 0-7 days after class
-                return daysDiff >= 0 && daysDiff <= 7;
-              });
-
-              if (latePayment) {
-                const paymentId = latePayment.id || latePayment.gmail_id || latePayment.payment_id;
-                usedPaymentIds.add(paymentId);
-                coveredClasses.add(classDate); // Mark class as covered
-                const paymentAmount = Number(latePayment.amount || latePayment.amountUSD || latePayment.amount_paid_usd || 0);
-                const paymentDateStr = normalizeDateInput(latePayment.emailDate || latePayment.email_date || latePayment.date || latePayment.timestamp);
-                const daysAfter = Math.floor((new Date(paymentDateStr + 'T12:00:00') - new Date(classDate + 'T12:00:00')) / (1000 * 60 * 60 * 24));
-                coverage.set(classDate, {
-                  amount: paymentAmount,
-                  payDate: paymentDateStr,
-                  paymentIds: [paymentId],
-                  matchType: 'late'
-                });
-              }
-            });
-
-            // Pass 3: Match early payments for TODAY/FUTURE classes (within 5 days before)
-            // Process BEFORE exact matches for today/future to avoid wasting early payments
-            classDatesDesc.forEach(classDate => {
-              if (coveredClasses.has(classDate)) return; // Already covered
-
-              // Only look for early payments for today/future classes
-              if (classDate < todayStr) return;
-
-              const earlyPayment = studentPayments.find(p => {
-                const paymentId = p.id || p.gmail_id || p.payment_id;
-                if (usedPaymentIds.has(paymentId)) return false;
-
-                const paymentTimestamp = p.emailDate || p.email_date || p.date || p.timestamp;
-                if (!paymentTimestamp) return false;
-
-                const paymentDateStr = normalizeDateInput(paymentTimestamp);
-                const classDt = new Date(classDate + 'T12:00:00');
-                const payDt = new Date(paymentDateStr + 'T12:00:00');
-                const daysDiff = Math.floor((classDt - payDt) / (1000 * 60 * 60 * 24));
-
-                // Early payment: 1-5 days before class
-                return daysDiff >= 1 && daysDiff <= 5;
-              });
-
-              if (earlyPayment) {
-                const paymentId = earlyPayment.id || earlyPayment.gmail_id || earlyPayment.payment_id;
-                usedPaymentIds.add(paymentId);
-                coveredClasses.add(classDate);
-                const paymentAmount = Number(earlyPayment.amount || earlyPayment.amountUSD || earlyPayment.amount_paid_usd || 0);
-                const paymentDateStr = normalizeDateInput(earlyPayment.emailDate || earlyPayment.email_date || earlyPayment.date || earlyPayment.timestamp);
-                const daysBefore = Math.floor((new Date(classDate + 'T12:00:00') - new Date(paymentDateStr + 'T12:00:00')) / (1000 * 60 * 60 * 24));
-                coverage.set(classDate, {
-                  amount: paymentAmount,
-                  payDate: paymentDateStr,
-                  paymentIds: [paymentId],
-                  matchType: 'early'
-                });
-              }
-            });
-            
-            // Pass 4: Exact matches for TODAY/FUTURE classes (use any remaining exact payments)
-            classDatesDesc.forEach(classDate => {
-              if (coveredClasses.has(classDate)) return; // Already covered
-              if (classDate < todayStr) return; // Already processed past classes in Pass 1
-              
-              const exactPayment = studentPayments.find(p => {
-                const paymentId = p.id || p.gmail_id || p.payment_id;
-                if (usedPaymentIds.has(paymentId)) return false;
-
-                const paymentTimestamp = p.emailDate || p.email_date || p.date || p.timestamp;
-                if (!paymentTimestamp) return false;
-
-                const paymentDateStr = normalizeDateInput(paymentTimestamp);
-                return paymentDateStr === classDate;
-              });
-
-              if (exactPayment) {
-                const paymentId = exactPayment.id || exactPayment.gmail_id || exactPayment.payment_id;
-                usedPaymentIds.add(paymentId);
-                coveredClasses.add(classDate);
-                const paymentAmount = Number(exactPayment.amount || exactPayment.amountUSD || exactPayment.amount_paid_usd || 0);
-                coverage.set(classDate, {
-                  amount: paymentAmount,
-                  payDate: classDate,
-                  paymentIds: [paymentId],
-                  matchType: 'exact'
-                });
-              }
-            });
-
-            // Pass 5: SMART ALLOCATION - DISABLED
-            // REASON: This was force-matching old payments (30+ days) to unrelated classes
-            // Example: Oct 26 payment matched to Nov 28 class (+33 days) - incorrect!
-            // These excess payments should flow to credit balance instead of being force-allocated
-            // If re-enabled, add strict time window (e.g., max 14 days difference)
-            
-            /* DISABLED CODE - DO NOT USE
-            const unpaidPastClasses = classDatesDesc.filter(d => !coveredClasses.has(d) && d < todayStr);
-            const unmatchedPayments = studentPayments.filter(p => {
-              const paymentId = p.id || p.gmail_id || p.payment_id;
-              return !usedPaymentIds.has(paymentId);
-            });
-            
-            if (unpaidPastClasses.length > 0 && unmatchedPayments.length > 0) {
-              // Smart allocation logic here...
-            }
-            */
-            
-            // Pass 6: Mark remaining classes as unpaid or future
-            classDatesDesc.forEach(classDate => {
-              if (coveredClasses.has(classDate)) return; // Already covered
-
-              if (classDate >= todayStr) {
-                coverage.set(classDate, { amount: 0, payDate: null, paymentIds: [], matchType: 'future' });
-              } else {
-                coverage.set(classDate, { amount: 0, payDate: null, paymentIds: [], matchType: 'unpaid' });
-              }
-            });
-
-            // Check for REMAINING unmatched payments AFTER smart allocation
-            const remainingUnmatched = studentPayments.filter(p => {
-              const paymentId = p.id || p.gmail_id || p.payment_id;
-              return !usedPaymentIds.has(paymentId);
-            });
-
-            if (remainingUnmatched.length > 0) {
-              // Store excess payments for credit dialog (will be used by UI)
-              if (!window.excessPaymentsForCredit) {
-                window.excessPaymentsForCredit = [];
-              }
-              
-              remainingUnmatched.forEach(p => {
-                const paymentDateStr = normalizeDateInput(p.emailDate || p.email_date || p.date || p.timestamp);
-                const amount = Number(p.amount || 0);
-                const paymentId = p.id || p.gmail_id || p.payment_id;
-                
-                window.excessPaymentsForCredit.push({
-                  paymentId,
-                  studentId: p.student_id,
-                  studentName: p.payer_name || p.student_name,
-                  amount,
-                  date: paymentDateStr,
-                  reason: `${remainingUnmatched.length} payment(s) exceed class count`
-                });
-              });
-            }
-
-            return coverage;
-          }
-
-          function normalizePaymentDate(payment) {
-            if (!payment) return '';
-            const source =
-              payment.emailDate ||
-              payment.email_date ||
-              payment.payDate ||
-              payment.payment_date ||
-              payment.date ||
-              payment.timestamp ||
-              payment.created_at ||
-              payment.raw?.email_date ||
-              payment.raw?.date;
-            if (!source) return '';
-            return normalizeDateInput(source) || '';
-          }
+          return lateMatch || null;
         }
 
         function addPaymentEvents(paymentsByDate) {
@@ -4319,7 +4000,7 @@
           // Validate pricePerClass
           const validPrice = Number(pricePerClass) || 0;
           if (validPrice <= 0) {
-            console.warn(`Invalid pricePerClass for student ${student.name}: ${pricePerClass}`);
+            // console.warn(`Invalid pricePerClass for student ${student.name}: ${pricePerClass}`);
           }
 
           // Hide historical classes before system start or before the student existed
@@ -4374,40 +4055,22 @@
             };
           }
 
-          // Priority 3: CRITICAL FIX - Check payment coverage FIRST (before credits)
-          // This is the main payment matching engine - it MUST be checked for all classes
-          const coverageEntry = lookupPaymentCoverage(dateStr);
-          
-          // DEBUG: Log coverage lookup attempts
-          if (Math.random() < 0.02) { // Log 2% of lookups
-            debugLog(`🔎 Coverage lookup for ${studentName} on ${dateStr}:`, {
-              idKey,
-              studentName,
-              coverageExists: !!coverageEntry,
-              coverageAmount: coverageEntry?.amount,
-              validPrice,
-              globalCoverageSize: window.studentPaymentCoverage?.size
-            });
-          }
-          
-          // Priority 3: PAID via regular payment coverage
-          // CRITICAL: Trust payment allocation from buildStudentPaymentCoverage
-          // Don't compare amounts - student's current price may differ from price at time of payment
-          if (coverageEntry && coverageEntry.amount > 0) {
-            const paidAmount = coverageEntry.amount;
-            const matchType = coverageEntry.matchType || 'exact';
-            const matchLabel = {
-              exact: `Paid ${formatCurrency(paidAmount)} $`,
-              early: `Paid ${formatCurrency(paidAmount)} $ (early)`,
-              late: `Paid ${formatCurrency(paidAmount)} $ (late)`
-            }[matchType] || `Paid ${formatCurrency(paidAmount)} $`;
+          // Priority 3: Direct payment match using simple date rules
+          const paymentMatch = findPaymentMatchForClass(student, dateStr);
+          if (paymentMatch && paymentMatch.amount > 0) {
+            const paidAmount = paymentMatch.amount;
+            const overpayAmount = validPrice > 0 ? paidAmount - validPrice : 0;
+            const labelBase = `Paid ${formatCurrency(paidAmount)} $`;
+            const label = overpayAmount > 0
+              ? `${labelBase} (${formatCurrency(overpayAmount)} $ overpaid)`
+              : labelBase;
             
             return {
               status: 'paid',
-              label: matchLabel,
+              label,
               balance,
-              paidAmount: paidAmount,
-              paymentDate: coverageEntry.payDate,
+              paidAmount,
+              paymentDate: paymentMatch.dateStr,
             };
           }
 
@@ -4450,25 +4113,6 @@
               record?.created_at || record?.start_date || record?.startDate || record?.joined_at || record?.joinedAt
             );
             return created || CALENDAR_START_DATE_STR;
-          }
-
-          function lookupPaymentCoverage(targetDateStr) {
-            const store = window.studentPaymentCoverage;
-            if (!store || typeof store.get !== 'function') return null;
-
-            const keysToTry = [];
-            if (idKey) keysToTry.push(idKey);
-            const normalizedName = normalizeNameKey(studentName);
-            if (normalizedName) keysToTry.push(`name:${normalizedName}`);
-
-            for (const key of keysToTry) {
-              const perStudent = store.get(key);
-              if (perStudent && typeof perStudent.get === 'function' && perStudent.has(targetDateStr)) {
-                return perStudent.get(targetDateStr);
-              }
-            }
-
-            return null;
           }
 
         }
@@ -4516,7 +4160,7 @@
                 
                 // Validate student has required data
                 if (!studentName && !studentId) {
-                  console.warn('Student missing both name and id:', student);
+                  // console.warn('Student missing both name and id:', student);
                   return;
                 }
                 
@@ -4661,7 +4305,7 @@
           const student = students.find(s => s.id === studentId);
           
           if (!student) {
-            console.warn('Student not found:', studentId);
+            // console.warn('Student not found:', studentId);
             return null;
           }
           
@@ -4800,54 +4444,32 @@
             return studentName && (paymentName === studentName || payerName === studentName);
           });
           
-          // Get payment coverage (what's been allocated to classes)
-          const coverageMap = window.studentPaymentCoverage;
-          const coverage = coverageMap?.get(String(studentId));
-          
           // Sum all payments
           const totalPaid = studentPayments.reduce((sum, p) => {
             return sum + (Number(p.amount) || 0);
           }, 0);
           
-          // Sum all allocated payments (what's been used for classes)
-          let totalAllocated = 0;
-          if (coverage && typeof coverage.get === 'function') {
-            for (const [dateStr, allocationInfo] of coverage) {
-              totalAllocated += Number(allocationInfo.amount) || 0;
-            }
-          }
-          
-          // Calculate credit balance (payments not yet allocated)
-          const creditBalance = totalPaid - totalAllocated;
-          
-          // Get stored balance from student record (may include manual adjustments)
           const storedBalance = Number(student?.balance) || 0;
-          
-          // Use the greater of stored balance or calculated credit
-          // This accounts for manual balance additions
-          const finalBalance = Math.max(creditBalance, storedBalance);
-          
-          debugLog(`💰 Balance for ${student?.name || studentId}:`, {
+          const debugInfo = {
             totalPaid,
-            totalAllocated,
-            creditBalance,
             storedBalance,
-            finalBalance
-          });
+            finalBalance: storedBalance
+          };
+          debugLog(`💰 Balance for ${student?.name || studentId}:`, debugInfo);
           
           return {
             totalPaid,
-            totalAllocated,
-            creditBalance,
+            totalAllocated: 0,
+            creditBalance: storedBalance,
             storedBalance,
-            finalBalance
+            finalBalance: storedBalance
           };
         } catch (err) {
           console.error('Error calculating student balance:', err);
           return {
             totalPaid: 0,
             totalAllocated: 0,
-            creditBalance: 0,
+            creditBalance: Number(student?.balance) || 0,
             storedBalance: Number(student?.balance) || 0,
             finalBalance: Number(student?.balance) || 0
           };
@@ -5040,7 +4662,7 @@
             const studentId = record.student_id != null ? String(record.student_id) : null;
             const dateStr = normalizeDateInput(record.class_date || record.date);
             if (!studentId || !dateStr) {
-              console.warn('⚠️ Skipping invalid absence record:', record);
+              // console.warn('⚠️ Skipping invalid absence record:', record);
               return;
             }
             if (!absences[studentId]) {
@@ -5180,7 +4802,7 @@
                 debugLog('📧 Parsed email from JSON array:', cleanEmail);
               }
             } catch (e) {
-              console.warn('⚠️ Failed to parse email JSON:', e);
+              // console.warn('⚠️ Failed to parse email JSON:', e);
             }
           }
           
@@ -5235,6 +4857,65 @@
           }
           
           debugLog('✅ Absence email sent successfully:', result);
+          
+          // Log to sent_emails and notifications tables
+          try {
+            const resendEmailId = result?.id || result?.data?.id || null;
+            
+            // 1. Log to sent_emails table (for Email System)
+            const sentEmailRecord = {
+              recipient_email: cleanEmail,
+              recipient_name: student.name,
+              subject: `⚠️ Absence Notice - ${formattedDate}`,
+              html_content: emailHTML,
+              template_name: 'Absence Notice',
+              email_type: 'absence_notice',
+              resend_id: resendEmailId,
+              delivery_status: 'delivered',
+              status: 'sent',
+              sent_at: new Date().toISOString()
+            };
+            
+            const { data: logData, error: logError } = await supabase.from('sent_emails').insert([sentEmailRecord]).select();
+            
+            if (logError) {
+              console.error('⚠️ Failed to log to sent_emails:', logError);
+            } else {
+              debugLog('✅ Absence email logged to sent_emails:', logData[0]);
+            }
+            
+            // 2. Log to notifications table (for Notification Center bell)
+            const notificationRecord = {
+              type: 'email_sent',
+              category: 'email',
+              title: 'Absence Notice Sent',
+              description: `Sent absence notice to ${student.name} (${cleanEmail}) for ${formattedDate}`,
+              student_name: student.name,
+              metadata: {
+                student_id: studentId,
+                student_name: student.name,
+                email: cleanEmail,
+                absence_date: dateStr,
+                email_type: 'absence_notice',
+                subject: `⚠️ Absence Notice - ${formattedDate}`,
+                html: emailHTML
+              },
+              timestamp: new Date().toISOString(),
+              read: false,
+              created_at: new Date().toISOString()
+            };
+            
+            const { data: notifData, error: notifError } = await supabase.from('notifications').insert([notificationRecord]).select();
+            
+            if (notifError) {
+              console.error('⚠️ Failed to log to notifications:', notifError);
+            } else {
+              debugLog('✅ Notification logged:', notifData[0]);
+            }
+            
+          } catch (logErr) {
+            console.error('⚠️ Error logging notifications (email still sent):', logErr);
+          }
           
           return result;
         } catch (err) {
@@ -5488,7 +5169,7 @@
                 debugLog('📧 Parsed email from JSON array:', cleanEmail);
               }
             } catch (e) {
-              console.warn('⚠️ Failed to parse email JSON:', e);
+              // console.warn('⚠️ Failed to parse email JSON:', e);
             }
           }
           
@@ -5500,11 +5181,51 @@
           }
           
           // Get student balance and price
-          const balance = student.balance || 0;
-          const pricePerClass = student.price_per_class || 0;
+          const balance = Number(student.balance) || 0;
+          const pricePerClass = Number(student.price_per_class) || 0;
+          
+          console.log('📊 Student data from cache:', {
+            studentId,
+            name: student.name,
+            balance,
+            pricePerClass,
+            rawBalance: student.balance,
+            rawPrice: student.price_per_class
+          });
+          
+          // CRITICAL: Count ACTUAL unpaid red dots from the current calendar display
+          // The balance field may be stale - we need to count visible unpaid classes
+          let unpaidClassesFromCalendar = 0;
+          let unpaidAmountFromCalendar = 0;
+          
+          // Look at the currently displayed calendar cells (use .indicator-dot class)
+          const calendarDots = document.querySelectorAll(`.indicator-dot[data-student-id="${studentId}"]`);
+          console.log(`🔴 Found ${calendarDots.length} calendar dots for student ${studentId}`);
+          
+          calendarDots.forEach(dot => {
+            const status = dot.dataset.status || dot.getAttribute('data-status');
+            const price = parseFloat(dot.dataset.price || dot.getAttribute('data-price') || pricePerClass);
+            const dateStr = dot.dataset.date || dot.getAttribute('data-date');
+            
+            console.log(`  Dot on ${dateStr}: status=${status}, price=${price}`);
+            
+            if (status === 'unpaid') {
+              unpaidClassesFromCalendar++;
+              unpaidAmountFromCalendar += price;
+            }
+          });
+          
+          console.log('💰 Unpaid classes from visible calendar:', {
+            count: unpaidClassesFromCalendar,
+            amount: unpaidAmountFromCalendar
+          });
+          
+          // Use calendar data if we found unpaid classes, otherwise fall back to balance
+          const finalBalance = unpaidAmountFromCalendar > 0 ? unpaidAmountFromCalendar : balance;
+          const finalPrice = pricePerClass || 15;
           
           // Generate email HTML (async now - loads from Email System)
-          const emailHTML = await generatePaymentReminderEmailHTML(student.name, balance, pricePerClass, studentId);
+          const emailHTML = await generatePaymentReminderEmailHTML(student.name, finalBalance, finalPrice, studentId);
           
           debugLog('📧 Sending payment reminder to:', cleanEmail);
           
@@ -5538,6 +5259,79 @@
           }
           
           debugLog('✅ Payment reminder email sent successfully:', result);
+          
+          console.log('🔥 ABOUT TO LOG EMAIL TO sent_emails TABLE');
+          
+          // CRITICAL: Log to BOTH notification systems
+          try {
+            const resendEmailId = result?.id || result?.data?.id || null;
+            
+            // 1. Log to sent_emails table (for Email System)
+            const sentEmailRecord = {
+              recipient_email: cleanEmail,
+              recipient_name: student.name,
+              subject: `Payment Reminder - ARNOMA NCLEX-RN`,
+              html_content: emailHTML,
+              template_name: 'Payment Reminder',
+              email_type: 'payment_reminder',
+              resend_id: resendEmailId,
+              delivery_status: 'delivered',
+              status: 'sent',
+              sent_at: new Date().toISOString()
+            };
+            
+            console.log('📝 sentEmailRecord:', sentEmailRecord);
+            
+            const { data: logData, error: logError } = await supabase
+              .from('sent_emails')
+              .insert([sentEmailRecord])
+              .select();
+            
+            console.log('💾 Supabase sent_emails response:', { logData, logError });
+            
+            if (logError) {
+              console.error('⚠️ Failed to log to sent_emails:', logError);
+            } else {
+              debugLog('✅ Payment reminder logged to sent_emails:', logData[0]);
+            }
+            
+            // 2. Log to notifications table (for Notification Center bell)
+            const notificationRecord = {
+              type: 'email_sent',
+              category: 'email',  // For UI rendering (getCategoryIcon)
+              title: 'Payment Reminder Sent',
+              description: `Sent payment reminder to ${student.name} (${cleanEmail}) for $${finalBalance}`,
+              student_name: student.name,
+              metadata: {
+                student_id: studentId,
+                student_name: student.name,
+                email: cleanEmail,
+                amount: finalBalance,
+                email_type: 'payment_reminder',
+                subject: `Payment Reminder - ARNOMA NCLEX-RN`,
+                html: emailHTML  // Full email HTML for preview
+              },
+              timestamp: new Date().toISOString(),
+              read: false,
+              created_at: new Date().toISOString()
+            };
+            
+            const { data: notifData, error: notifError } = await supabase
+              .from('notifications')
+              .insert([notificationRecord])
+              .select();
+            
+            console.log('🔔 Supabase notifications response:', { notifData, notifError });
+            
+            if (notifError) {
+              console.error('⚠️ Failed to log to notifications:', notifError);
+            } else {
+              debugLog('✅ Notification logged:', notifData[0]);
+            }
+            
+          } catch (logErr) {
+            console.error('⚠️ Error logging notifications (email still sent):', logErr);
+          }
           
           return result;
         } catch (err) {
@@ -5716,90 +5510,34 @@
           return date.toLocaleDateString('en-US', options);
         }
         
-        // Fetch unpaid classes for this student
+        // Calculate unpaid amount from student balance
+        // The calendar red dots show unpaid classes, and balance reflects this
         let unpaidClasses = [];
         let actualAmountDue = 0;
         let actualUnpaidCount = 0;
-        if (studentId) {
-          try {
-            const students = window.studentsCache || [];
-            const student = students.find(s => s.id === parseInt(studentId));
-            
-            if (student && student.groupId) {
-              // Get group schedule
-              const { data: groupData, error: groupError } = await supabase
-                .from('student_groups')
-                .select('schedule')
-                .eq('id', student.groupId)
-                .single();
-              
-              if (!groupError && groupData && groupData.schedule) {
-                const schedule = groupData.schedule;
-                
-                // Get all class dates for this student
-                const allClassDates = [];
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                
-                // Generate class dates from schedule (past 60 days)
-                for (let i = 60; i >= 0; i--) {
-                  const date = new Date(today);
-                  date.setDate(date.getDate() - i);
-                  const dayName = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][date.getDay()];
-                  
-                  if (schedule[dayName]) {
-                    const dateStr = date.toISOString().split('T')[0];
-                    allClassDates.push(dateStr);
-                  }
-                }
-                
-                // Get payment records for this student
-                const { data: payments, error: paymentsError } = await supabase
-                  .from('payment_records')
-                  .select('*')
-                  .eq('student_id', studentId);
-                
-                const paidDates = new Set();
-                if (!paymentsError && payments) {
-                  payments.forEach(p => {
-                    if (p.class_date) {
-                      paidDates.add(p.class_date);
-                    }
-                  });
-                }
-                
-                // Check absences
-                const { data: absences, error: absencesError } = await supabase
-                  .from('student_absences')
-                  .select('*')
-                  .eq('student_id', studentId);
-                
-                const absentDates = new Set();
-                if (!absencesError && absences) {
-                  absences.forEach(a => {
-                    if (a.class_date) {
-                      absentDates.add(a.class_date);
-                    }
-                  });
-                }
-                
-                // Filter to unpaid, non-absent classes in the past
-                unpaidClasses = allClassDates
-                  .filter(dateStr => {
-                    const classDate = new Date(dateStr + 'T12:00:00');
-                    return classDate < today && !paidDates.has(dateStr) && !absentDates.has(dateStr);
-                  })
-                  .map(dateStr => ({
-                    date: dateStr,
-                    formattedDate: formatClassDate(dateStr),
-                    amount: pricePerClass
-                  }))
-                  .sort((a, b) => a.date.localeCompare(b.date)); // Oldest first
-              }
-            }
-          } catch (err) {
-            console.warn('⚠️ Could not fetch unpaid classes:', err);
-          }
+        
+        if (studentId && balance && balance > 0) {
+          // Student has positive balance = money owed
+          actualAmountDue = balance;
+          
+          // Calculate number of unpaid classes based on price per class
+          const validPricePerClass = (pricePerClass && pricePerClass > 0) ? pricePerClass : 15;
+          actualUnpaidCount = Math.ceil(actualAmountDue / validPricePerClass);
+          
+          console.log('💰 Payment reminder - using student balance:', {
+            studentId,
+            studentName,
+            balance,
+            pricePerClass: validPricePerClass,
+            unpaidCount: actualUnpaidCount,
+            amountDue: actualAmountDue
+          });
+        } else {
+          console.log('💰 Payment reminder - no balance owed:', {
+            studentId,
+            studentName,
+            balance
+          });
         }
         
         // Build unpaid classes summary HTML
@@ -5840,7 +5578,8 @@
           }
         } else {
           // Fallback: calculate from balance if we couldn't fetch classes
-          actualAmountDue = balance < 0 ? Math.abs(balance) : 0;
+          const normalizedBalance = Number(balance) || 0;
+          actualAmountDue = normalizedBalance > 0 ? normalizedBalance : 0;
           
           // Validate pricePerClass to prevent NaN
           const validPricePerClass = (pricePerClass && pricePerClass > 0) ? pricePerClass : 15; // Default to $15 if invalid
@@ -5850,6 +5589,13 @@
           if (!Number.isFinite(actualUnpaidCount) || actualUnpaidCount < 0) {
             actualUnpaidCount = 0;
           }
+          
+          debugLog('💰 Using fallback calculation:', {
+            balance: normalizedBalance,
+            actualAmountDue,
+            pricePerClass: validPricePerClass,
+            unpaidCount: actualUnpaidCount
+          });
           
           unpaidClassesSummary = `${actualUnpaidCount} unpaid ${actualUnpaidCount === 1 ? 'class' : 'classes'} - Total: $${actualAmountDue.toFixed(2)}`;
         }
@@ -5881,7 +5627,7 @@
             return emailHTML;
           }
         } catch (e) {
-          console.warn('⚠️ Could not load template from Email System, using fallback:', e);
+          // console.warn('⚠️ Could not load template from Email System, using fallback:', e);
         }
         
         // FALLBACK: Use hardcoded template if Email System template not found
@@ -6246,7 +5992,7 @@
               const dateStr = normalizeDateInput(record.class_date || record.date);
 
               if (!studentId || !dateStr) {
-                console.warn('⚠️ AbsentManager: Skipping invalid record:', record);
+                // console.warn('⚠️ AbsentManager: Skipping invalid record:', record);
                 return;
               }
               if (!absences[studentId]) {
@@ -6430,13 +6176,13 @@
                 });
               
               if (error) {
-                console.warn('⚠️ Could not sync absence to Supabase (RLS restricted):', error.message);
+                // console.warn('⚠️ Could not sync absence to Supabase (RLS restricted):', error.message);
                 debugLog('✅ Absence saved to localStorage');
               } else {
                 debugLog('✅ Absence saved to Supabase and localStorage');
               }
             } catch (err) {
-              console.warn('⚠️ Exception syncing absence to Supabase:', err.message);
+              // console.warn('⚠️ Exception syncing absence to Supabase:', err.message);
               debugLog('✅ Absence saved to localStorage');
             }
             
@@ -6478,13 +6224,13 @@
                 .eq('class_date', dateStr);
               
               if (error) {
-                console.warn('⚠️ Could not sync absence removal to Supabase (RLS restricted):', error.message);
+                // console.warn('⚠️ Could not sync absence removal to Supabase (RLS restricted):', error.message);
                 debugLog('✅ Absence removed from localStorage');
               } else {
                 debugLog('✅ Absence removed from Supabase and localStorage');
               }
             } catch (err) {
-              console.warn('⚠️ Exception syncing absence removal to Supabase:', err.message);
+              // console.warn('⚠️ Exception syncing absence removal to Supabase:', err.message);
               debugLog('✅ Absence removed from localStorage');
             }
           },
@@ -7512,6 +7258,7 @@
         // Setup event listeners
         const closeBtn = document.getElementById('closeCreditModal');
         const cancelBtn = document.getElementById('cancelCreditBtn');
+        const skipAllBtn = document.getElementById('skipAllCreditBtn');
         
         const skipStudent = () => {
           modal.classList.remove('active');
@@ -7540,6 +7287,38 @@
           }, 300);
         };
         
+        const skipAllStudents = () => {
+          modal.classList.remove('active');
+          
+          // Mark ALL remaining students' payments as dismissed permanently
+          try {
+            const allPaymentKeys = [];
+            
+            // Collect payment keys from current student and all remaining students
+            for (let i = currentIndex; i < studentArray.length; i++) {
+              const s = studentArray[i];
+              s.payments.forEach(p => {
+                allPaymentKeys.push(`${p.studentId}_${p.paymentId}_${p.date}_${p.amount}`);
+              });
+            }
+            
+            const existingDismissed = JSON.parse(localStorage.getItem('dismissedExcessPayments') || '[]');
+            const updatedDismissed = [...new Set([...existingDismissed, ...allPaymentKeys])];
+            localStorage.setItem('dismissedExcessPayments', JSON.stringify(updatedDismissed));
+            
+            // Remove all these payments from the global list
+            window.excessPaymentsForCredit = window.excessPaymentsForCredit.filter(p => {
+              const key = `${p.studentId}_${p.paymentId}_${p.date}_${p.amount}`;
+              return !allPaymentKeys.includes(key);
+            });
+            
+            // Hide notification bell since all are dismissed
+            updateCreditNotificationBell(0);
+          } catch (e) {
+            console.error('Failed to save dismissed payments:', e);
+          }
+        };
+        
         const applyCredit = () => {
           modal.classList.remove('active');
           
@@ -7555,14 +7334,17 @@
         // Remove old event listeners by cloning buttons
         const newCloseBtn = closeBtn.cloneNode(true);
         const newCancelBtn = cancelBtn.cloneNode(true);
+        const newSkipAllBtn = skipAllBtn.cloneNode(true);
         const newApplyBtn = applyBtn.cloneNode(true);
         
         closeBtn.parentNode.replaceChild(newCloseBtn, closeBtn);
         cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+        skipAllBtn.parentNode.replaceChild(newSkipAllBtn, skipAllBtn);
         applyBtn.parentNode.replaceChild(newApplyBtn, applyBtn);
         
         newCloseBtn.onclick = skipStudent;
         newCancelBtn.onclick = skipStudent;
+        newSkipAllBtn.onclick = skipAllStudents;
         newApplyBtn.onclick = applyCredit;
         
         // Close on overlay click
@@ -7843,6 +7625,13 @@
               dot.setAttribute('data-tooltip', tooltip);
               dot.style.cursor = 'pointer';
             }
+            
+            // Add data attributes for payment reminder email calculations
+            dot.setAttribute('data-student-id', student.id);
+            dot.setAttribute('data-student-name', student.name);
+            dot.setAttribute('data-status', student.status || 'unpaid');
+            dot.setAttribute('data-price', student.pricePerClass || student.price_per_class || 50);
+            dot.setAttribute('data-date', dayData.dateStr);
             
             // Add click handler to open individual student details
             dot.addEventListener('click', (e) => {
@@ -8504,7 +8293,7 @@
       function toggleAutoReminder(studentId, studentName) {
         const button = document.querySelector(`[data-student-id="${studentId}"].pause`);
         if (!button) {
-          console.warn('Toggle auto reminder button not found for', studentId);
+          // console.warn('Toggle auto reminder button not found for', studentId);
           return;
         }
         const isPaused = button.classList.contains('paused');
