@@ -6576,17 +6576,31 @@
       }
       
       try {
-        const { error } = await supabase
+        // First try with edited_at column
+        let updateData = { 
+          message: newText,
+          edited_at: new Date().toISOString()
+        };
+        
+        let { error } = await supabase
           .from('forum_messages')
-          .update({ 
-            message: newText,
-            edited_at: new Date().toISOString()
-          })
+          .update(updateData)
           .eq('id', messageId);
+        
+        // If column doesn't exist, try without edited_at
+        if (error && error.code === 'PGRST204') {
+          console.log('⚠️ edited_at column not found, updating without it');
+          updateData = { message: newText };
+          const result = await supabase
+            .from('forum_messages')
+            .update(updateData)
+            .eq('id', messageId);
+          error = result.error;
+        }
         
         if (error) {
           console.error('Error updating message:', error);
-          showCustomAlert('Failed to update message', 'error');
+          showCustomAlert('Failed to update message. Please try again.', 'error');
           return;
         }
         
