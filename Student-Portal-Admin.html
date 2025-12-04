@@ -2226,11 +2226,26 @@
       try {
         await ensureAdminSession();
         
+        // CRITICAL DEBUG: Log the student ID being queried
+        console.log('🔍 Querying sessions for student:', {
+          studentId,
+          studentIdType: typeof studentId,
+          studentName
+        });
+        
         // FIX: Query student_sessions table (not session_logs)
+        // CRITICAL: Ensure studentId is a number for proper filtering
+        const numericStudentId = parseInt(studentId);
+        if (isNaN(numericStudentId)) {
+          console.error('❌ Invalid student ID:', studentId);
+          alert('Invalid student ID');
+          return;
+        }
+        
         const { data: sessions, error } = await supabase
           .from('student_sessions')
           .select('*')
-          .eq('student_id', studentId)
+          .eq('student_id', numericStudentId)
           .order('session_start', { ascending: false })
           .limit(20);
         
@@ -2239,7 +2254,7 @@
           throw error;
         }
         
-        console.log('Sessions data:', sessions);
+        console.log(`✅ Found ${sessions?.length || 0} sessions for student ${numericStudentId}:`, sessions);
         
         // Calculate statistics (FIX: student_sessions doesn't have duration_seconds, page_views, or notes_viewed)
         // We need to calculate duration from session_start and session_end
