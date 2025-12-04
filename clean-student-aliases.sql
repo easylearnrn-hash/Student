@@ -51,18 +51,14 @@ WHERE aliases IS NOT NULL;
 UPDATE students
 SET aliases = (
   SELECT jsonb_agg(
-    -- Remove only [] brackets from each alias name
-    regexp_replace(
-      regexp_replace(elem::text, '^"|"$', '', 'g'),
-      '[\[\]]',
-      '',
-      'g'
-    )::jsonb
+    to_jsonb(
+      regexp_replace(elem #>> '{}', '[\[\]]', '', 'g')
+    )
   )
   FROM jsonb_array_elements(aliases::jsonb) AS elem
-  WHERE elem::text != '""' 
-    AND elem::text != 'null'
-    AND length(trim(elem::text, '"')) > 0
+  WHERE (elem #>> '{}') IS NOT NULL
+    AND (elem #>> '{}') != ''
+    AND length(elem #>> '{}') > 0
 )
 WHERE aliases IS NOT NULL 
   AND jsonb_typeof(aliases::jsonb) = 'array'
