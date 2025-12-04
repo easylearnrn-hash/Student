@@ -6166,12 +6166,23 @@
     }
     
     // ---------- Forum Message Rendering ----------
-    // Format message with markdown-style formatting
+    // Format message with markdown-style formatting and safe HTML
     function formatMessageText(text) {
       if (!text) return '';
       
-      // Escape HTML first to prevent XSS
-      let formatted = escapeHtml(text);
+      // First, protect safe HTML tags by temporarily replacing them
+      let formatted = text;
+      const safeSpans = [];
+      
+      // Extract and protect <span style="font-size: Xpx">...</span> tags
+      formatted = formatted.replace(/<span style="font-size: (\d+)px">(.+?)<\/span>/g, (match, size, content) => {
+        const index = safeSpans.length;
+        safeSpans.push({ size, content });
+        return `__SAFE_SPAN_${index}__`;
+      });
+      
+      // NOW escape HTML to prevent XSS (but our safe spans are protected)
+      formatted = escapeHtml(formatted);
       
       // Convert **text** to <strong>text</strong>
       formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -6179,10 +6190,11 @@
       // Convert *text* to <em>text</em> (but not *** or **)
       formatted = formatted.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
       
-      // Allow <span style="font-size: Xpx">text</span> tags (already escaped, need to unescape)
-      // Match everything between the opening and closing tags, including escaped HTML
-      formatted = formatted.replace(/&lt;span style=&quot;font-size: (\d+)px&quot;&gt;(.+?)&lt;\/span&gt;/g, 
-        '<span style="font-size: $1px">$2</span>');
+      // Restore safe span tags
+      formatted = formatted.replace(/__SAFE_SPAN_(\d+)__/g, (match, index) => {
+        const span = safeSpans[parseInt(index)];
+        return `<span style="font-size: ${span.size}px">${span.content}</span>`;
+      });
       
       return formatted;
     }
