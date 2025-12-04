@@ -1825,8 +1825,16 @@
             .eq('is_active', true);
           
           if (!sessionsResult.error) {
-            activeSessions = sessionsResult.data || [];
-            console.log('✅ Active sessions from student_sessions:', activeSessions);
+            const allSessions = sessionsResult.data || [];
+            console.log('✅ Raw active sessions from student_sessions:', allSessions);
+            
+            // CRITICAL FIX: Only consider sessions with activity in last 10 minutes as "online"
+            // This prevents stale sessions from showing students as online when they're not
+            const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+            activeSessions = allSessions.filter(session => {
+              return session.last_activity && session.last_activity > tenMinutesAgo;
+            });
+            console.log(`✅ Filtered to ${activeSessions.length} truly active sessions (activity < 10 min ago)`);
           } else {
             console.log('⚠️ Student sessions query error:', sessionsResult.error);
           }
