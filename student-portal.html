@@ -5333,12 +5333,187 @@
       }
     }
     
+    /**
+     * 🔴 Calculate unpaid classes based on student's schedule
+     * This matches the Calendar's red dot logic - counts PAST classes without payment
+     * 
+     * @param {Object} student - Student object with group_name, price_per_class, start_date
+     * @param {Array} payments - Array of payment records
+     * @param {Object} groupSchedule - Group schedule with days array
+     * @returns {Object} { unpaidAmount, unpaidClasses: [] }
+     */
+    async function calculateUnpaidFromSchedule(student, payments, groupScheduleData) {
+      console.debug('🔴 Calculating unpaid classes from schedule:', {
+        student: student.name,
+        groupScheduleData: groupScheduleData,
+        payments: payments.length
+      });
+      
+      if (!student.group_name || !groupScheduleData || !groupScheduleData.schedule) {
+        console.debug('⚠️ No schedule data to calculate unpaid classes');
+        return { unpaidAmount: 0, unpaidClasses: [] };
+      }
+      
+      const pricePerClass = parseFloat(student.price_per_class) || 50;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // Get student start date (when they joined)
+      let studentStartDate = null;
+      if (student.start_date) {
+        studentStartDate = new Date(student.start_date);
+        studentStartDate.setHours(0, 0, 0, 0);
+      }
+      
+      // Fetch absences data for this student
+      let absences = [];
+      try {
+        const { data, error } = await supabase
+          .from('absences')
+          .select('*')
+          .eq('student_id', student.id);
+        
+        if (!error && data) {
+          absences = data.map(a => a.class_date);
+        }
+      } catch (err) {
+        console.debug('⚠️ Could not load absences:', err);
+      }
+      
+      // Fetch credit_payments to see which classes were paid via credit
+      let creditPayments = [];
+      try {
+        const { data, error } = await supabase
+          .from('credit_payments')
+          .select('*')
+          .eq('student_id', student.id);
+        
+        if (!error && data) {
+          creditPayments = data.map(cp => cp.class_date);
+        }
+      } catch (err) {
+        console.debug('⚠️ Could not load credit payments:', err);
+      }
+      
+      // Parse schedule string to extract active days
+      // Format: "Monday, Wednesday, Friday at 7:00 PM" or "Tue, Thu 6:30 PM"
+      const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const scheduleActiveDays = [];
+      
+      const scheduleStr = groupScheduleData.schedule || '';
+      console.debug('📝 Parsing schedule string:', scheduleStr);
+      
+      // Extract day names from schedule string
+      const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      const fullDayMap = {
+        'Mon': 'Monday', 'Tue': 'Tuesday', 'Wed': 'Wednesday',
+        'Thu': 'Thursday', 'Fri': 'Friday', 'Sat': 'Saturday', 'Sun': 'Sunday'
+      };
+      
+      dayNames.forEach(dayName => {
+        if (scheduleStr.includes(dayName)) {
+          const fullDay = fullDayMap[dayName] || dayName;
+          if (!scheduleActiveDays.includes(fullDay)) {
+            scheduleActiveDays.push(fullDay);
+          }
+        }
+      });
+      
+      console.debug('📅 Active schedule days:', scheduleActiveDays);
+      
+      if (scheduleActiveDays.length === 0) {
+        console.debug('⚠️ No active days found in schedule');
+        return { unpaidAmount: 0, unpaidClasses: [] };
+      }
+      
+      // Generate all past class dates based on schedule
+      const scheduledDates = [];
+      
+      // Start from 6 months ago or student start date
+      const startDate = new Date(today);
+      startDate.setMonth(startDate.getMonth() - 6);
+      if (studentStartDate && studentStartDate > startDate) {
+        startDate.setTime(studentStartDate.getTime());
+      }
+      
+      // Generate all scheduled class dates until today
+      for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
+        const dayName = daysOfWeek[d.getDay()];
+        if (scheduleActiveDays.includes(dayName)) {
+          const dateStr = d.toISOString().split('T')[0];
+          scheduledDates.push(dateStr);
+        }
+      }
+      
+      console.debug(`📅 Generated ${scheduledDates.length} scheduled class dates`);
+      
+      // Check each scheduled date for payment status
+      const unpaidClasses = [];
+      for (const dateStr of scheduledDates) {
+        // Skip if absent (no payment expected)
+        if (absences.includes(dateStr)) {
+          console.debug(`⚪ ${dateStr}: Student was absent (no payment expected)`);
+          continue;
+        }
+        
+        // Skip if paid via credit
+        if (creditPayments.includes(dateStr)) {
+          console.debug(`🔵 ${dateStr}: Paid via credit`);
+          continue;
+        }
+        
+        // Check if there's a payment covering this class
+        const classDate = new Date(dateStr);
+        const hasPaidPayment = payments.some(p => {
+          if (p.status !== 'paid') return false;
+          const paymentDate = new Date(p.date);
+          
+          // Payment must be on or after class date (Calendar logic)
+          // Payment applies to nearest PAST class
+          const daysDiff = Math.floor((paymentDate - classDate) / (1000 * 60 * 60 * 24));
+          return daysDiff >= 0 && daysDiff <= 7; // Within a week after class
+        });
+        
+        if (!hasPaidPayment) {
+          unpaidClasses.push({
+            date: dateStr,
+            amount: pricePerClass
+          });
+          console.debug(`🔴 ${dateStr}: UNPAID (no payment found)`);
+        } else {
+          console.debug(`🟢 ${dateStr}: PAID`);
+        }
+      }
+      
+      const unpaidAmount = unpaidClasses.length * pricePerClass;
+      console.debug(`💰 Total unpaid: $${unpaidAmount} (${unpaidClasses.length} classes × $${pricePerClass})`);
+      
+      return { unpaidAmount, unpaidClasses };
+    }
+    
     // Load student payment UI only when needed
-    function updatePaymentUI(payments = []) {
+    async function updatePaymentUI(payments = [], student = null, groupSchedule = null) {
       let totalUnpaid = 0;
       let lastPaidAmount = 0;
       let lastPaidDate = null;
       
+      // 🔴 ENHANCED: Calculate unpaid from schedule (matches Calendar red dots)
+      if (student && groupSchedule) {
+        const { unpaidAmount, unpaidClasses } = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
+        totalUnpaid = unpaidAmount;
+        console.debug(`✅ Schedule-based unpaid calculation: $${unpaidAmount} (${unpaidClasses.length} classes)`);
+      } else {
+        // Fallback: Calculate from payment_records table only
+        console.debug('⚠️ Using fallback payment_records calculation (no schedule data)');
+        payments.forEach(payment => {
+          const amount = parseFloat(payment.amount) || 0;
+          if (payment.status === 'unpaid' || payment.status === 'pending') {
+            totalUnpaid += amount;
+          }
+        });
+      }
+      
+      // Calculate last paid
       payments.forEach(payment => {
         const amount = parseFloat(payment.amount) || 0;
         if (payment.status === 'paid') {
@@ -5346,8 +5521,6 @@
             lastPaidDate = payment.date;
             lastPaidAmount = amount;
           }
-        } else if (payment.status === 'unpaid' || payment.status === 'pending') {
-          totalUnpaid += amount;
         }
       });
       
@@ -5789,7 +5962,8 @@
 
     async function loadPaymentsSection() {
       const payments = await ensurePaymentsData();
-      updatePaymentUI(payments);
+      // 🔴 Pass student and schedule to calculate unpaid from Calendar red dots
+      await updatePaymentUI(payments, currentStudent, currentGroupScheduleData);
       const lazyMessage = document.getElementById('paymentLazyMessage');
       if (lazyMessage) {
         lazyMessage.remove();
