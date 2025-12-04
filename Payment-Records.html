@@ -7081,15 +7081,25 @@
           const gmailTimestamp = dateHeader ? new Date(dateHeader.value) : new Date();
 
           // Check timezone offset toggles
+          // CRITICAL: Read timezone offset from localStorage (persists FOREVER)
           const offset12 = localStorage.getItem('la-offset-12') === 'true';
           const offset11 = localStorage.getItem('la-offset-11') === 'true';
 
           // Apply offset if toggle is on
           let finalTimestamp = gmailTimestamp;
+          let offsetApplied = 'none';
           if (offset12) {
             finalTimestamp = new Date(gmailTimestamp.getTime() - (12 * 60 * 60 * 1000));
+            offsetApplied = '-12h (Winter)';
           } else if (offset11) {
             finalTimestamp = new Date(gmailTimestamp.getTime() - (11 * 60 * 60 * 1000));
+            offsetApplied = '-11h (Summer)';
+          }
+          
+          if (offsetApplied !== 'none') {
+            console.log(`⏰ Timezone offset applied: ${offsetApplied}`);
+            console.log(`   Original: ${gmailTimestamp.toISOString()}`);
+            console.log(`   Adjusted: ${finalTimestamp.toISOString()}`);
           }
 
           // Extract date and time components from the final timestamp
@@ -8659,22 +8669,29 @@
         });
 
         // Load saved settings and apply on page load
+        // CRITICAL: These settings MUST persist across sessions, regardless of Gmail connection status
         const offset12 = localStorage.getItem('la-offset-12') === 'true';
         const offset11 = localStorage.getItem('la-offset-11') === 'true';
 
-  debugLog('🔄 Loading timezone settings:', { offset12, offset11 });
+        console.log('🔄 LOADING TIMEZONE SETTINGS FROM LOCALSTORAGE:');
+        console.log('   la-offset-12:', localStorage.getItem('la-offset-12'), '→', offset12);
+        console.log('   la-offset-11:', localStorage.getItem('la-offset-11'), '→', offset11);
+        debugLog('🔄 Loading timezone settings:', { offset12, offset11 });
 
         if (toggle12) {
           toggle12.checked = offset12;
           updateToggleStyle(toggle12, offset12);
+          console.log('✅ Applied -12h toggle state:', offset12);
         }
         if (toggle11) {
           toggle11.checked = offset11;
           updateToggleStyle(toggle11, offset11);
+          console.log('✅ Applied -11h toggle state:', offset11);
         }
 
         // Update Gmail button glow on page load
         updateGmailButtonGlow();
+        console.log('✅ Timezone settings loaded and applied on page load');
 
         // Add click handlers to sliders (since checkboxes are hidden)
         const slider12 = document.querySelector('[data-toggle="12"]');
@@ -8731,9 +8748,12 @@
       }
 
       // Toggle LA offset (only one can be active)
+      // CRITICAL: These settings persist FOREVER in localStorage, independent of Gmail connection
       async function setLAOffset(hours, isEnabled) {
         const toggle12 = document.getElementById('laOffset12Toggle');
         const toggle11 = document.getElementById('laOffset11Toggle');
+
+        console.log(`🔧 setLAOffset called: ${hours}h = ${isEnabled}`);
 
         if (hours === 12 && toggle12) {
           toggle12.checked = isEnabled;
@@ -8744,14 +8764,21 @@
             updateToggleStyle(toggle11, false);
           }
 
-          // Save to localStorage (persists across sessions)
+          // CRITICAL: Save to localStorage (persists FOREVER across all sessions)
           localStorage.setItem('la-offset-12', isEnabled.toString());
           localStorage.setItem('la-offset-11', 'false');
+          
+          // Verify the save worked
+          const saved12 = localStorage.getItem('la-offset-12');
+          const saved11 = localStorage.getItem('la-offset-11');
+          console.log('💾 SAVED TO LOCALSTORAGE:');
+          console.log('   la-offset-12:', saved12);
+          console.log('   la-offset-11:', saved11);
 
           debugLog(
             isEnabled
-              ? '❄️ Winter offset enabled: –12 hours (PERSISTED)'
-              : '✅ Winter offset disabled (PERSISTED)'
+              ? '❄️ Winter offset enabled: –12 hours (PERSISTED FOREVER)'
+              : '✅ Winter offset disabled (PERSISTED FOREVER)'
           );
         } else if (hours === 11 && toggle11) {
           toggle11.checked = isEnabled;
@@ -8762,19 +8789,27 @@
             updateToggleStyle(toggle12, false);
           }
 
-          // Save to localStorage (persists across sessions)
+          // CRITICAL: Save to localStorage (persists FOREVER across all sessions)
           localStorage.setItem('la-offset-11', isEnabled.toString());
           localStorage.setItem('la-offset-12', 'false');
+          
+          // Verify the save worked
+          const saved12 = localStorage.getItem('la-offset-12');
+          const saved11 = localStorage.getItem('la-offset-11');
+          console.log('💾 SAVED TO LOCALSTORAGE:');
+          console.log('   la-offset-12:', saved12);
+          console.log('   la-offset-11:', saved11);
 
           debugLog(
             isEnabled
-              ? '☀️ Summer offset enabled: –11 hours (PERSISTED)'
-              : '✅ Summer offset disabled (PERSISTED)'
+              ? '☀️ Summer offset enabled: –11 hours (PERSISTED FOREVER)'
+              : '✅ Summer offset disabled (PERSISTED FOREVER)'
           );
         }
 
         // Update Gmail button glow after changing settings
         updateGmailButtonGlow();
+        console.log('✅ Timezone offset saved and will persist FOREVER until manually changed');
       }
 
       // Update toggle visual style
