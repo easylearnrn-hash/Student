@@ -5734,116 +5734,6 @@
           }
         });
         profileModal.addEventListener('keydown', (event) => {
-        function initSectionTabs() {
-          const tabs = document.querySelectorAll('.section-tab');
-          if (!tabs.length) return;
-          tabs.forEach(tab => {
-            tab.addEventListener('click', async () => {
-              const section = tab.dataset.section;
-              if (!section || section === activeSection) return;
-              if (!currentStudent) {
-                console.warn('Student data not ready yet. Please wait a moment.');
-                return;
-              }
-              setActiveSection(section);
-              await ensureSectionData(section);
-            });
-          });
-          setActiveSection(activeSection);
-        }
-
-        function setActiveSection(section) {
-          activeSection = section;
-          document.querySelectorAll('.section-tab').forEach(tab => {
-            tab.classList.toggle('active', tab.dataset.section === section);
-          });
-          document.querySelectorAll('.section-panel').forEach(panel => {
-            panel.classList.toggle('active', panel.dataset.section === section);
-          });
-        }
-
-        async function ensureSectionData(section) {
-          if (sectionLoadedState[section]) return;
-          if (!currentStudent) {
-            console.warn('Section requested before student data is ready.');
-            return;
-          }
-          try {
-            switch (section) {
-              case 'overview':
-                await loadScheduleForStudent(currentStudent);
-                break;
-              case 'payments':
-                await loadPaymentsSection();
-                break;
-              case 'progress':
-                await loadProgressSection();
-                break;
-              case 'materials':
-                await loadMaterialsSection();
-                break;
-              default:
-                break;
-            }
-            sectionLoadedState[section] = true;
-          } catch (error) {
-            console.error(`Error loading section ${section}:`, error);
-          }
-        }
-
-        async function ensurePaymentsData() {
-          if (paymentsLoaded && currentPayments.length) {
-            return currentPayments;
-          }
-          if (paymentsLoadingPromise) {
-            return paymentsLoadingPromise;
-          }
-          paymentsLoadingPromise = loadPaymentHistory(currentStudent)
-            .then(payments => {
-              currentPayments = payments;
-              paymentsLoaded = true;
-              paymentsLoadingPromise = null;
-              return payments;
-            })
-            .catch(error => {
-              paymentsLoadingPromise = null;
-              throw error;
-            });
-          return paymentsLoadingPromise;
-        }
-
-        async function loadPaymentsSection() {
-          const payments = await ensurePaymentsData();
-          updatePaymentUI(payments);
-          const lazyMessage = document.getElementById('paymentLazyMessage');
-          if (lazyMessage) {
-            lazyMessage.remove();
-          }
-        }
-
-        async function loadProgressSection() {
-          if (progressLoaded) return;
-          await loadSystemsProgress();
-          progressLoaded = true;
-        }
-
-        async function loadMaterialsSection() {
-          if (materialsLoaded) return;
-          const payments = await ensurePaymentsData();
-          
-          // Load both notes AND announcements
-          await Promise.all([
-            loadClassroomUpdates(payments),
-            loadChangeNotes(currentStudent?.group || currentStudent?.group_name)
-          ]);
-          
-          const notesMessage = document.getElementById('notesLazyMessage');
-          if (notesMessage) {
-            notesMessage.remove();
-          }
-          materialsLoaded = true;
-        }
-
           if (event.key === 'Escape' || event.key === 'Enter') {
             closeProfileModal();
           }
@@ -5862,6 +5752,117 @@
           }
         });
       }
+    }
+
+    // Initialize section tabs for lazy loading
+    function initSectionTabs() {
+      const tabs = document.querySelectorAll('.section-tab');
+      if (!tabs.length) return;
+      tabs.forEach(tab => {
+        tab.addEventListener('click', async () => {
+          const section = tab.dataset.section;
+          if (!section || section === activeSection) return;
+          if (!currentStudent) {
+            console.warn('Student data not ready yet. Please wait a moment.');
+            return;
+          }
+          setActiveSection(section);
+          await ensureSectionData(section);
+        });
+      });
+      setActiveSection(activeSection);
+    }
+
+    function setActiveSection(section) {
+      activeSection = section;
+      document.querySelectorAll('.section-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.section === section);
+      });
+      document.querySelectorAll('.section-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.dataset.section === section);
+      });
+    }
+
+    async function ensureSectionData(section) {
+      if (sectionLoadedState[section]) return;
+      if (!currentStudent) {
+        console.warn('Section requested before student data is ready.');
+        return;
+      }
+      try {
+        switch (section) {
+          case 'overview':
+            await loadScheduleForStudent(currentStudent);
+            break;
+          case 'payments':
+            await loadPaymentsSection();
+            break;
+          case 'progress':
+            await loadProgressSection();
+            break;
+          case 'materials':
+            await loadMaterialsSection();
+            break;
+          default:
+            break;
+        }
+        sectionLoadedState[section] = true;
+      } catch (error) {
+        console.error(`Error loading section ${section}:`, error);
+      }
+    }
+
+    async function ensurePaymentsData() {
+      if (paymentsLoaded && currentPayments.length) {
+        return currentPayments;
+      }
+      if (paymentsLoadingPromise) {
+        return paymentsLoadingPromise;
+      }
+      paymentsLoadingPromise = loadPaymentHistory(currentStudent)
+        .then(payments => {
+          currentPayments = payments;
+          paymentsLoaded = true;
+          paymentsLoadingPromise = null;
+          return payments;
+        })
+        .catch(error => {
+          paymentsLoadingPromise = null;
+          throw error;
+        });
+      return paymentsLoadingPromise;
+    }
+
+    async function loadPaymentsSection() {
+      const payments = await ensurePaymentsData();
+      updatePaymentUI(payments);
+      const lazyMessage = document.getElementById('paymentLazyMessage');
+      if (lazyMessage) {
+        lazyMessage.remove();
+      }
+    }
+
+    async function loadProgressSection() {
+      if (progressLoaded) return;
+      await loadSystemsProgress();
+      progressLoaded = true;
+    }
+
+    async function loadMaterialsSection() {
+      if (materialsLoaded) return;
+      const payments = await ensurePaymentsData();
+      
+      // Load both notes AND announcements
+      await Promise.all([
+        loadClassroomUpdates(payments),
+        loadChangeNotes(currentStudent?.group || currentStudent?.group_name)
+      ]);
+      
+      const notesMessage = document.getElementById('notesLazyMessage');
+      if (notesMessage) {
+        notesMessage.remove();
+      }
+      materialsLoaded = true;
     }
 
     document.addEventListener('DOMContentLoaded', () => {
