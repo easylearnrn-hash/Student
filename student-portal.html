@@ -850,6 +850,7 @@
       border-radius: 16px;
       padding: 20px;
       animation: slideInLeft 0.4s ease backwards;
+      position: relative; /* For absolute positioned pin icon */
     }
     
     .message-header {
@@ -6133,7 +6134,16 @@
           return;
         }
         
+        // Sort messages: pinned first, then by date
         forumMessages = data || [];
+        forumMessages.sort((a, b) => {
+          // Pinned messages come first
+          if (a.is_pinned && !b.is_pinned) return -1;
+          if (!a.is_pinned && b.is_pinned) return 1;
+          // Then sort by date (newest first)
+          return new Date(b.created_at) - new Date(a.created_at);
+        });
+        
         renderForumMessages();
         updateForumBadge();
         
@@ -6196,8 +6206,10 @@
       
       container.innerHTML = forumMessages.map((msg, index) => {
         const isAdminMessage = msg.student_name === 'Administrator' || msg.student_id === 0;
+        const isPinned = msg.is_pinned === true;
         return `
-        <div class="forum-message" style="animation-delay: ${index * 0.1}s;">
+        <div class="forum-message" style="animation-delay: ${index * 0.1}s; ${isPinned ? 'border: 2px solid rgba(251, 191, 36, 0.3); background: linear-gradient(145deg, rgba(251, 191, 36, 0.05), rgba(245, 158, 11, 0.05));' : ''}">
+          ${isPinned ? '<div style="position: absolute; top: 8px; right: 8px; font-size: 20px;" title="Pinned message">📌</div>' : ''}
           <div class="message-header">
             <div style="display: flex; flex-direction: column; gap: 2px;">
               <span class="message-author" style="${isAdminMessage ? 'color: #ef4444; font-weight: 600;' : ''}">👤 ${escapeHtml(msg.student_name || 'Student')}</span>
@@ -6214,7 +6226,7 @@
           <div style="display: flex; gap: 8px; margin-top: 8px;">
             <button class="reply-btn" onclick="toggleReplyInput(${msg.id})">Reply</button>
             ${isAdminMessage && isAdmin ? `
-              <button class="reply-btn" onclick="togglePinMessage(${msg.id})" title="Pin message">📌 Pin</button>
+              <button class="reply-btn" onclick="togglePinMessage(${msg.id})" title="${isPinned ? 'Unpin message' : 'Pin message'}">${isPinned ? '📍 Unpin' : '📌 Pin'}</button>
               <button class="reply-btn" onclick="editMessage(${msg.id})" title="Edit message">✏️ Edit</button>
             ` : ''}
           </div>
@@ -6473,8 +6485,46 @@
     
     // ---------- Admin Message Actions ----------
     async function togglePinMessage(messageId) {
-      // TODO: Implement pinning (add isPinned column to forum_messages table)
-      showCustomAlert('Pin feature coming soon!', 'info');
+      try {
+        // Get current pin status
+        const { data: currentMessage, error: fetchError } = await supabase
+          .from('forum_messages')
+          .select('is_pinned')
+          .eq('id', messageId)
+          .single();
+        
+        if (fetchError) {
+          console.error('Error fetching message:', fetchError);
+          // If column doesn't exist, show helpful message
+          if (fetchError.code === 'PGRST116' || fetchError.code === 'PGRST204') {
+            showCustomAlert('Pin feature requires database update. Please run add-is-pinned-to-forum.sql', 'error');
+            return;
+          }
+          showCustomAlert('Failed to fetch message status', 'error');
+          return;
+        }
+        
+        // Toggle the pin status
+        const newPinStatus = !currentMessage.is_pinned;
+        
+        const { error: updateError } = await supabase
+          .from('forum_messages')
+          .update({ is_pinned: newPinStatus })
+          .eq('id', messageId);
+        
+        if (updateError) {
+          console.error('Error updating pin status:', updateError);
+          showCustomAlert('Failed to pin/unpin message', 'error');
+          return;
+        }
+        
+        showCustomAlert(newPinStatus ? '📌 Message pinned!' : 'Message unpinned', 'success');
+        await loadForumMessages();
+        
+      } catch (error) {
+        console.error('Toggle pin error:', error);
+        showCustomAlert('Failed to toggle pin. Please try again.', 'error');
+      }
     }
     
     async function editMessage(messageId) {
