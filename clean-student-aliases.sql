@@ -43,20 +43,32 @@ WHERE aliases IS NOT NULL;
 */
 
 -- =====================================================
--- 4. CLEAN ALL ALIASES (AUTOMATIC)
+-- 4. CLEAN BRACKETS [] FROM ALIASES
 -- =====================================================
--- This will be done automatically by the app on next save
--- But you can force clean all students now:
+-- This removes [] characters from alias text while keeping the aliases
+-- Run this query to fix all students at once:
 
--- Note: The cleaning will happen automatically when:
--- 1. Student Manager loads students (parseAliasesField)
--- 2. Any student is saved (cleanAliasesForSave)
-
--- To force immediate cleanup, you can trigger a save in Student Manager:
--- 1. Open Student Manager
--- 2. Edit any student (change a field)
--- 3. Their aliases will be cleaned and saved
--- 4. Repeat for all students with weird aliases
+UPDATE students
+SET aliases = (
+  SELECT jsonb_agg(
+    -- Remove only [] brackets from each alias name
+    regexp_replace(
+      regexp_replace(elem::text, '^"|"$', '', 'g'),
+      '[\[\]]',
+      '',
+      'g'
+    )::jsonb
+  )
+  FROM jsonb_array_elements(aliases) AS elem
+  WHERE elem::text != '""' 
+    AND elem::text != 'null'
+    AND length(trim(elem::text, '"')) > 0
+)
+WHERE aliases IS NOT NULL 
+  AND jsonb_typeof(aliases) = 'array'
+  AND aliases::text != '[]'
+  AND aliases::text LIKE '%[%'
+  OR aliases::text LIKE '%]%';
 
 -- =====================================================
 -- 5. MANUAL CLEAN SPECIFIC STUDENT (if needed)
