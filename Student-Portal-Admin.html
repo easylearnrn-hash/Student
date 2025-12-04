@@ -1328,7 +1328,7 @@
         <button class="back-btn" onclick="window.location.href='Test-Manager.html'">
           📝 Test Manager
         </button>
-        <button class="back-btn" onclick="openAdminChat()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+        <button class="back-btn" onclick="openAdminChat()">
           💬 Student Chat
         </button>
         <button class="back-btn" onclick="window.location.href='student-portal.html'">
@@ -2541,21 +2541,47 @@
     }
     
     // Open admin chat modal
-    function openAdminChat() {
-      const modal = document.getElementById('impersonationModal');
-      const iframe = document.getElementById('impersonationIframe');
-      const titleElement = document.getElementById('impersonationStudentName');
-      
-      // Update modal title
-      titleElement.textContent = 'Student Chat (Admin Mode)';
-      
-      // Load student portal with hash to go directly to forum tab
-      iframe.src = 'student-portal.html#forum';
-      
-      // Show modal
-      modal.classList.add('active');
-      
-      console.log('💬 Admin chat opened');
+    async function openAdminChat() {
+      try {
+        // Get current admin user
+        const { data: { user } } = await supabase.auth.getUser();
+        
+        if (!user) {
+          alert('Please log in to access the chat');
+          return;
+        }
+        
+        // Create admin chat token (similar to impersonation but for admin)
+        const adminChatToken = {
+          isAdmin: true,
+          adminEmail: user.email || currentEmail || 'admin',
+          timestamp: Date.now(),
+          expiresAt: Date.now() + (60 * 60 * 1000), // 1 hour
+          mode: 'admin_chat'
+        };
+        
+        // Store token so student portal knows this is an admin
+        sessionStorage.setItem('admin_chat_token', JSON.stringify(adminChatToken));
+        
+        const modal = document.getElementById('impersonationModal');
+        const iframe = document.getElementById('impersonationIframe');
+        const titleElement = document.getElementById('impersonationStudentName');
+        
+        // Update modal title
+        titleElement.textContent = 'Student Chat (Admin Mode)';
+        
+        // Load student portal with hash to go directly to forum tab
+        iframe.src = 'student-portal.html#forum';
+        
+        // Show modal
+        modal.classList.add('active');
+        
+        console.log('💬 Admin chat opened for:', adminChatToken.adminEmail);
+        
+      } catch (error) {
+        console.error('Error opening admin chat:', error);
+        alert('Failed to open chat. Please try again.');
+      }
     }
     
     async function deleteStudent(id) {
