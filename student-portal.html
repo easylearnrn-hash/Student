@@ -3712,6 +3712,7 @@
       // ---------- Impersonation Authentication ----------
       if (impersonateId) {
         console.log('🎭 Impersonation mode detected for student ID:', impersonateId);
+        console.log('📍 Running in iframe:', window.self !== window.top);
         
         // Try both sessionStorage and localStorage
         let tokenData = sessionStorage.getItem('impersonation_token') || localStorage.getItem('impersonation_token');
@@ -3724,20 +3725,32 @@
           // Validate token hasn't expired
           if (impersonationToken.expiresAt < Date.now()) {
             console.error('⏰ Token expired');
-            alert('Impersonation session has expired. Returning to admin panel.');
+            alert('Impersonation session has expired.');
             sessionStorage.removeItem('impersonation_token');
             localStorage.removeItem('impersonation_token');
-            window.location.href = 'Student-Portal-Admin.html';
+            
+            // If in iframe, tell parent to close modal
+            if (window.self !== window.top) {
+              window.parent.postMessage({ action: 'closeImpersonation', reason: 'expired' }, '*');
+            } else {
+              window.location.href = 'Student-Portal-Admin.html';
+            }
             return null;
           }
           
-          // Validate student ID matches
-          if (impersonationToken.studentId != impersonateId) {
+          // Validate student ID matches (convert both to string for comparison)
+          if (String(impersonationToken.studentId) !== String(impersonateId)) {
             console.error('❌ Student ID mismatch!', impersonationToken.studentId, 'vs', impersonateId);
-            alert('Invalid impersonation token. Returning to admin panel.');
+            alert('Invalid impersonation token.');
             sessionStorage.removeItem('impersonation_token');
             localStorage.removeItem('impersonation_token');
-            window.location.href = 'Student-Portal-Admin.html';
+            
+            // If in iframe, tell parent to close modal
+            if (window.self !== window.top) {
+              window.parent.postMessage({ action: 'closeImpersonation', reason: 'mismatch' }, '*');
+            } else {
+              window.location.href = 'Student-Portal-Admin.html';
+            }
             return null;
           }
           
@@ -3750,11 +3763,18 @@
             .single();
           
           if (error || !student) {
-            console.error('Impersonated student not found:', error);
-            alert('Student not found. Returning to admin panel.');
+            console.error('❌ Impersonated student not found:', error);
+            console.error('Query details - ID:', impersonateId, 'Type:', typeof impersonateId);
+            alert('Student not found. Please contact administrator.');
             sessionStorage.removeItem('impersonation_token');
             localStorage.removeItem('impersonation_token');
-            window.location.href = 'Student-Portal-Admin.html';
+            
+            // If in iframe, tell parent to close modal
+            if (window.self !== window.top) {
+              window.parent.postMessage({ action: 'closeImpersonation', reason: 'not_found' }, '*');
+            } else {
+              window.location.href = 'Student-Portal-Admin.html';
+            }
             return null;
           }
           
@@ -3764,8 +3784,14 @@
           console.error('❌ No impersonation token found in sessionStorage or localStorage');
           console.error('SessionStorage keys:', Object.keys(sessionStorage));
           console.error('LocalStorage keys:', Object.keys(localStorage));
-          alert('Invalid impersonation session. Returning to admin panel.');
-          window.location.href = 'Student-Portal-Admin.html';
+          alert('Invalid impersonation session.');
+          
+          // If in iframe, tell parent to close modal
+          if (window.self !== window.top) {
+            window.parent.postMessage({ action: 'closeImpersonation', reason: 'no_token' }, '*');
+          } else {
+            window.location.href = 'Student-Portal-Admin.html';
+          }
           return null;
         }
       }

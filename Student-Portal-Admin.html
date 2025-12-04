@@ -2421,10 +2421,18 @@
 
     async function impersonateStudent(studentId, studentName) {
       try {
-        console.log('🚪 Starting impersonation request', { studentId, studentName });
+        console.log('🚪 Starting impersonation request', { studentId, studentName, studentIdType: typeof studentId });
+        
+        // Ensure studentId is a number (not string)
+        const numericStudentId = parseInt(studentId);
+        if (isNaN(numericStudentId)) {
+          alert('Invalid student ID');
+          return;
+        }
+        
         // Generate impersonation token (valid for 10 minutes)
         const impersonationToken = {
-          studentId: studentId,
+          studentId: numericStudentId,  // Store as number
           studentName: studentName,
           timestamp: Date.now(),
           expiresAt: Date.now() + (10 * 60 * 1000), // 10 minutes
@@ -2812,10 +2820,25 @@
       }
     });
 
-    // Listen for messages from embedded iframes (e.g., Group Notes Manager)
+    // Listen for messages from embedded iframes (e.g., Group Notes Manager, Impersonation)
     window.addEventListener('message', (event) => {
       if (event.data && event.data.action === 'openNotesManager') {
         openNotesManager();
+      }
+      
+      // Handle impersonation iframe messages
+      if (event.data && event.data.action === 'closeImpersonation') {
+        console.log('📨 Received close impersonation message:', event.data.reason);
+        closeImpersonation();
+        
+        // Show error message based on reason
+        if (event.data.reason === 'not_found') {
+          alert('Student not found in database. Please refresh the page and try again.');
+        } else if (event.data.reason === 'expired') {
+          alert('Impersonation session expired.');
+        } else if (event.data.reason === 'no_token') {
+          alert('Impersonation token not found. Please try again.');
+        }
       }
     });
   </script>
