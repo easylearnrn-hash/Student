@@ -1375,6 +1375,9 @@
           <select class="group-filter" id="groupFilterSelect" onchange="filterStudents()" title="Filter by group">
             <option value="">All Groups</option>
           </select>
+          <button class="btn-filter active" id="activeFilterBtn" onclick="toggleActiveFilter()" title="Show only active students">
+            ✓ Active Only
+          </button>
           <button class="btn-filter" id="onlineFilterBtn" onclick="toggleOnlineFilter()" title="Show only online students">
             🟢 Online Now
           </button>
@@ -1914,7 +1917,7 @@
           }
           
           return `
-          <tr data-group="${groupCode}" data-student-name="${(student.name || '').toLowerCase()}">
+          <tr data-group="${groupCode}" data-student-name="${(student.name || '').toLowerCase()}" data-active="${student.show_in_grid ? 'true' : 'false'}">
             <td>${student.name || '-'}</td>
             <td>${student.email || '-'}</td>
             <td>${formatGroupLabel(groupCode)}</td>
@@ -2624,6 +2627,22 @@
     
     // Filter Functions
     let showOnlineOnly = false;
+    let showActiveOnly = true; // DEFAULT: Show active students only
+    
+    function toggleActiveFilter() {
+      showActiveOnly = !showActiveOnly;
+      const btn = document.getElementById('activeFilterBtn');
+      
+      if (showActiveOnly) {
+        btn.classList.add('active');
+        btn.textContent = '✓ Active Only';
+      } else {
+        btn.classList.remove('active');
+        btn.textContent = '○ All Students';
+      }
+      
+      filterStudents();
+    }
     
     function toggleOnlineFilter() {
       showOnlineOnly = !showOnlineOnly;
@@ -2655,8 +2674,18 @@
         const statusBtn = row.querySelector('.action-btn.info');
         const isOnline = statusBtn && statusBtn.classList.contains('online');
         
-        // Show row if it matches search AND group AND (showOnlineOnly is false OR student is online)
-        const shouldShow = matchesSearch && matchesGroup && (!showOnlineOnly || isOnline);
+        // Check if student is active (data-active attribute)
+        const isActive = row.getAttribute('data-active') === 'true';
+        
+        // Show row if it matches all filters:
+        // - search term AND
+        // - group filter AND
+        // - online filter (if enabled) AND
+        // - active filter (if enabled)
+        const shouldShow = matchesSearch && 
+                          matchesGroup && 
+                          (!showOnlineOnly || isOnline) &&
+                          (!showActiveOnly || isActive);
         row.style.display = shouldShow ? '' : 'none';
       });
     }
