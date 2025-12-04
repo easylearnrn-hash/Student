@@ -59,16 +59,15 @@ SET aliases = (
       'g'
     )::jsonb
   )
-  FROM jsonb_array_elements(aliases) AS elem
+  FROM jsonb_array_elements(aliases::jsonb) AS elem
   WHERE elem::text != '""' 
     AND elem::text != 'null'
     AND length(trim(elem::text, '"')) > 0
 )
 WHERE aliases IS NOT NULL 
-  AND jsonb_typeof(aliases) = 'array'
+  AND jsonb_typeof(aliases::jsonb) = 'array'
   AND aliases::text != '[]'
-  AND aliases::text LIKE '%[%'
-  OR aliases::text LIKE '%]%';
+  AND (aliases::text LIKE '%[%' OR aliases::text LIKE '%]%');
 
 -- =====================================================
 -- 5. MANUAL CLEAN SPECIFIC STUDENT (if needed)
