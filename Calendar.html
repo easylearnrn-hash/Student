@@ -7958,12 +7958,12 @@
         let tabPanelsHtml = '';
 
         if (groups.length) {
-          // Collect all unpaid students from all groups
+          // Collect all unpaid students from all groups (ONLY actually unpaid, not upcoming/absent/canceled)
           let unpaidStudents = [];
           groups.forEach(group => {
             if (group.students && group.students.length) {
               group.students.forEach((student, idx) => {
-                if (student.status === 'unpaid' || student.status === 'upcoming') {
+                if (student.status === 'unpaid') {
                   unpaidStudents.push({
                     student: student,
                     group: group,
@@ -8176,8 +8176,8 @@
                 </button>
               </div>
             `;
-          } else if (student.status === 'unpaid' || student.status === 'upcoming') {
-            // Show full action buttons for unpaid students
+          } else if (student.status === 'unpaid') {
+            // Show full action buttons for unpaid students ONLY (not upcoming)
             let actionButtonsHtml = `
               <button class="action-icon-btn pause ${student.autoPaused ? 'paused' : ''}"
                       data-student-id="${normalizedId}"
@@ -8216,6 +8216,16 @@
               `;
             }
             
+            actionButtons = `<div class="student-actions">${actionButtonsHtml}</div>`;
+          } else if (student.status === 'upcoming') {
+            // Upcoming classes get limited actions (can only mark absent, no payment reminders)
+            let actionButtonsHtml = `
+              <button class="action-icon-btn"
+                      data-tooltip="Mark Absent"
+                      onclick="event.stopPropagation(); markAsAbsent(${studentId}, '${dateStr}')">
+                ⚪
+              </button>
+            `;
             actionButtons = `<div class="student-actions">${actionButtonsHtml}</div>`;
           } else if (student.status === 'paid' || student.status === 'credit') {
             // Show absent button even for paid students (allow marking paid students as absent)
@@ -9023,7 +9033,8 @@
               </button>
             </div>
           `;
-        } else if (student.status === 'unpaid' || student.status === 'upcoming') {
+        } else if (student.status === 'unpaid') {
+          // ONLY truly unpaid classes get payment reminder actions (not upcoming)
           const safeName = student.name.replace(/'/g, "\\'");
           let buttons = `
             <button class="quick-action-btn pause" 
@@ -9058,6 +9069,17 @@
           }
           
           actionButtons = `<div class="quick-actions-grid">${buttons}</div>`;
+        } else if (student.status === 'upcoming') {
+          // Upcoming classes: no payment reminders, just ability to mark absent
+          actionButtons = `
+            <div class="quick-actions-grid">
+              <button class="quick-action-btn tertiary" 
+                      onclick="markAsAbsent(${student.id}, '${classDate}')"
+                      title="Mark as absent">
+                ⚪ Mark Absent
+              </button>
+            </div>
+          `;
         } else if (student.status === 'paid' || student.status === 'credit') {
           // Add action button for paid/credit status - can mark as absent
           actionButtons = `
