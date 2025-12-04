@@ -7081,7 +7081,7 @@
           const gmailTimestamp = dateHeader ? new Date(dateHeader.value) : new Date();
 
           // Check timezone offset toggles
-          // CRITICAL: Read timezone offset from localStorage (persists FOREVER)
+          // Read from localStorage cache (synced from Supabase on page load and every toggle change)
           const offset12 = localStorage.getItem('la-offset-12') === 'true';
           const offset11 = localStorage.getItem('la-offset-11') === 'true';
 
@@ -8638,7 +8638,7 @@
       // ============================================================
       // GMAIL CONTEXT MENU & TIMEZONE SETTINGS
       // ============================================================
-      function setupGmailContextMenu() {
+      async function setupGmailContextMenu() {
         const gmailBtn = document.getElementById('gmailBtn');
         const contextMenu = document.getElementById('gmailContextMenu');
         const toggle12 = document.getElementById('laOffset12Toggle');
@@ -8668,15 +8668,42 @@
           }
         });
 
-        // Load saved settings and apply on page load
-        // CRITICAL: These settings MUST persist across sessions, regardless of Gmail connection status
-        const offset12 = localStorage.getItem('la-offset-12') === 'true';
-        const offset11 = localStorage.getItem('la-offset-11') === 'true';
+        // CRITICAL: Load timezone settings from SUPABASE (syncs across ALL devices)
+        // Fallback to localStorage for backward compatibility
+        console.log('🔄 LOADING TIMEZONE SETTINGS FROM SUPABASE...');
+        
+        let offset12 = false;
+        let offset11 = false;
+        
+        try {
+          // Get current admin email
+          const session = currentAdminSession || (await supabase.auth.getSession()).data.session;
+          if (session?.user?.email) {
+            const { data, error } = await supabase
+              .from('admin_accounts')
+              .select('timezone_offset')
+              .eq('email', session.user.email)
+              .single();
+            
+            if (data && !error) {
+              console.log('✅ Loaded timezone from Supabase:', data.timezone_offset);
+              offset12 = data.timezone_offset === '-12';
+              offset11 = data.timezone_offset === '-11';
+            } else {
+              console.log('⚠️ No Supabase timezone found, checking localStorage...');
+              offset12 = localStorage.getItem('la-offset-12') === 'true';
+              offset11 = localStorage.getItem('la-offset-11') === 'true';
+            }
+          }
+        } catch (err) {
+          console.error('❌ Error loading timezone from Supabase:', err);
+          // Fallback to localStorage
+          offset12 = localStorage.getItem('la-offset-12') === 'true';
+          offset11 = localStorage.getItem('la-offset-11') === 'true';
+        }
 
-        console.log('🔄 LOADING TIMEZONE SETTINGS FROM LOCALSTORAGE:');
-        console.log('   la-offset-12:', localStorage.getItem('la-offset-12'), '→', offset12);
-        console.log('   la-offset-11:', localStorage.getItem('la-offset-11'), '→', offset11);
-        debugLog('🔄 Loading timezone settings:', { offset12, offset11 });
+        console.log('   -12h offset:', offset12);
+        console.log('   -11h offset:', offset11);
 
         if (toggle12) {
           toggle12.checked = offset12;
@@ -8748,13 +8775,15 @@
       }
 
       // Toggle LA offset (only one can be active)
-      // CRITICAL: These settings persist FOREVER in localStorage, independent of Gmail connection
+      // CRITICAL: These settings persist FOREVER in SUPABASE, syncing across ALL devices
       async function setLAOffset(hours, isEnabled) {
         const toggle12 = document.getElementById('laOffset12Toggle');
         const toggle11 = document.getElementById('laOffset11Toggle');
 
         console.log(`🔧 setLAOffset called: ${hours}h = ${isEnabled}`);
 
+        let offsetValue = null;
+        
         if (hours === 12 && toggle12) {
           toggle12.checked = isEnabled;
           updateToggleStyle(toggle12, isEnabled);
@@ -8764,21 +8793,12 @@
             updateToggleStyle(toggle11, false);
           }
 
-          // CRITICAL: Save to localStorage (persists FOREVER across all sessions)
-          localStorage.setItem('la-offset-12', isEnabled.toString());
-          localStorage.setItem('la-offset-11', 'false');
+          offsetValue = isEnabled ? '-12' : null;
           
-          // Verify the save worked
-          const saved12 = localStorage.getItem('la-offset-12');
-          const saved11 = localStorage.getItem('la-offset-11');
-          console.log('💾 SAVED TO LOCALSTORAGE:');
-          console.log('   la-offset-12:', saved12);
-          console.log('   la-offset-11:', saved11);
-
           debugLog(
             isEnabled
-              ? '❄️ Winter offset enabled: –12 hours (PERSISTED FOREVER)'
-              : '✅ Winter offset disabled (PERSISTED FOREVER)'
+              ? '❄️ Winter offset enabled: –12 hours (SYNCING TO SUPABASE)'
+              : '✅ Winter offset disabled (SYNCING TO SUPABASE)'
           );
         } else if (hours === 11 && toggle11) {
           toggle11.checked = isEnabled;
@@ -8789,27 +8809,45 @@
             updateToggleStyle(toggle12, false);
           }
 
-          // CRITICAL: Save to localStorage (persists FOREVER across all sessions)
-          localStorage.setItem('la-offset-11', isEnabled.toString());
-          localStorage.setItem('la-offset-12', 'false');
-          
-          // Verify the save worked
-          const saved12 = localStorage.getItem('la-offset-12');
-          const saved11 = localStorage.getItem('la-offset-11');
-          console.log('💾 SAVED TO LOCALSTORAGE:');
-          console.log('   la-offset-12:', saved12);
-          console.log('   la-offset-11:', saved11);
+          offsetValue = isEnabled ? '-11' : null;
 
           debugLog(
             isEnabled
-              ? '☀️ Summer offset enabled: –11 hours (PERSISTED FOREVER)'
-              : '✅ Summer offset disabled (PERSISTED FOREVER)'
+              ? '☀️ Summer offset enabled: –11 hours (SYNCING TO SUPABASE)'
+              : '✅ Summer offset disabled (SYNCING TO SUPABASE)'
           );
         }
 
+        // CRITICAL: Save to SUPABASE (syncs across ALL devices)
+        try {
+          const session = currentAdminSession || (await supabase.auth.getSession()).data.session;
+          if (session?.user?.email) {
+            const { error } = await supabase
+              .from('admin_accounts')
+              .update({ timezone_offset: offsetValue })
+              .eq('email', session.user.email);
+            
+            if (error) {
+              console.error('❌ Error saving to Supabase:', error);
+              throw error;
+            }
+            
+            console.log('💾 SAVED TO SUPABASE (SYNCS ACROSS ALL DEVICES):');
+            console.log('   timezone_offset:', offsetValue);
+            console.log('   admin email:', session.user.email);
+          }
+        } catch (err) {
+          console.error('❌ Failed to save timezone to Supabase:', err);
+        }
+        
+        // Also save to localStorage as backup/cache
+        localStorage.setItem('la-offset-12', (offsetValue === '-12').toString());
+        localStorage.setItem('la-offset-11', (offsetValue === '-11').toString());
+        console.log('💾 Also cached in localStorage');
+
         // Update Gmail button glow after changing settings
         updateGmailButtonGlow();
-        console.log('✅ Timezone offset saved and will persist FOREVER until manually changed');
+        console.log('✅ Timezone offset saved to SUPABASE and will sync across ALL your devices FOREVER!');
       }
 
       // Update toggle visual style
