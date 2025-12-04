@@ -3845,9 +3845,13 @@
       }
     };
     
-    // Clean up all intervals when page unloads
+    // Clean up all intervals and end session when page unloads
     window.addEventListener('beforeunload', () => {
       intervalManager.clearAll();
+      // End session if one was started (not during impersonation)
+      if (sessionId) {
+        endSession();
+      }
     });
     
     // ==========================================================================
@@ -7465,16 +7469,36 @@
     let sessionHeartbeatInterval = null;
     
     async function startSession() {
-      if (!currentStudent || !currentStudent.id) return;
-      
-      // CRITICAL: Don't track sessions when admin is impersonating
-      // This prevents students from showing as "online" when admins view their portal
-      const urlParams = new URLSearchParams(window.location.search);
-      const isImpersonating = urlParams.get('impersonate');
-      if (isImpersonating) {
-        if (DEBUG_MODE) console.log('⚠️ Skipping session tracking: Admin impersonation mode');
+      // VALIDATION 1: Ensure we have a valid student
+      if (!currentStudent || !currentStudent.id) {
+        console.warn('⚠️ Cannot start session: No student data');
         return;
       }
+      
+      // CRITICAL VALIDATION 2: NEVER track sessions during admin impersonation
+      // This prevents false "online" status when admins view student portals
+      const urlParams = new URLSearchParams(window.location.search);
+      const isImpersonating = urlParams.get('impersonate');
+      
+      // Also check sessionStorage for impersonation token
+      const impersonationToken = sessionStorage.getItem('impersonation_token') || 
+                                 localStorage.getItem('impersonation_token');
+      
+      if (isImpersonating || impersonationToken) {
+        console.log('🚫 SESSION TRACKING BLOCKED: Admin impersonation mode detected', {
+          urlParam: isImpersonating,
+          hasToken: !!impersonationToken,
+          student: currentStudent.name
+        });
+        return;
+      }
+      
+      // VALIDATION 3: Ensure this is a real student login
+      console.log('✅ Starting REAL student session:', {
+        studentId: currentStudent.id,
+        studentName: currentStudent.name,
+        timestamp: new Date().toISOString()
+      });
       
       try {
         // Create new session
