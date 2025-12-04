@@ -1750,21 +1750,22 @@
         let activeSessions = [];
         let allSessionsMap = {};
         try {
+          // FIX: Query student_sessions table (not session_logs)
           const sessionsResult = await supabase
-            .from('session_logs')
+            .from('student_sessions')
             .select('student_id, is_active, last_activity')
             .eq('is_active', true);
           
           if (!sessionsResult.error) {
             activeSessions = sessionsResult.data || [];
-            console.log('✅ Active sessions from session_logs:', activeSessions);
+            console.log('✅ Active sessions from student_sessions:', activeSessions);
           } else {
-            console.log('⚠️ Session logs query error:', sessionsResult.error);
+            console.log('⚠️ Student sessions query error:', sessionsResult.error);
           }
           
           // Also get all students who have ever logged in
           const allSessionsResult = await supabase
-            .from('session_logs')
+            .from('student_sessions')
             .select('student_id')
             .limit(1000);
           
@@ -1775,7 +1776,7 @@
             });
           }
         } catch (sessionError) {
-          console.log('⚠️ Session logs not available yet (table may not exist):', sessionError);
+          console.log('⚠️ Student sessions table not available yet (table may not exist):', sessionError);
         }
         
         // Create online status map
@@ -2149,9 +2150,9 @@
       try {
         await ensureAdminSession();
         
-        // Query detailed session logs
+        // FIX: Query student_sessions table (not session_logs)
         const { data: sessions, error } = await supabase
-          .from('session_logs')
+          .from('student_sessions')
           .select('*')
           .eq('student_id', studentId)
           .order('session_start', { ascending: false })
@@ -2164,14 +2165,29 @@
         
         console.log('Sessions data:', sessions);
         
-        // Calculate statistics
+        // Calculate statistics (FIX: student_sessions doesn't have duration_seconds, page_views, or notes_viewed)
+        // We need to calculate duration from session_start and session_end
         const activeSession = sessions?.find(s => s.is_active);
         const totalSessions = sessions?.length || 0;
-        const totalSeconds = sessions?.reduce((sum, s) => sum + (s.duration_seconds || 0), 0) || 0;
+        
+        // Calculate total seconds by summing up session durations
+        const totalSeconds = sessions?.reduce((sum, s) => {
+          if (s.session_end && s.session_start) {
+            const start = new Date(s.session_start);
+            const end = new Date(s.session_end);
+            return sum + Math.floor((end - start) / 1000);
+          }
+          // For active sessions, calculate from start to now
+          if (s.is_active && s.session_start) {
+            const start = new Date(s.session_start);
+            const now = new Date();
+            return sum + Math.floor((now - start) / 1000);
+          }
+          return sum;
+        }, 0) || 0;
+        
         const totalHours = (totalSeconds / 3600).toFixed(1);
         const avgSessionMinutes = totalSessions > 0 ? ((totalSeconds / totalSessions) / 60).toFixed(1) : 0;
-        const totalPageViews = sessions?.reduce((sum, s) => sum + (s.total_page_views || 0), 0) || 0;
-        const totalNotesViewed = sessions?.reduce((sum, s) => sum + (s.total_notes_viewed || 0), 0) || 0;
         
         // Build status HTML
         let statusHTML = `
@@ -2208,18 +2224,17 @@
                 <span class="status-label">Last Activity:</span>
                 <span class="status-value">${idleMinutes === 0 ? 'Just now' : idleMinutes + ' minutes ago'}</span>
               </div>
-              <div class="status-row">
-                <span class="status-label">Pages Viewed:</span>
-                <span class="status-value">${activeSession.total_page_views || 0}</span>
-              </div>
-              <div class="status-row">
-                <span class="status-label">Notes Accessed:</span>
-                <span class="status-value">${activeSession.total_notes_viewed || 0}</span>
-              </div>
             </div>
           `;
         } else if (sessions && sessions.length > 0) {
           const lastSession = sessions[0];
+          // Calculate last session duration
+          let lastSessionMinutes = 0;
+          if (lastSession.session_end && lastSession.session_start) {
+            const start = new Date(lastSession.session_start);
+            const end = new Date(lastSession.session_end);
+            lastSessionMinutes = Math.floor((end - start) / 1000 / 60);
+          }
           const lastSeen = new Date(lastSession.session_end || lastSession.last_activity);
           
           statusHTML += `
@@ -2234,7 +2249,7 @@
               </div>
               <div class="status-row">
                 <span class="status-label">Last Session Duration:</span>
-                <span class="status-value">${Math.floor((lastSession.duration_seconds || 0) / 60)} minutes</span>
+                <span class="status-value">${lastSessionMinutes} minutes</span>
               </div>
             </div>
           `;
@@ -2264,14 +2279,6 @@
                 <div class="stat-item">
                   <div class="stat-value">${avgSessionMinutes}m</div>
                   <div class="stat-label">Avg Session</div>
-                </div>
-                <div class="stat-item">
-                  <div class="stat-value">${totalPageViews}</div>
-                  <div class="stat-label">Page Views</div>
-                </div>
-                <div class="stat-item">
-                  <div class="stat-value">${totalNotesViewed}</div>
-                  <div class="stat-label">Notes Viewed</div>
                 </div>
               </div>
             </div>
