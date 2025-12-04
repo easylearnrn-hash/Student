@@ -5510,10 +5510,16 @@
       
       // Check each scheduled date for payment status
       const unpaidClasses = [];
+      const absentClasses = []; // Track absent classes for display
       for (const dateStr of scheduledDates) {
-        // Skip if absent (no payment expected)
+        // Mark if absent (show in payment history but don't count as unpaid)
         if (absences.includes(dateStr)) {
           console.debug(`⚪ ${dateStr}: Student was absent (no payment expected)`);
+          absentClasses.push({
+            date: dateStr,
+            amount: 0, // No payment expected for absences
+            status: 'absent'
+          });
           continue;
         }
         
@@ -5548,8 +5554,9 @@
       
       const unpaidAmount = unpaidClasses.length * pricePerClass;
       console.debug(`💰 Total unpaid: $${unpaidAmount} (${unpaidClasses.length} classes × $${pricePerClass})`);
+      console.debug(`⚪ Total absent: ${absentClasses.length} classes`);
       
-      return { unpaidAmount, unpaidClasses };
+      return { unpaidAmount, unpaidClasses, absentClasses };
     }
     
     // Load student payment UI only when needed
@@ -5558,13 +5565,16 @@
       let lastPaidAmount = 0;
       let lastPaidDate = null;
       let unpaidClasses = []; // Track individual unpaid class dates
+      let absentClasses = []; // Track absent class dates
       
       // 🔴 ENHANCED: Calculate unpaid from schedule (matches Calendar red dots)
       if (student && groupSchedule) {
         const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
         totalUnpaid = result.unpaidAmount;
         unpaidClasses = result.unpaidClasses; // Capture unpaid class dates
+        absentClasses = result.absentClasses || []; // Capture absent class dates
         console.debug(`✅ Schedule-based unpaid calculation: $${result.unpaidAmount} (${unpaidClasses.length} classes)`);
+        console.debug(`⚪ Absent classes: ${absentClasses.length}`);
       } else {
         // Fallback: Calculate from payment_records table only
         console.debug('⚠️ Using fallback payment_records calculation (no schedule data)');
@@ -5642,7 +5652,30 @@
         });
       }
       
-      if (!payments.length && (!unpaidClasses || unpaidClasses.length === 0)) {
+      // ⚪ NEW: Add absent class entries (if any)
+      if (absentClasses && absentClasses.length > 0) {
+        console.debug(`📋 Displaying ${absentClasses.length} absent class dates`);
+        absentClasses.forEach(absentClass => {
+          const classDate = new Date(absentClass.date);
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const dateStr = `${monthNames[classDate.getMonth()]} ${classDate.getDate()}, ${classDate.getFullYear()}`;
+          
+          const item = document.createElement('div');
+          item.className = 'payment-item absent';
+          
+          item.innerHTML = `
+            <div class="payment-date">${dateStr}</div>
+            <div class="payment-status">
+              <span class="status-badge absent">Absent</span>
+              <span class="payment-amount">-</span>
+            </div>
+          `;
+          
+          paymentList.appendChild(item);
+        });
+      }
+      
+      if (!payments.length && (!unpaidClasses || unpaidClasses.length === 0) && (!absentClasses || absentClasses.length === 0)) {
         paymentList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 40px;">No payment records found.</div>';
         return;
       }
