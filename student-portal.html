@@ -3640,7 +3640,7 @@
      */
     async function checkAuthentication() {
       // ---------- Check for Admin Chat Mode ----------
-      const adminChatTokenStr = sessionStorage.getItem('admin_chat_token');
+      const adminChatTokenStr = localStorage.getItem('admin_chat_token') || sessionStorage.getItem('admin_chat_token');
       if (adminChatTokenStr) {
         try {
           const adminToken = JSON.parse(adminChatTokenStr);
@@ -3648,6 +3648,7 @@
           // Check if token is expired
           if (Date.now() > adminToken.expiresAt) {
             console.log('🔒 Admin chat token expired');
+            localStorage.removeItem('admin_chat_token');
             sessionStorage.removeItem('admin_chat_token');
           } else {
             console.log('✅ Admin chat mode activated for:', adminToken.adminEmail);
@@ -3664,6 +3665,7 @@
           }
         } catch (e) {
           console.error('Error parsing admin chat token:', e);
+          localStorage.removeItem('admin_chat_token');
           sessionStorage.removeItem('admin_chat_token');
         }
       }
@@ -3763,8 +3765,14 @@
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session) {
-        // No session - redirect to login
-        window.location.href = 'index.html';
+        // Check if we're in admin chat mode - if so, it's okay to have no session
+        const adminChatCheck = localStorage.getItem('admin_chat_token') || sessionStorage.getItem('admin_chat_token');
+        if (!adminChatCheck) {
+          // No session and no admin token - redirect to login
+          window.location.href = 'index.html';
+          return null;
+        }
+        // Admin chat mode is active, continue without student session
         return null;
       }
       
@@ -3778,9 +3786,13 @@
       
       if (error || !studentData) {
         console.error('❌ Student not found:', error);
-        alert('Your account is not set up correctly. Please contact the administrator.');
-        await supabase.auth.signOut();
-        window.location.href = 'index.html';
+        // Check if admin chat mode before showing error
+        const adminChatCheck = localStorage.getItem('admin_chat_token') || sessionStorage.getItem('admin_chat_token');
+        if (!adminChatCheck) {
+          alert('Your account is not set up correctly. Please contact the administrator.');
+          await supabase.auth.signOut();
+          window.location.href = 'index.html';
+        }
         return null;
       }
       
@@ -6137,11 +6149,13 @@
         return;
       }
       
-      container.innerHTML = forumMessages.map((msg, index) => `
+      container.innerHTML = forumMessages.map((msg, index) => {
+        const isAdminMessage = msg.student_name === 'Administrator' || msg.student_id === 0;
+        return `
         <div class="forum-message" style="animation-delay: ${index * 0.1}s;">
           <div class="message-header">
             <div style="display: flex; flex-direction: column; gap: 4px;">
-              <span class="message-author">${escapeHtml(msg.student_name || 'Student')}</span>
+              <span class="message-author" style="${isAdminMessage ? 'color: #ef4444; font-weight: 600;' : ''}">${escapeHtml(msg.student_name || 'Student')}</span>
               <div style="font-size: 11px; color: rgba(255,255,255,0.5); display: flex; gap: 12px;">
                 ${msg.student_group ? `<span>📚 Group ${escapeHtml(msg.student_group)}</span>` : ''}
                 ${msg.student_college ? `<span>🎓 ${escapeHtml(msg.student_college)}</span>` : ''}
@@ -6152,7 +6166,7 @@
               ${isAdmin ? `<button class="delete-message-btn" onclick="deleteForumMessage(${msg.id})" title="Delete message">🗑️</button>` : ''}
             </div>
           </div>
-          <div class="message-text">${escapeHtml(msg.message)}</div>
+          <div class="message-text" style="${isAdminMessage ? 'color: #ef4444;' : ''}">${escapeHtml(msg.message)}</div>
           <button class="reply-btn" onclick="toggleReplyInput(${msg.id})">Reply</button>
           
           <div class="reply-input-container" id="replyInput${msg.id}">
@@ -6167,11 +6181,13 @@
           
           ${msg.replies && msg.replies.length > 0 ? `
             <div class="message-replies">
-              ${msg.replies.map(reply => `
+              ${msg.replies.map(reply => {
+                const isAdminReply = reply.student_name === 'Administrator' || reply.student_id === 0;
+                return `
                 <div class="message-reply">
                   <div class="message-header">
                     <div style="display: flex; flex-direction: column; gap: 4px;">
-                      <span class="message-author">${escapeHtml(reply.student_name || 'Student')}</span>
+                      <span class="message-author" style="${isAdminReply ? 'color: #ef4444; font-weight: 600;' : ''}">${escapeHtml(reply.student_name || 'Student')}</span>
                       <div style="font-size: 10px; color: rgba(255,255,255,0.4); display: flex; gap: 10px;">
                         ${reply.student_group ? `<span>📚 Group ${escapeHtml(reply.student_group)}</span>` : ''}
                         ${reply.student_college ? `<span>🎓 ${escapeHtml(reply.student_college)}</span>` : ''}
@@ -6182,13 +6198,15 @@
                       ${isAdmin ? `<button class="delete-message-btn" onclick="deleteForumReply(${reply.id})" title="Delete reply">🗑️</button>` : ''}
                     </div>
                   </div>
-                  <div class="message-text">${escapeHtml(reply.message)}</div>
+                  <div class="message-text" style="${isAdminReply ? 'color: #ef4444;' : ''}">${escapeHtml(reply.message)}</div>
                 </div>
-              `).join('')}
+              `;
+              }).join('')}
             </div>
           ` : ''}
         </div>
-      `).join('');
+      `;
+      }).join('');
     }
     
     /**
@@ -6228,14 +6246,17 @@
       }
       
       try {
+        // Check if admin is posting
+        const isAdminPosting = currentStudent.isAdminChatMode || currentStudent.role === 'admin';
+        
         const { data, error } = await supabase
           .from('forum_messages')
           .insert([{
-            student_id: currentStudent.id,
-            student_name: currentStudent.name || 'Student',
+            student_id: isAdminPosting ? 0 : currentStudent.id,
+            student_name: isAdminPosting ? 'Administrator' : (currentStudent.name || 'Student'),
             student_email: currentStudent.email || currentEmail,
-            student_group: currentStudent.group_code || null,
-            student_college: currentStudent.college || null,
+            student_group: isAdminPosting ? null : (currentStudent.group_code || null),
+            student_college: isAdminPosting ? null : (currentStudent.college || null),
             message: message,
             created_at: new Date().toISOString()
           }])
@@ -6285,14 +6306,17 @@
       }
       
       try {
+        // Check if admin is replying
+        const isAdminReplying = currentStudent.isAdminChatMode || currentStudent.role === 'admin';
+        
         const { data, error } = await supabase
           .from('forum_replies')
           .insert([{
             message_id: messageId,
-            student_id: currentStudent.id,
-            student_name: currentStudent.name || 'Student',
-            student_group: currentStudent.group_code || null,
-            student_college: currentStudent.college || null,
+            student_id: isAdminReplying ? 0 : currentStudent.id,
+            student_name: isAdminReplying ? 'Administrator' : (currentStudent.name || 'Student'),
+            student_group: isAdminReplying ? null : (currentStudent.group_code || null),
+            student_college: isAdminReplying ? null : (currentStudent.college || null),
             message: message,
             created_at: new Date().toISOString()
           }])
@@ -7923,6 +7947,15 @@
         
         // PERFORMANCE FIX: Removed duplicate loadPortalData() call
         // It's already called inside checkAuthentication() after auth verification
+        
+        // Check if URL has #forum hash and automatically open forum
+        if (window.location.hash === '#forum') {
+          console.log('🎯 Auto-opening forum from URL hash');
+          // Wait a bit for DOM to be ready
+          setTimeout(() => {
+            toggleForum();
+          }, 500);
+        }
         
       } catch (error) {
         console.error('❌ Portal initialization failed:', error);
