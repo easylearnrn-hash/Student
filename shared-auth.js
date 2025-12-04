@@ -104,7 +104,7 @@
     }
 
     if (redirectToLogin) {
-      window.location.href = 'Login.html';
+      window.location.href = 'index.html';
     }
 
     throw new Error('AUTH_REQUIRED');
