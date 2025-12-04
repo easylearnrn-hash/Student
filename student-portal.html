@@ -58,6 +58,9 @@
       transition: none !important;
       transition-duration: 0s !important;
       transition-delay: 0s !important;
+      /* PERFORMANCE FIX: Disable backdrop-filter blur (major GPU killer) */
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
     }
 
     /* ==========================================================================
@@ -3724,6 +3727,47 @@
     let currentPayments = []; // Store payment history globally
     
     // ==========================================================================
+    // GLOBAL INTERVAL MANAGER - PERFORMANCE FIX
+    // ==========================================================================
+    // Prevents duplicate intervals and ensures proper cleanup
+    const intervalManager = {
+      intervals: new Map(),
+      
+      set(name, callback, delay) {
+        // Clear existing interval if it exists
+        this.clear(name);
+        
+        // Create new interval
+        const id = setInterval(callback, delay);
+        this.intervals.set(name, id);
+        console.debug(`✅ Interval '${name}' started (${delay}ms)`);
+        return id;
+      },
+      
+      clear(name) {
+        if (this.intervals.has(name)) {
+          clearInterval(this.intervals.get(name));
+          this.intervals.delete(name);
+          console.debug(`🛑 Interval '${name}' cleared`);
+        }
+      },
+      
+      clearAll() {
+        console.debug(`🧹 Clearing all ${this.intervals.size} intervals`);
+        this.intervals.forEach((id, name) => {
+          clearInterval(id);
+          console.debug(`  🛑 Cleared '${name}'`);
+        });
+        this.intervals.clear();
+      }
+    };
+    
+    // Clean up all intervals when page unloads
+    window.addEventListener('beforeunload', () => {
+      intervalManager.clearAll();
+    });
+    
+    // ==========================================================================
     // CUSTOM DIALOG SYSTEM
     // ==========================================================================
     
@@ -4470,10 +4514,11 @@
         }
         
         if (diff <= -twoHours) {
-          // Class ended more than 2 hours ago, need to recalculate next class
-          clearInterval(countdownInterval);
-          // Reload the schedule to get next class
-          location.reload();
+          // Class ended more than 2 hours ago, stop countdown
+          intervalManager.clear('countdown');
+          countdownEl.textContent = 'Check schedule for next class';
+          countdownEl.style.fontSize = '14px';
+          countdownEl.style.color = 'rgba(255,255,255,0.6)';
           return;
         }
         
@@ -4509,8 +4554,9 @@
       // Update immediately
       updateCountdown();
       
-      // Update every second
-      countdownInterval = setInterval(updateCountdown, 1000);
+      // PERFORMANCE FIX: Update every 30 seconds instead of every 1 second
+      // Reduces CPU usage by 97% while maintaining good UX
+      intervalManager.set('countdown', updateCountdown, 30000); // 30 seconds
     }
     
     // Load schedule change announcements
@@ -5445,16 +5491,14 @@
       
       if (isActive) {
         modal.classList.remove('active');
-        if (forumUpdateInterval) {
-          clearInterval(forumUpdateInterval);
-          forumUpdateInterval = null;
-        }
+        intervalManager.clear('forum');
       } else {
         modal.classList.add('active');
         markForumViewed(); // Mark as viewed when opening
         loadForumMessages();
-        // Auto-refresh every 10 seconds
-        forumUpdateInterval = setInterval(loadForumMessages, 10000);
+        // PERFORMANCE FIX: Refresh every 30 seconds instead of 10 seconds
+        // Reduces database load by 67%
+        intervalManager.set('forum', loadForumMessages, 30000); // 30 seconds
       }
     }
     
@@ -7128,11 +7172,12 @@
         studentNameEl.textContent = token.studentName;
         banner.style.display = 'flex';
         
-        // Update countdown timer every second
+        // PERFORMANCE FIX: Update timer every 10 seconds instead of 1 second
+        // Still shows countdown but with 90% less CPU usage
         updateImpersonationTimer(token, timerEl);
-        impersonationTimer = setInterval(() => {
+        intervalManager.set('impersonation', () => {
           updateImpersonationTimer(token, timerEl);
-        }, 1000);
+        }, 10000); // 10 seconds instead of 1 second
       }
     }
     
@@ -7142,7 +7187,7 @@
       
       if (remainingMs <= 0) {
         // Session expired
-        clearInterval(impersonationTimer);
+        intervalManager.clear('impersonation');
         alert('Impersonation session has expired.');
         exitImpersonation();
         return;
@@ -7183,29 +7228,14 @@
     function exitImpersonation() {
       // Clear impersonation data
       sessionStorage.removeItem('impersonation_token');
-      clearInterval(impersonationTimer);
-      
-      // Clear countdown timer
-      if (countdownInterval) {
-        clearInterval(countdownInterval);
-        countdownInterval = null;
-      }
+      intervalManager.clear('impersonation');
+      intervalManager.clear('countdown');
       
       // Log exit
       
       // Redirect back to admin panel
       window.location.href = 'Student-Portal-Admin.html';
     }
-    
-    // Auto-cleanup on page unload (security measure)
-    window.addEventListener('beforeunload', () => {
-      if (impersonationMode) {
-        clearInterval(impersonationTimer);
-      }
-      if (countdownInterval) {
-        clearInterval(countdownInterval);
-      }
-    });
     
     // ==========================================================================
     // SESSION TRACKING
@@ -7238,8 +7268,9 @@
         console.log('Session started:', data);
         sessionId = data.id;
         
-        // Start heartbeat to update last_activity every 2 minutes
-        sessionHeartbeatInterval = setInterval(updateSessionActivity, 2 * 60 * 1000);
+        // PERFORMANCE FIX: Heartbeat every 5 minutes instead of 2 minutes
+        // Reduces Supabase load by 60% while still tracking activity
+        intervalManager.set('sessionHeartbeat', updateSessionActivity, 5 * 60 * 1000); // 5 minutes
         
         // Update activity on page visibility change
         document.addEventListener('visibilitychange', () => {
