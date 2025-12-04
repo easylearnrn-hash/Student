@@ -5824,6 +5824,8 @@
         modal.classList.add('active');
         markForumViewed(); // Mark as viewed when opening
         loadForumMessages();
+        loadStudentsForMentions(); // Load students for @ mentions
+        setupMentionAutocomplete(); // Setup autocomplete
         // PERFORMANCE FIX: Refresh every 30 seconds instead of 10 seconds
         // Reduces database load by 67%
         intervalManager.set('forum', loadForumMessages, 30000); // 30 seconds
@@ -6178,8 +6180,14 @@
               ${isAdmin ? `<button class="delete-message-btn" onclick="deleteForumMessage(${msg.id})" title="Delete message">🗑️</button>` : ''}
             </div>
           </div>
-          <div class="message-text" style="${isAdminMessage ? 'color: #ef4444;' : ''}">${escapeHtml(msg.message)}</div>
-          <button class="reply-btn" onclick="toggleReplyInput(${msg.id})">Reply</button>
+          <div class="message-text" id="messageText${msg.id}" style="${isAdminMessage ? 'color: #ef4444;' : ''}" data-original="${escapeHtml(msg.message).replace(/"/g, '&quot;')}">${escapeHtml(msg.message)}</div>
+          <div style="display: flex; gap: 8px; margin-top: 8px;">
+            <button class="reply-btn" onclick="toggleReplyInput(${msg.id})">Reply</button>
+            ${isAdminMessage && isAdmin ? `
+              <button class="reply-btn" onclick="togglePinMessage(${msg.id})" title="Pin message">📌 Pin</button>
+              <button class="reply-btn" onclick="editMessage(${msg.id})" title="Edit message">✏️ Edit</button>
+            ` : ''}
+          </div>
           
           <div class="reply-input-container" id="replyInput${msg.id}">
             <input 
@@ -6425,6 +6433,245 @@
         console.error('Delete reply error:', error);
         showCustomAlert('Failed to delete reply. Please try again.', 'error');
       }
+    }
+    
+    // ---------- Admin Message Actions ----------
+    async function togglePinMessage(messageId) {
+      // TODO: Implement pinning (add isPinned column to forum_messages table)
+      showCustomAlert('Pin feature coming soon!', 'info');
+    }
+    
+    async function editMessage(messageId) {
+      const messageTextEl = document.getElementById(`messageText${messageId}`);
+      const originalText = messageTextEl.getAttribute('data-original');
+      
+      // Show formatting toolbar and edit mode
+      const modal = document.createElement('div');
+      modal.className = 'custom-alert-overlay';
+      modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 999999;
+      `;
+      
+      modal.innerHTML = `
+        <div style="
+          background: linear-gradient(145deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.1));
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          border-radius: 16px;
+          padding: 24px;
+          max-width: 600px;
+          width: 90%;
+          backdrop-filter: blur(12px);
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        ">
+          <h3 style="color: white; margin-bottom: 16px;">✏️ Edit Message</h3>
+          
+          <div style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+            <button onclick="formatText('bold')" style="padding: 8px 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: white; cursor: pointer;"><strong>B</strong></button>
+            <button onclick="formatText('italic')" style="padding: 8px 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: white; cursor: pointer;"><em>I</em></button>
+            <select id="fontSize" onchange="formatText('fontSize')" style="padding: 8px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: white;">
+              <option value="14">Normal</option>
+              <option value="18">Large</option>
+              <option value="24">Extra Large</option>
+            </select>
+          </div>
+          
+          <textarea id="editMessageText" style="
+            width: 100%;
+            min-height: 120px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            resize: vertical;
+            margin-bottom: 16px;
+          ">${originalText.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')}</textarea>
+          
+          <div style="display: flex; gap: 12px;">
+            <button onclick="this.closest('.custom-alert-overlay').remove()" style="
+              flex: 1;
+              padding: 12px;
+              background: rgba(255, 255, 255, 0.1);
+              border: 1px solid rgba(255, 255, 255, 0.2);
+              border-radius: 8px;
+              color: white;
+              cursor: pointer;
+            ">Cancel</button>
+            <button onclick="saveEditedMessage(${messageId})" style="
+              flex: 1;
+              padding: 12px;
+              background: linear-gradient(135deg, rgba(59, 130, 246, 0.9), rgba(37, 99, 235, 0.9));
+              border: none;
+              border-radius: 8px;
+              color: white;
+              font-weight: 600;
+              cursor: pointer;
+            ">Save</button>
+          </div>
+        </div>
+      `;
+      
+      document.body.appendChild(modal);
+    }
+    
+    function formatText(command) {
+      const textarea = document.getElementById('editMessageText');
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const selectedText = textarea.value.substring(start, end);
+      
+      if (!selectedText) {
+        showCustomAlert('Please select text to format', 'info');
+        return;
+      }
+      
+      let formattedText = '';
+      if (command === 'bold') {
+        formattedText = `**${selectedText}**`;
+      } else if (command === 'italic') {
+        formattedText = `*${selectedText}*`;
+      } else if (command === 'fontSize') {
+        const size = document.getElementById('fontSize').value;
+        formattedText = `<span style="font-size: ${size}px">${selectedText}</span>`;
+      }
+      
+      textarea.value = textarea.value.substring(0, start) + formattedText + textarea.value.substring(end);
+      textarea.focus();
+      textarea.setSelectionRange(start, start + formattedText.length);
+    }
+    
+    async function saveEditedMessage(messageId) {
+      const newText = document.getElementById('editMessageText').value.trim();
+      
+      if (!newText) {
+        showCustomAlert('Message cannot be empty', 'error');
+        return;
+      }
+      
+      try {
+        const { error } = await supabase
+          .from('forum_messages')
+          .update({ 
+            message: newText,
+            edited_at: new Date().toISOString()
+          })
+          .eq('id', messageId);
+        
+        if (error) {
+          console.error('Error updating message:', error);
+          showCustomAlert('Failed to update message', 'error');
+          return;
+        }
+        
+        showCustomAlert('Message updated successfully', 'success');
+        document.querySelector('.custom-alert-overlay').remove();
+        await loadForumMessages();
+        
+      } catch (error) {
+        console.error('Save message error:', error);
+        showCustomAlert('Failed to save message', 'error');
+      }
+    }
+    
+    // ---------- @ Mention Autocomplete ----------
+    let allStudents = [];
+    let mentionSuggestions = null;
+    
+    async function loadStudentsForMentions() {
+      try {
+        const { data, error } = await supabase
+          .from('students')
+          .select('id, name')
+          .order('name');
+        
+        if (!error && data) {
+          allStudents = data;
+        }
+      } catch (error) {
+        console.error('Error loading students for mentions:', error);
+      }
+    }
+    
+    function setupMentionAutocomplete() {
+      const input = document.getElementById('forumInput');
+      if (!input) return;
+      
+      // Create suggestion dropdown
+      mentionSuggestions = document.createElement('div');
+      mentionSuggestions.style.cssText = `
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        right: 0;
+        max-height: 200px;
+        overflow-y: auto;
+        background: rgba(30, 41, 59, 0.95);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        margin-bottom: 8px;
+        display: none;
+        z-index: 1000;
+      `;
+      input.parentElement.style.position = 'relative';
+      input.parentElement.appendChild(mentionSuggestions);
+      
+      input.addEventListener('input', function(e) {
+        const text = this.value;
+        const cursorPos = this.selectionStart;
+        const textBeforeCursor = text.substring(0, cursorPos);
+        const atIndex = textBeforeCursor.lastIndexOf('@');
+        
+        if (atIndex !== -1 && cursorPos - atIndex <= 20) {
+          const searchTerm = textBeforeCursor.substring(atIndex + 1).toLowerCase();
+          const matches = allStudents.filter(s => 
+            s.name.toLowerCase().includes(searchTerm)
+          ).slice(0, 5);
+          
+          if (matches.length > 0 && searchTerm) {
+            showMentionSuggestions(matches, atIndex, cursorPos);
+          } else {
+            mentionSuggestions.style.display = 'none';
+          }
+        } else {
+          mentionSuggestions.style.display = 'none';
+        }
+      });
+    }
+    
+    function showMentionSuggestions(matches, atIndex, cursorPos) {
+      mentionSuggestions.innerHTML = matches.map(student => `
+        <div onclick="insertMention('${student.name.replace(/'/g, "\\'")}', ${atIndex}, ${cursorPos})" style="
+          padding: 10px 12px;
+          cursor: pointer;
+          color: white;
+          border-bottom: 1px solid rgba(255,255,255,0.05);
+        " onmouseover="this.style.background='rgba(59, 130, 246, 0.2)'" onmouseout="this.style.background=''">
+          👤 ${student.name}
+        </div>
+      `).join('');
+      mentionSuggestions.style.display = 'block';
+    }
+    
+    function insertMention(name, atIndex, cursorPos) {
+      const input = document.getElementById('forumInput');
+      const text = input.value;
+      const beforeAt = text.substring(0, atIndex);
+      const afterCursor = text.substring(cursorPos);
+      input.value = beforeAt + `@${name} ` + afterCursor;
+      mentionSuggestions.style.display = 'none';
+      input.focus();
     }
     
     // Update Forum Badge (unread count)
