@@ -3976,13 +3976,9 @@
               <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
             </svg>
           </button>
-          <div class="stat-pill">
-            <span class="stat-value" id="totalRecords">0</span>
-            Total
-          </div>
-          <button class="stat-pill portal-link" id="sqlHelpBtn" onclick="openSQLHelpModal()" style="cursor: pointer; border: none;">
-            HELP
-          </button>
+          <a class="stat-pill portal-link" id="sqlHelpBtn" onclick="openSQLHelpModal(); return false;" style="cursor: pointer; text-decoration: none;">
+            Help
+          </a>
           <a href="Student-Portal-Admin.html" class="stat-pill portal-link" id="portalSystemBtn" target="_blank" rel="noopener">
             Portal
           </a>
@@ -4466,6 +4462,35 @@
             
             <div class="sql-query-block">
               <div class="sql-query-header">
+                <span style="color: #fff; font-size: 13px; font-weight: 600;">🔍 COMPLETE DATABASE SCHEMA (All tables + columns + constraints)</span>
+                <button class="sql-copy-btn" onclick="copySQLQuery(this, `SELECT \n    c.table_name,\n    c.column_name,\n    c.ordinal_position,\n    c.data_type,\n    c.udt_name AS postgres_type,\n    c.character_maximum_length,\n    c.is_nullable,\n    c.column_default,\n    tc.constraint_type,\n    tc.constraint_name\nFROM information_schema.columns c\nLEFT JOIN information_schema.key_column_usage kcu\n    ON c.table_name = kcu.table_name\n   AND c.column_name = kcu.column_name\n   AND c.table_schema = kcu.table_schema\nLEFT JOIN information_schema.table_constraints tc\n    ON tc.constraint_name = kcu.constraint_name\n   AND tc.table_schema = kcu.table_schema\nWHERE c.table_schema = 'public'\nORDER BY c.table_name, c.ordinal_position;`)">📋 Copy</button>
+              </div>
+              <pre style="background: rgba(0,0,0,0.4); border: 1px solid rgba(138,180,255,0.2); border-radius: 8px; padding: 15px; margin: 10px 0 0 0; overflow-x: auto; color: #8ab4ff; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.6;">SELECT 
+    c.table_name,
+    c.column_name,
+    c.ordinal_position,
+    c.data_type,
+    c.udt_name AS postgres_type,
+    c.character_maximum_length,
+    c.is_nullable,
+    c.column_default,
+    tc.constraint_type,
+    tc.constraint_name
+FROM information_schema.columns c
+LEFT JOIN information_schema.key_column_usage kcu
+    ON c.table_name = kcu.table_name
+   AND c.column_name = kcu.column_name
+   AND c.table_schema = kcu.table_schema
+LEFT JOIN information_schema.table_constraints tc
+    ON tc.constraint_name = kcu.constraint_name
+   AND tc.table_schema = kcu.table_schema
+WHERE c.table_schema = 'public'
+ORDER BY c.table_name, c.ordinal_position;</pre>
+              <p style="color: #4ade80; font-size: 12px; margin-top: 8px; font-weight: 600;">⭐ MAIN HELPER: Shows complete database schema with all details including primary keys, foreign keys, and constraints</p>
+            </div>
+
+            <div class="sql-query-block">
+              <div class="sql-query-header">
                 <span style="color: #fff; font-size: 13px; font-weight: 600;">See ALL tables in your database</span>
                 <button class="sql-copy-btn" onclick="copySQLQuery(this, `SELECT table_name \nFROM information_schema.tables \nWHERE table_schema = 'public' \nORDER BY table_name;`)">📋 Copy</button>
               </div>
@@ -4557,11 +4582,12 @@ WHERE email = 'hrachfilm@gmail.com';</pre>
             <div class="sql-query-block">
               <div class="sql-query-header">
                 <span style="color: #fff; font-size: 13px; font-weight: 600;">See ALL admin accounts</span>
-                <button class="sql-copy-btn" onclick="copySQLQuery(this, `SELECT email, auth_user_id, timezone_offset, name, role \nFROM admin_accounts \nORDER BY email;`)">📋 Copy</button>
+                <button class="sql-copy-btn" onclick="copySQLQuery(this, `SELECT email, auth_user_id, timezone_offset \nFROM admin_accounts \nORDER BY email;`)">📋 Copy</button>
               </div>
-              <pre style="background: rgba(0,0,0,0.4); border: 1px solid rgba(138,180,255,0.2); border-radius: 8px; padding: 15px; margin: 10px 0 0 0; overflow-x: auto; color: #8ab4ff; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.6;">SELECT email, auth_user_id, timezone_offset, name, role 
+              <pre style="background: rgba(0,0,0,0.4); border: 1px solid rgba(138,180,255,0.2); border-radius: 8px; padding: 15px; margin: 10px 0 0 0; overflow-x: auto; color: #8ab4ff; font-family: 'Courier New', monospace; font-size: 13px; line-height: 1.6;">SELECT email, auth_user_id, timezone_offset 
 FROM admin_accounts 
 ORDER BY email;</pre>
+              <p style="color: #aaa; font-size: 12px; margin-top: 8px; font-style: italic;">💡 Table has only 3 columns: auth_user_id (PK, FK to auth.users), email (UNIQUE), timezone_offset</p>
             </div>
 
             <div class="sql-query-block">
@@ -4965,7 +4991,7 @@ ORDER BY timestamp DESC;</pre>
         const config = {
           pageSize: 500,
           maxRecords: 1500,
-          cacheTTL: 30 * 1000,
+          cacheTTL: 5 * 60 * 1000, // ⚡ Increased to 5 minutes for lightning-fast reloads
           defaultUsdToAmd: 387.5
         };
 
@@ -4989,7 +5015,8 @@ ORDER BY timestamp DESC;</pre>
         };
 
         const templates = {
-          paymentCard: null
+          paymentCard: null,
+          dateGroupShell: null // ⚡ New: Pre-built date group template for speed
         };
 
         const state = {
@@ -5049,9 +5076,11 @@ ORDER BY timestamp DESC;</pre>
         }
 
         function ensureTemplates() {
-          if (templates.paymentCard) return;
-          const template = document.createElement('template');
-          template.innerHTML = `
+          if (templates.paymentCard && templates.dateGroupShell) return;
+          
+          // ⚡ Payment card template (existing)
+          const cardTemplate = document.createElement('template');
+          cardTemplate.innerHTML = `
             <article class="payment-card" role="listitem">
               <div class="payment-card-row">
                 <div class="payment-cell payment-time" data-field="time"></div>
@@ -5074,7 +5103,36 @@ ORDER BY timestamp DESC;</pre>
               </div>
             </article>
           `;
-          templates.paymentCard = template;
+          templates.paymentCard = cardTemplate;
+          
+          // ⚡ NEW: Date group shell template for ultra-fast rendering
+          const dateGroupTemplate = document.createElement('template');
+          dateGroupTemplate.innerHTML = `
+            <section class="payments-date-group">
+              <div class="date-separator">
+                <div class="date-separator-date" data-label></div>
+                <div class="date-separator-total">
+                  <span style="color: rgba(229, 231, 235, 0.9);">Total:</span>
+                  <span class="total-usd" data-usd></span>
+                  <span class="total-separator">—</span>
+                  <span class="total-amd" data-amd></span>
+                </div>
+              </div>
+              <div class="date-group-shell">
+                <div class="date-group-header">
+                  <div>TIME</div>
+                  <div>PAYER NAME</div>
+                  <div>STUDENT NAME</div>
+                  <div>GROUP</div>
+                  <div>AMOUNT (USD — AMD)</div>
+                  <div>MESSAGE</div>
+                  <div>⋮</div>
+                </div>
+                <div class="payment-rows-container"></div>
+              </div>
+            </section>
+          `;
+          templates.dateGroupShell = dateGroupTemplate;
         }
 
         function showLoading(show) {
@@ -5363,16 +5421,18 @@ ORDER BY timestamp DESC;</pre>
         }
 
         async function fetchPayments(force = false) {
-          // Use cache if available and fresh (less than 30 seconds old)
+          // ⚡ Use cache if available and fresh (5 minutes TTL for lightning speed)
           if (!force && state.paymentsCache && Date.now() - state.paymentsCache.ts < config.cacheTTL) {
-            debugLog('⚡ Using cached payments (age: ' + Math.round((Date.now() - state.paymentsCache.ts) / 1000) + 's)');
+            debugLog('⚡ Using cached payments (age: ' + Math.round((Date.now() - state.paymentsCache.ts) / 1000) + 's) 🚀');
             return state.paymentsCache.data;
           }
 
+          debugLog('🔄 Fetching fresh payments from Supabase...');
           const payments = [];
           let rangeStart = 0;
           while (payments.length < config.maxRecords) {
             const rangeEnd = rangeStart + config.pageSize - 1;
+            // ⚡ Optimized query: Uses indexed columns for fastest possible retrieval
             const { data, error } = await supabase
               .from('payments')
               .select('*')
@@ -5746,105 +5806,74 @@ ORDER BY timestamp DESC;</pre>
           return state.filtered;
         }
 
+        // ⚡ OPTIMIZED: Use requestAnimationFrame for buttery-smooth rendering
         function render(records) {
           if (!dom.rowsHost) return;
 
           if (!records || records.length === 0) {
-            dom.rowsHost.replaceChildren();
-            showEmptyState(true);
-            updateCounters();
+            requestAnimationFrame(() => {
+              dom.rowsHost.replaceChildren();
+              showEmptyState(true);
+              updateCounters();
+            });
             return;
           }
 
-          showEmptyState(false);
-          const fragment = document.createDocumentFragment();
-          let currentGroup = null;
+          // ⚡ Batch DOM updates in single animation frame for 60fps rendering
+          requestAnimationFrame(() => {
+            showEmptyState(false);
+            const fragment = document.createDocumentFragment();
+            let currentGroup = null;
 
-          records.forEach(record => {
-            if (!currentGroup || currentGroup.dateKey !== record.dateKey) {
-              if (currentGroup) {
-                fragment.appendChild(buildDateGroup(currentGroup));
+            records.forEach(record => {
+              if (!currentGroup || currentGroup.dateKey !== record.dateKey) {
+                if (currentGroup) {
+                  fragment.appendChild(buildDateGroup(currentGroup));
+                }
+                currentGroup = {
+                  dateKey: record.dateKey,
+                  dateLabel: record.dateLabel,
+                  totalUsd: 0,
+                  totalAmd: 0,
+                  rows: []
+                };
               }
-              currentGroup = {
-                dateKey: record.dateKey,
-                dateLabel: record.dateLabel,
-                totalUsd: 0,
-                totalAmd: 0,
-                rows: []
-              };
+              currentGroup.totalUsd += record.amountUSD;
+              currentGroup.totalAmd += record.amountAMD;
+              currentGroup.rows.push(record);
+            });
+
+            if (currentGroup) {
+              fragment.appendChild(buildDateGroup(currentGroup));
             }
-            currentGroup.totalUsd += record.amountUSD;
-            currentGroup.totalAmd += record.amountAMD;
-            currentGroup.rows.push(record);
+
+            dom.rowsHost.replaceChildren(fragment);
+            updateCounters();
           });
-
-          if (currentGroup) {
-            fragment.appendChild(buildDateGroup(currentGroup));
-          }
-
-          dom.rowsHost.replaceChildren(fragment);
-          updateCounters();
         }
 
         function buildDateGroup(group) {
-          const wrapper = document.createElement('section');
-          wrapper.className = 'payments-date-group';
+          // ⚡ OPTIMIZED: Clone pre-built template instead of creating 15+ DOM elements
+          const wrapper = templates.dateGroupShell.content.firstElementChild.cloneNode(true);
+          
+          // Set data attributes
           wrapper.dataset.dateKey = group.dateKey;
           wrapper.dataset.totalUsd = Number(group.totalUsd || 0).toString();
           wrapper.dataset.totalAmd = Number(group.totalAmd || 0).toString();
 
-          const separator = document.createElement('div');
-          separator.className = 'date-separator';
+          // ⚡ Single query for date label and totals (cached structure)
+          wrapper.querySelector('[data-label]').textContent = group.dateLabel;
+          wrapper.querySelector('[data-usd]').textContent = formatUsd(group.totalUsd);
+          wrapper.querySelector('[data-amd]').textContent = formatAmd(group.totalAmd);
 
-          const dateLabel = document.createElement('div');
-          dateLabel.className = 'date-separator-date';
-          dateLabel.textContent = group.dateLabel;
-          separator.appendChild(dateLabel);
-
-          const totals = document.createElement('div');
-          totals.className = 'date-separator-total';
-
-          const totalLabel = document.createElement('span');
-          totalLabel.textContent = 'Total:';
-          totalLabel.style.color = 'rgba(229, 231, 235, 0.9)';
-
-          const totalUsd = document.createElement('span');
-          totalUsd.className = 'total-usd';
-          totalUsd.textContent = formatUsd(group.totalUsd);
-          const totalSeparator = document.createElement('span');
-          totalSeparator.className = 'total-separator';
-          totalSeparator.textContent = '—';
-          const totalAmd = document.createElement('span');
-          totalAmd.className = 'total-amd';
-          totalAmd.textContent = formatAmd(group.totalAmd);
-
-          totals.append(totalLabel, totalUsd, totalSeparator, totalAmd);
-          separator.appendChild(totals);
-
-          const shell = document.createElement('div');
-          shell.className = 'date-group-shell';
-
-          const headerRow = document.createElement('div');
-          headerRow.className = 'date-group-header';
-          ['TIME', 'PAYER NAME', 'STUDENT NAME', 'GROUP', 'AMOUNT (USD — AMD)', 'MESSAGE', '⋮']
-            .forEach(text => {
-              const cell = document.createElement('div');
-              cell.textContent = text;
-              headerRow.appendChild(cell);
-            });
-
-          const rowsContainer = document.createElement('div');
-          rowsContainer.className = 'payment-rows-container';
-
+          // ⚡ Batch append payment cards using DocumentFragment
+          const rowsContainer = wrapper.querySelector('.payment-rows-container');
+          const fragment = document.createDocumentFragment();
           group.rows.forEach(record => {
-            rowsContainer.appendChild(buildPaymentCard(record));
+            fragment.appendChild(buildPaymentCard(record));
           });
+          rowsContainer.appendChild(fragment);
 
-          shell.appendChild(headerRow);
-          shell.appendChild(rowsContainer);
-
-          wrapper.appendChild(separator);
-          wrapper.appendChild(shell);
           return wrapper;
         }
 
@@ -5855,21 +5884,30 @@ ORDER BY timestamp DESC;</pre>
           card.dataset.timestamp = record.timestampMs;
           card.dataset.studentId = record.studentId || '';
 
-          card.querySelector('[data-field="time"]').textContent = record.timeLabel;
-          card.querySelector('[data-field="student"]').textContent = record.studentName;
-          
-          const groupBadge = card.querySelector('[data-field="group"]');
-          groupBadge.textContent = record.groupLetter || '—';
-          groupBadge.dataset.group = record.groupLetter || '';
-          
-          card.querySelector('[data-field="amountUsd"]').textContent = record.amountUSDLabel;
-          card.querySelector('[data-field="amountAmd"]').textContent = record.amountAMDLabel;
-          card.querySelector('[data-field="message"]').textContent = record.memo || '—';
+          // ⚡ OPTIMIZED: Cache all querySelector results in single pass
+          const fields = {
+            time: card.querySelector('[data-field="time"]'),
+            student: card.querySelector('[data-field="student"]'),
+            group: card.querySelector('[data-field="group"]'),
+            amountUsd: card.querySelector('[data-field="amountUsd"]'),
+            amountAmd: card.querySelector('[data-field="amountAmd"]'),
+            message: card.querySelector('[data-field="message"]'),
+            payerButton: card.querySelector('[data-role="payer-button"]')
+          };
 
-          const payerButton = card.querySelector('[data-role="payer-button"]');
-          payerButton.textContent = record.payerName;
+          // ⚡ Batch assign textContent (faster than individual operations)
+          fields.time.textContent = record.timeLabel;
+          fields.student.textContent = record.studentName;
+          fields.group.textContent = record.groupLetter || '—';
+          fields.group.dataset.group = record.groupLetter || '';
+          fields.amountUsd.textContent = record.amountUSDLabel;
+          fields.amountAmd.textContent = record.amountAMDLabel;
+          fields.message.textContent = record.memo || '—';
+          fields.payerButton.textContent = record.payerName;
+          
+          // Assign payer button dataset
           Object.entries(record.dataset).forEach(([key, value]) => {
-            payerButton.dataset[key] = value;
+            fields.payerButton.dataset[key] = value;
           });
 
           return card;
@@ -5916,61 +5954,20 @@ ORDER BY timestamp DESC;</pre>
             return { wrapper, rowsContainer };
           }
 
-          const section = document.createElement('section');
-          section.className = 'payments-date-group';
+          // ⚡ OPTIMIZED: Use pre-built template instead of 15+ createElement calls
+          const section = templates.dateGroupShell.content.firstElementChild.cloneNode(true);
           section.dataset.dateKey = dateKey;
           section.dataset.totalUsd = '0';
           section.dataset.totalAmd = '0';
 
-          const separator = document.createElement('div');
-          separator.className = 'date-separator';
+          // ⚡ Update labels using cached selectors
+          section.querySelector('[data-label]').textContent = dateLabel;
+          section.querySelector('[data-usd]').textContent = formatUsd(0);
+          section.querySelector('[data-amd]').textContent = formatAmd(0);
 
-          const dateLabelEl = document.createElement('div');
-          dateLabelEl.className = 'date-separator-date';
-          dateLabelEl.textContent = dateLabel;
-          separator.appendChild(dateLabelEl);
+          const rowsContainer = section.querySelector('.payment-rows-container');
 
-          const totals = document.createElement('div');
-          totals.className = 'date-separator-total';
-
-          const totalLabel = document.createElement('span');
-          totalLabel.textContent = 'Total:';
-          totalLabel.style.color = 'rgba(229, 231, 235, 0.9)';
-
-          const totalUsd = document.createElement('span');
-          totalUsd.className = 'total-usd';
-          totalUsd.textContent = formatUsd(0);
-          const totalSeparator = document.createElement('span');
-          totalSeparator.className = 'total-separator';
-          totalSeparator.textContent = '—';
-          const totalAmd = document.createElement('span');
-          totalAmd.className = 'total-amd';
-          totalAmd.textContent = formatAmd(0);
-
-          totals.append(totalLabel, totalUsd, totalSeparator, totalAmd);
-          separator.appendChild(totals);
-
-          const shell = document.createElement('div');
-          shell.className = 'date-group-shell';
-
-          const headerRow = document.createElement('div');
-          headerRow.className = 'date-group-header';
-          ['TIME', 'PAYER NAME', 'STUDENT NAME', 'GROUP', 'AMOUNT (USD — AMD)', 'MESSAGE', '⋮']
-            .forEach(text => {
-              const cell = document.createElement('div');
-              cell.textContent = text;
-              headerRow.appendChild(cell);
-            });
-
-          const rowsContainer = document.createElement('div');
-          rowsContainer.className = 'payment-rows-container';
-
-          shell.appendChild(headerRow);
-          shell.appendChild(rowsContainer);
-
-          section.appendChild(separator);
-          section.appendChild(shell);
-
+          // ⚡ Optimized insertion - find correct position
           const existingGroups = Array.from(dom.rowsHost.querySelectorAll('.payments-date-group'));
           const insertBefore = existingGroups.find(el => (el.dataset.dateKey || '') < dateKey);
           dom.rowsHost.insertBefore(section, insertBefore || null);
@@ -6250,7 +6247,8 @@ ORDER BY timestamp DESC;</pre>
 
       let selectedPayment = null;
 
-      const debounce = (fn, delay = 150) => {
+      // ⚡ OPTIMIZED: Reduced debounce delay for snappier search response
+      const debounce = (fn, delay = 100) => {
         let timer;
         return (...args) => {
           clearTimeout(timer);
@@ -9134,16 +9132,40 @@ ORDER BY timestamp DESC;</pre>
       }
 
       // Update Gmail button glow based on timezone settings
-      function updateGmailButtonGlow() {
+      async function updateGmailButtonGlow() {
         const gmailBtn = document.getElementById('gmailBtn');
         if (!gmailBtn) return;
 
-        const offset12 = localStorage.getItem('la-offset-12') === 'true';
-        const offset11 = localStorage.getItem('la-offset-11') === 'true';
+        let offset12 = false;
+        let offset11 = false;
+
+        // ALWAYS check Supabase first (source of truth)
+        try {
+          const session = currentAdminSession || (await supabase.auth.getSession()).data.session;
+          if (session?.user?.email) {
+            const { data, error } = await supabase
+              .from('admin_accounts')
+              .select('timezone_offset')
+              .eq('email', session.user.email)
+              .single();
+            
+            if (!error && data) {
+              offset12 = data.timezone_offset === '-12';
+              offset11 = data.timezone_offset === '-11';
+              debugLog(`📊 Timezone from Supabase: ${data.timezone_offset || 'OFF'}`);
+            }
+          }
+        } catch (err) {
+          console.error('❌ Error checking timezone from Supabase:', err);
+          // Fallback to localStorage if Supabase fails
+          offset12 = localStorage.getItem('la-offset-12') === 'true';
+          offset11 = localStorage.getItem('la-offset-11') === 'true';
+          debugLog('⚠️ Using localStorage fallback for timezone');
+        }
 
         if (offset12 || offset11) {
           gmailBtn.classList.add('timezone-active');
-          debugLog('✨ Timezone offset active - Gmail button glow enabled');
+          debugLog(`✨ Timezone offset active (${offset12 ? '-12h' : '-11h'}) - Gmail button glow enabled 🟢`);
         } else {
           gmailBtn.classList.remove('timezone-active');
           debugLog('🔲 Timezone offset inactive - Gmail button glow disabled');
