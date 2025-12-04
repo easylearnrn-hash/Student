@@ -298,17 +298,44 @@ async function loadTests() {
       return;
     }
 
-    // Get question counts for each test
+    // Get question counts and Q-Bank info for each test
     const testsWithCounts = await Promise.all(
       tests.map(async (test) => {
+        // Get question count
         const { count, error } = await supabase
           .from('test_questions')
           .select('*', { count: 'exact', head: true })
           .eq('test_id', test.id);
 
+        // Get Q-Banks this test's questions belong to
+        const { data: testQuestions } = await supabase
+          .from('test_questions')
+          .select('id')
+          .eq('test_id', test.id);
+
+        let qbankNames = [];
+        if (testQuestions && testQuestions.length > 0) {
+          const questionIds = testQuestions.map(q => q.id);
+          
+          const { data: qbankData } = await supabase
+            .from('qbank_questions')
+            .select(`
+              qbank_id,
+              question_banks(name)
+            `)
+            .in('question_id', questionIds);
+
+          if (qbankData && qbankData.length > 0) {
+            // Get unique Q-Bank names
+            const uniqueQBanks = [...new Set(qbankData.map(q => q.question_banks?.name).filter(Boolean))];
+            qbankNames = uniqueQBanks;
+          }
+        }
+
         return {
           ...test,
-          questionCount: count || 0
+          questionCount: count || 0,
+          qbankNames: qbankNames
         };
       })
     );
@@ -342,7 +369,7 @@ async function loadTests() {
           <div class="tests-grid">
             ${categoryTests.map(test => `
               <div class="test-card" onclick="startTest(${test.id}, '${escapeHtml(test.test_name)}')">
-                <div class="test-system">${test.system_category}</div>
+                <div class="test-system">${test.system_category}${test.qbankNames && test.qbankNames.length > 0 ? ` (${test.qbankNames.join(', ')})` : ''}</div>
                 <div class="test-name">${escapeHtml(test.test_name)}</div>
                 ${test.description ? `<div class="test-description">${escapeHtml(test.description)}</div>` : '<div class="test-description" style="opacity: 0.5;">No description provided</div>'}
                 <div class="test-stats">
@@ -350,6 +377,12 @@ async function loadTests() {
                     <span>📝</span>
                     <span>${test.questionCount} ${test.questionCount === 1 ? 'Question' : 'Questions'}</span>
                   </div>
+                  ${test.qbankNames && test.qbankNames.length > 0 ? `
+                    <div class="test-stat">
+                      <span>🏦</span>
+                      <span>${test.qbankNames.length} Q-Bank${test.qbankNames.length === 1 ? '' : 's'}</span>
+                    </div>
+                  ` : ''}
                 </div>
                 <button class="test-btn" onclick="event.stopPropagation(); startTest(${test.id}, '${escapeHtml(test.test_name)}')">
                   <span>Start Test</span>
