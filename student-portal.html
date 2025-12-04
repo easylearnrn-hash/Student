@@ -6156,6 +6156,26 @@
     }
     
     // ---------- Forum Message Rendering ----------
+    // Format message with markdown-style formatting
+    function formatMessageText(text) {
+      if (!text) return '';
+      
+      // Escape HTML first to prevent XSS
+      let formatted = escapeHtml(text);
+      
+      // Convert **text** to <strong>text</strong>
+      formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      
+      // Convert *text* to <em>text</em> (but not *** or **)
+      formatted = formatted.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+      
+      // Allow <span style="font-size: Xpx">text</span> tags (already escaped, need to unescape)
+      formatted = formatted.replace(/&lt;span style=&quot;font-size: (\d+)px&quot;&gt;([^&]+)&lt;\/span&gt;/g, 
+        '<span style="font-size: $1px">$2</span>');
+      
+      return formatted;
+    }
+    
     // Render Forum Messages
     function renderForumMessages() {
       const container = document.getElementById('forumMessages');
@@ -6190,7 +6210,7 @@
               ${isAdmin ? `<button class="delete-message-btn" onclick="deleteForumMessage(${msg.id})" title="Delete message">🗑️</button>` : ''}
             </div>
           </div>
-          <div class="message-text" id="messageText${msg.id}" style="${isAdminMessage ? 'color: #ef4444;' : ''}" data-original="${escapeHtml(msg.message).replace(/"/g, '&quot;')}">${escapeHtml(msg.message)}</div>
+          <div class="message-text" id="messageText${msg.id}" style="${isAdminMessage ? 'color: #ef4444;' : ''}" data-original="${escapeHtml(msg.message).replace(/"/g, '&quot;')}">${formatMessageText(msg.message)}</div>
           <div style="display: flex; gap: 8px; margin-top: 8px;">
             <button class="reply-btn" onclick="toggleReplyInput(${msg.id})">Reply</button>
             ${isAdminMessage && isAdmin ? `
@@ -6227,7 +6247,7 @@
                       ${isAdmin ? `<button class="delete-message-btn" onclick="deleteForumReply(${reply.id})" title="Delete reply">🗑️</button>` : ''}
                     </div>
                   </div>
-                  <div class="message-text" style="${isAdminReply ? 'color: #ef4444;' : ''}">${escapeHtml(reply.message)}</div>
+                  <div class="message-text" style="${isAdminReply ? 'color: #ef4444;' : ''}">${formatMessageText(reply.message)}</div>
                 </div>
               `;
               }).join('')}
