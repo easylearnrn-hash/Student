@@ -6636,6 +6636,12 @@
         return alerts;
       }
 
+      // Track last rendered sidebar alerts to avoid unnecessary rebuilds
+      let lastSidebarAlerts = {
+        upcoming: [],
+        unpaid: [],
+      };
+
       function renderSidebarAlerts(monthData) {
         const upcomingContainer = document.getElementById('upcomingClassesList');
         const unpaidContainer = document.getElementById('unpaidClassesList');
@@ -6645,8 +6651,31 @@
         const upcomingItems = (alerts.upcoming || []).slice(0, SIDEBAR_ALERT_LIMIT);
         const unpaidItems = (alerts.unpaid || []).slice(0, SIDEBAR_ALERT_LIMIT);
 
-        renderList(upcomingContainer, upcomingItems, alerts.upcoming?.length || 0, 'upcoming');
-        renderList(unpaidContainer, unpaidItems, alerts.unpaid?.length || 0, 'unpaid');
+        // ⚡ INCREMENTAL: Only re-render if alerts changed
+        const upcomingChanged = !arraysEqual(upcomingItems, lastSidebarAlerts.upcoming);
+        const unpaidChanged = !arraysEqual(unpaidItems, lastSidebarAlerts.unpaid);
+
+        if (upcomingChanged) {
+          renderList(upcomingContainer, upcomingItems, alerts.upcoming?.length || 0, 'upcoming');
+          lastSidebarAlerts.upcoming = upcomingItems;
+          debugLog('📊 Updated upcoming alerts');
+        }
+
+        if (unpaidChanged) {
+          renderList(unpaidContainer, unpaidItems, alerts.unpaid?.length || 0, 'unpaid');
+          lastSidebarAlerts.unpaid = unpaidItems;
+          debugLog('📊 Updated unpaid alerts');
+        }
+
+        function arraysEqual(a, b) {
+          if (a.length !== b.length) return false;
+          for (let i = 0; i < a.length; i++) {
+            if (a[i].dateStr !== b[i].dateStr || a[i].studentName !== b[i].studentName) {
+              return false;
+            }
+          }
+          return true;
+        }
 
         function renderList(container, items, totalCount, type) {
           container.innerHTML = '';
@@ -7411,6 +7440,85 @@
         }
       }
       
+      // ============================================================
+      // INCREMENTAL RENDERING SYSTEM
+      // ============================================================
+      // Track the last rendered calendar state to avoid full DOM rebuilds
+      let lastRenderedCalendar = {
+        year: null,
+        month: null,
+        dayElements: new Map(), // dateStr -> DOM element
+        dataFingerprints: new Map(), // dateStr -> data hash
+      };
+
+      // Generate a simple fingerprint for day data to detect changes
+      function getDayDataFingerprint(dayData) {
+        if (!dayData) return 'empty';
+        
+        const stats = dayData.stats || {};
+        const totals = dayData.totals || {};
+        const indicators = Array.from(dayData.indicators || []).sort().join(',');
+        
+        return `${stats.classes || 0}:${stats.payments || 0}:${stats.absences || 0}:${stats.skipped || 0}:${totals.paid || 0}:${totals.unpaid || 0}:${indicators}`;
+      }
+
+      // Invalidate a specific day's cache to force re-render on next update
+      function invalidateDayCache(dateStr) {
+        lastRenderedCalendar.dataFingerprints.delete(dateStr);
+        debugLog(`🔄 Invalidated cache for ${dateStr}`);
+      }
+
+      // Invalidate entire calendar cache (for major data changes)
+      function invalidateCalendarCache() {
+        lastRenderedCalendar.dataFingerprints.clear();
+        lastRenderedCalendar.dayElements.clear();
+        clearMonthCache();
+        debugLog('🔄 Invalidated entire calendar cache');
+      }
+
+      // Update payment summary in day header without rebuilding entire element
+      function updateDayPaymentSummary(dayEl, dayData) {
+        const dayHeader = dayEl.querySelector('.day-header');
+        if (!dayHeader) return;
+        
+        // Remove existing payment summary if present
+        const existingSummary = dayHeader.querySelector('.day-payment-summary');
+        if (existingSummary) {
+          existingSummary.remove();
+        }
+        
+        // Add new payment summary if there's data
+        if (dayData && dayData.totals) {
+          const paid = Number(dayData.totals.paid || 0);
+          const unpaid = Number(dayData.totals.unpaid || 0);
+          
+          if (paid > 0 || unpaid > 0) {
+            const paymentSummary = document.createElement('div');
+            paymentSummary.className = 'day-payment-summary';
+
+            // Paid amount
+            const paidSpan = document.createElement('span');
+            paidSpan.className = 'day-payment-paid';
+            paidSpan.textContent = `${formatCurrency(paid)} $`;
+            paymentSummary.appendChild(paidSpan);
+
+            // Divider
+            const divider = document.createElement('span');
+            divider.className = 'day-payment-divider';
+            divider.textContent = '/';
+            paymentSummary.appendChild(divider);
+
+            // Unpaid amount
+            const unpaidSpan = document.createElement('span');
+            unpaidSpan.className = 'day-payment-unpaid';
+            unpaidSpan.textContent = `${formatCurrency(unpaid)} $`;
+            paymentSummary.appendChild(unpaidSpan);
+
+            dayHeader.appendChild(paymentSummary);
+          }
+        }
+      }
+
       function renderCalendar() {
         const { year, month } = getCurrentViewYearMonth();
 
@@ -7435,42 +7543,104 @@
         lastMergedEventsCount = currentMonthEventsFlat.length;
 
         const calendarDays = document.getElementById('calendarDays');
-        calendarDays.innerHTML = '';
-
+        
+        // ⚡ INCREMENTAL RENDERING: Check if we're viewing the same month
+        const isSameMonth = lastRenderedCalendar.year === year && lastRenderedCalendar.month === month;
+        
         const todayParts = getTodayLAParts();
         const isCurrentMonth =
           todayParts && Number(todayParts.year) === year && Number(todayParts.month) - 1 === month;
         const todayDate = todayParts ? Number(todayParts.day) : null;
 
-        // Previous month days
-        for (let i = firstDay - 1; i >= 0; i--) {
-          const day = daysInPrevMonth - i;
-          const prevDate = createDateFromParts(year, month - 1, day);
-          const dayEl = createDayElement({ dayNumber: day, isOtherMonth: true, dateObj: prevDate });
-          calendarDays.appendChild(dayEl);
-        }
+        if (isSameMonth && calendarDays.children.length > 0) {
+          // ⚡ INCREMENTAL UPDATE: Only update changed days
+          debugLog('📊 Incremental calendar update (same month)');
+          
+          let cellIndex = 0;
+          
+          // Update previous month days (usually no data changes here)
+          cellIndex += firstDay;
+          
+          // Update current month days
+          for (let day = 1; day <= daysInMonth; day++) {
+            const dayData = monthData.dayMap ? monthData.dayMap[day] : null;
+            const dateStr = dayData?.dateStr || formatDateYYYYMMDD(createDateFromParts(year, month, day));
+            const newFingerprint = getDayDataFingerprint(dayData);
+            const oldFingerprint = lastRenderedCalendar.dataFingerprints.get(dateStr);
+            
+            // Only update if data changed
+            if (newFingerprint !== oldFingerprint) {
+              const dayEl = calendarDays.children[cellIndex];
+              if (dayEl) {
+                // Update classes
+                dayEl.className = 'day';
+                if (isCurrentMonth && day === todayDate) dayEl.classList.add('today');
+                
+                // Update payment summary in header
+                updateDayPaymentSummary(dayEl, dayData);
+                
+                // Update state classes and indicators
+                applyDayStateClasses(dayEl, dayData);
+                addIndicators(dayEl, dayData);
+                
+                // Update fingerprint
+                lastRenderedCalendar.dataFingerprints.set(dateStr, newFingerprint);
+                
+                debugLog(`📝 Updated day ${day} (${dateStr})`);
+              }
+            }
+            
+            cellIndex++;
+          }
+          
+        } else {
+          // ⚡ FULL RENDER: Different month or first render
+          debugLog('🔄 Full calendar render (month changed)');
+          
+          calendarDays.innerHTML = '';
+          lastRenderedCalendar.dayElements.clear();
+          lastRenderedCalendar.dataFingerprints.clear();
 
-        // Current month days
-        for (let day = 1; day <= daysInMonth; day++) {
-          const dayData = monthData.dayMap ? monthData.dayMap[day] : null;
-          const dayEl = createDayElement({
-            dayNumber: day,
-            dayData,
-            isToday: isCurrentMonth && day === todayDate,
-          });
+          // Previous month days
+          for (let i = firstDay - 1; i >= 0; i--) {
+            const day = daysInPrevMonth - i;
+            const prevDate = createDateFromParts(year, month - 1, day);
+            const dayEl = createDayElement({ dayNumber: day, isOtherMonth: true, dateObj: prevDate });
+            calendarDays.appendChild(dayEl);
+          }
 
-          applyDayStateClasses(dayEl, dayData);
-          addIndicators(dayEl, dayData);
-          calendarDays.appendChild(dayEl);
-        }
+          // Current month days
+          for (let day = 1; day <= daysInMonth; day++) {
+            const dayData = monthData.dayMap ? monthData.dayMap[day] : null;
+            const dateStr = dayData?.dateStr || formatDateYYYYMMDD(createDateFromParts(year, month, day));
+            
+            const dayEl = createDayElement({
+              dayNumber: day,
+              dayData,
+              isToday: isCurrentMonth && day === todayDate,
+            });
 
-        // Next month days
-        const totalCells = calendarDays.children.length;
-        const remainingCells = 42 - totalCells; // 6 rows × 7 days
-        for (let day = 1; day <= remainingCells; day++) {
-          const nextDate = createDateFromParts(year, month + 1, day);
-          const dayEl = createDayElement({ dayNumber: day, isOtherMonth: true, dateObj: nextDate });
-          calendarDays.appendChild(dayEl);
+            applyDayStateClasses(dayEl, dayData);
+            addIndicators(dayEl, dayData);
+            calendarDays.appendChild(dayEl);
+            
+            // Cache element and fingerprint
+            lastRenderedCalendar.dayElements.set(dateStr, dayEl);
+            lastRenderedCalendar.dataFingerprints.set(dateStr, getDayDataFingerprint(dayData));
+          }
+
+          // Next month days
+          const totalCells = calendarDays.children.length;
+          const remainingCells = 42 - totalCells; // 6 rows × 7 days
+          for (let day = 1; day <= remainingCells; day++) {
+            const nextDate = createDateFromParts(year, month + 1, day);
+            const dayEl = createDayElement({ dayNumber: day, isOtherMonth: true, dateObj: nextDate });
+            calendarDays.appendChild(dayEl);
+          }
+          
+          // Update last rendered state
+          lastRenderedCalendar.year = year;
+          lastRenderedCalendar.month = month;
         }
 
         updateStats();
@@ -8625,10 +8795,10 @@
             // Reload absences data from database to ensure fresh data
             absencesData = await loadAbsences();
             
-            // Force complete calendar refresh
-            clearMonthCache();
+            // ⚡ INCREMENTAL: Only invalidate the specific day's cache
+            invalidateDayCache(dateStr);
             
-            // Re-render calendar with fresh data
+            // Re-render calendar (will only update changed day)
             await renderCalendar();
             
             // Refresh the day modal to show updated status
@@ -8681,13 +8851,14 @@
             // Reload absences data from database to ensure fresh data
             absencesData = await loadAbsences();
             
-            // Force complete calendar refresh
-            clearMonthCache();
+            // ⚡ INCREMENTAL: Only invalidate the specific day's cache
+            invalidateDayCache(dateStr);
             
-            // Re-render calendar with fresh data
+            // Re-render calendar (will only update changed day)
             await renderCalendar();
             
             // Refresh the day modal to show updated status
+            openDayModal(dateStr);
             openDayModal(dateStr);
           } else {
             throw new Error('AbsentManager not available');
@@ -8763,9 +8934,13 @@
           // Close the modal
           closeDayModal();
           
-          // Reload payment data and refresh calendar
+          // Reload payment data and invalidate specific day
           await loadPayments();
-          clearMonthCache();
+          
+          // ⚡ INCREMENTAL: Only invalidate the specific day's cache
+          invalidateDayCache(dateStr);
+          
+          // Re-render calendar (will only update changed day)
           renderCalendar();
           
         } catch (err) {
@@ -8845,9 +9020,13 @@
           // Close the modal
           closeDayModal();
 
-          // Reload credit data and refresh calendar
+          // Reload credit data and invalidate specific day
           creditPaymentsLookup = await loadCreditPayments();
-          clearMonthCache();
+          
+          // ⚡ INCREMENTAL: Only invalidate the specific day's cache
+          invalidateDayCache(dateStr);
+          
+          // Re-render calendar (will only update changed day)
           renderCalendar();
         } catch (error) {
           console.error('❌ Failed to apply credit:', error);
