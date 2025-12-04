@@ -4585,7 +4585,7 @@
             .select('id, class_date, template_id')
             .eq('group_id', normalizedGroup)
             .eq('is_open', true)
-            .eq('deleted', false)
+            .is('deleted_at', null) // FIX: Use deleted_at column
             .order('class_date', { ascending: false })
             .limit(10)
         ]);
@@ -5073,15 +5073,27 @@
         const allPayments = [];
         
         // 1. Query payment_records table (manual tracking by student_id)
-        const { data: paymentRecords, error: recordsError } = await supabase
-          .from('payment_records')
-          .select('*')
-          .eq('student_id', student.id)
-          .order('date', { ascending: false });
+        // PERFORMANCE FIX: Wrap in try-catch to handle RLS permission errors gracefully
+        let paymentRecords = [];
+        try {
+          const { data, error: recordsError } = await supabase
+            .from('payment_records')
+            .select('*')
+            .eq('student_id', student.id)
+            .order('date', { ascending: false });
+          
+          if (recordsError) {
+            // RLS permission error expected for students - skip silently
+            console.debug('⚠️ Payment records not accessible (expected for students)');
+          } else if (data && data.length > 0) {
+            paymentRecords = data;
+          }
+        } catch (err) {
+          // Ignore permission errors
+          console.debug('⚠️ Payment records query failed (expected for students)');
+        }
         
-        if (recordsError) {
-          console.error('Error loading payment_records:', recordsError);
-        } else if (paymentRecords && paymentRecords.length > 0) {
+        if (paymentRecords.length > 0) {
           const records = paymentRecords.map(record => ({
             date: new Date(record.date),
             status: record.status || 'unpaid',
@@ -6213,7 +6225,7 @@
           .select('id, class_date, is_open, sort_order, template_id')
           .eq('group_id', studentGroup)
           .eq('is_open', true)
-          .eq('deleted', false)
+          .is('deleted_at', null) // FIX: Use deleted_at column, not deleted
           .order('sort_order', { ascending: true });
         
         if (error) {
@@ -6766,10 +6778,9 @@
             folder_name,
             icon,
             sort_order,
-            is_current,
             note_templates (id)
           `)
-          .eq('deleted', false)
+          .is('deleted_at', null) // FIX: Use deleted_at column
           .order('sort_order', { ascending: true });
 
         if (error) {
@@ -6784,7 +6795,7 @@
             const totalTemplates = Array.isArray(folder.note_templates) ? folder.note_templates.length : 0;
             const meta = {
               totalTemplates,
-              is_current: !!folder.is_current,
+              is_current: false, // Default to false (column doesn't exist)
               icon: folder.icon || '📚'
             };
             systemMetaMap.set(folder.folder_name, meta);
