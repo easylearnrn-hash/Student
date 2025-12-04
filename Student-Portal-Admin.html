@@ -1218,6 +1218,74 @@
       border: none;
     }
 
+    /* Fullscreen Impersonation Modal */
+    .impersonation-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.95);
+      backdrop-filter: blur(10px);
+      z-index: 9999;
+      display: none;
+      flex-direction: column;
+    }
+
+    .impersonation-modal.active {
+      display: flex;
+    }
+
+    .impersonation-header {
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.95), rgba(118, 75, 162, 0.95));
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .impersonation-title {
+      color: white;
+      font-size: 18px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .impersonation-title .emoji {
+      font-size: 24px;
+    }
+
+    .impersonation-close {
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: white;
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      font-weight: 300;
+    }
+
+    .impersonation-close:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: rotate(90deg);
+    }
+
+    .impersonation-iframe {
+      flex: 1;
+      width: 100%;
+      border: none;
+      background: white;
+    }
+
     @keyframes fadeIn {
       from {
         opacity: 0;
@@ -2376,27 +2444,47 @@
         });
         console.log('✅ Token stored in storage:', JSON.stringify(impersonationToken));
         
-        // Create audit log in database (optional - uncomment if you want to track this)
-        /*
-        await supabase.from('admin_audit_log').insert([{
-          admin_email: impersonationToken.adminEmail,
-          action: 'impersonate_student',
-          student_id: studentId,
-          student_name: studentName,
-          timestamp: new Date().toISOString()
-        }]);
-        */
-        
-        // Small delay to ensure sessionStorage write completes
+        // Small delay to ensure storage write completes
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Redirect to student portal with impersonation mode
-        window.location.href = `student-portal.html?impersonate=${studentId}`;
+        // Open in fullscreen modal instead of navigation
+        const modal = document.getElementById('impersonationModal');
+        const iframe = document.getElementById('impersonationIframe');
+        const titleElement = document.getElementById('impersonationStudentName');
+        
+        // Update modal title
+        titleElement.textContent = `Viewing as ${studentName}`;
+        
+        // Set iframe src with impersonation parameter
+        iframe.src = `student-portal.html?impersonate=${studentId}`;
+        
+        // Show modal
+        modal.classList.add('active');
         
       } catch (error) {
         console.error('Error starting impersonation:', error);
         alert('Failed to start impersonation mode: ' + error.message);
       }
+    }
+    
+    function closeImpersonation() {
+      const modal = document.getElementById('impersonationModal');
+      const iframe = document.getElementById('impersonationIframe');
+      
+      // Clear iframe
+      iframe.src = '';
+      
+      // Hide modal
+      modal.classList.remove('active');
+      
+      // Clear impersonation tokens
+      sessionStorage.removeItem('impersonation_token');
+      localStorage.removeItem('impersonation_token');
+      
+      console.log('🚪 Impersonation session closed');
+      
+      // Refresh student list to update any changes
+      loadStudents();
     }
     
     async function deleteStudent(id) {
@@ -2731,6 +2819,18 @@
       }
     });
   </script>
+
+  <!-- Fullscreen Impersonation Modal -->
+  <div id="impersonationModal" class="impersonation-modal">
+    <div class="impersonation-header">
+      <div class="impersonation-title">
+        <span class="emoji">👁️</span>
+        <span id="impersonationStudentName">Viewing as Student</span>
+      </div>
+      <button class="impersonation-close" onclick="closeImpersonation()">×</button>
+    </div>
+    <iframe id="impersonationIframe" class="impersonation-iframe" title="Student Portal View"></iframe>
+  </div>
 
 </body>
 </html>
