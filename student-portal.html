@@ -3711,31 +3711,38 @@
       
       // ---------- Impersonation Authentication ----------
       if (impersonateId) {
-        console.debug('🎭 Impersonation mode detected, skipping auth check');
-        // Load impersonated student directly
-        const tokenData = sessionStorage.getItem('impersonation_token');
+        console.log('🎭 Impersonation mode detected for student ID:', impersonateId);
+        
+        // Try both sessionStorage and localStorage
+        let tokenData = sessionStorage.getItem('impersonation_token') || localStorage.getItem('impersonation_token');
+        console.log('🔍 Token data found:', tokenData ? 'YES' : 'NO');
         
         if (tokenData) {
           const impersonationToken = JSON.parse(tokenData);
+          console.log('📋 Token parsed:', impersonationToken);
           
           // Validate token hasn't expired
           if (impersonationToken.expiresAt < Date.now()) {
+            console.error('⏰ Token expired');
             alert('Impersonation session has expired. Returning to admin panel.');
             sessionStorage.removeItem('impersonation_token');
-            window.location.href = 'Student-Manager.html';
+            localStorage.removeItem('impersonation_token');
+            window.location.href = 'Student-Portal-Admin.html';
             return null;
           }
           
           // Validate student ID matches
           if (impersonationToken.studentId != impersonateId) {
-            console.error('❌ Student ID mismatch!');
+            console.error('❌ Student ID mismatch!', impersonationToken.studentId, 'vs', impersonateId);
             alert('Invalid impersonation token. Returning to admin panel.');
             sessionStorage.removeItem('impersonation_token');
-            window.location.href = 'Student-Manager.html';
+            localStorage.removeItem('impersonation_token');
+            window.location.href = 'Student-Portal-Admin.html';
             return null;
           }
           
           // Load the impersonated student's data
+          console.log('📥 Loading student data for ID:', impersonateId);
           const { data: student, error } = await supabase
             .from('students')
             .select('*')
@@ -3746,16 +3753,19 @@
             console.error('Impersonated student not found:', error);
             alert('Student not found. Returning to admin panel.');
             sessionStorage.removeItem('impersonation_token');
-            window.location.href = 'Student-Manager.html';
+            localStorage.removeItem('impersonation_token');
+            window.location.href = 'Student-Portal-Admin.html';
             return null;
           }
           
-          console.debug('✅ Impersonation authenticated for:', student.name);
+          console.log('✅ Impersonation authenticated for:', student.name);
           return student;
         } else {
-          console.error('❌ No impersonation token found');
+          console.error('❌ No impersonation token found in sessionStorage or localStorage');
+          console.error('SessionStorage keys:', Object.keys(sessionStorage));
+          console.error('LocalStorage keys:', Object.keys(localStorage));
           alert('Invalid impersonation session. Returning to admin panel.');
-          window.location.href = 'Student-Manager.html';
+          window.location.href = 'Student-Portal-Admin.html';
           return null;
         }
       }
@@ -7458,12 +7468,14 @@
      * <button onclick="exitImpersonation()">Exit Impersonation</button>
      */
     function exitImpersonation() {
-      // Clear impersonation data
+      // Clear impersonation data from both storages
       sessionStorage.removeItem('impersonation_token');
+      localStorage.removeItem('impersonation_token');
       intervalManager.clear('impersonation');
       intervalManager.clear('countdown');
       
       // Log exit
+      console.log('🚪 Exiting impersonation mode');
       
       // Redirect back to admin panel
       window.location.href = 'Student-Portal-Admin.html';
