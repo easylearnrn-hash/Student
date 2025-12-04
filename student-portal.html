@@ -2285,32 +2285,9 @@
       letter-spacing: 0.3px;
     }
     
-    /* Unpaid stat card with glossy blinking effect */
+    /* Unpaid stat card - clean style matching Last Paid box */
     .stat-card.has-unpaid {
-      animation: unpaidGlow 2s ease-in-out infinite, scaleIn 0.5s ease-out backwards;
-      background: linear-gradient(150deg, rgba(239, 68, 68, 0.25), rgba(239, 68, 68, 0.08));
-      position: relative;
-    }
-    
-    .stat-card.has-unpaid::before {
-      content: '';
-      position: absolute;
-      top: -50%;
-      left: -50%;
-      width: 200%;
-      height: 200%;
-      background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.3), transparent);
-      animation: glossyShine 3s ease-in-out infinite;
-      pointer-events: none;
-    }
-    
-    @keyframes glossyShine {
-      0%, 100% {
-        transform: translateX(-100%) translateY(-100%) rotate(45deg);
-      }
-      50% {
-        transform: translateX(100%) translateY(100%) rotate(45deg);
-      }
+      /* No special effects - looks exactly like green box but red */
     }
     
     .login-screen {
@@ -5429,12 +5406,17 @@
       // Generate all past class dates based on schedule
       const scheduledDates = [];
       
-      // Start from 6 months ago or student start date
-      const startDate = new Date(today);
-      startDate.setMonth(startDate.getMonth() - 6);
+      // 🔴 START FROM DECEMBER 1, 2025 (as requested)
+      const dec1_2025 = new Date('2025-12-01');
+      dec1_2025.setHours(0, 0, 0, 0);
+      
+      // Use the later of: Dec 1 2025 or student start date
+      const startDate = new Date(dec1_2025);
       if (studentStartDate && studentStartDate > startDate) {
         startDate.setTime(studentStartDate.getTime());
       }
+      
+      console.debug(`📅 Calculating unpaid classes from ${startDate.toISOString().split('T')[0]} to today`);
       
       // Generate all scheduled class dates until today
       for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
@@ -5496,12 +5478,14 @@
       let totalUnpaid = 0;
       let lastPaidAmount = 0;
       let lastPaidDate = null;
+      let unpaidClasses = []; // Track individual unpaid class dates
       
       // 🔴 ENHANCED: Calculate unpaid from schedule (matches Calendar red dots)
       if (student && groupSchedule) {
-        const { unpaidAmount, unpaidClasses } = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
-        totalUnpaid = unpaidAmount;
-        console.debug(`✅ Schedule-based unpaid calculation: $${unpaidAmount} (${unpaidClasses.length} classes)`);
+        const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
+        totalUnpaid = result.unpaidAmount;
+        unpaidClasses = result.unpaidClasses; // Capture unpaid class dates
+        console.debug(`✅ Schedule-based unpaid calculation: $${result.unpaidAmount} (${unpaidClasses.length} classes)`);
       } else {
         // Fallback: Calculate from payment_records table only
         console.debug('⚠️ Using fallback payment_records calculation (no schedule data)');
@@ -5556,7 +5540,30 @@
       if (!paymentList) return;
       paymentList.innerHTML = '';
       
-      if (!payments.length) {
+      // 🔴 NEW: Add unpaid class entries first (if any)
+      if (unpaidClasses && unpaidClasses.length > 0) {
+        console.debug(`📋 Displaying ${unpaidClasses.length} unpaid class dates`);
+        unpaidClasses.forEach(unpaidClass => {
+          const classDate = new Date(unpaidClass.date);
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const dateStr = `${monthNames[classDate.getMonth()]} ${classDate.getDate()}, ${classDate.getFullYear()}`;
+          
+          const item = document.createElement('div');
+          item.className = 'payment-item unpaid';
+          
+          item.innerHTML = `
+            <div class="payment-date">${dateStr}</div>
+            <div class="payment-status">
+              <span class="status-badge unpaid">Not Paid</span>
+              <span class="payment-amount">$${unpaidClass.amount.toFixed(0)}</span>
+            </div>
+          `;
+          
+          paymentList.appendChild(item);
+        });
+      }
+      
+      if (!payments.length && (!unpaidClasses || unpaidClasses.length === 0)) {
         paymentList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 40px;">No payment records found.</div>';
         return;
       }
