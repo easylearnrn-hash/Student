@@ -3247,6 +3247,127 @@
 
         addPaymentEvents(paymentIndexes.byDate);
         addCreditEvents(creditEventsByDate);
+        
+        // ============================================================
+        // 🔥 OFFICIAL REVERSE CHRONOLOGICAL PAYMENT ALLOCATION
+        // ============================================================
+        // Implements ARNOMA spec: pay from NEWEST → OLDEST class
+        // Credit applies FIRST, then cash payments
+        // ============================================================
+        
+        const studentAllocationCache = new Map();
+        
+        /**
+         * Pre-allocate payments for a student across ALL classes in reverse chronological order
+         * This ensures newest classes get paid first, going backward until money runs out
+         */
+        function preAllocateStudentPayments(student, allClassDates) {
+          const studentId = student?.id != null ? String(student.id) : null;
+          const cacheKey = studentId || normalizeSimpleName(student?.name) || 'unknown';
+          
+          if (studentAllocationCache.has(cacheKey)) {
+            return; // Already allocated
+          }
+          
+          // Collect all payments for this student (all time)
+          const allPayments = collectPaymentsForStudentSimple(student);
+          const totalPaid = allPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+          
+          // Get credit balance
+          let availableCredit = Number(student.balance) || 0;
+          let remainingCash = totalPaid;
+          
+          // Sort classes NEWEST → OLDEST (reverse chronological)
+          const sortedDates = [...allClassDates].sort((a, b) => b.localeCompare(a));
+          
+          const allocations = new Map(); // dateStr -> {paidAmount, creditUsed, cashUsed}
+          
+          // Allocate from newest to oldest
+          sortedDates.forEach(dateStr => {
+            // Skip future classes
+            if (dateStr > todayStr) {
+              allocations.set(dateStr, { paidAmount: 0, creditUsed: 0, cashUsed: 0 });
+              return;
+            }
+            
+            const price = Number(student.price_per_class) || 50; // Default class price
+            let remaining = price;
+            let creditUsed = 0;
+            let cashUsed = 0;
+            
+            // Apply CREDIT FIRST
+            if (availableCredit > 0) {
+              const creditToApply = Math.min(availableCredit, remaining);
+              creditUsed = creditToApply;
+              remaining -= creditToApply;
+              availableCredit -= creditToApply;
+            }
+            
+            // Then apply CASH
+            if (remaining > 0 && remainingCash > 0) {
+              const cashToApply = Math.min(remainingCash, remaining);
+              cashUsed = cashToApply;
+              remaining -= cashToApply;
+              remainingCash -= cashToApply;
+            }
+            
+            allocations.set(dateStr, {
+              paidAmount: creditUsed + cashUsed,
+              creditUsed,
+              cashUsed
+            });
+          });
+          
+          studentAllocationCache.set(cacheKey, {
+            allocations,
+            totalPaid,
+            remainingCredit: availableCredit,
+            remainingCash
+          });
+        }
+        
+        function allocatePaymentForClass(student, classDateStr, classPrice) {
+          const studentId = student?.id != null ? String(student.id) : null;
+          const cacheKey = studentId || normalizeSimpleName(student?.name) || 'unknown';
+          
+          const cached = studentAllocationCache.get(cacheKey);
+          if (!cached || !cached.allocations.has(classDateStr)) {
+            // Fallback: no allocation found, treat as unpaid
+            return { paidAmount: 0, unpaidAmount: Number(classPrice) || 0, creditUsed: 0, cashUsed: 0 };
+          }
+          
+          const alloc = cached.allocations.get(classDateStr);
+          return {
+            paidAmount: alloc.paidAmount,
+            unpaidAmount: Math.max(0, (Number(classPrice) || 0) - alloc.paidAmount),
+            creditUsed: alloc.creditUsed,
+            cashUsed: alloc.cashUsed
+          };
+        }
+        
+        // ============================================================
+        // 🔥 PRE-ALLOCATE ALL STUDENTS' PAYMENTS (REVERSE CHRONOLOGICAL)
+        // ============================================================
+        // This must run BEFORE addClassEvents to ensure reverse chronological allocation
+        // We collect all class dates for each student and pre-allocate payments
+        students.forEach(student => {
+          if (!shouldIncludeStudent(student)) return;
+          
+          // Collect ALL class dates for this student in this month
+          const studentGroup = groups.find(g => 
+            (g.group_code && g.group_code === student.group) ||
+            (g.group_name && normalizeGroupKey(g.group_name) === normalizeGroupKey(student.group))
+          );
+          
+          if (!studentGroup) return;
+          
+          const occurrences = generateGroupOccurrences(studentGroup);
+          const classDates = occurrences.map(occ => occ.dateStr);
+          
+          // Pre-allocate payments for this student across all their classes
+          preAllocateStudentPayments(student, classDates);
+        });
+
         addClassEvents(groups, studentsByGroup);
         addStudentMilestones(students);
 
@@ -3686,10 +3807,20 @@
         }
 
         function getStudentAliasNames(student) {
-          const aliasFields = [student?.aliases, student?.alias_list, student?.alias];
+          const aliasFields = [
+            student?.aliases,
+            student?.alias_list,
+            student?.alias,
+            student?.parent_name,
+            student?.guardian_name,
+            student?.payer_name,
+            student?.payer,
+          ];
           const names = new Set();
           aliasFields.forEach(value => {
-            parseAliasList(value).forEach(alias => {
+            // Accept both arrays and delimited strings
+            const list = Array.isArray(value) ? value : parseAliasList(value);
+            list.forEach(alias => {
               const normalized = normalizeSimpleName(alias);
               if (normalized) names.add(normalized);
             });
@@ -3794,7 +3925,48 @@
             .map(normalizeSimpleName)
             .filter(Boolean);
 
-          return paymentNames.some(name => matchNames.has(name));
+          // Direct exact-name match
+          if (paymentNames.some(name => matchNames.has(name))) return true;
+
+          // Alias array on payment record
+          if (Array.isArray(payment.aliases)) {
+            const paymentAliasNames = payment.aliases.map(normalizeSimpleName).filter(Boolean);
+            if (paymentAliasNames.some(name => matchNames.has(name))) return true;
+          }
+
+          // Fuzzy match: contains/startsWith to catch common variations
+          for (const payName of paymentNames) {
+            for (const alias of matchNames) {
+              if (!payName || !alias) continue;
+              if (payName.includes(alias) || alias.includes(payName)) {
+                return true;
+              }
+            }
+          }
+
+          // Token-based fuzzy match: require at least 2 overlapping tokens (first/last names)
+          function tokenize(name) {
+            return String(name)
+              .split(/\s+/)
+              .map(s => s.trim())
+              .filter(Boolean);
+          }
+          for (const payName of paymentNames) {
+            const payTokens = new Set(tokenize(payName));
+            if (!payTokens.size) continue;
+            for (const alias of matchNames) {
+              const aliasTokens = tokenize(alias);
+              let overlap = 0;
+              for (const t of aliasTokens) {
+                if (payTokens.has(t)) overlap++;
+              }
+              if (overlap >= 2) {
+                return true;
+              }
+            }
+          }
+
+          return false;
         }
 
         function findPaymentMatchForClass(student, dateStr) {
@@ -4171,15 +4343,60 @@
                 }
                 
                 const pricePerClass = getStudentPricePerClass(student, groupRecord);
-                const statusInfo = determineClassStatus(
-                  student,
-                  studentId,
-                  occurrence.dateStr,
-                  pricePerClass,
-                  skipInfo,
-                  groupNameRaw,
-                  occurrence.laTime
-                );
+                // New allocation-first logic: always render a red dot for scheduled class,
+                // then consume student's payment bucket to flip to paid/partial
+                let statusInfo;
+                if (skipInfo) {
+                  statusInfo = {
+                    status: skipInfo.type === 'class-canceled' ? 'canceled' : 'skipped',
+                    label: skipInfo.note || (skipInfo.type === 'class-canceled' ? 'Class canceled' : 'Class skipped'),
+                    balance: getStudentBalance(student),
+                    paidAmount: 0,
+                  };
+                } else {
+                  // Absences override payment matching
+                  const idKey = studentId ? String(studentId) : null;
+                  const isAbsentInData = idKey && absencesData[idKey] && absencesData[idKey][occurrence.dateStr];
+                  const isAbsentInManager = idKey && window.AbsentManager && window.AbsentManager.isAbsent(idKey, occurrence.dateStr);
+                  if (isAbsentInData || isAbsentInManager) {
+                    statusInfo = {
+                      status: 'absent',
+                      label: 'Marked absent',
+                      balance: getStudentBalance(student),
+                      paidAmount: 0,
+                    };
+                  } else {
+                    // ============================================================
+                    // 🔥 REVERSE CHRONOLOGICAL ALLOCATION CALL
+                    // ============================================================
+                    const alloc = allocatePaymentForClass(student, occurrence.dateStr, pricePerClass);
+                    const classPrice = Number(pricePerClass) || 0;
+                    if (classPrice > 0 && alloc.paidAmount > 0 && alloc.paidAmount >= classPrice) {
+                      statusInfo = {
+                        status: alloc.creditUsed > 0 && alloc.cashUsed === 0 ? 'credit' : 'paid',
+                        label: alloc.creditUsed > 0 && alloc.cashUsed === 0 
+                          ? `Credit ${formatCurrency(alloc.paidAmount)} $`
+                          : `Paid ${formatCurrency(alloc.paidAmount)} $`,
+                        balance: getStudentBalance(student),
+                        paidAmount: alloc.paidAmount,
+                      };
+                    } else if (alloc.paidAmount > 0 && classPrice > 0) {
+                      statusInfo = {
+                        status: 'partial',
+                        label: `Partial ${formatCurrency(alloc.paidAmount)} $`,
+                        balance: getStudentBalance(student),
+                        paidAmount: alloc.paidAmount,
+                      };
+                    } else {
+                      statusInfo = {
+                        status: 'unpaid',
+                        label: 'Unpaid',
+                        balance: getStudentBalance(student),
+                        paidAmount: 0,
+                      };
+                    }
+                  }
+                }
                 
                 if (!statusInfo) return;
 
@@ -4220,6 +4437,9 @@
                   dayEntry.indicators.add('absent');
                   aggregates.absenceCount += 1;
                 }
+                // Always add a red dot for scheduled class days (unpaid expectation)
+                // The indicator rows are built from students' status via getDotClassForStudent
+                // so setting status correctly above is sufficient. No extra indicator needed here.
               });
 
               if (classEntry.students.length === 0 && !(skipInfo && skipInfo.type)) {
@@ -6520,6 +6740,50 @@
             await loadPayments();
             clearMonthCache();
             renderCalendar();
+          })
+          .subscribe();
+
+        // Subscribe to absences changes
+        supabase
+          .channel('absences_changes')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'absences' }, async payload => {
+            try {
+              // Absences affect per-day stats; only invalidate affected day if available
+              const d = payload?.new?.class_date || payload?.old?.class_date;
+              if (d) {
+                const dateStr = formatDateYYYYMMDD(new Date(d));
+                invalidateDayCache(dateStr);
+              } else {
+                clearMonthCache();
+              }
+              renderCalendar();
+            } catch (e) {
+              console.warn('⚠️ Absences realtime update issue', e);
+              clearMonthCache();
+              renderCalendar();
+            }
+          })
+          .subscribe();
+
+        // Subscribe to credit payments changes
+        supabase
+          .channel('credit_payments_changes')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'credit_payments' }, async payload => {
+            try {
+              // Credit payments can resolve unpaid for a specific class_date
+              const d = payload?.new?.class_date || payload?.old?.class_date;
+              if (d) {
+                const dateStr = formatDateYYYYMMDD(new Date(d));
+                invalidateDayCache(dateStr);
+              } else {
+                clearMonthCache();
+              }
+              renderCalendar();
+            } catch (e) {
+              console.warn('⚠️ Credit payments realtime update issue', e);
+              clearMonthCache();
+              renderCalendar();
+            }
           })
           .subscribe();
       }
