@@ -411,6 +411,182 @@ let reactions = {
   correct: [],
   incorrect: []
 };
+const ANSWER_LETTERS = ['A', 'B', 'C', 'D'];
+
+function safeJsonParse(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    return null;
+  }
+}
+
+function escapeHtml(text = '') {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatTextWithBreaks(text = '') {
+  return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
+function letterToIndex(letter) {
+  if (typeof letter !== 'string') return -1;
+  return ANSWER_LETTERS.indexOf(letter.toUpperCase());
+}
+
+function normalizeCorrectAnswer(rawValue, optionsList = [], rawQuestion = null) {
+  if (typeof rawValue === 'number' && !Number.isNaN(rawValue)) {
+    return ANSWER_LETTERS[rawValue] || 'A';
+  }
+
+  if (typeof rawValue === 'string') {
+    const trimmed = rawValue.trim();
+    if (trimmed) {
+      const upper = trimmed.toUpperCase();
+      if (ANSWER_LETTERS.includes(upper)) {
+        return upper;
+      }
+
+      const numeric = Number(trimmed);
+      if (!Number.isNaN(numeric)) {
+        return ANSWER_LETTERS[numeric] || 'A';
+      }
+
+      const matchIndex = optionsList.findIndex(opt => opt.toLowerCase() === trimmed.toLowerCase());
+      if (matchIndex >= 0) {
+        return ANSWER_LETTERS[matchIndex] || 'A';
+      }
+    }
+  }
+
+  if (rawQuestion) {
+    const fallbackFields = ['correctOption', 'correct_option', 'correct', 'answer', 'correct_answer_value'];
+    for (const field of fallbackFields) {
+      if (rawQuestion[field] != null && rawQuestion[field] !== rawValue) {
+        return normalizeCorrectAnswer(rawQuestion[field], optionsList, null);
+      }
+    }
+  }
+
+  return 'A';
+}
+
+function normalizeOptionArray(rawOptions, rawQuestion) {
+  let optionsList = [];
+
+  if (Array.isArray(rawOptions)) {
+    optionsList = rawOptions;
+  } else if (typeof rawOptions === 'string') {
+    let parsed = safeJsonParse(rawOptions);
+    if (Array.isArray(parsed)) {
+      optionsList = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      optionsList = Object.values(parsed);
+    } else if (typeof parsed === 'string' && parsed !== rawOptions) {
+      const doubleParsed = safeJsonParse(parsed);
+      if (Array.isArray(doubleParsed)) {
+        optionsList = doubleParsed;
+      } else if (doubleParsed && typeof doubleParsed === 'object') {
+        optionsList = Object.values(doubleParsed);
+      }
+    }
+
+    if (!optionsList.length) {
+      if (rawOptions.includes('|')) {
+        optionsList = rawOptions.split('|').map(part => part.trim()).filter(Boolean);
+      } else if (rawOptions.includes('\n')) {
+        optionsList = rawOptions.split('\n').map(line => line.trim()).filter(Boolean);
+      } else {
+        optionsList = [rawOptions.trim()].filter(Boolean);
+      }
+    }
+  } else if (rawOptions && typeof rawOptions === 'object') {
+    const ordered = [];
+    ['A', 'B', 'C', 'D', 'a', 'b', 'c', 'd', '0', '1', '2', '3'].forEach(key => {
+      if (rawOptions[key]) ordered.push(rawOptions[key]);
+    });
+    optionsList = ordered.length ? ordered : Object.values(rawOptions);
+  }
+
+  if (!optionsList.length && rawQuestion) {
+    const fallbackKeys = [
+      'optionA', 'optionB', 'optionC', 'optionD',
+      'option_a', 'option_b', 'option_c', 'option_d',
+      'answerA', 'answerB', 'answerC', 'answerD',
+      'answer_a', 'answer_b', 'answer_c', 'answer_d'
+    ];
+    fallbackKeys.forEach(key => {
+      if (rawQuestion[key]) {
+        optionsList.push(rawQuestion[key]);
+      }
+    });
+  }
+
+  const cleaned = optionsList
+    .map(opt => {
+      if (opt == null) return '';
+      if (typeof opt === 'string') return opt.replace(/\s+/g, ' ').trim();
+      if (typeof opt === 'object') {
+        if (typeof opt.text === 'string') return opt.text.trim();
+        return Object.values(opt)
+          .map(val => (typeof val === 'string' ? val.trim() : ''))
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+      }
+      return String(opt);
+    })
+    .filter(Boolean);
+
+  return cleaned.slice(0, ANSWER_LETTERS.length);
+}
+
+function padOptions(options, correctLetter) {
+  const padded = [...options];
+  const requiredLength = Math.max(
+    padded.length,
+    letterToIndex(correctLetter) + 1,
+    ANSWER_LETTERS.length
+  );
+
+  while (padded.length < requiredLength) {
+    const letter = ANSWER_LETTERS[padded.length] || String.fromCharCode(65 + padded.length);
+    padded.push(`Option ${letter} not provided`);
+  }
+
+  return padded.slice(0, ANSWER_LETTERS.length);
+}
+
+function normalizeQuestionRecord(rawQuestion) {
+  const questionText =
+    (typeof rawQuestion.question === 'string' && rawQuestion.question.trim()) ||
+    rawQuestion.prompt ||
+    rawQuestion.question_text ||
+    rawQuestion.title ||
+    rawQuestion.text ||
+    'Question text unavailable';
+
+  const optionCandidates = normalizeOptionArray(
+    rawQuestion.options ?? rawQuestion.options_json ?? rawQuestion.choices ?? rawQuestion.answers,
+    rawQuestion
+  );
+  let normalizedCorrect = normalizeCorrectAnswer(rawQuestion.correct_answer, optionCandidates, rawQuestion);
+  const paddedOptions = padOptions(optionCandidates, normalizedCorrect);
+  normalizedCorrect = normalizeCorrectAnswer(normalizedCorrect, paddedOptions, rawQuestion);
+
+  return {
+    ...rawQuestion,
+    question: questionText,
+    options: paddedOptions,
+    correct_answer: normalizedCorrect,
+  };
+}
 
 // ========================================================
 // SHUFFLE FUNCTIONS
@@ -569,9 +745,11 @@ async function loadQuestions() {
       return;
     }
 
-    // Store original order and current questions
-    originalQuestions = [...data];
-    questions = [...data];
+  const normalizedQuestions = data.map(normalizeQuestionRecord);
+
+  // Store original order and current questions
+  originalQuestions = [...normalizedQuestions];
+  questions = [...normalizedQuestions];
     currentQuestionIndex = 0;
     selectedAnswers = new Array(questions.length).fill(null);
     isShuffled = false;
@@ -598,9 +776,36 @@ async function loadQuestions() {
 // DISPLAY QUESTION
 // ========================================================
 function displayQuestion() {
+  if (!questions.length) {
+    document.getElementById('questionContainer').innerHTML = `
+      <div class="question-card">
+        <div style="text-align: center; color: #ffffff;">
+          <div style="font-size: 48px; margin-bottom: 20px;">📭</div>
+          <div style="font-size: 20px; font-weight: 600; margin-bottom: 10px;">No Questions Loaded</div>
+          <div style="font-size: 16px; opacity: 0.8;">Please return to the test library and choose a different test.</div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   const question = questions[currentQuestionIndex];
-  const options = typeof question.options === 'string' ? JSON.parse(question.options) : question.options;
-  const letters = ['A', 'B', 'C', 'D'];
+  if (!question) {
+    document.getElementById('questionContainer').innerHTML = `
+      <div class="question-card">
+        <div style="text-align: center; color: #ffffff;">
+          <div style="font-size: 48px; margin-bottom: 20px;">⚠️</div>
+          <div style="font-size: 20px; font-weight: 600; margin-bottom: 10px;">Question unavailable</div>
+          <div style="font-size: 16px; opacity: 0.8;">Please try the next question.</div>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const options = Array.isArray(question.options) ? question.options : [];
+  const letters = ANSWER_LETTERS;
+  window.tempSelection = null;
   
   // Update progress
   const progress = ((currentQuestionIndex + 1) / questions.length) * 100;
@@ -611,12 +816,12 @@ function displayQuestion() {
   document.getElementById('questionContainer').innerHTML = `
     <div class="question-card">
       <div class="question-number">Question ${currentQuestionIndex + 1}</div>
-      <div class="question-text">${question.question}</div>
+      <div class="question-text">${formatTextWithBreaks(question.question)}</div>
       <div class="options" id="optionsContainer">
         ${options.map((opt, i) => `
           <div class="option" onclick="selectAnswer('${letters[i]}')" id="option${letters[i]}">
             <span class="option-letter">${letters[i]}.</span>
-            <span>${opt}</span>
+            <span>${formatTextWithBreaks(opt)}</span>
           </div>
         `).join('')}
       </div>
@@ -635,7 +840,9 @@ function selectAnswer(letter) {
   });
   
   // Add selection
-  document.getElementById(`option${letter}`).classList.add('selected');
+  const optionEl = document.getElementById(`option${letter}`);
+  if (!optionEl) return;
+  optionEl.classList.add('selected');
   
   // Enable submit button
   document.getElementById('submitBtn').disabled = false;
@@ -663,9 +870,10 @@ function submitAnswer() {
   };
   
   // Show visual feedback
-  const letters = ['A', 'B', 'C', 'D'];
+  const letters = ANSWER_LETTERS;
   letters.forEach(letter => {
     const optionEl = document.getElementById(`option${letter}`);
+    if (!optionEl) return;
     if (letter === correctAnswer) {
       optionEl.classList.add('correct');
     } else if (letter === selectedAnswer && !isCorrect) {
@@ -702,7 +910,12 @@ function nextQuestion() {
 // SHOW RESULTS
 // ========================================================
 function showResults() {
-  const correctCount = selectedAnswers.filter(a => a.isCorrect).length;
+  const correctCount = selectedAnswers.reduce((sum, answer) => {
+    if (answer && answer.isCorrect) {
+      return sum + 1;
+    }
+    return sum;
+  }, 0);
   const percentage = Math.round((correctCount / questions.length) * 100);
   
   document.getElementById('scoreNumber').textContent = `${percentage}%`;

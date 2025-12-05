@@ -5425,12 +5425,15 @@
       let absences = [];
       try {
         const { data, error } = await supabase
-          .from('absences')
+          .from('student_absences')
           .select('*')
           .eq('student_id', student.id);
         
         if (!error && data) {
           absences = data.map(a => a.class_date);
+          console.debug(`✅ Loaded ${absences.length} absences for student:`, absences);
+        } else if (error) {
+          console.debug('⚠️ Error loading absences:', error);
         }
       } catch (err) {
         console.debug('⚠️ Could not load absences:', err);
@@ -5489,11 +5492,9 @@
       const dec1_2025 = new Date('2025-12-01');
       dec1_2025.setHours(0, 0, 0, 0);
       
-      // Use the later of: Dec 1 2025 or student start date
-      const startDate = new Date(dec1_2025);
-      if (studentStartDate && studentStartDate > startDate) {
-        startDate.setTime(studentStartDate.getTime());
-      }
+      // ALWAYS use the LATER of: Dec 1 2025 or student start date
+      // This ensures we never count unpaid before Dec 1, even if student started earlier
+      const startDate = new Date(Math.max(dec1_2025.getTime(), studentStartDate ? studentStartDate.getTime() : dec1_2025.getTime()));
       
       console.debug(`📅 Calculating unpaid classes from ${startDate.toISOString().split('T')[0]} to today`);
       
@@ -5566,6 +5567,25 @@
       let lastPaidDate = null;
       let unpaidClasses = []; // Track individual unpaid class dates
       let absentClasses = []; // Track absent class dates
+      const studentMarkedAbsent = (() => {
+        if (!student) return false;
+        const normalizeStatus = (value) => typeof value === 'string' ? value.trim().toLowerCase() : '';
+        const normalizeBooleanLike = (value) => {
+          if (value === true) return true;
+          if (typeof value === 'string') {
+            const normalized = value.trim().toLowerCase();
+            return ['true', 'absent', 'yes', 'on'].includes(normalized);
+          }
+          return false;
+        };
+        return (
+          normalizeBooleanLike(student.absent) ||
+          normalizeStatus(student.status) === 'absent' ||
+          normalizeStatus(student.attendance_status) === 'absent' ||
+          normalizeStatus(student.lifecycle_status) === 'absent' ||
+          normalizeStatus(student.current_status) === 'absent'
+        );
+      })();
       
       // 🔴 ENHANCED: Calculate unpaid from schedule (matches Calendar red dots)
       if (student && groupSchedule) {
@@ -5575,6 +5595,32 @@
         absentClasses = result.absentClasses || []; // Capture absent class dates
         console.debug(`✅ Schedule-based unpaid calculation: $${result.unpaidAmount} (${unpaidClasses.length} classes)`);
         console.debug(`⚪ Absent classes: ${absentClasses.length}`);
+
+        // 🔒 Guardrail: respect Student Manager balances (Dec 1 reset)
+        const numericBalance = Number(student.balance);
+        if (Number.isFinite(numericBalance)) {
+          const pricePerClass = parseFloat(student.price_per_class) || 50;
+          if (numericBalance >= 0) {
+            if (totalUnpaid > 0 || unpaidClasses.length > 0) {
+              console.debug('🟢 Balance is non-negative — suppressing unpaid indicators to match Student Manager.');
+            }
+            totalUnpaid = 0;
+            unpaidClasses = [];
+          } else {
+            const owedAmount = Math.abs(numericBalance);
+            if (totalUnpaid === 0) {
+              // No schedule debt detected, but balance says otherwise (e.g., manual adjustment)
+              totalUnpaid = owedAmount;
+            } else {
+              const adjustedAmount = Math.min(totalUnpaid, owedAmount);
+              if (pricePerClass > 0) {
+                const classesToShow = Math.min(unpaidClasses.length, Math.ceil(adjustedAmount / pricePerClass));
+                unpaidClasses = unpaidClasses.slice(0, classesToShow);
+              }
+              totalUnpaid = adjustedAmount;
+            }
+          }
+        }
       } else {
         // Fallback: Calculate from payment_records table only
         console.debug('⚠️ Using fallback payment_records calculation (no schedule data)');
@@ -5584,6 +5630,12 @@
             totalUnpaid += amount;
           }
         });
+      }
+
+      if (studentMarkedAbsent && (totalUnpaid > 0 || unpaidClasses.length > 0)) {
+        console.debug('🚫 Student marked absent — clearing unpaid totals from portal view.');
+        totalUnpaid = 0;
+        unpaidClasses = [];
       }
       
       // Calculate last paid

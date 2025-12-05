@@ -18,8 +18,6 @@
       window.studentsCache = [];
       window.groupsCache = [];
       window.paymentsCache = [];
-  const studentPaymentMatchCache = new Map();
-  window.studentPaymentMatchCache = studentPaymentMatchCache;
       
       // ============================================================
       // ⚡ PERFORMANCE UTILITIES
@@ -137,82 +135,6 @@
     </script>
     
     <style>
-      /* ========================================================================
-         ⚡ PERFORMANCE OPTIMIZATIONS - GPU HEAT & LAG FIX
-         ========================================================================
-         
-         ISSUE 1: Glassmorphism (backdrop-filter: blur) causes GPU overload
-         - Each blur layer forces GPU to sample, blur, and composite pixels
-         - With 35-42 day cells + sidebar + header, this meant 50+ blur layers
-         - GPU was rendering this 60 times/second = extreme heat & lag
-         
-         SOLUTION: Strategic blur reduction
-         ✅ REMOVED blur from: .day cells (35-42 instances)
-         ✅ REDUCED blur on: modals (40px → 20px), tooltips (12px → 6px)
-         ✅ REMOVED blur from: panel-blur and card-blur (0px)
-         ✅ KEPT blur on: main containers only (header, sidebar, modal overlay)
-         
-         ISSUE 2: Animated floating orbs with filter: blur()
-         - Two 400px orbs with blur(40-45px) moving every frame
-         - Forces full background repaint 60 times/second
-         - Gaussian blur on animated elements = GPU death
-         
-         SOLUTION: Replace filter blur with radial gradients
-         ✅ REMOVED: filter: blur(40px) and filter: blur(45px)
-         ✅ REPLACED: With multi-stop radial gradients (naturally soft edges)
-         ✅ RESULT: Same visual effect, ZERO blur cost
-         
-         ISSUE 3: "Lazy" transitions (transition: all)
-         - `transition: all` forces browser to watch EVERY CSS property for changes
-         - With 42 day cells × dozens of properties = thousands of checks/second
-         - CPU calculates diff for background, border, width, height, filter, etc.
-         - Most properties never change, wasted computation
-         
-         SOLUTION: Specific property transitions
-         ✅ REPLACED: transition: all → transition: transform, border-color
-         ✅ OPTIMIZED: Only animate properties that actually change
-         ✅ RESULT: Browser can optimize rendering pipeline, skip unused checks
-         
-         ISSUE 4: "Thousands of Dots" problem (DOM node count)
-         - Busy calendar: 5 groups/day × 4 students/group = 20 dots/day
-         - 30 days × 20 dots = 600 tiny elements on the page
-         - Each dot had box-shadow: 0 2px 4px rgba(0,0,0,0.3)
-         - Browser calculates shadow rendering for 600 circles on every scroll/hover
-         
-         SOLUTION: Remove shadow from indicator dots
-         ✅ REMOVED: box-shadow from .indicator-dot (600+ instances)
-         ✅ KEPT: Border-radius and color (sufficient for 8px dots)
-         ✅ RESULT: Dots too small to need shadows, massive scroll performance boost
-         
-         ISSUE 5: "Fixed" background gradient on high-res displays
-         - Body background: radial-gradient(...) fixed
-         - On 4K/Retina displays (8M pixels), painting a complex fixed gradient is expensive
-         - Browser repaints or composites weirdly when scrolling content over it
-         - Fixed attachment prevents browser from optimizing scroll compositing
-         
-         SOLUTION: Remove 'fixed' attachment from background
-         ✅ REMOVED: 'fixed' from body background gradient
-         ✅ SIMPLIFIED: Let gradient scroll naturally (cheaper to composite)
-         ✅ RESULT: Eliminates expensive scroll-time repaints on high-DPI screens
-         
-         ISSUE 6: Event Listener Memory Leak (CRITICAL!)
-         - Every day cell got click listener (42 listeners per render)
-         - Every indicator dot got 3 listeners (600+ listeners for dots alone)
-         - Navigating months didn't remove old listeners before creating new ones
-         - After viewing 10 months: 4,200+ ghost listeners consuming RAM
-         - Browser keeps track of every deleted element with attached listeners
-         
-         SOLUTION: Event Delegation Pattern
-         ✅ REMOVED: Individual listeners from .day cells (42 per render)
-         ✅ REMOVED: Individual listeners from .indicator-dot (600+ per render)
-         ✅ ADDED: ONE delegated click listener on .calendar-grid container
-         ✅ ADDED: ONE delegated mouseenter/leave listener for all dots
-         ✅ RESULT: Fixed memory leak, 99% reduction in event listeners
-         
-         TOTAL RESULT: ~95% GPU load reduction + optimized CPU + DOM simplified
-         + scroll performance on high-res + NO memory leaks → cool, smooth, responsive! ❄️⚡
-         ======================================================================== */
-      
       * {
         margin: 0;
         padding: 0;
@@ -245,21 +167,18 @@
         --shadow-soft: 0 4px 16px rgba(0, 0, 0, 0.2);
         --radius: 22px;
         --transition: 0.25s ease;
-        --blur: 6px; /* ⚡ REDUCED FROM 8px FOR BETTER GPU PERFORMANCE */
+        --blur: 8px; /* REDUCED FROM 18px FOR PERFORMANCE */
         
-        /* ⚡ PERFORMANCE: Heavily optimized blur values to prevent GPU overload */
-        --panel-blur: 0px; /* REMOVED - was causing heat on repeated elements */
-        --card-blur: 0px;  /* REMOVED - not needed for visual clarity */
-        --modal-blur: 6px; /* REDUCED - only for modals that appear occasionally */
+        /* PERFORMANCE: Optimized blur values - REDUCED FOR BETTER FPS */
+        --panel-blur: 4px; /* REDUCED FROM 8px */
+        --card-blur: 4px;  /* REDUCED FROM 8px */
+        --modal-blur: 8px; /* REDUCED FROM 14px */
         --list-blur: 0px;
       }
 
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Poppins', sans-serif;
-        /* ⚡ PERFORMANCE: Removed 'fixed' - on 4K/Retina displays, painting a fixed gradient 
-           over 8M pixels causes expensive repaints on scroll. Simple gradient without fixed
-           is cheaper to composite. */
-        background: radial-gradient(circle at 20% 20%, #0f1120, #05060a 80%);
+        background: radial-gradient(circle at 20% 20%, #0f1120, #05060a 80%) fixed;
         min-height: 100vh;
         padding: 40px 20px;
         overflow-x: hidden;
@@ -267,7 +186,7 @@
         color: var(--text-primary);
       }
 
-      /* ⚡ PERFORMANCE: Floating Neon Orbs - OPTIMIZED (Removed blur filter) */
+      /* Floating Neon Orbs - ARNOMA Style - OPTIMIZED FOR PERFORMANCE */
       body::before {
         content: '';
         position: fixed;
@@ -276,19 +195,12 @@
         width: 380px;
         height: 380px;
         border-radius: 50%;
-        /* ⚡ Soft edge via radial-gradient instead of filter: blur() */
-        background: radial-gradient(
-          circle, 
-          rgba(38, 255, 230, 0.25) 0%,
-          rgba(38, 255, 230, 0.15) 30%,
-          rgba(38, 255, 230, 0.05) 60%,
-          transparent 100%
-        );
-        /* REMOVED: filter: blur(40px) - was causing constant repaints */
+        background: radial-gradient(circle, rgba(38, 255, 230, 0.35), transparent 70%); /* Reduced opacity from 0.45 */
+        filter: blur(40px); /* Reduced from 55px */
         animation: float 8s ease-in-out infinite alternate;
-        opacity: 0.6;
+        opacity: 0.5; /* Reduced from 0.6 */
         z-index: -1;
-        will-change: transform;
+        will-change: transform; /* GPU acceleration hint */
       }
 
       body::after {
@@ -299,19 +211,12 @@
         width: 400px;
         height: 400px;
         border-radius: 50%;
-        /* ⚡ Soft edge via radial-gradient instead of filter: blur() */
-        background: radial-gradient(
-          circle,
-          rgba(138, 77, 255, 0.20) 0%,
-          rgba(138, 77, 255, 0.12) 30%,
-          rgba(138, 77, 255, 0.04) 60%,
-          transparent 100%
-        );
-        /* REMOVED: filter: blur(45px) - was causing constant repaints */
+        background: radial-gradient(circle, rgba(138, 77, 255, 0.25), transparent 70%); /* Reduced opacity from 0.35 */
+        filter: blur(45px); /* Reduced from 65px */
         animation: float2 10s ease-in-out infinite alternate;
-        opacity: 0.5;
+        opacity: 0.4; /* Reduced from 0.5 */
         z-index: -1;
-        will-change: transform;
+        will-change: transform; /* GPU acceleration hint */
       }
 
       @keyframes float {
@@ -358,9 +263,7 @@
         position: fixed;
         top: 20px;
         right: -80px;
-        transition: right 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
-                    opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1),
-                    width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         width: 60px;
         opacity: 0;
         pointer-events: none;
@@ -392,7 +295,7 @@
       }
 
       .sidebar-content {
-        transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
 
       .sidebar-toggle {
@@ -408,8 +311,7 @@
         align-items: center;
         justify-content: center;
         font-size: 1.3rem;
-        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                    background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         margin-bottom: 0;
         position: relative;
         overflow: hidden;
@@ -466,8 +368,7 @@
         align-items: center;
         justify-content: center;
         font-size: 1.5rem;
-        transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                    transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         z-index: 1000;
         opacity: 1;
         pointer-events: all;
@@ -542,7 +443,7 @@
         border: 1px solid var(--card-border);
         border-radius: 12px;
         cursor: pointer;
-        transition: background-color 0.3s ease, border-color 0.3s ease;
+        transition: all 0.3s ease;
         position: relative;
         overflow: hidden;
       }
@@ -589,7 +490,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: background-color 0.3s ease, border-color 0.3s ease;
+        transition: all 0.3s ease;
       }
 
       .filter-item.active .filter-checkbox {
@@ -604,7 +505,7 @@
         font-weight: 700;
         opacity: 0;
         transform: scale(0);
-        transition: opacity 0.2s ease, transform 0.2s ease;
+        transition: all 0.2s ease;
       }
 
       .filter-item.active .filter-checkbox::after {
@@ -633,7 +534,7 @@
         border-radius: 12px;
         padding: 16px;
         text-align: center;
-        transition: transform 0.3s ease, border-color 0.3s ease;
+        transition: all 0.3s ease;
       }
 
       .stat-card:hover {
@@ -761,9 +662,8 @@
       }
 
       .action-btn:hover {
-        /* ⚡ PERFORMANCE: Only GPU-accelerated properties */
         transform: translateY(-2px);
-        /* Box-shadow removed to prevent layout thrashing */
+        box-shadow: 0 0 18px rgba(38, 255, 230, 0.4);
       }
 
       .calendar-wrapper {
@@ -897,10 +797,9 @@
       }
 
       .nav-btn:hover {
-        /* ⚡ PERFORMANCE: Only GPU-accelerated properties */
         transform: translateY(-2px);
+        box-shadow: 0 0 18px rgba(38, 255, 230, 0.4);
         border-color: var(--neon-cyan);
-        /* Box-shadow removed to prevent layout thrashing */
       }
 
       .nav-btn:active {
@@ -922,9 +821,8 @@
       }
 
       .today-btn:hover {
-        /* ⚡ PERFORMANCE: Only GPU-accelerated properties */
         transform: translateY(-2px);
-        /* Box-shadow removed to prevent layout thrashing */
+        box-shadow: 0 0 18px rgba(38, 255, 230, 0.45);
       }
 
       /* Elite Refresh Button */
@@ -939,8 +837,7 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-                    border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         margin-left: 12px;
         overflow: hidden;
       }
@@ -984,7 +881,7 @@
         stroke-width: 2;
         stroke-linecap: round;
         stroke-linejoin: round;
-        transition: filter 0.3s ease;
+        transition: all 0.3s ease;
         position: relative;
         z-index: 1;
       }
@@ -1138,7 +1035,7 @@
         border-radius: 14px;
         border: 1px solid var(--glass-border);
         background: var(--glass-bg);
-        /* ⚡ PERFORMANCE: Removed backdrop-filter to reduce GPU load on 35-42 day cells */
+        backdrop-filter: blur(var(--panel-blur));
         display: flex;
         flex-direction: column;
         align-items: flex-start;
@@ -1147,10 +1044,8 @@
         cursor: pointer;
         position: relative;
         overflow: visible;
-        transition: transform 0.3s cubic-bezier(0.4, 0.2, 1), border-color 0.3s ease;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         animation: fadeIn 0.4s ease-out backwards;
-        /* ⚡ PERFORMANCE: will-change hint for GPU acceleration */
-        will-change: transform;
       }
 
       .day::before {
@@ -1171,10 +1066,9 @@
       }
 
       .day:hover {
-        /* ⚡ PERFORMANCE: Only GPU-accelerated properties (no box-shadow changes) */
         transform: translateY(-4px) scale(1.02);
+        box-shadow: 0 0 18px rgba(38, 255, 230, 0.4);
         border-color: var(--neon-cyan);
-        /* Box-shadow removed to prevent layout recalculation on hover */
       }
 
       .day-header {
@@ -1241,7 +1135,6 @@
         flex: 1;
         justify-content: center;
         align-items: flex-start;
-        overflow: visible;
       }
 
       .group-dots-row {
@@ -1253,8 +1146,6 @@
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
         width: 100%;
         font-size: 0.65rem;
-        overflow: visible;
-        position: relative;
       }
 
       .group-dots-row:last-child {
@@ -1289,19 +1180,15 @@
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        transition: transform 0.2s ease;
+        transition: all 0.2s ease;
         cursor: pointer;
-        /* ⚡ PERFORMANCE: box-shadow removed - too expensive for 600+ tiny dots */
-        /* With 30 days × 20 dots = 600 elements, shadow rendering kills scroll performance */
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         position: relative;
-        /* ⚡ PERFORMANCE: Pre-allocate GPU layer to prevent layout thrashing */
-        will-change: transform;
       }
 
       .indicator-dot:hover {
-        /* ⚡ PERFORMANCE: Only transform (GPU-accelerated), no box-shadow changes */
         transform: scale(1.5);
-        /* Box-shadow removed from hover to prevent layout recalculation */
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
       }
 
       /* Tooltip for dots - using fixed position to escape stacking context */
@@ -1321,8 +1208,8 @@
         width: 100%;
         height: 100%;
         background: rgba(0, 0, 0, 0.92);
-        backdrop-filter: blur(6px); /* ⚡ REDUCED from 12px for performance */
-        -webkit-backdrop-filter: blur(6px);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
         display: none;
         align-items: center;
         justify-content: center;
@@ -1340,8 +1227,8 @@
         background: linear-gradient(135deg, 
           rgba(15, 23, 42, 0.95) 0%, 
           rgba(30, 41, 59, 0.92) 100%);
-        backdrop-filter: blur(20px); /* ⚡ REDUCED from 40px - less GPU intensive */
-        -webkit-backdrop-filter: blur(20px);
+        backdrop-filter: blur(40px);
+        -webkit-backdrop-filter: blur(40px);
         border: 1px solid rgba(38, 255, 230, 0.2);
         border-radius: 24px;
         max-width: 520px;
@@ -1353,9 +1240,8 @@
           0 20px 80px rgba(0, 0, 0, 0.6),
           inset 0 1px 0 rgba(255, 255, 255, 0.1);
         transform: scale(0.85) translateY(30px);
-        transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
         position: relative;
-        pointer-events: auto;
       }
 
       #studentDotModal.active .dot-modal-container {
@@ -1392,8 +1278,7 @@
         justify-content: center;
         font-size: 20px;
         font-weight: 300;
-        transition: background-color 0.2s ease, border-color 0.2s ease, 
-                    color 0.2s ease, transform 0.2s ease;
+        transition: all 0.2s ease;
         z-index: 10;
       }
 
@@ -1470,7 +1355,6 @@
         padding: 0 28px 28px;
         overflow-y: auto;
         max-height: calc(85vh - 200px);
-        pointer-events: auto;
       }
 
       .dot-info-grid {
@@ -1485,8 +1369,7 @@
         border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 16px;
         padding: 16px 18px;
-        transition: background-color 0.2s ease, border-color 0.2s ease, 
-                    transform 0.2s ease;
+        transition: all 0.2s ease;
       }
 
       .dot-info-card:hover {
@@ -1556,7 +1439,6 @@
       /* Actions Section */
       .dot-actions-section {
         margin-top: 24px;
-        pointer-events: auto;
       }
 
       .dot-actions-title {
@@ -1572,7 +1454,6 @@
         display: grid;
         grid-template-columns: repeat(2, 1fr);
         gap: 10px;
-        pointer-events: auto;
       }
 
       .dot-action-btn {
@@ -1584,15 +1465,13 @@
         cursor: pointer;
         font-weight: 600;
         font-size: 0.9rem;
-        transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                    border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 10px;
         position: relative;
         overflow: hidden;
-        pointer-events: auto;
       }
 
       .dot-action-btn::before {
@@ -1609,10 +1488,9 @@
       }
 
       .dot-action-btn:hover {
-        /* ⚡ PERFORMANCE: Only GPU-accelerated properties */
         border-color: rgba(38, 255, 230, 0.4);
         transform: translateY(-3px);
-        /* Box-shadow removed to prevent layout thrashing when hovering multiple buttons */
+        box-shadow: 0 8px 20px rgba(38, 255, 230, 0.2);
       }
 
       .dot-action-btn:active {
@@ -1697,7 +1575,7 @@
 
       /* ========================================
          HOVER TOOLTIP FOR STUDENT DOTS
-         Shows student name on hover using real DOM element
+         Shows student name on hover
          ======================================== */
       
       .student-dot {
@@ -1705,12 +1583,15 @@
         z-index: 1;
       }
 
-      /* Hover tooltip container - positioned fixed to escape stacking context */
-      .hover-tooltip {
-        position: fixed;
+      .student-dot::before {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 50%;
+        transform: translateX(-50%) translateY(-4px);
         background: rgba(15, 23, 42, 0.98);
-        backdrop-filter: blur(6px); /* ⚡ REDUCED from 12px for performance */
-        -webkit-backdrop-filter: blur(6px);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
         color: #fff;
         padding: 8px 14px;
         border-radius: 8px;
@@ -1719,27 +1600,32 @@
         white-space: nowrap;
         pointer-events: none;
         opacity: 0;
-        transition: opacity 0.08s ease-out; /* ⚡ INSTANT: Reduced from 0.2s for faster response */
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
         z-index: 999999;
         border: 1px solid rgba(38, 255, 230, 0.3);
         box-shadow: 
           0 4px 12px rgba(0, 0, 0, 0.4),
           0 0 20px rgba(38, 255, 230, 0.2);
-        transform: translateX(-50%) translateY(-8px);
       }
 
-      .hover-tooltip.visible {
-        opacity: 1;
-      }
-
-      .hover-tooltip::after {
+      .student-dot::after {
         content: '';
         position: absolute;
-        top: 100%;
+        bottom: calc(100% + 2px);
         left: 50%;
         transform: translateX(-50%);
-        border: 6px solid transparent;
+        border: 4px solid transparent;
         border-top-color: rgba(15, 23, 42, 0.98);
+        pointer-events: none;
+        opacity: 0;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        z-index: 999998;
+      }
+
+      .student-dot:hover::before,
+      .student-dot:hover::after {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
       }
 
       .dot-class {
@@ -2048,8 +1934,7 @@
         border-radius: 12px 12px 0 0;
         color: rgba(255, 255, 255, 0.6);
         cursor: pointer;
-        transition: background-color 0.3s ease, color 0.3s ease, 
-                    border-color 0.3s ease;
+        transition: all 0.3s ease;
         font-size: 14px;
         font-weight: 500;
         white-space: nowrap;
@@ -2174,8 +2059,7 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        transition: background-color 0.3s ease, border-color 0.3s ease, 
-                    transform 0.3s ease;
+        transition: all 0.3s ease;
         position: relative;
         overflow: hidden;
         gap: 10px;
@@ -2272,8 +2156,7 @@
         align-items: center;
         justify-content: center;
         font-size: 0.9rem;
-        transition: background-color 0.3s ease, border-color 0.3s ease, 
-                    transform 0.3s ease;
+        transition: all 0.3s ease;
         position: relative;
         overflow: hidden;
       }
@@ -2605,7 +2488,7 @@
         color: white;
         font-size: 24px;
         cursor: pointer;
-        transition: transform 0.2s ease, opacity 0.2s ease;
+        transition: all 0.2s ease;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -3777,9 +3660,6 @@
 
       function clearMonthCache() {
         monthCache.clear();
-        if (DataCache && DataCache.monthData && typeof DataCache.monthData.clear === 'function') {
-          DataCache.monthData.clear();
-        }
       }
 
       function getMonthData(year, month) {
@@ -3802,38 +3682,6 @@
       }
 
       function computeMonthData(year, month) {
-        /* ================================================================
-           🛡️ DATA INTEGRITY SAFEGUARDS
-           ================================================================
-           
-           ISSUE 1: Orphan Data (Unused Cache)
-           ✅ PROTECTED: clearMonthCache() is called after EVERY data mutation
-           ✅ PROTECTED: computeMonthData() creates FRESH structures every time
-           ✅ PROTECTED: Uses latest window.studentsCache, groupsCache, paymentsCache
-           → No stale data: when cache is cleared, this function rebuilds from source
-           
-           ISSUE 2: Payment Duplication (Logic Bug)
-           ✅ PROTECTED: This function is IDEMPOTENT - always rebuilds from scratch
-           ✅ PROTECTED: dayMap is created fresh (line 3808), NOT mutated
-           ✅ PROTECTED: Payment matching uses Set() to prevent duplicates
-           ✅ PROTECTED: Each render clears cache and re-computes, no accumulation
-           → No duplicates: same payment ID can't be linked twice in one month
-           
-           ISSUE 3: Inaccurate Payment Summaries
-           ✅ PROTECTED: Payments matched by BOTH date AND student ID
-           ✅ PROTECTED: buildPaymentIndexes() creates studentId → payments map
-           ✅ PROTECTED: Only payments for scheduled students are counted
-           ✅ PROTECTED: Summary calculated from matched payments, not raw count
-           → Accurate totals: payment must belong to student in that class
-           
-           ISSUE 4: Timezone/Date Mismatch
-           ✅ PROTECTED: ALL dates use Date.UTC() via createDateFromParts()
-           ✅ PROTECTED: ALL formatting uses getLAParts() for LA timezone
-           ✅ PROTECTED: Comparison uses YYYY-MM-DD strings (consistent format)
-           ✅ PROTECTED: UTC midnight dates with 12:00 noon prevent edge cases
-           → No timezone bugs: UTC storage + LA display, consistent everywhere
-           
-           ================================================================ */
         const cacheKey = getMonthCacheKey(year, month);
         const label = `${monthNames[month]} ${year}`;
         const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -3888,6 +3736,7 @@
     aggregates.activeStudents = studentIndexes.activeIds.size;
     const studentsByGroup = buildStudentsByGroup(students);
     const paymentIndexes = buildPaymentIndexes(payments, studentIndexes);
+    const studentPaymentMatchCache = new Map();
     const creditEventsByDate = buildCreditEventsByDate(creditLookup, studentIndexes.byId);
     const ambiguousPaymentAllocations = [];
     window.excessPaymentsForCredit = [];
@@ -4370,13 +4219,11 @@
 
         function collectPaymentsForStudentSimple(student) {
           if (!student) return [];
-
-          if (DEBUG_MODE) {
-            console.log('💳 collectPaymentsForStudentSimple called for:', student.name);
-            console.log('   window.paymentsCache exists?', !!window.paymentsCache);
-            console.log('   window.paymentsCache length:', (window.paymentsCache || []).length);
-          }
-
+          
+          console.log('💳 collectPaymentsForStudentSimple called for:', student.name);
+          console.log('   window.paymentsCache exists?', !!window.paymentsCache);
+          console.log('   window.paymentsCache length:', (window.paymentsCache || []).length);
+          
           const cacheKeys = getStudentPaymentCacheKeys(student);
           const existingKey = cacheKeys.find(key => studentPaymentMatchCache.has(key));
           if (existingKey) {
@@ -4424,11 +4271,9 @@
             });
           }
 
-          if (DEBUG_MODE) {
-            console.log(`   ✅ Matched ${matchedPayments.length} payments for ${student.name}`);
-            if (matchedPayments.length > 0) {
-              console.log('   Payment dates:', matchedPayments.map(p => p.dateStr));
-            }
+          console.log(`   ✅ Matched ${matchedPayments.length} payments for ${student.name}`);
+          if (matchedPayments.length > 0) {
+            console.log(`   Payment dates:`, matchedPayments.map(p => p.dateStr));
           }
           
           return matchedPayments;
@@ -5308,13 +5153,18 @@
           
           // Record the payment
           const paymentRecord = {
-            id: generatePaymentId(),
             student_id: studentId,
             student_name: student.name,
             amount: amount,
             date: paymentDate,
             email_date: paymentDate + 'T12:00:00',
-            payer_name: student.name
+            timestamp: new Date().toISOString(),
+            payer_name: student.name,
+            message: memo || 'Prepayment/Credit added',
+            source: 'manual',
+            is_manual: true,
+            is_prepayment: true,
+            ignored: false
           };
           
           const { error: paymentError } = await supabase
@@ -5422,7 +5272,7 @@
       
       // Load all payments from Supabase - BOTH payment_records (manual) AND payments (Zelle)
       async function loadPayments() {
-        debugLog('🔄 Loading payments from Supabase...');
+        console.log('🔄 Loading payments from Supabase...');
         try {
           // Load Zelle payments
           const { data: zellePayments, error: zelleError } = await supabase
@@ -5434,7 +5284,7 @@
             console.error('❌ Error loading Zelle payments:', zelleError);
           }
           
-          debugLog('✅ Zelle payments loaded:', (zellePayments || []).length);
+          console.log('✅ Zelle payments loaded:', (zellePayments || []).length);
           
           // Try to load manual payment records (may not have permission)
           let manualPayments = [];
@@ -5468,8 +5318,8 @@
           });
           
           window.paymentsCache = allPayments;
-          debugLog('✅ Stored in window.paymentsCache:', window.paymentsCache.length, 'payments');
-          debugLog('📋 Sample payment:', window.paymentsCache[0]);
+          console.log('✅ Stored in window.paymentsCache:', window.paymentsCache.length, 'payments');
+          console.log('📋 Sample payment:', window.paymentsCache[0]);
           return window.paymentsCache;
         } catch (err) {
           console.error('❌ Exception loading payments:', err);
@@ -6019,77 +5869,48 @@
           const balance = Number(student.balance) || 0;
           const pricePerClass = Number(student.price_per_class) || 0;
           
-          if (DEBUG_MODE) {
-            console.log('📊 Student data from cache:', {
-              studentId,
-              name: student.name,
-              balance,
-              pricePerClass,
-              rawBalance: student.balance,
-              rawPrice: student.price_per_class
-            });
-          }
+          console.log('📊 Student data from cache:', {
+            studentId,
+            name: student.name,
+            balance,
+            pricePerClass,
+            rawBalance: student.balance,
+            rawPrice: student.price_per_class
+          });
           
           // CRITICAL: Count ACTUAL unpaid red dots from the current calendar display
           // The balance field may be stale - we need to count visible unpaid classes
           let unpaidClassesFromCalendar = 0;
           let unpaidAmountFromCalendar = 0;
-          const unpaidClassDetails = [];
           
           // Look at the currently displayed calendar cells (use .indicator-dot class)
           const calendarDots = document.querySelectorAll(`.indicator-dot[data-student-id="${studentId}"]`);
-          if (DEBUG_MODE) {
-            console.log(`🔴 Found ${calendarDots.length} calendar dots for student ${studentId}`);
-          }
+          console.log(`🔴 Found ${calendarDots.length} calendar dots for student ${studentId}`);
           
           calendarDots.forEach(dot => {
             const status = dot.dataset.status || dot.getAttribute('data-status');
             const price = parseFloat(dot.dataset.price || dot.getAttribute('data-price') || pricePerClass);
             const dateStr = dot.dataset.date || dot.getAttribute('data-date');
             
-            if (DEBUG_MODE) {
-              console.log(`  Dot on ${dateStr}: status=${status}, price=${price}`);
-            }
+            console.log(`  Dot on ${dateStr}: status=${status}, price=${price}`);
             
             if (status === 'unpaid') {
               unpaidClassesFromCalendar++;
               unpaidAmountFromCalendar += price;
-
-              if (dateStr) {
-                const formattedDate = new Date(`${dateStr}T12:00:00`).toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                });
-                unpaidClassDetails.push({
-                  date: dateStr,
-                  formattedDate,
-                  amount: price
-                });
-              }
             }
           });
           
-          if (DEBUG_MODE) {
-            console.log('💰 Unpaid classes from visible calendar:', {
-              count: unpaidClassesFromCalendar,
-              amount: unpaidAmountFromCalendar
-            });
-          }
+          console.log('💰 Unpaid classes from visible calendar:', {
+            count: unpaidClassesFromCalendar,
+            amount: unpaidAmountFromCalendar
+          });
           
           // Use calendar data if we found unpaid classes, otherwise fall back to balance
           const finalBalance = unpaidAmountFromCalendar > 0 ? unpaidAmountFromCalendar : balance;
           const finalPrice = pricePerClass || 15;
           
           // Generate email HTML (async now - loads from Email System)
-          const emailHTML = await generatePaymentReminderEmailHTML(
-            student.name,
-            finalBalance,
-            finalPrice,
-            studentId,
-            unpaidClassDetails
-          );
+          const emailHTML = await generatePaymentReminderEmailHTML(student.name, finalBalance, finalPrice, studentId);
           
           debugLog('📧 Sending payment reminder to:', cleanEmail);
           
@@ -6124,7 +5945,7 @@
           
           debugLog('✅ Payment reminder email sent successfully:', result);
           
-          debugLog('🔥 ABOUT TO LOG EMAIL TO sent_emails TABLE');
+          console.log('🔥 ABOUT TO LOG EMAIL TO sent_emails TABLE');
           
           // CRITICAL: Log to BOTH notification systems
           try {
@@ -6144,14 +5965,14 @@
               sent_at: new Date().toISOString()
             };
             
-            debugLog('📝 sentEmailRecord:', sentEmailRecord);
+            console.log('📝 sentEmailRecord:', sentEmailRecord);
             
             const { data: logData, error: logError } = await supabase
               .from('sent_emails')
               .insert([sentEmailRecord])
               .select();
             
-            debugLog('💾 Supabase sent_emails response:', { logData, logError });
+            console.log('💾 Supabase sent_emails response:', { logData, logError });
             
             if (logError) {
               console.error('⚠️ Failed to log to sent_emails:', logError);
@@ -6185,7 +6006,7 @@
               .insert([notificationRecord])
               .select();
             
-            debugLog('🔔 Supabase notifications response:', { notifData, notifError });
+            console.log('🔔 Supabase notifications response:', { notifData, notifError });
             
             if (notifError) {
               console.error('⚠️ Failed to log to notifications:', notifError);
@@ -6366,55 +6187,42 @@
 </html>`;
       }
 
-      async function generatePaymentReminderEmailHTML(studentName, balance, pricePerClass, studentId = null, unpaidClassDetails = []) {
+      async function generatePaymentReminderEmailHTML(studentName, balance, pricePerClass, studentId = null) {
         // Helper function to format date beautifully
         function formatClassDate(dateStr) {
           const date = new Date(dateStr + 'T12:00:00');
           const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
           return date.toLocaleDateString('en-US', options);
         }
-        const normalizedPricePerClass = Number(pricePerClass) > 0 ? Number(pricePerClass) : 15;
-        const unpaidClasses = (Array.isArray(unpaidClassDetails) ? unpaidClassDetails : []).map(cls => {
-          const rawDate = cls.date || cls.class_date || null;
-          const formattedDate = cls.formattedDate || (rawDate ? formatClassDate(rawDate) : 'Class date pending');
-          const amount = Number(cls.amount);
-          return {
-            date: rawDate,
-            formattedDate,
-            amount: Number.isFinite(amount) && amount > 0 ? amount : normalizedPricePerClass
-          };
-        });
         
         // Calculate unpaid amount from student balance
         // The calendar red dots show unpaid classes, and balance reflects this
+        let unpaidClasses = [];
         let actualAmountDue = 0;
         let actualUnpaidCount = 0;
         
-  if (studentId && balance && balance > 0) {
+        if (studentId && balance && balance > 0) {
           // Student has positive balance = money owed
           actualAmountDue = balance;
           
           // Calculate number of unpaid classes based on price per class
-          actualUnpaidCount = Math.ceil(actualAmountDue / normalizedPricePerClass);
+          const validPricePerClass = (pricePerClass && pricePerClass > 0) ? pricePerClass : 15;
+          actualUnpaidCount = Math.ceil(actualAmountDue / validPricePerClass);
           
-          if (DEBUG_MODE) {
-            console.log('💰 Payment reminder - using student balance:', {
-              studentId,
-              studentName,
-              balance,
-              pricePerClass: normalizedPricePerClass,
-              unpaidCount: actualUnpaidCount,
-              amountDue: actualAmountDue
-            });
-          }
+          console.log('💰 Payment reminder - using student balance:', {
+            studentId,
+            studentName,
+            balance,
+            pricePerClass: validPricePerClass,
+            unpaidCount: actualUnpaidCount,
+            amountDue: actualAmountDue
+          });
         } else {
-          if (DEBUG_MODE) {
-            console.log('💰 Payment reminder - no balance owed:', {
-              studentId,
-              studentName,
-              balance
-            });
-          }
+          console.log('💰 Payment reminder - no balance owed:', {
+            studentId,
+            studentName,
+            balance
+          });
         }
         
         // Build unpaid classes summary HTML
@@ -6459,7 +6267,8 @@
           actualAmountDue = normalizedBalance > 0 ? normalizedBalance : 0;
           
           // Validate pricePerClass to prevent NaN
-          actualUnpaidCount = Math.ceil(actualAmountDue / normalizedPricePerClass);
+          const validPricePerClass = (pricePerClass && pricePerClass > 0) ? pricePerClass : 15; // Default to $15 if invalid
+          actualUnpaidCount = Math.ceil(actualAmountDue / validPricePerClass);
           
           // Ensure actualUnpaidCount is a valid number
           if (!Number.isFinite(actualUnpaidCount) || actualUnpaidCount < 0) {
@@ -6469,7 +6278,7 @@
           debugLog('💰 Using fallback calculation:', {
             balance: normalizedBalance,
             actualAmountDue,
-            pricePerClass: normalizedPricePerClass,
+            pricePerClass: validPricePerClass,
             unpaidCount: actualUnpaidCount
           });
           
@@ -6493,7 +6302,7 @@
               .replace(/\{\{StudentName\}\}/gi, studentName)
               .replace(/\{\{UnpaidClasses\}\}/gi, unpaidClassesSummary)
               .replace(/\{\{ClassDate\}\}/gi, new Date().toLocaleDateString())
-              .replace(/\{\{PricePerClass\}\}/gi, normalizedPricePerClass.toFixed(2))
+              .replace(/\{\{PricePerClass\}\}/gi, pricePerClass.toFixed(2))
               .replace(/\{\{Balance\}\}/gi, actualAmountDue.toFixed(2))
               .replace(/\{\{AmountDue\}\}/gi, actualAmountDue.toFixed(2))
               .replace(/\{\{UnpaidClassCount\}\}/gi, actualUnpaidCount.toString())
@@ -7426,9 +7235,7 @@
               }
               debouncedRenderCalendar();
             } catch (e) {
-              if (DEBUG_MODE) {
-                console.warn('⚠️ Absences realtime update issue', e);
-              }
+              console.warn('⚠️ Absences realtime update issue', e);
               clearMonthCache();
               debouncedRenderCalendar();
             }
@@ -7450,9 +7257,7 @@
               }
               debouncedRenderCalendar();
             } catch (e) {
-              if (DEBUG_MODE) {
-                console.warn('⚠️ Credit payments realtime update issue', e);
-              }
+              console.warn('⚠️ Credit payments realtime update issue', e);
               clearMonthCache();
               debouncedRenderCalendar();
             }
@@ -7461,7 +7266,7 @@
         
         END REALTIME UPDATES */
         
-        debugLog('⚡ Performance Mode: Realtime subscriptions disabled. Calendar updates on manual refresh.');
+        console.log('⚡ Performance Mode: Realtime subscriptions disabled. Calendar updates on manual refresh.');
       }
 
 
@@ -7618,25 +7423,26 @@
         }
 
         function renderList(container, items, totalCount, type) {
+          container.innerHTML = '';
           if (!items.length) {
             const empty = document.createElement('div');
             empty.className = 'insight-empty';
             empty.textContent = type === 'upcoming' ? 'No future classes in view' : 'No unpaid classes in view';
-            container.replaceChildren(empty);
+            container.appendChild(empty);
             return;
           }
 
-          const fragment = document.createDocumentFragment();
-
           items.forEach(entry => {
-            fragment.appendChild(createInsightCard(entry, type));
+            container.appendChild(createInsightCard(entry, type));
           });
 
           if (totalCount > items.length) {
-            fragment.appendChild(createRemainingIndicator(totalCount - items.length, type));
+            const remaining = totalCount - items.length;
+            const more = document.createElement('div');
+            more.className = 'insight-empty';
+            more.textContent = `+${remaining} more ${type === 'upcoming' ? 'class' : 'alert'} this month`;
+            container.appendChild(more);
           }
-
-          container.replaceChildren(fragment);
         }
 
         function createInsightCard(entry, type) {
@@ -7680,13 +7486,6 @@
           card.appendChild(bottomRow);
 
           return card;
-        }
-
-        function createRemainingIndicator(remainingCount, type) {
-          const more = document.createElement('div');
-          more.className = 'insight-empty';
-          more.textContent = `+${remainingCount} more ${type === 'upcoming' ? 'class' : 'alert'} this month`;
-          return more;
         }
       }
 
@@ -8168,8 +7967,10 @@
         showCreditModalForStudent(studentArray, 0);
       }
       
-      // 🗑️ REMOVED: Orphaned formatCurrency function (replaced by advanced version at line ~9008)
-      // The active version uses toLocaleString() with smart decimal handling
+      // Format currency with commas
+      function formatCurrency(amount) {
+        return amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      }
       
       // Show credit modal for a specific student
       function showCreditModalForStudent(studentArray, currentIndex) {
@@ -8673,9 +8474,12 @@
           dayEl.dataset.date = dateStr;
         }
 
-        // ⚡ PERFORMANCE: Removed individual click listener - using event delegation instead
-        // Old code created 42 listeners every render, causing memory leaks
-        // Now handled by ONE delegated listener in attachEventListeners()
+        // Add click handler
+        dayEl.addEventListener('click', () => {
+          if (!isOtherMonth && dayEl.dataset.date) {
+            openDayModal(dayEl.dataset.date);
+          }
+        });
 
         return dayEl;
       }
@@ -8739,8 +8543,7 @@
             dot.className = `indicator-dot student-dot ${className}`;
             dot.textContent = '';
             if (tooltip) {
-              dot.setAttribute('data-tooltip', tooltip); // Custom CSS tooltip on hover
-              dot.title = tooltip; // Fallback native tooltip
+              dot.setAttribute('data-tooltip', tooltip);
               dot.setAttribute('data-student', JSON.stringify({
                 id: student.id,
                 name: student.name,
@@ -8762,9 +8565,11 @@
             dot.setAttribute('data-price', student.pricePerClass || student.price_per_class || 50);
             dot.setAttribute('data-date', dayData.dateStr);
             
-            // ⚡ PERFORMANCE: Removed individual event listeners - using event delegation instead
-            // Old code created 600+ listeners for dots, causing massive memory leaks
-            // Now handled by delegated listeners in attachEventListeners()
+            // Add click handler to show custom tooltip (not the day modal)
+            dot.addEventListener('click', (e) => {
+              e.stopPropagation(); // Prevent day modal from opening
+              showCustomTooltip(e);
+            });
             
             groupRow.appendChild(dot);
             groupDotCount++;
@@ -8786,12 +8591,13 @@
             const style = EVENT_STYLE_MAP[type];
             const className = style?.dotClass || `dot-${type}`;
             const dot = document.createElement('div');
-            dot.className = `indicator-dot student-dot ${className}`;
+            dot.className = `indicator-dot ${className}`;
             dot.setAttribute('data-tooltip', type.replace(/([A-Z])/g, ' $1').trim());
             dot.style.cursor = 'pointer';
             
-            // ⚡ PERFORMANCE: Removed individual event listeners - using event delegation instead
-            // Now handled by delegated listeners in attachEventListeners()
+            // Add hover handlers for custom tooltip
+            dot.addEventListener('mouseenter', showCustomTooltip);
+            dot.addEventListener('mouseleave', hideCustomTooltip);
             
             fallbackRow.appendChild(dot);
           });
@@ -8841,10 +8647,7 @@
       let activeTooltipDot = null;
 
       function showCustomTooltip(event) {
-        // ⚡ EVENT DELEGATION FIX: Use closest() instead of currentTarget
-        const dotElement = event.target.closest('.indicator-dot');
-        if (!dotElement) return;
-        
+        const dotElement = event.currentTarget;
         const studentData = dotElement.getAttribute('data-student');
         const classDate = dotElement.getAttribute('data-class-date');
         
@@ -8886,10 +8689,8 @@
         const safeName = student.name.replace(/'/g, "\\'");
 
         // Build action buttons
-        // Build standardized action buttons based on student status
         let actionButtons = '';
         
-        // For absent students: only show unmark button
         if (student.status === 'absent' || student.absent) {
           actionButtons = `
             <button class="dot-action-btn success wide" onclick="unmarkAbsent(${student.id}, '${classDate}')">
@@ -8897,58 +8698,59 @@
               <span class="btn-text">Unmark Absent</span>
             </button>
           `;
-        } else {
-          // For all non-absent students, show relevant action buttons
+        } else if (student.status === 'unpaid') {
+          actionButtons = `
+            <button class="dot-action-btn primary" onclick="event.stopPropagation(); sendManualReminder(${student.id}, '${safeName}')">
+              <span class="btn-icon">�</span>
+              <span class="btn-text">Reminder</span>
+            </button>
+            <button class="dot-action-btn danger" onclick="markAsAbsent(${student.id}, '${classDate}')">
+              <span class="btn-icon">⚪</span>
+              <span class="btn-text">Absent</span>
+            </button>
+            <button class="dot-action-btn warning" onclick="event.stopPropagation(); pauseStudent(${student.id}, '${safeName}')">
+              <span class="btn-icon">⏸</span>
+              <span class="btn-text">Pause</span>
+            </button>
+            <button class="dot-action-btn purple" onclick="event.stopPropagation(); forwardStudent(${student.id}, '${safeName}')">
+              <span class="btn-icon">⏭</span>
+              <span class="btn-text">Forward</span>
+            </button>
+          `;
           
-          // Email Reminder - show for unpaid and upcoming students
-          if (student.status === 'unpaid' || student.status === 'upcoming') {
+          if (studentBalance >= pricePerClass && pricePerClass > 0) {
             actionButtons += `
-              <button class="dot-action-btn primary" onclick="event.stopPropagation(); sendManualReminder(${student.id}, '${safeName}')">
-                <span class="btn-icon">📧</span>
-                <span class="btn-text">Email Reminder</span>
-              </button>
-            `;
-          }
-          
-          // Apply Credit - show when student has sufficient balance AND is unpaid
-          if (student.status === 'unpaid' && studentBalance >= pricePerClass && pricePerClass > 0) {
-            actionButtons += `
-              <button class="dot-action-btn success" onclick="applyFromCredit(${student.id}, '${classDate}', ${pricePerClass})">
+              <button class="dot-action-btn success wide" onclick="applyFromCredit(${student.id}, '${classDate}', ${pricePerClass})">
                 <span class="btn-icon">💰</span>
                 <span class="btn-text">Apply Credit ($${formatCurrency(studentBalance)})</span>
               </button>
             `;
+          } else {
+            actionButtons += `
+              <button class="dot-action-btn success wide" onclick="openAddCreditModal(${student.id}, '${safeName}')">
+                <span class="btn-icon">💳</span>
+                <span class="btn-text">Add Credit</span>
+              </button>
+            `;
           }
-          
-          // Mark Absent - show for all non-absent students
-          actionButtons += `
-            <button class="dot-action-btn danger" onclick="markAsAbsent(${student.id}, '${classDate}')">
+        } else if (student.status === 'upcoming') {
+          actionButtons = `
+            <button class="dot-action-btn danger wide" onclick="markAsAbsent(${student.id}, '${classDate}')">
               <span class="btn-icon">⚪</span>
               <span class="btn-text">Mark Absent</span>
             </button>
           `;
-          
-          // Add Credit - always show (allows adding credit at any time)
-          actionButtons += `
+        } else if (student.status === 'paid' || student.status === 'credit') {
+          actionButtons = `
+            <button class="dot-action-btn danger" onclick="markAsAbsent(${student.id}, '${classDate}')">
+              <span class="btn-icon">⚪</span>
+              <span class="btn-text">Absent</span>
+            </button>
             <button class="dot-action-btn success" onclick="openAddCreditModal(${student.id}, '${safeName}')">
               <span class="btn-icon">💳</span>
               <span class="btn-text">Add Credit</span>
             </button>
           `;
-          
-          // Pause/Forward - only for unpaid students
-          if (student.status === 'unpaid') {
-            actionButtons += `
-              <button class="dot-action-btn warning" onclick="event.stopPropagation(); pauseStudent(${student.id}, '${safeName}')">
-                <span class="btn-icon">⏸</span>
-                <span class="btn-text">Pause</span>
-              </button>
-              <button class="dot-action-btn purple" onclick="event.stopPropagation(); forwardStudent(${student.id}, '${safeName}')">
-                <span class="btn-icon">⏭</span>
-                <span class="btn-text">Forward</span>
-              </button>
-            `;
-          }
         }
 
         // Balance display with colors
@@ -8956,7 +8758,7 @@
         // If they owe, balance would be negative (but we show as owed)
         const balanceClass = studentBalance > 0 ? 'highlight-green' : studentBalance < 0 ? 'highlight-red' : '';
         const balanceLabel = studentBalance > 0 ? 'Credit (extra money)' : studentBalance < 0 ? 'Owed' : 'Balanced';
-        const balanceClickable = true; // Make balance always editable
+        const balanceClickable = studentBalance !== 0; // Make balance clickable when there's a value
 
         // Build new modal HTML
         const modalHTML = `
@@ -9023,70 +8825,8 @@
         `;
 
         modal.innerHTML = modalHTML;
-        modal.setAttribute('data-class-date', classDate); // Store class date for later refresh
-        modal.setAttribute('data-student-id', student.id); // Store student ID for later refresh
         modal.classList.add('active');
         document.body.style.overflow = 'hidden';
-      }
-
-      // Refresh the dot modal with updated student data
-      async function refreshDotModal(studentId, classDate) {
-        // Reload students to get fresh data
-        await loadStudents();
-        
-        // Find the dot element for this student and date
-        const dotElement = document.querySelector(
-          `.student-dot[data-student*='"id":${studentId}'][data-class-date="${classDate}"]`
-        );
-        
-        if (dotElement) {
-          // Re-trigger the tooltip with updated data
-          // Create a synthetic event that works with event delegation
-          const syntheticEvent = {
-            target: dotElement,
-            stopPropagation: () => {}
-          };
-          showCustomTooltip(syntheticEvent);
-        }
-      }
-
-      // Hover tooltip functions - shows simple name/status tooltip on hover
-      let hoverTooltipElement = null;
-
-      function showHoverTooltip(e) {
-        // ⚡ EVENT DELEGATION FIX: Use closest() instead of currentTarget
-        const dot = e.target.closest('.indicator-dot');
-        if (!dot) return;
-        
-        const tooltipText = dot.getAttribute('data-tooltip');
-        if (!tooltipText) return;
-
-        // Create tooltip element if it doesn't exist
-        if (!hoverTooltipElement) {
-          hoverTooltipElement = document.createElement('div');
-          hoverTooltipElement.className = 'hover-tooltip';
-          document.body.appendChild(hoverTooltipElement);
-        }
-
-        // Set tooltip text and show immediately (no delay)
-        hoverTooltipElement.textContent = tooltipText;
-        
-        // Get dot position
-        const rect = dot.getBoundingClientRect();
-        const tooltipX = rect.left + (rect.width / 2);
-        const tooltipY = rect.top - 40; // Position above the dot with offset
-
-        hoverTooltipElement.style.left = tooltipX + 'px';
-        hoverTooltipElement.style.top = tooltipY + 'px';
-        
-        // Show tooltip immediately (no animation delay for faster response)
-        hoverTooltipElement.classList.add('visible');
-      }
-
-      function hideHoverTooltip() {
-        if (hoverTooltipElement) {
-          hoverTooltipElement.classList.remove('visible');
-        }
       }
 
       function hideCustomTooltip() {
@@ -9107,14 +8847,11 @@
 
       // Edit Student Balance
       async function editStudentBalance(studentId, studentName, currentBalance) {
-        // Don't close the modal - keep it open
+        hideCustomTooltip();
         
-        const balanceDisplay = Math.abs(currentBalance).toFixed(2);
-        const balanceType = currentBalance > 0 ? '(credit)' : currentBalance < 0 ? '(owed)' : '';
-        
-        const newBalanceStr = await customPrompt(
-          `Edit balance for ${studentName}`,
-          `Current balance: $${balanceDisplay} ${balanceType}\n\n` +
+        const newBalanceStr = prompt(
+          `Edit balance for ${studentName}\n\n` +
+          `Current balance: $${Math.abs(currentBalance).toFixed(2)} ${currentBalance > 0 ? '(credit)' : currentBalance < 0 ? '(owed)' : ''}\n\n` +
           `Enter new balance:\n` +
           `• Positive number = Credit (student has extra money)\n` +
           `• Negative number = Owed (student owes money)\n` +
@@ -9126,7 +8863,7 @@
         
         const newBalance = parseFloat(newBalanceStr);
         if (isNaN(newBalance)) {
-          await customAlert('❌ Invalid Input', 'Please enter a valid number for the balance.');
+          alert('❌ Invalid number. Please enter a valid balance.');
           return;
         }
         
@@ -9138,51 +8875,98 @@
           
           if (error) throw error;
           
+          alert(`✅ Balance updated for ${studentName}\nNew balance: $${Math.abs(newBalance).toFixed(2)} ${newBalance > 0 ? '(credit)' : newBalance < 0 ? '(owed)' : '(balanced)'}`);
+          
+          // Refresh calendar
           await loadStudents();
           clearMonthCache();
           renderCalendar();
-          
-          const modalUpdate = updateActiveDotModalBalance(studentId, newBalance);
-          if (modalUpdate?.classDate) {
-            await refreshDotModal(studentId, modalUpdate.classDate);
-          }
-
-          const newBalanceDisplay = Math.abs(newBalance).toFixed(2);
-          const newBalanceType = newBalance > 0 ? '(credit)' : newBalance < 0 ? '(owed)' : '(balanced)';
-          await customAlert(
-            '✅ Balance Updated', 
-            `Balance updated for ${studentName}\nNew balance: $${newBalanceDisplay} ${newBalanceType}`
-          );
         } catch (error) {
           console.error('❌ Error updating balance:', error);
           alert(`❌ Failed to update balance: ${error.message}`);
         }
       }
 
-      // 🗑️ REMOVED: Orphaned applyFromCredit function (replaced by advanced version at line ~10024)
-      // The active version uses CreditPaymentManager, custom dialogs, and incremental cache invalidation
+      // Apply Credit to Pay for Class
+      async function applyFromCredit(studentId, classDate, amount) {
+        hideCustomTooltip();
+        
+        try {
+          // Get current student data
+          const { data: studentData, error: fetchError } = await supabase
+            .from('students')
+            .select('balance, name')
+            .eq('id', studentId)
+            .single();
+          
+          if (fetchError) throw fetchError;
+          
+          const currentBalance = parseFloat(studentData.balance) || 0;
+          
+          if (currentBalance < amount) {
+            alert(`❌ Insufficient credit\n\nAvailable: $${currentBalance.toFixed(2)}\nNeeded: $${amount.toFixed(2)}`);
+            return;
+          }
+          
+          const confirmed = confirm(
+            `Apply credit to class on ${classDate}?\n\n` +
+            `Class price: $${amount.toFixed(2)}\n` +
+            `Current credit: $${currentBalance.toFixed(2)}\n` +
+            `After payment: $${(currentBalance - amount).toFixed(2)}`
+          );
+          
+          if (!confirmed) return;
+          
+          // Record credit payment
+          const { error: creditError } = await supabase
+            .from('credit_payments')
+            .insert({
+              student_id: studentId,
+              class_date: classDate,
+              amount: amount,
+              balance_after: currentBalance - amount
+            });
+          
+          if (creditError) throw creditError;
+          
+          // Update student balance
+          const { error: updateError } = await supabase
+            .from('students')
+            .update({ balance: currentBalance - amount })
+            .eq('id', studentId);
+          
+          if (updateError) throw updateError;
+          
+          alert(`✅ Credit applied!\n\n${studentData.name}\nClass: ${classDate}\nPaid: $${amount.toFixed(2)}\nRemaining credit: $${(currentBalance - amount).toFixed(2)}`);
+          
+          // Refresh calendar
+          await Promise.all([loadStudents(), loadCreditPayments()]);
+          clearMonthCache();
+          renderCalendar();
+        } catch (error) {
+          console.error('❌ Error applying credit:', error);
+          alert(`❌ Failed to apply credit: ${error.message}`);
+        }
+      }
 
       // Open Add Credit Modal for a specific student
       async function openAddCreditModal(studentId, studentName) {
-        // Don't hide the tooltip - keep modal open
+        // Hide the tooltip first
+        hideCustomTooltip();
         
-        // Prompt for credit amount using custom dialog
-        const amount = await customPrompt(
-          `Add Credit for ${studentName}`,
-          `Enter the amount in USD to add to the student's credit balance:`,
-          '0'
-        );
+        // Prompt for credit amount
+        const amount = prompt(`Add credit for ${studentName}:\n\nEnter amount in USD:`);
         
         if (!amount || isNaN(parseFloat(amount))) {
           if (amount !== null) { // null means user clicked cancel
-            await customAlert('❌ Invalid Amount', 'Please enter a valid number.');
+            alert('Invalid amount. Please enter a valid number.');
           }
           return;
         }
         
         const creditAmount = parseFloat(amount);
         if (creditAmount <= 0) {
-          await customAlert('❌ Invalid Amount', 'Amount must be greater than 0.');
+          alert('Amount must be greater than 0.');
           return;
         }
         
@@ -9207,38 +8991,17 @@
           
           if (updateError) throw updateError;
           
-          // ⚡ INSTANT UPDATE: Refresh calendar data FIRST (before showing alert)
+          // Show success message
+          alert(`✅ Credit added successfully!\n\n${studentName}\nAdded: $${creditAmount.toFixed(2)}\nNew Balance: $${newBalance.toFixed(2)} (credit)`);
+          
+          // Refresh calendar data and re-render
           await loadStudents();
           clearMonthCache();
-          
-          // Update the dot modal if it's open - DO THIS BEFORE SHOWING ALERT
-          const modalUpdate = updateActiveDotModalBalance(studentId, newBalance);
-          if (modalUpdate?.classDate) {
-            if (DEBUG_MODE) {
-              console.log('🔄 Calling refreshDotModal...');
-            }
-            await refreshDotModal(studentId, modalUpdate.classDate);
-            if (DEBUG_MODE) {
-              console.log('✅ refreshDotModal completed');
-            }
-          } else {
-            if (DEBUG_MODE) {
-              console.warn('⚠️ Modal not found or not active');
-            }
-          }
-          
-          // Re-render calendar to update dot colors
           renderCalendar();
-          
-          // Show success message AFTER everything is updated
-          await customAlert(
-            '✅ Credit Added Successfully',
-            `${studentName}\nAdded: $${creditAmount.toFixed(2)}\nNew Balance: $${newBalance.toFixed(2)} (credit)`
-          );
           
         } catch (error) {
           console.error('Error adding credit:', error);
-          await customAlert('❌ Failed to Add Credit', error.message);
+          alert(`❌ Failed to add credit: ${error.message}`);
         }
       }
 
@@ -9249,54 +9012,6 @@
           minimumFractionDigits: hasCents ? 2 : 0,
           maximumFractionDigits: hasCents ? 2 : 0,
         });
-      }
-
-      function updateActiveDotModalBalance(studentId, newBalance) {
-        const modal = document.getElementById('studentDotModal');
-        if (!modal || !modal.classList.contains('active')) return null;
-
-        const modalStudentId = modal.getAttribute('data-student-id');
-        if (modalStudentId && String(modalStudentId) !== String(studentId)) return null;
-
-        const balanceCard = modal.querySelector('.clickable-balance');
-        if (!balanceCard) return { modal };
-
-        const balanceLabel = newBalance > 0 ? 'Credit (extra money)' : newBalance < 0 ? 'Owed' : 'Balanced';
-        const balanceClass = newBalance > 0 ? 'highlight-green' : newBalance < 0 ? 'highlight-red' : '';
-
-        const labelElement = balanceCard.querySelector('.dot-info-label');
-        const valueElement = balanceCard.querySelector('.dot-info-value');
-        if (labelElement && valueElement) {
-          labelElement.innerHTML = `
-            ${balanceLabel}
-            <span style="font-size: 0.7rem; opacity: 0.6; margin-left: 4px;">✏️ click to edit</span>
-          `;
-          valueElement.className = `dot-info-value ${balanceClass}`;
-          valueElement.textContent = `$${formatCurrency(Math.abs(newBalance))}`;
-
-          valueElement.style.transition = 'all 0.3s ease';
-          valueElement.style.transform = 'scale(1.1)';
-          valueElement.style.textShadow = '0 0 10px rgba(34, 197, 94, 0.8)';
-          setTimeout(() => {
-            valueElement.style.transform = 'scale(1)';
-            valueElement.style.textShadow = 'none';
-          }, 300);
-        }
-
-        const applyBtn = modal.querySelector('button[onclick*="applyFromCredit"] .btn-text');
-        if (applyBtn) {
-          applyBtn.textContent = `Apply Credit ($${formatCurrency(newBalance)})`;
-        }
-
-        const classDate = modal.getAttribute('data-class-date') || new Date().toISOString().split('T')[0];
-        return { modal, classDate };
-      }
-
-      function generatePaymentId() {
-        if (window.crypto && window.crypto.randomUUID) {
-          return window.crypto.randomUUID();
-        }
-        return `pay-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
       }
 
       // Event Listeners
@@ -9316,45 +9031,6 @@
           syncCurrentDateToLAToday();
           renderCalendar();
         });
-
-        // ⚡ PERFORMANCE: EVENT DELEGATION - ONE listener instead of 42+ day listeners
-        // This prevents memory leaks when re-rendering the calendar
-        const calendarDays = document.getElementById('calendarDays');
-        
-        // Handle day clicks (opens day modal)
-        calendarDays.addEventListener('click', (e) => {
-          const dayCell = e.target.closest('.day');
-          if (dayCell && !dayCell.classList.contains('other-month') && dayCell.dataset.date) {
-            // Check if click was on a dot (prevent modal from opening)
-            if (!e.target.closest('.indicator-dot')) {
-              openDayModal(dayCell.dataset.date);
-            }
-          }
-        });
-        
-        // Handle dot clicks (opens dot modal instead of day modal)
-        calendarDays.addEventListener('click', (e) => {
-          const dot = e.target.closest('.indicator-dot');
-          if (dot) {
-            e.stopPropagation(); // Prevent day modal from opening
-            showCustomTooltip(e);
-          }
-        });
-        
-        // Handle dot hover - show hover tooltip
-        calendarDays.addEventListener('mouseenter', (e) => {
-          const dot = e.target.closest('.indicator-dot');
-          if (dot && dot.hasAttribute('data-tooltip')) {
-            showHoverTooltip(e);
-          }
-        }, true); // Use capture phase for delegation
-        
-        calendarDays.addEventListener('mouseleave', (e) => {
-          const dot = e.target.closest('.indicator-dot');
-          if (dot && dot.hasAttribute('data-tooltip')) {
-            hideHoverTooltip();
-          }
-        }, true); // Use capture phase for delegation
 
         // ⚡ PERFORMANCE: Manual refresh button with elite loading animation
         document.getElementById('refreshBtn').addEventListener('click', async () => {
@@ -10196,8 +9872,8 @@
             // Re-render calendar (will only update changed day)
             await renderCalendar();
             
-            // Refresh the dot modal to show updated status
-            await refreshDotModal(studentId, dateStr);
+            // Refresh the day modal to show updated status
+            openDayModal(dateStr);
           } else {
             throw new Error('AbsentManager not available');
           }
@@ -10252,8 +9928,9 @@
             // Re-render calendar (will only update changed day)
             await renderCalendar();
             
-            // Refresh the dot modal to show updated status
-            await refreshDotModal(studentId, dateStr);
+            // Refresh the day modal to show updated status
+            openDayModal(dateStr);
+            openDayModal(dateStr);
           } else {
             throw new Error('AbsentManager not available');
           }
@@ -10296,13 +9973,17 @@
 
           // Create a manual payment record with LA timezone date
           const paymentRecord = {
-            id: generatePaymentId(),
             student_id: studentId,
             student_name: student.name,
             amount: paymentAmount,
-            date: dateStr,
-            email_date: dateStr + 'T12:00:00',
-            payer_name: student.name
+            date: dateStr, // Use the class date as payment date
+            email_date: dateStr + 'T12:00:00', // Set to noon on class date in LA time
+            timestamp: new Date().toISOString(),
+            payer_name: student.name,
+            message: 'Cash payment',
+            source: 'manual',
+            is_manual: true,
+            ignored: false
           };
 
           // Insert into Supabase payments table
@@ -10342,65 +10023,34 @@
       // Apply Credit Payment
       async function applyFromCredit(studentId, dateStr, pricePerClass) {
         try {
-          const normalizedId = String(studentId);
-          const students = Array.isArray(window.studentsCache) ? window.studentsCache : [];
-          if (!Array.isArray(window.studentsCache)) {
-            window.studentsCache = students;
-          }
-
-          const classPrice = Number(pricePerClass) || 0;
-
-          let student = students.find(s => String(s.id) === normalizedId);
-          let currentBalance = 0;
+          // Get student from cache
+          const students = window.studentsCache || [];
+          const student = students.find(s => s.id === studentId);
 
           if (!student) {
-            const { data, error } = await supabase
-              .from('students')
-              .select('*')
-              .eq('id', studentId)
-              .single();
-
-            if (error || !data) {
-              showErrorToast('❌ Student not found');
-              return;
-            }
-
-            student = data;
-            students.push(student);
-            currentBalance = parseFloat(data.balance) || 0;
-          } else {
-            const { data: latestBalance, error: latestBalanceError } = await supabase
-              .from('students')
-              .select('balance')
-              .eq('id', studentId)
-              .single();
-
-            if (latestBalanceError) {
-              console.warn('⚠️ Unable to fetch latest balance, using cached value', latestBalanceError);
-              currentBalance = parseFloat(student.balance) || 0;
-            } else {
-              currentBalance = parseFloat(latestBalance?.balance) || 0;
-              student.balance = currentBalance;
-            }
+            showErrorToast('❌ Student not found');
+            return;
           }
 
+          const currentBalance = parseFloat(student.balance) || 0;
+
           // Check if student has enough credit
-          if (currentBalance < classPrice) {
+          if (currentBalance < pricePerClass) {
             showErrorToast(
-              `❌ Insufficient credit! Need ${formatCurrency(classPrice - currentBalance)} $ more.`
+              `❌ Insufficient credit! Need ${formatCurrency(pricePerClass - currentBalance)} $ more.`
             );
             return;
           }
 
           // Show custom confirm dialog
-          const newBalance = currentBalance - classPrice;
+          const newBalance = currentBalance - pricePerClass;
           const confirmed = await showConfirmDialog(
             'Apply Credit Payment?',
             `
               <div style="text-align: left; line-height: 1.6;">
                 <div style="margin-bottom: 12px;"><strong>Student:</strong> ${student.name}</div>
                 <div style="margin-bottom: 12px;"><strong>Class Date:</strong> ${dateStr}</div>
-                <div style="margin-bottom: 12px;"><strong>Class Price:</strong> ${formatCurrency(classPrice)} $</div>
+                <div style="margin-bottom: 12px;"><strong>Class Price:</strong> ${formatCurrency(pricePerClass)} $</div>
                 <div style="margin-bottom: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
                   <strong>Current Balance:</strong> ${formatCurrency(currentBalance)} $
                 </div>
@@ -10416,7 +10066,7 @@
           // Deduct from balance
           student.balance = newBalance;
 
-          // 1. Update student balance in Supabase
+          // Save to Supabase
           const { error: updateError } = await supabase
             .from('students')
             .update({ balance: newBalance })
@@ -10426,61 +10076,29 @@
             throw new Error(`Failed to update student balance: ${updateError.message}`);
           }
 
-          // 2. Create payment record in payments table
-          // Note: Only include fields that exist in the payments schema
-          const paymentRecord = {
-            id: generatePaymentId(),
-            student_id: studentId,
-            student_name: student.name,
-            amount: classPrice,
-            date: dateStr,
-            email_date: dateStr + 'T12:00:00',
-            payer_name: student.name
-          };
-
-          console.log('💳 Creating payment record:', paymentRecord);
-          
-          const { data: insertedPayment, error: paymentError } = await supabase
-            .from('payments')
-            .insert([paymentRecord])
-            .select(); // Return the inserted record
-
-          if (paymentError) {
-            console.error('❌ Error creating payment record:', paymentError);
-            throw new Error(`Failed to create payment record: ${paymentError.message}`);
-          } else {
-            console.log('✅ Payment record created successfully:', insertedPayment);
-            debugLog('✅ Payment record created:', paymentRecord);
-          }
-
-          // 3. Store credit payment tracking in credit_payments table
+          // Store credit payment using CreditPaymentManager for cloud sync
           if (window.CreditPaymentManager) {
-            await window.CreditPaymentManager.applyCreditPayment(studentId, dateStr, classPrice, newBalance);
-            debugLog('✅ Applied credit payment (Supabase):', { studentId, dateStr, amount: classPrice });
+            await window.CreditPaymentManager.applyCreditPayment(studentId, dateStr, pricePerClass, newBalance);
+            debugLog('✅ Applied credit payment (Supabase):', { studentId, dateStr, amount: pricePerClass });
           } else {
             throw new Error('CreditPaymentManager not available');
           }
 
           showSuccessToast(
-            `✅ Applied ${formatCurrency(classPrice)} $ from credit • New Balance: ${formatCurrency(newBalance)} $`
+            `✅ Applied ${formatCurrency(pricePerClass)} $ from credit • New Balance: ${formatCurrency(newBalance)} $`
           );
 
-          // ⚡ CRITICAL: Clear payment matching cache so new payment is detected
-          studentPaymentMatchCache.clear();
+          // Close the modal
+          closeDayModal();
+
+          // Reload credit data and invalidate specific day
+          creditPaymentsLookup = await loadCreditPayments();
           
-          // Reload ALL payment data (both payments and credit_payments)
-          await loadPayments(); // This loads the main payments table
-          creditPaymentsLookup = await loadCreditPayments(); // This loads credit tracking
-          await loadStudents(); // Reload students to get updated balance
+          // ⚡ INCREMENTAL: Only invalidate the specific day's cache
+          invalidateDayCache(dateStr);
           
-          // ⚡ CRITICAL: Clear month cache to force full recalculation
-          clearMonthCache();
-          
-          // Re-render calendar (will pick up new payment)
+          // Re-render calendar (will only update changed day)
           renderCalendar();
-          
-          // Refresh the dot modal to show updated status
-          await refreshDotModal(studentId, dateStr);
         } catch (error) {
           console.error('❌ Failed to apply credit:', error);
           showErrorToast('❌ Failed to apply credit: ' + error.message);
@@ -10870,208 +10488,6 @@
       }
 
       // Custom Confirm Dialog
-      // Custom Alert Dialog
-      function customAlert(title, message) {
-        return new Promise((resolve) => {
-          // Create overlay
-          const overlay = document.createElement('div');
-          overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            z-index: 999999; /* ⚡ Match dot modal z-index */
-            backdrop-filter: blur(var(--list-blur));
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          `;
-
-          // Create dialog
-          const dialog = document.createElement('div');
-          dialog.style.cssText = `
-            background: linear-gradient(135deg, rgba(30,30,46,0.98) 0%, rgba(42,42,62,0.98) 100%);
-            border: 2px solid rgba(138,180,255,0.3);
-            border-radius: 16px;
-            padding: 24px;
-            min-width: 400px;
-            max-width: 500px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.7);
-            pointer-events: auto;
-          `;
-
-          dialog.innerHTML = `
-            <h3 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 900; color: white;">${title}</h3>
-            <div style="margin-bottom: 24px; color: rgba(255,255,255,0.9); font-size: 14px; white-space: pre-wrap;">
-              ${message}
-            </div>
-            <div style="display: flex; gap: 12px; justify-content: flex-end;">
-              <button id="alertOk" style="
-                padding: 10px 20px;
-                background: #22c55e;
-                border: 1px solid #22c55e;
-                border-radius: 8px;
-                color: white;
-                font-size: 14px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: all 0.2s;
-                pointer-events: auto;
-              ">OK</button>
-            </div>
-          `;
-
-          overlay.appendChild(dialog);
-          document.body.appendChild(overlay);
-
-          // Add hover effects
-          const okBtn = dialog.querySelector('#alertOk');
-          okBtn.addEventListener('mouseover', () => {
-            okBtn.style.background = '#16a34a';
-          });
-          okBtn.addEventListener('mouseout', () => {
-            okBtn.style.background = '#22c55e';
-          });
-
-          // Handle responses
-          const cleanup = () => {
-            overlay.remove();
-            resolve(true);
-          };
-
-          okBtn.addEventListener('click', cleanup);
-          overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) cleanup();
-          });
-        });
-      }
-
-      // Custom Prompt Dialog
-      function customPrompt(title, message, defaultValue = '') {
-        return new Promise((resolve) => {
-          // Create overlay
-          const overlay = document.createElement('div');
-          overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            z-index: 9999999;
-            backdrop-filter: blur(var(--list-blur));
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            pointer-events: auto;
-          `;
-
-          // Create dialog
-          const dialog = document.createElement('div');
-          dialog.style.cssText = `
-            background: linear-gradient(135deg, rgba(30,30,46,0.98) 0%, rgba(42,42,62,0.98) 100%);
-            border: 2px solid rgba(138,180,255,0.3);
-            border-radius: 16px;
-            padding: 24px;
-            min-width: 400px;
-            max-width: 500px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.7);
-            pointer-events: auto;
-          `;
-
-          dialog.innerHTML = `
-            <h3 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 900; color: white;">${title}</h3>
-            <div style="margin-bottom: 16px; color: rgba(255,255,255,0.9); font-size: 14px; white-space: pre-wrap;">
-              ${message}
-            </div>
-            <input type="text" id="promptInput" value="${defaultValue}" style="
-              width: 100%;
-              padding: 12px;
-              margin-bottom: 24px;
-              background: rgba(255,255,255,0.05);
-              border: 1px solid rgba(138,180,255,0.3);
-              border-radius: 8px;
-              color: white;
-              font-size: 14px;
-              font-family: inherit;
-              box-sizing: border-box;
-            " />
-            <div style="display: flex; gap: 12px; justify-content: flex-end;">
-              <button id="promptCancel" style="
-                padding: 10px 20px;
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.2);
-                border-radius: 8px;
-                color: white;
-                font-size: 14px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: all 0.2s;
-              ">Cancel</button>
-              <button id="promptOk" style="
-                padding: 10px 20px;
-                background: #22c55e;
-                border: 1px solid #22c55e;
-                border-radius: 8px;
-                color: white;
-                font-size: 14px;
-                font-weight: 600;
-                cursor: pointer;
-                transition: all 0.2s;
-              ">OK</button>
-            </div>
-          `;
-
-          overlay.appendChild(dialog);
-          document.body.appendChild(overlay);
-
-          const input = dialog.querySelector('#promptInput');
-          const cancelBtn = dialog.querySelector('#promptCancel');
-          const okBtn = dialog.querySelector('#promptOk');
-
-          // Focus and select input
-          setTimeout(() => {
-            input.focus();
-            input.select();
-          }, 100);
-
-          // Add hover effects
-          cancelBtn.addEventListener('mouseover', () => {
-            cancelBtn.style.background = 'rgba(255,255,255,0.1)';
-          });
-          cancelBtn.addEventListener('mouseout', () => {
-            cancelBtn.style.background = 'rgba(255,255,255,0.05)';
-          });
-          
-          okBtn.addEventListener('mouseover', () => {
-            okBtn.style.background = '#16a34a';
-          });
-          okBtn.addEventListener('mouseout', () => {
-            okBtn.style.background = '#22c55e';
-          });
-
-          // Handle responses
-          const cleanup = (result) => {
-            overlay.remove();
-            resolve(result);
-          };
-
-          cancelBtn.addEventListener('click', () => cleanup(null));
-          okBtn.addEventListener('click', () => cleanup(input.value));
-          
-          // Enter key submits
-          input.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') cleanup(input.value);
-          });
-          
-          overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) cleanup(null);
-          });
-        });
-      }
-
       function showConfirmDialog(title, message) {
         return new Promise((resolve) => {
           // Create overlay
@@ -11083,12 +10499,11 @@
             right: 0;
             bottom: 0;
             background: rgba(0, 0, 0, 0.7);
-            z-index: 9999999;
+            z-index: 99999;
             backdrop-filter: blur(var(--list-blur));
             display: flex;
             align-items: center;
             justify-content: center;
-            pointer-events: auto;
           `;
 
           // Create dialog
@@ -11101,7 +10516,6 @@
             min-width: 400px;
             max-width: 500px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.7);
-            pointer-events: auto;
           `;
 
           dialog.innerHTML = `
