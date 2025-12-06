@@ -8,8 +8,9 @@
   <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <!-- Shared Auth -->
+  <!-- Shared Auth & Dialogs -->
   <script src="shared-auth.js"></script>
+  <script src="shared-dialogs.js"></script>
   
   <style>
     /* ==========================================================================
@@ -418,7 +419,7 @@
         }
 
         notesList.innerHTML = notes.map(note => `
-          <div class="note-item" onclick="selectNote(${note.id})">
+          <div class="note-item" onclick="selectNote(${note.id}, event)">
             <div class="note-title">${note.title || 'Untitled Document'}</div>
             <div class="note-meta">Group ${note.group_name || 'N/A'} • ${note.system_category || 'General'}</div>
           </div>
@@ -436,7 +437,7 @@
     // SELECT NOTE
     // ============================================================
 
-    async function selectNote(noteId) {
+    async function selectNote(noteId, event) {
       try {
         // Fetch note details
         const { data: note, error } = await supabase
@@ -464,7 +465,7 @@
 
       } catch (error) {
         console.error('Error selecting note:', error);
-        alert('Failed to load document details');
+        await customAlert('Error', 'Failed to load document details');
       }
     }
 
@@ -546,7 +547,7 @@
 
     async function addMedia() {
       if (!currentNote) {
-        alert('Please select a document first');
+        await customAlert('Error', 'Please select a document first');
         return;
       }
 
@@ -556,7 +557,7 @@
       const description = document.getElementById('mediaDescription').value.trim();
 
       if (!title || !url) {
-        alert('Please fill in title and URL');
+        await customAlert('Missing Information', 'Please fill in title and URL');
         return;
       }
 
@@ -582,11 +583,11 @@
         // Reload media
         await loadMedia(currentNote.id);
 
-        alert('✅ Media added successfully!');
+        await customAlert('Success', '✅ Media added successfully!');
 
       } catch (error) {
         console.error('Error adding media:', error);
-        alert('Failed to add media');
+        await customAlert('Error', 'Failed to add media');
       }
     }
 
@@ -595,7 +596,8 @@
     // ============================================================
 
     async function deleteMedia(mediaId) {
-      if (!confirm('Are you sure you want to delete this media item?')) {
+      const confirmed = await customConfirm('Delete Media', 'Are you sure you want to delete this media item?');
+      if (!confirmed) {
         return;
       }
 
@@ -608,19 +610,19 @@
         if (error) throw error;
 
         await loadMedia(currentNote.id);
-        alert('✅ Media deleted successfully!');
+        await customAlert('Success', '✅ Media deleted successfully!');
 
       } catch (error) {
         console.error('Error deleting media:', error);
-        alert('Failed to delete media');
+        await customAlert('Error', 'Failed to delete media');
       }
     }
 
     // ============================================================
-    // EDIT MEDIA (TODO: Implement modal)
+    // EDIT MEDIA
     // ============================================================
 
-    function editMedia(index) {
+    async function editMedia(index) {
       const item = mediaItems[index];
       // For now, just populate the form
       document.getElementById('mediaType').value = item.type;
@@ -628,7 +630,7 @@
       document.getElementById('mediaUrl').value = item.url;
       document.getElementById('mediaDescription').value = item.description || '';
       
-      alert('Edit the values above and click "Add Media" to update (or delete and re-add)');
+      await customAlert('Edit Mode', 'Edit the values above and click "Add Media" to update (or delete and re-add)');
     }
   </script>
 </body>
