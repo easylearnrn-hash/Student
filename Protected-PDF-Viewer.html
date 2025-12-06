@@ -477,29 +477,58 @@
           return;
         }
         
-        // Check authentication
-        const { data: { session }, error: authError } = await supabase.auth.getSession();
+        // Check authentication (support both regular auth and impersonation)
+        let currentStudent = null;
         
-        if (authError || !session) {
-          showError('Please log in to view this note');
-          window.location.href = 'index.html';
-          return;
+        // First check for impersonation token
+        const impersonationToken = sessionStorage.getItem('impersonation_token');
+        if (impersonationToken) {
+          try {
+            const tokenData = JSON.parse(impersonationToken);
+            const { data: student, error: studentError } = await supabase
+              .from('students')
+              .select('*')
+              .eq('id', tokenData.studentId)
+              .single();
+            
+            if (student && !studentError) {
+              currentStudent = student;
+            }
+          } catch (e) {
+            console.error('Error reading impersonation token:', e);
+          }
         }
         
-        // Get current student data
-        const { data: student, error: studentError } = await supabase
-          .from('students')
-          .select('*')
-          .eq('email', session.user.email)
-          .single();
+        // If no impersonation, check regular auth session
+        if (!currentStudent) {
+          const { data: { session }, error: authError } = await supabase.auth.getSession();
+          
+          if (authError || !session) {
+            showError('Please log in to view this note');
+            window.location.href = 'index.html';
+            return;
+          }
+          
+          // Get current student data by email
+          const { data: student, error: studentError } = await supabase
+            .from('students')
+            .select('*')
+            .eq('email', session.user.email)
+            .single();
+          
+          if (studentError || !student) {
+            showError('Student profile not found');
+            return;
+          }
+          
+          currentStudent = student;
+        }
         
-        if (studentError || !student) {
+        if (!currentStudent) {
           showError('Student profile not found');
           return;
         }
-        
-        currentStudent = student;
-        document.getElementById('studentName').textContent = student.name;
+        document.getElementById('studentName').textContent = currentStudent.name;
         document.getElementById('noteTitle').textContent = noteTitle;
         
         // Create mock note data for watermarking
@@ -511,7 +540,15 @@
         // If URL provided directly (from new group notes system)
         if (pdfUrl) {
           document.getElementById('viewerControls').style.display = 'flex';
-          await loadPDFFromURL(pdfUrl);
+          
+          // Check if it's a storage path or a full URL
+          if (pdfUrl.startsWith('http://') || pdfUrl.startsWith('https://')) {
+            // It's already a full URL, use it directly
+            await loadPDFFromURL(pdfUrl);
+          } else {
+            // It's a storage path, create signed URL
+            await loadPDF(pdfUrl);
+          }
           return;
         }
         
@@ -531,7 +568,7 @@
           noteData = note;
           
           // Verify student is in the correct group
-          if (note.group_name !== student.group_name) {
+          if (note.group_name !== currentStudent.group_name) {
             showError('This note is not for your group');
             return;
           }
@@ -541,7 +578,7 @@
             const { data: payments, error: paymentError } = await supabase
               .from('payment_records')
               .select('*')
-              .eq('student_id', student.id)
+              .eq('student_id', currentStudent.id)
               .eq('status', 'paid')
               .limit(1);
             
@@ -590,15 +627,17 @@
     
     async function loadPDF(pdfPath) {
       try {
-        // Get signed URL from Supabase Storage
-        const { data, error } = await supabase.storage
+        console.log('🔍 Loading PDF from storage path:', pdfPath);
+        
+        // Get public URL (bucket should be public for this to work)
+        const { data: publicUrlData } = supabase.storage
           .from('student-notes')
-          .createSignedUrl(pdfPath, 3600); // 1 hour expiry
+          .getPublicUrl(pdfPath);
         
-        if (error) throw error;
+        console.log('🔗 Public URL:', publicUrlData.publicUrl);
         
-        // Load PDF
-        const loadingTask = pdfjsLib.getDocument(data.signedUrl);
+        // Load PDF from public URL
+        const loadingTask = pdfjsLib.getDocument(publicUrlData.publicUrl);
         pdfDoc = await loadingTask.promise;
         totalPages = pdfDoc.numPages;
         
@@ -612,7 +651,7 @@
         
       } catch (error) {
         console.error('PDF loading error:', error);
-        showError('Failed to load PDF: ' + error.message);
+        showError('Failed to load PDF. The file may not exist in storage or the bucket may not be public. Please contact your administrator.');
       }
     }
     

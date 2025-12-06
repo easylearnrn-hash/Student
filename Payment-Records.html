@@ -5,10 +5,16 @@
     ║  ARNOMA PAYMENT RECORDS MODULE v1.0.0                            ║
     ║  Glassmorphism + Neon Prism Hybrid Design                        ║
     ╚═══════════════════════════════════════════════════════════════════╝
+  function ensureFloatingCountdownInitialized() {
+    if (floatingCountdownInitialized) return;
+    floatingCountdownInitialized = true;
+    initFloatingCountdown();
+  }
 
-  🎯 MODULE OVERVIEW:
-  Comprehensive payment records viewer with advanced filtering and
-  credit management capabilities.
+  /**
+   /* Lines 6664-6666 omitted */
+   */
+  function initFloatingCountdown() {
 
     ✅ Features:
     - Advanced filter toolbar (search, date range, method, type, group, amount)
@@ -145,20 +151,20 @@
         color: rgba(255, 255, 255, 0.9);
       }
 
-      /* Animated gradient blobs */
+      /* Static gradient blobs (animation removed for GPU savings) */
       body::before {
         content: '';
         position: fixed;
         width: 800px;
         height: 800px;
-        background: radial-gradient(circle, rgba(138, 180, 255, 0.15) 0%, transparent 70%);
+        background: radial-gradient(circle, rgba(138, 180, 255, 0.1) 0%, transparent 70%);
         top: -300px;
         right: -200px;
         border-radius: 50%;
         filter: blur(100px);
         pointer-events: none;
         z-index: 0;
-        animation: breathe 12s ease-in-out infinite;
+        animation: none;
       }
 
       body::after {
@@ -166,14 +172,14 @@
         position: fixed;
         width: 900px;
         height: 900px;
-        background: radial-gradient(circle, rgba(168, 85, 247, 0.12) 0%, transparent 70%);
+        background: radial-gradient(circle, rgba(168, 85, 247, 0.08) 0%, transparent 70%);
         bottom: -250px;
         left: -250px;
         border-radius: 50%;
         filter: blur(100px);
         pointer-events: none;
         z-index: 0;
-        animation: breathe 15s ease-in-out infinite reverse;
+        animation: none;
       }
 
       .container {
@@ -606,6 +612,44 @@
         background: rgba(138, 180, 255, 0);
         border-radius: 12px;
         overflow: hidden;
+      }
+
+      .grid-pagination {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        margin: 12px auto 32px;
+        text-align: center;
+      }
+
+      .grid-load-more-btn {
+        padding: 12px 32px;
+        border-radius: 999px;
+        border: 1px solid rgba(138, 180, 255, 0.4);
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(168, 85, 247, 0.3));
+        color: rgba(255, 255, 255, 0.95);
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+
+      .grid-load-more-btn:hover:not([disabled]) {
+        transform: translateY(-1px);
+        box-shadow: 0 16px 40px rgba(59, 130, 246, 0.35);
+      }
+
+      .grid-load-more-btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .grid-pagination-hint {
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.65);
+        font-weight: 600;
       }
 
       .payment-groups-wrapper {
@@ -3965,8 +4009,8 @@
             <span id="gmailBtnText">Gmail</span>
           </button>
           <button id="autoRefreshToggle" class="auto-refresh-btn" onclick="toggleAutoRefresh()"
-                  title="Toggle 15-second auto-refresh (currently OFF)">
-            15s
+                  title="Toggle 1-minute auto-refresh (currently OFF)">
+            60s
           </button>
           <button id="syncBtn" class="gmail-btn" onclick="openSyncModal()">
             <span>Sync</span>
@@ -4045,6 +4089,13 @@
           <div class="loading-spinner"></div>
           <div style="color: rgba(255, 255, 255, 0.6); font-weight: 600">Loading payment records...</div>
         </div>
+      </div>
+
+      <div class="grid-pagination" id="gridLoadMoreWrapper" style="display: none;">
+        <button id="gridLoadMoreBtn" class="grid-load-more-btn" type="button">
+          Load more
+        </button>
+        <div class="grid-pagination-hint" id="gridLoadMoreHint">Showing latest payments</div>
       </div>
 
       <!-- EMPTY STATE (hidden by default) -->
@@ -4990,9 +5041,11 @@ ORDER BY timestamp DESC;</pre>
       const PaymentRecordsEngine = (() => {
         const config = {
           pageSize: 500,
-          maxRecords: 1500,
+          maxRecords: 600,
           cacheTTL: 5 * 60 * 1000, // ⚡ Increased to 5 minutes for lightning-fast reloads
-          defaultUsdToAmd: 387.5
+          defaultUsdToAmd: 387.5,
+          initialRenderLimit: 200, // ⚡ Render only the first 200 rows to keep initial load snappy
+          renderBatchSize: 150 // ⚡ Append 150 rows per "Load more" click
         };
 
         const dom = {
@@ -5006,7 +5059,11 @@ ORDER BY timestamp DESC;</pre>
           monthSelector: null,
           monthTotalCount: null,
           monthTotalUSD: null,
-          monthTotalAMD: null
+          monthTotalAMD: null,
+          searchInput: null,
+          loadMoreWrapper: null,
+          loadMoreBtn: null,
+          loadMoreHint: null
         };
 
         const formatCache = {
@@ -5040,7 +5097,7 @@ ORDER BY timestamp DESC;</pre>
             statuses: new Set(),
             dateFrom: null,
             dateTo: null,
-            monthFilter: 'all' // Track month selector value
+            monthFilter: 'all' // Match UI default
           },
           indexes: {
             payer: new Map(),
@@ -5049,6 +5106,12 @@ ORDER BY timestamp DESC;</pre>
             month: new Map(),
             amount: new Map(),
             date: new Map()
+          },
+          renderWindow: {
+            visibleCount: 0,
+            totalCount: 0,
+            lastChunkSize: 0,
+            renderedCount: 0
           }
         };
 
@@ -5073,6 +5136,10 @@ ORDER BY timestamp DESC;</pre>
           dom.monthTotalCount = document.getElementById('monthTotalCount');
           dom.monthTotalUSD = document.getElementById('monthTotalUSD');
           dom.monthTotalAMD = document.getElementById('monthTotalAMD');
+          dom.searchInput = document.getElementById('paymentsSearchInput');
+          dom.loadMoreWrapper = document.getElementById('gridLoadMoreWrapper');
+          dom.loadMoreBtn = document.getElementById('gridLoadMoreBtn');
+          dom.loadMoreHint = document.getElementById('gridLoadMoreHint');
         }
 
         function ensureTemplates() {
@@ -5807,14 +5874,32 @@ ORDER BY timestamp DESC;</pre>
         }
 
         // ⚡ OPTIMIZED: Use requestAnimationFrame for buttery-smooth rendering
-        function render(records) {
+        function render(records, options = {}) {
           if (!dom.rowsHost) return;
+          ensureTemplates();
+          const list = Array.isArray(records) ? records : [];
+          const { mode = 'replace' } = options;
 
-          if (!records || records.length === 0) {
+          if (!list.length) {
+            if (mode === 'replace') {
+              requestAnimationFrame(() => {
+                dom.rowsHost.replaceChildren();
+                showEmptyState(true);
+                state.renderWindow.renderedCount = 0;
+                updateCounters();
+                updateLoadMoreControls();
+              });
+            }
+            return;
+          }
+
+          if (mode === 'append') {
             requestAnimationFrame(() => {
-              dom.rowsHost.replaceChildren();
-              showEmptyState(true);
+              showEmptyState(false);
+              list.forEach(record => insertRecordIntoDom(record));
+              state.renderWindow.renderedCount += list.length;
               updateCounters();
+              updateLoadMoreControls();
             });
             return;
           }
@@ -5825,7 +5910,7 @@ ORDER BY timestamp DESC;</pre>
             const fragment = document.createDocumentFragment();
             let currentGroup = null;
 
-            records.forEach(record => {
+            list.forEach(record => {
               if (!currentGroup || currentGroup.dateKey !== record.dateKey) {
                 if (currentGroup) {
                   fragment.appendChild(buildDateGroup(currentGroup));
@@ -5848,7 +5933,9 @@ ORDER BY timestamp DESC;</pre>
             }
 
             dom.rowsHost.replaceChildren(fragment);
+            state.renderWindow.renderedCount = list.length;
             updateCounters();
+            updateLoadMoreControls();
           });
         }
 
@@ -5988,13 +6075,56 @@ ORDER BY timestamp DESC;</pre>
           updateDateGroupTotals(wrapper, record.amountUSD, record.amountAMD);
         }
 
+        function removeOldestRenderedCards(count = 0) {
+          if (!dom.rowsHost || count <= 0) return 0;
+          let removed = 0;
+          while (removed < count) {
+            const lastGroup = dom.rowsHost.lastElementChild;
+            if (!lastGroup) break;
+            const rowsContainer = lastGroup.querySelector('.payment-rows-container');
+            if (!rowsContainer) {
+              dom.rowsHost.removeChild(lastGroup);
+              continue;
+            }
+
+            const lastCard = rowsContainer.lastElementChild;
+            if (!lastCard) {
+              dom.rowsHost.removeChild(lastGroup);
+              continue;
+            }
+
+            rowsContainer.removeChild(lastCard);
+            const record = state.paymentLookup.get(lastCard.dataset.paymentKey);
+            if (record) {
+              updateDateGroupTotals(lastGroup, -record.amountUSD, -record.amountAMD);
+            }
+            removed += 1;
+            state.renderWindow.renderedCount = Math.max(0, state.renderWindow.renderedCount - 1);
+
+            if (!rowsContainer.children.length) {
+              dom.rowsHost.removeChild(lastGroup);
+            }
+          }
+          return removed;
+        }
+
+        function enforceRenderWindowLimit() {
+          if (!dom.rowsHost) return;
+          const overflow = state.renderWindow.renderedCount - state.renderWindow.visibleCount;
+          if (overflow > 0) {
+            removeOldestRenderedCards(overflow);
+          }
+        }
+
         function insertIntoSortedList(list, record) {
-          if (!Array.isArray(list)) return;
+          if (!Array.isArray(list)) return -1;
           const index = list.findIndex(item => item.timestampMs < record.timestampMs);
           if (index === -1) {
             list.push(record);
+            return list.length - 1;
           } else {
             list.splice(index, 0, record);
+            return index;
           }
         }
 
@@ -6035,6 +6165,33 @@ ORDER BY timestamp DESC;</pre>
           }
         }
 
+        function updateLoadMoreControls() {
+          if (!dom.loadMoreWrapper) return;
+          const total = state.renderWindow.totalCount || 0;
+          const visible = state.renderWindow.visibleCount || 0;
+          const remaining = Math.max(0, total - visible);
+          const hasRecords = total > 0;
+          const hasMore = remaining > 0;
+
+          dom.loadMoreWrapper.style.display = hasRecords ? 'flex' : 'none';
+
+          if (dom.loadMoreBtn) {
+            dom.loadMoreBtn.style.display = hasMore ? 'inline-flex' : 'none';
+            dom.loadMoreBtn.disabled = !hasMore;
+            dom.loadMoreBtn.setAttribute('aria-disabled', hasMore ? 'false' : 'true');
+          }
+
+          if (dom.loadMoreHint) {
+            if (!hasRecords) {
+              dom.loadMoreHint.textContent = 'No payments to display';
+            } else if (!hasMore) {
+              dom.loadMoreHint.textContent = `Showing all ${total.toLocaleString()} payments`;
+            } else {
+              dom.loadMoreHint.textContent = `Showing ${visible.toLocaleString()} of ${total.toLocaleString()} payments`;
+            }
+          }
+        }
+
         function updateMonthTotals() {
           // Simple stats calculation from currently filtered records
           const recordsToCount = state.filtered && state.filtered.length > 0 ? state.filtered : state.payments;
@@ -6054,6 +6211,51 @@ ORDER BY timestamp DESC;</pre>
           if (dom.monthTotalAMD) dom.monthTotalAMD.textContent = formatAmd(amd);
         }
 
+        function resetRenderWindow(totalCount = 0) {
+          const limit = totalCount === 0
+            ? 0
+            : Math.min(totalCount, config.initialRenderLimit) || totalCount;
+          state.renderWindow.totalCount = totalCount;
+          state.renderWindow.visibleCount = limit;
+          state.renderWindow.lastChunkSize = limit;
+          state.renderWindow.renderedCount = 0;
+        }
+
+        function renderInitialWindow() {
+          const total = Array.isArray(state.filtered) ? state.filtered.length : 0;
+          resetRenderWindow(total);
+          const limit = state.renderWindow.visibleCount || total;
+          const initialSlice = limit ? state.filtered.slice(0, limit) : [];
+          render(initialSlice, { mode: 'replace' });
+          updateLoadMoreControls();
+        }
+
+        function loadMoreRecords() {
+          if (!Array.isArray(state.filtered) || !state.filtered.length) {
+            return { added: 0, hasMore: false };
+          }
+
+          const total = state.renderWindow.totalCount = state.filtered.length;
+          const previousVisible = state.renderWindow.visibleCount;
+          if (previousVisible >= total) {
+            updateLoadMoreControls();
+            return { added: 0, hasMore: false };
+          }
+
+          const nextVisible = Math.min(previousVisible + config.renderBatchSize, total);
+          const chunk = state.filtered.slice(previousVisible, nextVisible);
+          state.renderWindow.visibleCount = nextVisible;
+          state.renderWindow.lastChunkSize = chunk.length;
+
+          if (chunk.length) {
+            render(chunk, { mode: 'append' });
+          } else {
+            updateLoadMoreControls();
+          }
+
+          return { added: chunk.length, hasMore: nextVisible < total };
+        }
+
         function handleMonthSelectorChange() {
           if (!dom.monthSelector) return;
           state.filters.monthFilter = dom.monthSelector.value;
@@ -6065,7 +6267,7 @@ ORDER BY timestamp DESC;</pre>
           }
           
           applyFilters();
-          render(state.filtered);
+          renderInitialWindow();
           updateMonthTotals();
         }
 
@@ -6099,9 +6301,8 @@ ORDER BY timestamp DESC;</pre>
 
               state.payments = preparePayments(payments);
               rebuildIndexes(state.payments);
-              state.filtered = state.payments.slice();
-
-              render(state.filtered);
+              applyFilters();
+              renderInitialWindow();
               updateMonthTotals();
             } catch (error) {
               console.error('❌ PaymentRecords load failed:', error);
@@ -6160,7 +6361,7 @@ ORDER BY timestamp DESC;</pre>
             }
             rebuildIndexes(state.payments);
             state.filtered = state.payments.slice();
-            render(state.filtered);
+            renderInitialWindow();
             updateMonthTotals();
             updateCounters();
             return { added: newRecords.length, displayed: newRecords.length };
@@ -6175,21 +6376,41 @@ ORDER BY timestamp DESC;</pre>
             .filter(recordMatchesCurrentFilters)
             .sort((a, b) => b.timestampMs - a.timestampMs);
 
-          matchingRecords.forEach(record => {
-            insertIntoSortedList(state.filtered, record);
-            insertRecordIntoDom(record);
+          const inserted = matchingRecords.map(record => ({
+            record,
+            index: insertIntoSortedList(state.filtered, record)
+          }));
+
+          state.renderWindow.totalCount = state.filtered.length;
+
+          if (!state.renderWindow.visibleCount && state.renderWindow.totalCount) {
+            renderInitialWindow();
+            updateCounters();
+            updateMonthTotals();
+            return { added: newRecords.length, displayed: matchingRecords.length };
+          }
+
+          let displayed = 0;
+          inserted.forEach(({ record, index }) => {
+            if (index > -1 && index < state.renderWindow.visibleCount) {
+              insertRecordIntoDom(record);
+              state.renderWindow.renderedCount += 1;
+              displayed += 1;
+            }
           });
 
+          enforceRenderWindowLimit();
+          updateLoadMoreControls();
           updateCounters();
           updateMonthTotals();
 
-          return { added: newRecords.length, displayed: matchingRecords.length };
+          return { added: newRecords.length, displayed };
         }
 
         function setSearchTerm(term) {
           state.filters.search = term || '';
           applyFilters();
-          render(state.filtered);
+          renderInitialWindow();
           updateMonthTotals();
         }
 
@@ -6197,14 +6418,14 @@ ORDER BY timestamp DESC;</pre>
           state.filters.dateFrom = from ? (from instanceof Date ? from.getTime() : from) : null;
           state.filters.dateTo = to ? (to instanceof Date ? to.getTime() : to) : null;
           applyFilters();
-          render(state.filtered);
+          renderInitialWindow();
           updateMonthTotals();
         }
 
         function setPaymentMethods(methods = []) {
           state.filters.methods = new Set((methods || []).map(method => method.toLowerCase()));
           applyFilters();
-          render(state.filtered);
+          renderInitialWindow();
           updateMonthTotals();
         }
 
@@ -6216,7 +6437,7 @@ ORDER BY timestamp DESC;</pre>
           state.filters.groups = new Set();
           state.filters.statuses = new Set();
           state.filtered = state.payments.slice();
-          render(state.filtered);
+          renderInitialWindow();
           updateMonthTotals();
         }
 
@@ -6241,6 +6462,7 @@ ORDER BY timestamp DESC;</pre>
           getActiveFilterCount,
           updateMonthTotals,
           handleMonthSelectorChange,
+          loadMoreRecords,
           state
         };
       })();
@@ -6281,9 +6503,13 @@ ORDER BY timestamp DESC;</pre>
         if (toggleBtn) {
           if (autoRefreshEnabled) {
             toggleBtn.classList.add('active');
-            toggleBtn.title = 'Auto-refresh ON (every 15s) - Click to disable';
-            startAutoRefresh();
-            startCountdown();
+            toggleBtn.title = 'Auto-refresh ON (every 60s) - Click to disable';
+            const started = startAutoRefresh();
+            if (started) {
+              startCountdown();
+            } else {
+              stopCountdown({ label: 'Paused' });
+            }
           } else {
             toggleBtn.classList.remove('active');
             toggleBtn.title = 'Auto-refresh OFF - Click to enable';
@@ -6300,15 +6526,13 @@ ORDER BY timestamp DESC;</pre>
           syncToDate.value = today.toISOString().split('T')[0];
         }
 
-        await loadData();
-        setupEventListeners();
-        setupGmailContextMenu(); // Setup Gmail context menu with timezone toggles
-        setupNavContextMenu();
-        initScrollBehavior();
-        initFloatingCountdown(); // Initialize countdown timer in floating nav
-        
-        // Load saved navbar button order AFTER all dynamic buttons are added
-        loadNavButtonOrder();
+  await loadData();
+  setupEventListeners();
+  setupGmailContextMenu(); // Setup Gmail context menu with timezone toggles
+  initScrollBehavior();
+  loadNavButtonOrder();
+  attachLazyNavInitTriggers();
+  ensureFloatingCountdownInitialized();
       });
 
       // ============================================================
@@ -6343,6 +6567,32 @@ ORDER BY timestamp DESC;</pre>
             nav.classList.remove('interacting');
           });
         }
+      }
+
+      function attachLazyNavInitTriggers() {
+        const nav = document.querySelector('.floating-nav');
+        if (!nav) return;
+
+        const triggerInit = () => {
+          ensureNavEnhancementsInitialized();
+        };
+
+        ['pointerenter', 'focusin', 'touchstart'].forEach(evt => {
+          nav.addEventListener(evt, triggerInit, { once: true });
+        });
+
+        const countdownBtn = document.getElementById('navCountdownTimer');
+        if (countdownBtn) {
+          countdownBtn.addEventListener('click', () => ensureNavEnhancementsInitialized());
+        }
+      }
+
+      function ensureNavEnhancementsInitialized() {
+        if (ensureNavEnhancementsInitialized.__done) return;
+        ensureNavEnhancementsInitialized.__done = true;
+        debugLog('⚙️ Lazy-loading floating nav enhancements');
+        setupNavContextMenu();
+        ensureFloatingCountdownInitialized();
       }
 
       // ============================================================
@@ -6655,16 +6905,23 @@ ORDER BY timestamp DESC;</pre>
         }
       }
 
-      let navCountdownInterval = null;
-      let cachedGroups = null;
-      let groupsCacheTime = null;
-      const GROUPS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  let navCountdownInterval = null;
+  let cachedGroups = null;
+  let groupsCacheTime = null;
+  const GROUPS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  let floatingCountdownInitialized = false;
+
+        function ensureFloatingCountdownInitialized() {
+          if (floatingCountdownInitialized) return;
+          floatingCountdownInitialized = true;
+          initFloatingCountdown();
+        }
 
       /**
        * Initialize the floating navigation countdown timer
        * PERFORMANCE FIX: Update every 30s instead of 1s - massive CPU savings
        */
-      function initFloatingCountdown() {
+    function initFloatingCountdown() {
   debugLog('⏳ Initializing floating nav countdown timer...');
         updateFloatingCountdownUI();
         if (navCountdownInterval) clearInterval(navCountdownInterval);
@@ -6911,6 +7168,7 @@ ORDER BY timestamp DESC;</pre>
        * Open countdown popup modal
        */
       async function openCountdownPopup() {
+        ensureFloatingCountdownInitialized();
         const overlay = document.getElementById('countdownPopupOverlay');
         const body = document.getElementById('countdownPopupBody');
         const popup = overlay?.querySelector('.countdown-popup');
@@ -7540,27 +7798,24 @@ ORDER BY timestamp DESC;</pre>
             }
           }
 
-          // Parse memo/message - try multiple patterns
+          // Parse memo/message - ONLY for display, NEVER use as student name
           let memo = '';
-          let studentNameFromMessage = '';
 
-          // Pattern 1: "Message from [Payer]: [Student Name]" (US Bank specific - extract student name)
-          // STOP BEFORE footer text like "The money is ready", "Pay it forward", etc.
+          // Pattern 1: "Message from [Payer]: [Text]" (US Bank specific)
           let messageFromMatch = bodyText.match(
             /Message\s+from\s+[^:]+:\s*([A-Za-z\s,'"\-]+?)(?=\s*(?:The money|Pay it forward|If you'd|Thanks|You can add|View transaction|\*\s*If you|\n\n|$))/i
           );
           if (messageFromMatch) {
-            studentNameFromMessage = messageFromMatch[1].trim();
+            let messageText = messageFromMatch[1].trim();
 
-            // Extra safety filter to remove any footer fragments and special characters
-            studentNameFromMessage = studentNameFromMessage
+            // Clean footer fragments and special characters
+            messageText = messageText
               .replace(/(The money.*|Pay it forward.*|If you'd.*|Thanks.*|You can add.*|View transaction.*|\*\s*If you.*)/i, '')
-              .replace(/[⚠️*]/g, '') // Remove emoji and asterisks
+              .replace(/[⚠️*]/g, '')
               .trim();
 
-            // Only use as memo if it's not empty after cleaning
-            if (studentNameFromMessage.length > 0) {
-              memo = studentNameFromMessage;
+            if (messageText.length > 0) {
+              memo = messageText;
             }
           } else {
             // Pattern 2: "Memo:" or "Message:" or "Note:" (text/plain format)
@@ -7570,7 +7825,7 @@ ORDER BY timestamp DESC;</pre>
               // Clean footer from memo as well
               memo = memo
                 .replace(/(The money.*|Pay it forward.*|If you'd.*|Thanks.*|You can add.*|View transaction.*|\*\s*If you.*)/i, '')
-                .replace(/[⚠️*]/g, '') // Remove emoji and asterisks
+                .replace(/[⚠️*]/g, '')
                 .trim();
             }
           }
@@ -7578,7 +7833,6 @@ ORDER BY timestamp DESC;</pre>
           // Final check: if memo contains footer keywords, clear it
           if (memo && /(?:if you'd|pay it forward|the money is ready|view transaction)/i.test(memo)) {
             memo = '';
-            studentNameFromMessage = '';
           }
 
           if (!amount || !senderName) return null;
@@ -7602,7 +7856,6 @@ ORDER BY timestamp DESC;</pre>
             timestamp: timestampStr,
             email_date: timestampStr,
             memo: memo,
-            studentNameFromMessage: studentNameFromMessage,
             status: 'unmatched'
           };
         } catch (error) {
@@ -7741,17 +7994,77 @@ ORDER BY timestamp DESC;</pre>
           return { data: [], error: null };
         }
 
-        const supabasePayments = payments.map(p => ({
-          id: p.gmailId,
-          gmail_id: p.gmailId,
-          payer_name: p.payer,
-          amount: p.amount,
-          date: p.date,
-          email_date: p.timestamp,
-          memo: p.memo,
-          student_name: p.studentNameFromMessage,
-          status: p.status
-        }));
+        // Load all students for matching
+        const { data: allStudents, error: studentsError } = await supabase
+          .from('students')
+          .select('id, name, email, aliases');
+        
+        if (studentsError) {
+          console.error('Error loading students for matching:', studentsError);
+        }
+
+        // Match each payment to a student ID - ONLY by payer name, NEVER by message text
+        const supabasePayments = payments.map(p => {
+          let linked_student_id = null;
+          let matched_student_name = null;
+          
+          // Only match by PAYER name, never by message/memo content
+          if (p.payer && allStudents) {
+            const payerName = p.payer.toLowerCase();
+            
+            // Try exact name match first
+            let matchedStudent = allStudents.find(s => 
+              s.name && s.name.toLowerCase() === payerName
+            );
+            
+            // Try partial name match (all words in payer name appear in student name)
+            if (!matchedStudent) {
+              matchedStudent = allStudents.find(s => {
+                if (!s.name) return false;
+                const name = s.name.toLowerCase();
+                const nameParts = payerName.split(/\s+/);
+                return nameParts.every(part => name.includes(part));
+              });
+            }
+            
+            // Try aliases match
+            if (!matchedStudent) {
+              matchedStudent = allStudents.find(s => {
+                if (!s.aliases) return false;
+                let aliases = [];
+                try {
+                  aliases = typeof s.aliases === 'string' ? JSON.parse(s.aliases) : s.aliases;
+                } catch (e) {
+                  aliases = [s.aliases];
+                }
+                return aliases.some(alias => 
+                  alias && alias.toLowerCase() === payerName
+                );
+              });
+            }
+            
+            if (matchedStudent) {
+              linked_student_id = matchedStudent.id;
+              matched_student_name = matchedStudent.name;
+              debugLog(`✅ Matched payer "${p.payer}" → Student "${matchedStudent.name}" (ID: ${linked_student_id})`);
+            } else {
+              debugLog(`⚠️ No match for payer "${p.payer}" - will show as Unmatched`);
+            }
+          }
+          
+          return {
+            id: p.gmailId,
+            gmail_id: p.gmailId,
+            payer_name: p.payer,
+            amount: p.amount,
+            date: p.date,
+            email_date: p.timestamp,
+            memo: p.memo,
+            student_name: matched_student_name, // Only set if matched, otherwise null
+            linked_student_id: linked_student_id,
+            status: linked_student_id ? 'matched' : 'unmatched'
+          };
+        });
 
         const { data, error } = await supabase
           .from('payments')
@@ -7763,7 +8076,8 @@ ORDER BY timestamp DESC;</pre>
           return { data: null, error };
         }
 
-  debugLog(`💾 [${contextLabel}] Saved ${data.length} payments to Supabase`);
+        const matchedCount = supabasePayments.filter(p => p.linked_student_id).length;
+        debugLog(`💾 [${contextLabel}] Saved ${data.length} payments to Supabase (${matchedCount} matched to students)`);
         return { data, error: null };
       }
 
@@ -8825,44 +9139,50 @@ ORDER BY timestamp DESC;</pre>
       // ============================================================
       // AUTO-REFRESH FUNCTIONALITY
       // ============================================================
-      const AUTO_REFRESH_INTERVAL = 15000; // 15 seconds
+      const AUTO_REFRESH_INTERVAL = 60 * 1000; // 60 seconds
+      const AUTO_REFRESH_SECONDS = Math.round(AUTO_REFRESH_INTERVAL / 1000);
       // Default to OFF - user must explicitly enable
       let autoRefreshEnabled = localStorage.getItem('paymentEmailAutoRefresh') === 'true';
       let autoRefreshInterval = null;
       let countdownInterval = null;
-  let autoRefreshInFlight = false;
+      let autoRefreshInFlight = false;
       let isSyncing = false; // Flag to prevent concurrent syncs
+      let autoRefreshPausedByVisibility = false;
+
+      function setAutoRefreshButtonLabel(text) {
+        const toggleBtn = document.getElementById('autoRefreshToggle');
+        if (toggleBtn) {
+          toggleBtn.textContent = text;
+        }
+      }
 
       function updateCountdown(secondsLeft) {
-        const toggleBtn = document.getElementById('autoRefreshToggle');
-        if (toggleBtn && autoRefreshEnabled) {
-          toggleBtn.textContent = `${secondsLeft}s`;
+        if (autoRefreshEnabled) {
+          setAutoRefreshButtonLabel(`${secondsLeft}s`);
         }
       }
 
       function startCountdown() {
         stopCountdown();
-        let secondsLeft = 15;
+        let secondsLeft = AUTO_REFRESH_SECONDS;
         updateCountdown(secondsLeft);
 
         countdownInterval = setInterval(() => {
           secondsLeft--;
           if (secondsLeft <= 0) {
-            secondsLeft = 15;
+            secondsLeft = AUTO_REFRESH_SECONDS;
           }
           updateCountdown(secondsLeft);
         }, 1000);
       }
 
-      function stopCountdown() {
+      function stopCountdown(options = {}) {
         if (countdownInterval) {
           clearInterval(countdownInterval);
           countdownInterval = null;
         }
-        const toggleBtn = document.getElementById('autoRefreshToggle');
-        if (toggleBtn) {
-          toggleBtn.textContent = '15s';
-        }
+        const fallbackLabel = options.label || `${AUTO_REFRESH_SECONDS}s`;
+        setAutoRefreshButtonLabel(fallbackLabel);
       }
 
       function toggleAutoRefresh() {
@@ -8877,11 +9197,15 @@ ORDER BY timestamp DESC;</pre>
 
         if (autoRefreshEnabled) {
           toggleBtn.classList.add('active');
-          toggleBtn.title = 'Auto-refresh ON (every 15s) - Click to disable';
-          startAutoRefresh();
-          startCountdown();
-          showNotification('✅ Auto-refresh enabled (every 15 seconds)', 'success');
-          debugLog('✅ Auto-refresh ENABLED - will sync every 15 seconds');
+          toggleBtn.title = 'Auto-refresh ON (every 60s) - Click to disable';
+          const started = startAutoRefresh();
+          if (started) {
+            startCountdown();
+          } else {
+            stopCountdown({ label: 'Paused' });
+          }
+          showNotification('✅ Auto-refresh enabled (every 60 seconds)', 'success');
+          debugLog('✅ Auto-refresh ENABLED - will sync every 60 seconds');
         } else {
           toggleBtn.classList.remove('active');
           toggleBtn.title = 'Auto-refresh OFF - Click to enable';
@@ -8892,51 +9216,53 @@ ORDER BY timestamp DESC;</pre>
         }
       }
 
-      function startAutoRefresh() {
+      async function runAutoRefreshCycle() {
+        if (document.hidden) {
+          debugLog('⏸️ Skipping auto-refresh while tab is hidden.');
+          return;
+        }
+        if (isSyncing || autoRefreshInFlight) {
+          console.log('⏭️ Skipping auto-refresh - another sync in progress');
+          debugLog('⏭️ Skipping auto-refresh - another sync in progress');
+          return;
+        }
+        autoRefreshInFlight = true;
+        try {
+          console.log('🔄 Auto-refreshing payments...');
+          debugLog('🔄 Auto-refreshing payments...');
+          await fetchPaymentsFromGmail({ silent: true });
+        } finally {
+          autoRefreshInFlight = false;
+        }
+      }
+
+      function startAutoRefresh(options = {}) {
+        const { skipImmediate = false } = options;
         console.log('🚀 startAutoRefresh() called');
         stopAutoRefresh();
-        console.log('🔄 Setting up auto-refresh interval (15s)...');
-        
-        // RUN IMMEDIATELY on page load
-        console.log('⚡ Running immediate initial fetch...');
-        fetchPaymentsFromGmail({ silent: true }).then(() => {
-          console.log('✅ Initial fetch complete');
-        }).catch(err => {
-          console.error('❌ Initial fetch failed:', err);
-        });
-        
-        let lastHiddenRefresh = Date.now(); // Track from now
-        const HIDDEN_REFRESH_INTERVAL = 30 * 60 * 1000; // 30 minutes in milliseconds
-        
-        autoRefreshInterval = setInterval(async () => {
-          console.log('⏰ Auto-refresh interval fired!');
-          
-          // Smart refresh: every 15s when visible, every 30min when hidden
-          if (document.hidden) {
-            const timeSinceLastHiddenRefresh = Date.now() - lastHiddenRefresh;
-            if (timeSinceLastHiddenRefresh < HIDDEN_REFRESH_INTERVAL) {
-              console.log(`⏸️ Skipping auto-refresh while tab is hidden (last refresh ${Math.floor(timeSinceLastHiddenRefresh / 1000 / 60)}min ago, will refresh in ${Math.ceil((HIDDEN_REFRESH_INTERVAL - timeSinceLastHiddenRefresh) / 1000 / 60)}min)`);
-              return;
-            }
-            console.log('🔄 Tab hidden but 30min elapsed - refreshing...');
-            lastHiddenRefresh = Date.now();
-          }
-          
-          if (isSyncing || autoRefreshInFlight) {
-            console.log('⏭️ Skipping auto-refresh - another sync in progress');
-            debugLog('⏭️ Skipping auto-refresh - another sync in progress');
-            return;
-          }
-          autoRefreshInFlight = true;
-          try {
-            console.log('🔄 Auto-refreshing payments...');
-            debugLog('🔄 Auto-refreshing payments...');
-            await fetchPaymentsFromGmail({ silent: true });
-          } finally {
-            autoRefreshInFlight = false;
-          }
-        }, AUTO_REFRESH_INTERVAL);
+
+        if (document.hidden) {
+          autoRefreshPausedByVisibility = true;
+          debugLog('🛑 Tab hidden - deferring auto-refresh until visible');
+          stopCountdown({ label: 'Paused' });
+          return false;
+        }
+
+        autoRefreshPausedByVisibility = false;
+        console.log(`🔄 Setting up auto-refresh interval (${AUTO_REFRESH_SECONDS}s)...`);
+
+        if (!skipImmediate) {
+          console.log('⚡ Running immediate initial fetch...');
+          runAutoRefreshCycle().then(() => {
+            console.log('✅ Initial fetch complete');
+          }).catch(err => {
+            console.error('❌ Initial fetch failed:', err);
+          });
+        }
+
+        autoRefreshInterval = setInterval(runAutoRefreshCycle, AUTO_REFRESH_INTERVAL);
         console.log('✅ Auto-refresh interval started! Interval ID:', autoRefreshInterval);
+        return true;
       }
 
       function stopAutoRefresh() {
@@ -8945,6 +9271,24 @@ ORDER BY timestamp DESC;</pre>
           autoRefreshInterval = null;
         }
       }
+
+      function handleVisibilityChange() {
+        if (!autoRefreshEnabled) return;
+        if (document.hidden) {
+          autoRefreshPausedByVisibility = true;
+          stopAutoRefresh();
+          stopCountdown({ label: 'Paused' });
+          debugLog('🛑 Auto-refresh paused while tab hidden');
+        } else if (autoRefreshPausedByVisibility) {
+          debugLog('▶️ Resuming auto-refresh after tab became visible');
+          const started = startAutoRefresh({ skipImmediate: false });
+          if (started) {
+            startCountdown();
+          }
+        }
+      }
+
+      document.addEventListener('visibilitychange', handleVisibilityChange);
 
       // ============================================================
       // EVENT LISTENERS
@@ -8960,6 +9304,7 @@ ORDER BY timestamp DESC;</pre>
 
         setupFilterToolbar();
         setupPaymentGridEvents();
+        setupGridPaginationControls();
         
         // Setup PDF export button
         const exportBtn = document.getElementById('exportPdfBtn');
@@ -9006,6 +9351,32 @@ ORDER BY timestamp DESC;</pre>
             event.preventDefault();
             openPayerActionsPopup(payerButton.dataset);
           }
+        });
+      }
+
+      function setupGridPaginationControls() {
+        const loadMoreBtn = document.getElementById('gridLoadMoreBtn');
+        if (!loadMoreBtn || loadMoreBtn.dataset.bound === 'true') return;
+        loadMoreBtn.dataset.bound = 'true';
+
+        loadMoreBtn.addEventListener('click', () => {
+          if (loadMoreBtn.disabled || loadMoreBtn.dataset.loading === 'true') {
+            return;
+          }
+
+          loadMoreBtn.dataset.loading = 'true';
+          const originalLabel = loadMoreBtn.textContent;
+          loadMoreBtn.textContent = 'Loading…';
+
+          const result = PaymentRecordsEngine.loadMoreRecords();
+
+          requestAnimationFrame(() => {
+            loadMoreBtn.textContent = originalLabel;
+            loadMoreBtn.dataset.loading = 'false';
+            if (!result?.hasMore) {
+              loadMoreBtn.blur();
+            }
+          });
         });
       }
 
@@ -9521,6 +9892,10 @@ ORDER BY timestamp DESC;</pre>
       // NAVIGATION CONTEXT MENU & SETTINGS
       // ============================================================
       function setupNavContextMenu() {
+        if (setupNavContextMenu.__initialized) {
+          return;
+        }
+        setupNavContextMenu.__initialized = true;
         const nav = document.querySelector('.floating-nav');
         const contextMenu = document.getElementById('navContextMenu');
         const overlay = document.getElementById('navContextMenuOverlay');
@@ -11275,6 +11650,44 @@ ORDER BY timestamp DESC;</pre>
         }
       }
 
+      const NotificationSystem = (() => {
+        let initialized = false;
+        let refreshIntervalId = null;
+
+        const refreshNotifications = async () => {
+          if (document.hidden) {
+            debugLog('🔔 Skipping notification refresh while tab is hidden');
+            return;
+          }
+          await loadNotifications();
+        };
+
+        const ensureInitialized = async () => {
+          if (initialized) return;
+          initialized = true;
+          await refreshNotifications();
+          document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+              refreshNotifications();
+            }
+          });
+          refreshIntervalId = setInterval(refreshNotifications, 300000);
+        };
+
+        return {
+          ensure: ensureInitialized,
+          refresh: refreshNotifications,
+          isInitialized: () => initialized,
+          stop() {
+            if (refreshIntervalId) {
+              clearInterval(refreshIntervalId);
+              refreshIntervalId = null;
+            }
+            initialized = false;
+          }
+        };
+      })();
+
       // Update notification badge
       function updateNotificationBadge() {
         const badge = document.getElementById('notificationBadge');
@@ -11293,7 +11706,8 @@ ORDER BY timestamp DESC;</pre>
       }
 
       // Toggle notification center
-      function toggleNotificationCenter() {
+      async function toggleNotificationCenter() {
+        await NotificationSystem.ensure();
         const overlay = document.getElementById('notificationCenterOverlay');
         if (!overlay) return;
 
@@ -11315,7 +11729,7 @@ ORDER BY timestamp DESC;</pre>
   BlurManager.enable(12);
 
   // Reload notifications to get latest
-  await loadNotifications();
+  await NotificationSystem.refresh();
 
   // Show panel (use next frame so display change lands first)
     requestAnimationFrame(() => overlay.classList.add('active'));
@@ -11821,29 +12235,7 @@ ORDER BY timestamp DESC;</pre>
       // NOTIFICATION SYSTEM INITIALIZATION
       // ============================================================
 
-      // Load notifications on page load
-      document.addEventListener('DOMContentLoaded', async () => {
-  debugLog('🔔 Initializing Notification System');
-        const refreshNotifications = async () => {
-          if (document.hidden) {
-            debugLog('🔔 Skipping notification refresh while tab is hidden');
-            return;
-          }
-          await loadNotifications();
-        };
-
-        await refreshNotifications();
-
-        document.addEventListener('visibilitychange', () => {
-          if (!document.hidden) {
-            refreshNotifications();
-          }
-        });
-
-        // PERFORMANCE FIX: Refresh notifications every 5 minutes instead of 30 seconds
-        // Reduces unnecessary API calls while maintaining reasonable update frequency
-        setInterval(refreshNotifications, 300000); // 5 minutes
-      });
+      // Lazy notification loading handled by NotificationSystem.ensure()
 
       // Helper function to create notification (for email system integration)
       async function createNotification(type, title, message, category, payload = {}) {
@@ -11871,8 +12263,10 @@ ORDER BY timestamp DESC;</pre>
 
           debugLog('✅ Notification created:', data[0]);
 
-          // Reload notifications to update UI
-          await loadNotifications();
+          // Reload notifications to update UI if the system is active
+          if (NotificationSystem.isInitialized()) {
+            await NotificationSystem.refresh();
+          }
 
           return data[0];
 

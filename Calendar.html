@@ -267,7 +267,7 @@
         color: var(--text-primary);
       }
 
-      /* ⚡ PERFORMANCE: Floating Neon Orbs - OPTIMIZED (Removed blur filter) */
+      /* ⚡ PERFORMANCE: Floating Neon Orbs - STATIC (Animation disabled for performance) */
       body::before {
         content: '';
         position: fixed;
@@ -284,11 +284,10 @@
           rgba(38, 255, 230, 0.05) 60%,
           transparent 100%
         );
-        /* REMOVED: filter: blur(40px) - was causing constant repaints */
-        animation: float 8s ease-in-out infinite alternate;
+        /* REMOVED: animation: float 8s ease-in-out infinite alternate; - causing constant GPU repaints */
+        animation: none;
         opacity: 0.6;
         z-index: -1;
-        will-change: transform;
       }
 
       body::after {
@@ -307,11 +306,10 @@
           rgba(138, 77, 255, 0.04) 60%,
           transparent 100%
         );
-        /* REMOVED: filter: blur(45px) - was causing constant repaints */
-        animation: float2 10s ease-in-out infinite alternate;
+        /* REMOVED: animation: float2 10s ease-in-out infinite alternate; - causing constant GPU repaints */
+        animation: none;
         opacity: 0.5;
         z-index: -1;
-        will-change: transform;
       }
 
       @keyframes float {
@@ -1045,7 +1043,8 @@
       .notification-bell.has-notifications {
         border-color: #22c55e;
         background: rgba(34, 197, 94, 0.1);
-        animation: bellPulse 2s ease-in-out infinite;
+        /* Reduced frequency from 2s to 4s to reduce GPU load */
+        animation: bellPulse 4s ease-in-out infinite;
       }
 
       .notification-bell.has-notifications svg {
@@ -1753,7 +1752,7 @@
       }
 
       .dot-credit {
-        background: #0ea5e9; /* Cyan - Paid via credit */
+        background: #fbbf24; /* Bright Amber/Gold - Paid via credit balance */
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
       }
 
@@ -4375,6 +4374,7 @@
             console.log('💳 collectPaymentsForStudentSimple called for:', student.name);
             console.log('   window.paymentsCache exists?', !!window.paymentsCache);
             console.log('   window.paymentsCache length:', (window.paymentsCache || []).length);
+            console.log('   creditPaymentsLookup exists?', !!creditPaymentsLookup);
           }
 
           const cacheKeys = getStudentPaymentCacheKeys(student);
@@ -4391,6 +4391,8 @@
           getStudentAliasNames(student).forEach(alias => matchNames.add(alias));
 
           const idKey = student?.id != null ? String(student.id) : null;
+          
+          // 1. Collect regular payments from payments table
           const matchedPayments = (window.paymentsCache || [])
             .filter(payment => doesPaymentBelongToStudent(payment, idKey, matchNames))
             .map(payment => {
@@ -4414,9 +4416,29 @@
                 amount,
                 dateStr,
                 raw: payment,
+                source: 'payment', // Mark as regular payment
               };
             })
             .filter(Boolean);
+          
+          // 2. Add credit payments from credit_payments table
+          if (idKey && creditPaymentsLookup && creditPaymentsLookup[idKey]) {
+            const creditPaymentsForStudent = creditPaymentsLookup[idKey] || {};
+            Object.keys(creditPaymentsForStudent).forEach(dateStr => {
+              const creditPayment = creditPaymentsForStudent[dateStr];
+              matchedPayments.push({
+                id: `credit-${idKey}-${dateStr}`,
+                amount: Number(creditPayment.amount) || 0,
+                dateStr: dateStr,
+                raw: creditPayment,
+                source: 'credit', // Mark as credit payment
+              });
+            });
+            
+            if (DEBUG_MODE) {
+              console.log(`   💳 Added ${Object.keys(creditPaymentsForStudent).length} credit payments for ${student.name}`);
+            }
+          }
 
           if (cacheKeys.length) {
             cacheKeys.forEach(key => {
@@ -4425,9 +4447,9 @@
           }
 
           if (DEBUG_MODE) {
-            console.log(`   ✅ Matched ${matchedPayments.length} payments for ${student.name}`);
+            console.log(`   ✅ Matched ${matchedPayments.length} total payments for ${student.name}`);
             if (matchedPayments.length > 0) {
-              console.log('   Payment dates:', matchedPayments.map(p => p.dateStr));
+              console.log('   Payment dates:', matchedPayments.map(p => `${p.dateStr} (${p.source})`));
             }
           }
           
@@ -4954,10 +4976,11 @@
                     }
                     
                     if (paymentOnThisDate) {
-                      // PAYMENT FOUND → GREEN DOT
+                      // PAYMENT FOUND → Check if credit or regular payment
                       debugLog(`✅ PAYMENT FOUND for ${studentName} on ${occurrence.dateStr}:`, paymentOnThisDate);
+                      const isCreditPayment = paymentOnThisDate.source === 'credit';
                       statusInfo = {
-                        status: 'paid',
+                        status: isCreditPayment ? 'credit' : 'paid',
                         label: `Paid ${formatCurrency(paymentOnThisDate.amount)} $`,
                         balance: getStudentBalance(student),
                         paidAmount: paymentOnThisDate.amount,
@@ -5437,6 +5460,8 @@
           debugLog('✅ Zelle payments loaded:', (zellePayments || []).length);
           
           // Try to load manual payment records (may not have permission)
+          // NOTE: payment_records is a legacy table - we now use 'payments' for all payment data
+          // This fallback is kept for backward compatibility but will silently fail if table doesn't exist
           let manualPayments = [];
           try {
             const { data, error: manualError } = await supabase
@@ -5445,13 +5470,17 @@
               .order('date', { ascending: false });
               
             if (manualError) {
-              console.warn('⚠️ Could not load payment_records (may not exist or no permission):', manualError.message);
+              // Silently skip - table may not exist or have RLS restrictions
+              // This is expected and not an error condition
+              debugLog('ℹ️ Skipping payment_records table (legacy - not required)');
               manualPayments = [];
             } else {
               manualPayments = data || [];
+              debugLog('📋 Loaded legacy payment_records:', manualPayments.length);
             }
           } catch (manualException) {
-            console.warn('⚠️ Exception loading payment_records:', manualException.message);
+            // Silently skip any exceptions - this table is optional
+            debugLog('ℹ️ payment_records table not available (using payments table only)');
             manualPayments = [];
           }
           
@@ -6561,7 +6590,8 @@
         width: 200%;
         height: 200%;
         background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
-        animation: pulse 15s ease-in-out infinite;
+        /* REMOVED: animation: pulse 15s ease-in-out infinite; - causing unnecessary GPU load */
+        animation: none;
       }
 
       @keyframes pulse {
@@ -10426,34 +10456,9 @@
             throw new Error(`Failed to update student balance: ${updateError.message}`);
           }
 
-          // 2. Create payment record in payments table
-          // Note: Only include fields that exist in the payments schema
-          const paymentRecord = {
-            id: generatePaymentId(),
-            student_id: studentId,
-            student_name: student.name,
-            amount: classPrice,
-            date: dateStr,
-            email_date: dateStr + 'T12:00:00',
-            payer_name: student.name
-          };
-
-          console.log('💳 Creating payment record:', paymentRecord);
-          
-          const { data: insertedPayment, error: paymentError } = await supabase
-            .from('payments')
-            .insert([paymentRecord])
-            .select(); // Return the inserted record
-
-          if (paymentError) {
-            console.error('❌ Error creating payment record:', paymentError);
-            throw new Error(`Failed to create payment record: ${paymentError.message}`);
-          } else {
-            console.log('✅ Payment record created successfully:', insertedPayment);
-            debugLog('✅ Payment record created:', paymentRecord);
-          }
-
-          // 3. Store credit payment tracking in credit_payments table
+          // 2. Store credit payment tracking in credit_payments table
+          // NOTE: We do NOT create a payment record - credit payments are tracked separately
+          // and should NOT appear in Payment Records
           if (window.CreditPaymentManager) {
             await window.CreditPaymentManager.applyCreditPayment(studentId, dateStr, classPrice, newBalance);
             debugLog('✅ Applied credit payment (Supabase):', { studentId, dateStr, amount: classPrice });

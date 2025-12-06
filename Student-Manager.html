@@ -2588,22 +2588,52 @@
       // LOAD STUDENTS FROM SUPABASE
       // ============================================================
       
+      function toNumericAmount(value) {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          return value;
+        }
+        if (typeof value === 'string') {
+          const cleaned = value.replace(/[^0-9.-]/g, '');
+          const parsed = parseFloat(cleaned);
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : 0;
+      }
+
       // Helper function to format price for display
       function formatPrice(value) {
         if (typeof value === 'string') {
           // If already formatted like "100 $", return as-is
           if (value.includes('$')) return value;
           // Otherwise parse and format
-          const num = parseInt(value.replace(/[^0-9]/g, '')) || 0;
-          return `${num} $`;
+          const num = toNumericAmount(value);
+          return `${num || 0} $`;
         }
         // If number, format it
-        return `${value || 0} $`;
+        return `${toNumericAmount(value) || 0} $`;
       }
 
-      // Helper function to format credit for display
+      // Helper function to format credit for display (including +/- and K format)
       function formatCredit(value) {
-        return formatPrice(value);  // Same format
+        const amount = toNumericAmount(value);
+        const absAmount = Math.abs(amount);
+
+        const formatAmount = (amt) => {
+          if (amt >= 1000) {
+            const formatted = (amt / 1000).toFixed(amt % 1000 === 0 ? 0 : 1).replace(/\.0$/, '');
+            return `${formatted}K $`;
+          }
+          return `${Math.round(amt)} $`;
+        };
+
+        if (amount > 0) {
+          return `+${formatAmount(absAmount)}`;
+        }
+        if (amount < 0) {
+          return `-${formatAmount(absAmount)}`;
+        }
+        return '0 $';
       }
       
       // Helper function to parse email field (handles JSON strings, arrays, and regular strings)
@@ -3035,7 +3065,9 @@
         
         // Build HTML string (faster than creating elements one by one)
         const cardsHTML = studentsToRender
-          .map(student => `
+          .map(student => {
+            const balanceAmount = toNumericAmount(student.balance);
+            return `
           <div class="student-card" data-student-id="${student.id}">
             <div class="card-toggle">
               <label class="elegant-toggle" onclick="event.stopPropagation()">
@@ -3058,7 +3090,7 @@
                 <div class="meta-badges">
                   <div class="meta-badge credit">
                     ${svgIconCache.dollar}
-                    ${formatCredit(student.balance)}
+                    ${formatCredit(balanceAmount)}
                   </div>
                   <div class="meta-badge price">
                     ${svgIconCache.dollar}
@@ -3069,7 +3101,8 @@
               <div class="status-pill ${student.status}" data-action="cycle-status" data-student-id="${student.id}">${student.status}</div>
             </div>
           </div>
-        `)
+        `;
+          })
           .join('');
         
         // Single DOM update instead of multiple
