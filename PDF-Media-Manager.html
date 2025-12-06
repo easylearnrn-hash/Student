@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Media Manager - ARNOMA Admin</title>
+  
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <!-- Shared Auth -->
+  <script src="shared-auth.js"></script>
+  
+  <style>
+    /* ==========================================================================
+       CSS VARIABLES - Liquid Glass Design System
+       ========================================================================== */
+    :root {
+      --bg-base: #020510;
+      --bg-gradient-start: #030a1f;
+      --bg-gradient-end: #050d2c;
+      --panel-light: rgba(37, 56, 117, 0.85);
+      --panel-dark: rgba(16, 24, 47, 0.92);
+      --glass-border: rgba(125, 211, 252, 0.35);
+      --accent-primary: #7dd3fc;
+      --accent-secondary: #c084fc;
+      --accent-tertiary: #f9a8d4;
+      --glow-blue: rgba(125, 211, 252, 0.65);
+      --glow-purple: rgba(192, 132, 252, 0.6);
+      --text-strong: #f8fbff;
+      --text-muted: rgba(255, 255, 255, 0.7);
+      --card-shadow: 0 30px 120px rgba(3, 6, 19, 0.65);
+      --panel-blur: 8px;
+      --modal-blur: 14px;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(145deg, var(--bg-gradient-start), var(--bg-gradient-end));
+      min-height: 100vh;
+      padding: 40px 20px;
+      color: var(--text-strong);
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: 
+        radial-gradient(circle at 20% 30%, rgba(102,126,234,0.12) 0%, transparent 50%),
+        radial-gradient(circle at 80% 70%, rgba(118,75,162,0.1) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 1;
+    }
+
+    .header {
+      background: var(--panel-dark);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 32px 40px;
+      margin-bottom: 32px;
+      backdrop-filter: blur(var(--panel-blur));
+      -webkit-backdrop-filter: blur(var(--panel-blur));
+      box-shadow: var(--card-shadow);
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 16px;
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 32px;
+    }
+
+    .panel {
+      background: var(--panel-dark);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 32px;
+      backdrop-filter: blur(var(--panel-blur));
+      -webkit-backdrop-filter: blur(var(--panel-blur));
+      box-shadow: var(--card-shadow);
+    }
+
+    .panel h2 {
+      font-size: 24px;
+      font-weight: 700;
+      background: linear-gradient(120deg, var(--accent-primary), var(--accent-secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 24px;
+    }
+
+    .notes-list {
+      max-height: 600px;
+      overflow-y: auto;
+    }
+
+    .notes-list::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .notes-list::-webkit-scrollbar-track {
+      background: rgba(125, 211, 252, 0.05);
+      border-radius: 4px;
+    }
+
+    .notes-list::-webkit-scrollbar-thumb {
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+      border-radius: 4px;
+    }
+
+    .note-item {
+      background: rgba(37, 56, 117, 0.4);
+      border: 1px solid rgba(125, 211, 252, 0.2);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .note-item:hover {
+      background: rgba(37, 56, 117, 0.6);
+      border-color: var(--accent-primary);
+      transform: translateX(4px);
+    }
+
+    .note-item.active {
+      background: linear-gradient(135deg, rgba(125, 211, 252, 0.2), rgba(192, 132, 252, 0.2));
+      border-color: var(--accent-primary);
+    }
+
+    .note-title {
+      color: var(--text-strong);
+      font-weight: 600;
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
+
+    .note-meta {
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .form-group {
+      margin-bottom: 24px;
+    }
+
+    .form-label {
+      display: block;
+      color: var(--accent-primary);
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .form-input, .form-textarea {
+      width: 100%;
+      background: rgba(16, 24, 47, 0.6);
+      border: 1px solid rgba(125, 211, 252, 0.3);
+      border-radius: 12px;
+      padding: 12px 16px;
+      color: var(--text-strong);
+      font-size: 15px;
+      transition: all 0.2s ease;
+    }
+
+    .form-input:focus, .form-textarea:focus {
+      outline: none;
+      border-color: var(--accent-primary);
+      box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.1);
+    }
+
+    .form-textarea {
+      min-height: 100px;
+      resize: vertical;
+      font-family: inherit;
+    }
+
+    .btn {
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+      border: none;
+      border-radius: 12px;
+      padding: 12px 24px;
+      color: white;
+      font-weight: 600;
+      font-size: 15px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(125, 211, 252, 0.3);
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(125, 211, 252, 0.5);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+
+    .btn-secondary {
+      background: rgba(125, 211, 252, 0.1);
+      border: 1px solid rgba(125, 211, 252, 0.3);
+      color: var(--accent-primary);
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+    }
+
+    .media-items-list {
+      margin-top: 24px;
+    }
+
+    .media-item {
+      background: rgba(37, 56, 117, 0.3);
+      border: 1px solid rgba(125, 211, 252, 0.2);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .media-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 12px;
+    }
+
+    .media-item h4 {
+      color: var(--accent-primary);
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .media-item-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn-small {
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+
+    .media-preview {
+      margin-top: 12px;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid rgba(125, 211, 252, 0.2);
+    }
+
+    .media-preview img, .media-preview video {
+      width: 100%;
+      display: block;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state-icon {
+      font-size: 64px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: var(--text-muted);
+    }
+
+    @media (max-width: 968px) {
+      .content-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📚 PDF Media Manager</h1>
+      <p class="subtitle">Manage media content (GIFs, videos, links) for student documents</p>
+    </div>
+
+    <div class="content-grid">
+      <!-- Notes List -->
+      <div class="panel">
+        <h2>📄 Select Document</h2>
+        <div id="notesList" class="notes-list">
+          <div class="loading">Loading documents...</div>
+        </div>
+      </div>
+
+      <!-- Media Editor -->
+      <div class="panel">
+        <h2 id="editorTitle">Select a document to manage media</h2>
+        
+        <div id="mediaEditor" style="display: none;">
+          <!-- Add New Media Form -->
+          <div class="form-group">
+            <label class="form-label">Media Type</label>
+            <select id="mediaType" class="form-input">
+              <option value="image">📸 Image/GIF</option>
+              <option value="video">🎬 Video</option>
+              <option value="link">🔗 Link</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Title</label>
+            <input type="text" id="mediaTitle" class="form-input" placeholder="e.g., Heart Blood Flow">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">URL</label>
+            <input type="text" id="mediaUrl" class="form-input" placeholder="https://...">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Description (optional)</label>
+            <textarea id="mediaDescription" class="form-textarea" placeholder="Add helpful context for students..."></textarea>
+          </div>
+
+          <button class="btn" onclick="addMedia()">➕ Add Media</button>
+
+          <!-- Existing Media Items -->
+          <div id="mediaItemsList" class="media-items-list"></div>
+        </div>
+
+        <div id="emptyState" class="empty-state">
+          <div class="empty-state-icon">👈</div>
+          <p>Select a document from the list to manage its media content</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================================
+    // SUPABASE CONFIGURATION
+    // ============================================================
+    
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let currentNote = null;
+    let mediaItems = [];
+
+    // ============================================================
+    // INITIALIZATION
+    // ============================================================
+
+    (async function init() {
+      // Ensure admin is authenticated
+      const session = await ArnomaAuth.ensureSession(supabase);
+      if (!session) return;
+
+      await loadNotes();
+    })();
+
+    // ============================================================
+    // LOAD NOTES
+    // ============================================================
+
+    async function loadNotes() {
+      try {
+        const { data: notes, error } = await supabase
+          .from('student_notes')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        const notesList = document.getElementById('notesList');
+        
+        if (!notes || notes.length === 0) {
+          notesList.innerHTML = '<div class="empty-state"><p>No documents found</p></div>';
+          return;
+        }
+
+        notesList.innerHTML = notes.map(note => `
+          <div class="note-item" onclick="selectNote(${note.id})">
+            <div class="note-title">${note.title || 'Untitled Document'}</div>
+            <div class="note-meta">Group ${note.group_name || 'N/A'} • ${note.system_category || 'General'}</div>
+          </div>
+        `).join('');
+
+      } catch (error) {
+        console.error('Error loading notes:', error);
+        document.getElementById('notesList').innerHTML = `
+          <div class="empty-state"><p>Error loading documents</p></div>
+        `;
+      }
+    }
+
+    // ============================================================
+    // SELECT NOTE
+    // ============================================================
+
+    async function selectNote(noteId) {
+      try {
+        // Fetch note details
+        const { data: note, error } = await supabase
+          .from('student_notes')
+          .select('*')
+          .eq('id', noteId)
+          .single();
+
+        if (error) throw error;
+
+        currentNote = note;
+
+        // Update UI
+        document.querySelectorAll('.note-item').forEach(item => {
+          item.classList.remove('active');
+        });
+        event.target.closest('.note-item').classList.add('active');
+
+        document.getElementById('editorTitle').textContent = `📚 ${note.title || 'Untitled Document'}`;
+        document.getElementById('mediaEditor').style.display = 'block';
+        document.getElementById('emptyState').style.display = 'none';
+
+        // Load media for this note
+        await loadMedia(noteId);
+
+      } catch (error) {
+        console.error('Error selecting note:', error);
+        alert('Failed to load document details');
+      }
+    }
+
+    // ============================================================
+    // LOAD MEDIA
+    // ============================================================
+
+    async function loadMedia(noteId) {
+      try {
+        const { data, error } = await supabase
+          .from('pdf_media')
+          .select('*')
+          .eq('note_id', noteId)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        mediaItems = data || [];
+        renderMediaItems();
+
+      } catch (error) {
+        console.error('Error loading media:', error);
+        mediaItems = [];
+        renderMediaItems();
+      }
+    }
+
+    // ============================================================
+    // RENDER MEDIA ITEMS
+    // ============================================================
+
+    function renderMediaItems() {
+      const container = document.getElementById('mediaItemsList');
+
+      if (mediaItems.length === 0) {
+        container.innerHTML = '<div class="empty-state"><p>No media added yet</p></div>';
+        return;
+      }
+
+      container.innerHTML = mediaItems.map((item, index) => `
+        <div class="media-item">
+          <div class="media-item-header">
+            <div>
+              <h4>${getMediaIcon(item.type)} ${item.title}</h4>
+              <p style="color: var(--text-muted); font-size: 13px;">${item.url}</p>
+              ${item.description ? `<p style="color: var(--text-muted); font-size: 14px; margin-top: 8px;">${item.description}</p>` : ''}
+            </div>
+            <div class="media-item-actions">
+              <button class="btn btn-secondary btn-small" onclick="editMedia(${index})">✏️ Edit</button>
+              <button class="btn btn-danger btn-small" onclick="deleteMedia(${item.id})">🗑️</button>
+            </div>
+          </div>
+          ${renderMediaPreview(item)}
+        </div>
+      `).join('');
+    }
+
+    function getMediaIcon(type) {
+      const icons = {
+        'image': '📸',
+        'video': '🎬',
+        'link': '🔗'
+      };
+      return icons[type] || '📄';
+    }
+
+    function renderMediaPreview(item) {
+      if (item.type === 'image') {
+        return `<div class="media-preview"><img src="${item.url}" alt="${item.title}"></div>`;
+      } else if (item.type === 'video') {
+        return `<div class="media-preview"><video controls><source src="${item.url}" type="video/mp4"></video></div>`;
+      }
+      return '';
+    }
+
+    // ============================================================
+    // ADD MEDIA
+    // ============================================================
+
+    async function addMedia() {
+      if (!currentNote) {
+        alert('Please select a document first');
+        return;
+      }
+
+      const type = document.getElementById('mediaType').value;
+      const title = document.getElementById('mediaTitle').value.trim();
+      const url = document.getElementById('mediaUrl').value.trim();
+      const description = document.getElementById('mediaDescription').value.trim();
+
+      if (!title || !url) {
+        alert('Please fill in title and URL');
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('pdf_media')
+          .insert([{
+            note_id: currentNote.id,
+            type: type,
+            title: title,
+            url: url,
+            description: description
+          }])
+          .select();
+
+        if (error) throw error;
+
+        // Clear form
+        document.getElementById('mediaTitle').value = '';
+        document.getElementById('mediaUrl').value = '';
+        document.getElementById('mediaDescription').value = '';
+
+        // Reload media
+        await loadMedia(currentNote.id);
+
+        alert('✅ Media added successfully!');
+
+      } catch (error) {
+        console.error('Error adding media:', error);
+        alert('Failed to add media');
+      }
+    }
+
+    // ============================================================
+    // DELETE MEDIA
+    // ============================================================
+
+    async function deleteMedia(mediaId) {
+      if (!confirm('Are you sure you want to delete this media item?')) {
+        return;
+      }
+
+      try {
+        const { error } = await supabase
+          .from('pdf_media')
+          .delete()
+          .eq('id', mediaId);
+
+        if (error) throw error;
+
+        await loadMedia(currentNote.id);
+        alert('✅ Media deleted successfully!');
+
+      } catch (error) {
+        console.error('Error deleting media:', error);
+        alert('Failed to delete media');
+      }
+    }
+
+    // ============================================================
+    // EDIT MEDIA (TODO: Implement modal)
+    // ============================================================
+
+    function editMedia(index) {
+      const item = mediaItems[index];
+      // For now, just populate the form
+      document.getElementById('mediaType').value = item.type;
+      document.getElementById('mediaTitle').value = item.title;
+      document.getElementById('mediaUrl').value = item.url;
+      document.getElementById('mediaDescription').value = item.description || '';
+      
+      alert('Edit the values above and click "Add Media" to update (or delete and re-add)');
+    }
+  </script>
+</body>
+</html>
