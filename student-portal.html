@@ -7380,10 +7380,26 @@
         
         // Fetch FREE access grants for this student
         const noteIds = notes.map(n => n.id);
-        const { data: freeAccess } = await supabase
+        const studentGroupLetter = currentStudent.group_letter || currentStudent.group_name;
+        
+        // Query for individual student access OR group access
+        let freeAccessQuery = supabase
           .from('note_free_access')
-          .select('note_id, access_type')
-          .or(`student_id.eq.${studentId},group_letter.eq.${currentStudent.group_letter || currentStudent.group_name}`);
+          .select('note_id, access_type, group_letter, student_id')
+          .in('note_id', noteIds);
+        
+        // Build OR condition: individual access for this student OR group access for their group
+        if (studentGroupLetter) {
+          freeAccessQuery = freeAccessQuery.or(`student_id.eq.${studentId},and(access_type.eq.group,group_letter.eq.${studentGroupLetter})`);
+        } else {
+          freeAccessQuery = freeAccessQuery.eq('student_id', studentId);
+        }
+        
+        const { data: freeAccess, error: freeAccessError } = await freeAccessQuery;
+        
+        if (freeAccessError) {
+          console.error('❌ Error loading free access:', freeAccessError);
+        }
         
         // Create a Set of note IDs that have free access
         const freeNoteIds = new Set(freeAccess?.map(fa => fa.note_id) || []);
