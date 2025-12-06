@@ -5092,15 +5092,19 @@
         }
         
         if (paymentRecords.length > 0) {
-          const records = paymentRecords.map(record => ({
-            date: new Date(record.date),
-            status: record.status || 'unpaid',
-            amount: parseFloat(record.amount) || 0,
-            payment_method: record.payment_method,
-            notes: record.notes,
-            id: record.id,
-            source: 'manual'
-          }));
+          const records = paymentRecords.map(record => {
+            const dateStr = record.date ? record.date.substring(0, 10) : null;
+            return {
+              date: new Date(record.date),
+              dateString: dateStr, // 🔧 Store original date string
+              status: record.status || 'unpaid',
+              amount: parseFloat(record.amount) || 0,
+              payment_method: record.payment_method,
+              notes: record.notes,
+              id: record.id,
+              source: 'manual'
+            };
+          });
           allPayments.push(...records);
         }
         
@@ -5174,6 +5178,7 @@
             console.log(`  → Converted date "${payment.date}" (extracted: "${dateStr}") to JavaScript Date: ${paymentDate.toLocaleDateString()}`);
             return {
               date: paymentDate,
+              dateString: dateStr, // 🔧 STORE ORIGINAL STRING to avoid timezone issues in comparisons
               status: 'paid', // Zelle payments are always paid
               amount: parseFloat(payment.amount) || 0,
               payment_method: 'Zelle',
@@ -5197,15 +5202,19 @@
         } else {
           console.debug(`💳 Raw credit_payments from database:`, creditPayments);
           if (creditPayments && creditPayments.length > 0) {
-            const credits = creditPayments.map(payment => ({
-              date: new Date(payment.class_date),
-              status: 'paid',
-              amount: parseFloat(payment.amount) || 0,
-              payment_method: 'Credit Balance',
-              notes: payment.balance_after != null ? `Balance after: $${payment.balance_after}` : null,
-              id: payment.id,
-              source: 'credit' // Mark as credit payment for orange badge
-            }));
+            const credits = creditPayments.map(payment => {
+              const dateStr = payment.class_date ? payment.class_date.substring(0, 10) : null;
+              return {
+                date: new Date(payment.class_date),
+                dateString: dateStr, // 🔧 Store original date string
+                status: 'paid',
+                amount: parseFloat(payment.amount) || 0,
+                payment_method: 'Credit Balance',
+                notes: payment.balance_after != null ? `Balance after: $${payment.balance_after}` : null,
+                id: payment.id,
+                source: 'credit' // Mark as credit payment for orange badge
+              };
+            });
             allPayments.push(...credits);
             console.debug(`💳 Loaded ${credits.length} credit payments:`, credits.map(c => ({ date: c.date.toISOString().split('T')[0], amount: c.amount })));
           } else {
@@ -5447,15 +5456,32 @@
         }
         
         // Check if there's a payment covering this class
-        const classDate = new Date(dateStr);
+        // 🔧 FIX: Use dateString property directly (no timezone conversion!)
         const hasPaidPayment = payments.some(p => {
           if (p.status !== 'paid') return false;
-          const paymentDate = new Date(p.date);
           
-          // Payment must be on or after class date (Calendar logic)
-          // Payment applies to nearest PAST class
+          // Use pre-extracted dateString to avoid timezone conversion issues
+          const paymentDateStr = p.dateString || (p.date instanceof Date 
+            ? p.date.toISOString().split('T')[0] 
+            : (p.date || '').substring(0, 10));
+          
+          console.debug(`  🔍 Comparing payment date "${paymentDateStr}" with class date "${dateStr}"`);
+          
+          // Payment matches if it's for the SAME date (exact match)
+          // or if it's within 7 days after class (Calendar logic: payment applies to nearest past class)
+          if (paymentDateStr === dateStr) {
+            console.debug(`  ✅ EXACT MATCH: Payment ${paymentDateStr} matches class ${dateStr}`);
+            return true; // Exact date match
+          }
+          
+          const classDate = new Date(dateStr + 'T00:00:00');
+          const paymentDate = new Date(paymentDateStr + 'T00:00:00');
           const daysDiff = Math.floor((paymentDate - classDate) / (1000 * 60 * 60 * 24));
-          return daysDiff >= 0 && daysDiff <= 7; // Within a week after class
+          const withinWeek = daysDiff >= 0 && daysDiff <= 7;
+          if (withinWeek) {
+            console.debug(`  ✅ WITHIN 7 DAYS: Payment ${paymentDateStr} is ${daysDiff} days after class ${dateStr}`);
+          }
+          return withinWeek; // Within a week after class
         });
         
         if (!hasPaidPayment) {
@@ -7352,6 +7378,18 @@
         
         if (DEBUG_MODE) console.log(`💰 Student payment status: ${studentHasPaid ? 'PAID' : 'UNPAID'}`);
         
+        // Fetch FREE access grants for this student
+        const noteIds = notes.map(n => n.id);
+        const { data: freeAccess } = await supabase
+          .from('note_free_access')
+          .select('note_id, access_type')
+          .or(`student_id.eq.${studentId},group_letter.eq.${currentStudent.group_letter || currentStudent.group_name}`);
+        
+        // Create a Set of note IDs that have free access
+        const freeNoteIds = new Set(freeAccess?.map(fa => fa.note_id) || []);
+        
+        if (DEBUG_MODE) console.log(`🎁 FREE access notes: ${freeNoteIds.size} notes`);
+        
         // Transform notes to match expected format
         const transformedNotes = notes.map(note => {
           const classDate = new Date(note.class_date);
@@ -7359,8 +7397,11 @@
           // Check if this specific note requires payment
           const noteRequiresPayment = note.requires_payment === true;
           
-          // Student can access if: note doesn't require payment OR student has paid
-          const isPaid = !noteRequiresPayment || studentHasPaid;
+          // Check if student has FREE access to this note
+          const hasFreeAccess = freeNoteIds.has(note.id);
+          
+          // Student can access if: note doesn't require payment OR student has paid OR has free access
+          const isPaid = !noteRequiresPayment || studentHasPaid || hasFreeAccess;
           
           // Get system category from whatever column exists (try system, system_category, group_name, etc.)
           const systemName = note.system || note.system_category || note.category || note.group_name || 'General';
