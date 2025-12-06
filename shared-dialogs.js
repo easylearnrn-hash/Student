@@ -36,10 +36,15 @@ function initCustomDialogs() {
         align-items: center;
         justify-content: center;
         animation: fadeIn 0.2s ease;
+        overflow: hidden;
       }
 
       .custom-alert-overlay.active {
         display: flex;
+      }
+      
+      body.dialog-open {
+        overflow: hidden !important;
       }
 
       .custom-alert-box {
@@ -188,12 +193,14 @@ window.customAlert = function(title, message) {
 
     const handleOk = () => {
       overlay.classList.remove('active');
+      document.body.classList.remove('dialog-open');
       okBtn.removeEventListener('click', handleOk);
       resolve(true);
     };
 
     okBtn.addEventListener('click', handleOk);
     overlay.classList.add('active');
+    document.body.classList.add('dialog-open');
   });
 };
 
@@ -217,6 +224,7 @@ window.customConfirm = function(title, message, isDanger = false) {
 
     const handleOk = () => {
       overlay.classList.remove('active');
+      document.body.classList.remove('dialog-open');
       okBtn.removeEventListener('click', handleOk);
       cancelBtn.removeEventListener('click', handleCancel);
       resolve(true);
@@ -224,6 +232,7 @@ window.customConfirm = function(title, message, isDanger = false) {
 
     const handleCancel = () => {
       overlay.classList.remove('active');
+      document.body.classList.remove('dialog-open');
       okBtn.removeEventListener('click', handleOk);
       cancelBtn.removeEventListener('click', handleCancel);
       resolve(false);
@@ -232,6 +241,7 @@ window.customConfirm = function(title, message, isDanger = false) {
     okBtn.addEventListener('click', handleOk);
     cancelBtn.addEventListener('click', handleCancel);
     overlay.classList.add('active');
+    document.body.classList.add('dialog-open');
   });
 };
 
@@ -258,6 +268,7 @@ window.customPrompt = function(title, message, placeholder = '', defaultValue = 
     const handleOk = () => {
       const value = inputEl.value.trim();
       overlay.classList.remove('active');
+      document.body.classList.remove('dialog-open');
       okBtn.removeEventListener('click', handleOk);
       cancelBtn.removeEventListener('click', handleCancel);
       inputEl.removeEventListener('keypress', handleEnter);
@@ -266,6 +277,7 @@ window.customPrompt = function(title, message, placeholder = '', defaultValue = 
 
     const handleCancel = () => {
       overlay.classList.remove('active');
+      document.body.classList.remove('dialog-open');
       okBtn.removeEventListener('click', handleOk);
       cancelBtn.removeEventListener('click', handleCancel);
       inputEl.removeEventListener('keypress', handleEnter);
@@ -280,6 +292,7 @@ window.customPrompt = function(title, message, placeholder = '', defaultValue = 
     cancelBtn.addEventListener('click', handleCancel);
     inputEl.addEventListener('keypress', handleEnter);
     overlay.classList.add('active');
+    document.body.classList.add('dialog-open');
 
     // Focus input
     setTimeout(() => inputEl.focus(), 100);
