@@ -3892,12 +3892,19 @@
     const ambiguousPaymentAllocations = [];
     window.excessPaymentsForCredit = [];
 
-        addPaymentEvents(paymentIndexes.byDate);
+        // Track payment IDs that have been allocated to classes
+        // This prevents payments from showing twice (once on class, once on payment date)
+        const allocatedPaymentIds = new Set();
+
         addCreditEvents(creditEventsByDate);
         
         // ============================================================
-        addClassEvents(groups, studentsByGroup);
+        // Process classes FIRST so we can track which payments are allocated
+        addClassEvents(groups, studentsByGroup, allocatedPaymentIds);
         addStudentMilestones(students);
+        
+        // Process payments AFTER classes, filtering out already-allocated ones
+        addPaymentEvents(paymentIndexes.byDate, allocatedPaymentIds);
 
         const totals = Object.values(dayMap).reduce(
           (acc, entry) => {
@@ -4563,19 +4570,24 @@
           return lateMatch || null;
         }
 
-        function addPaymentEvents(paymentsByDate) {
+        function addPaymentEvents(paymentsByDate, allocatedPaymentIds = new Set()) {
           Object.entries(paymentsByDate || {}).forEach(([dateStr, list]) => {
             const parts = parseDateParts(dateStr);
             if (!parts || parts.year !== year || parts.month !== month + 1) return;
             const dayEntry = dayMap[parts.day];
             if (!dayEntry) return;
 
-            dayEntry.payments.push(...list);
-            dayEntry.stats.payments += list.length;
-            dayEntry.indicators.add('payment');
-            aggregates.payments += list.length;
+            // Filter out payments that have already been allocated to classes
+            const unallocatedPayments = list.filter(p => !allocatedPaymentIds.has(p.id));
+            
+            if (unallocatedPayments.length === 0) return;
 
-            list.forEach(entry => {
+            dayEntry.payments.push(...unallocatedPayments);
+            dayEntry.stats.payments += unallocatedPayments.length;
+            dayEntry.indicators.add('payment');
+            aggregates.payments += unallocatedPayments.length;
+
+            unallocatedPayments.forEach(entry => {
               eventsFlat.push({ type: 'payment', date: dateStr, studentName: entry.studentName, amount: entry.amount });
             });
           });
@@ -4853,7 +4865,7 @@
 
         }
 
-        function addClassEvents(groupList, groupedStudents) {
+        function addClassEvents(groupList, groupedStudents, allocatedPaymentIds = new Set()) {
           groupList.forEach(groupRecord => {
             const groupNameRaw = groupRecord.group_name || groupRecord.name || 'Untitled Group';
             const groupCode = groupRecord.group_code || canonicalizeGroupCode(groupNameRaw);
@@ -4979,6 +4991,12 @@
                     if (paymentOnThisDate) {
                       // PAYMENT FOUND → Check if credit or regular payment
                       debugLog(`✅ PAYMENT FOUND for ${studentName} on ${occurrence.dateStr}:`, paymentOnThisDate);
+                      
+                      // Track this payment as allocated so it doesn't show as a standalone green dot
+                      if (paymentOnThisDate.id && allocatedPaymentIds) {
+                        allocatedPaymentIds.add(paymentOnThisDate.id);
+                      }
+                      
                       const isCreditPayment = paymentOnThisDate.source === 'credit';
                       statusInfo = {
                         status: isCreditPayment ? 'credit' : 'paid',
