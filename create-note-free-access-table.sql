@@ -75,3 +75,4 @@ COMMENT ON COLUMN note_free_access.access_type IS 'Type of access: group (whole 
 COMMENT ON COLUMN note_free_access.group_letter IS 'Group letter (A-F) for group-level free access';
 COMMENT ON COLUMN note_free_access.student_id IS 'Student ID for individual free access';
 COMMENT ON COLUMN note_free_access.created_by IS 'Admin email who granted the access';
+
