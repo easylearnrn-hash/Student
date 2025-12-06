@@ -2096,6 +2096,9 @@
           if (!confirmed) return;
 
           // Update all selected notes to have free access for this group
+          let successCount = 0;
+          let duplicateCount = 0;
+          
           for (const noteId of selectedNoteIds) {
             const { error } = await supabase
               .from('note_free_access')
@@ -2105,12 +2108,22 @@
                 access_type: 'group'
               });
 
-            if (error && error.code !== '23505') { // Ignore duplicate errors
+            if (error) {
+              // Ignore duplicate errors (PostgreSQL error code 23505 or HTTP 409)
+              if (error.code === '23505' || error.message?.includes('duplicate') || error.status === 409) {
+                duplicateCount++;
+                continue;
+              }
               throw error;
             }
+            successCount++;
           }
 
-          await customAlert('Success', `✅ FREE access granted to Group ${groupLetter} for ${selectedNoteIds.size} note(s)`);
+          const message = duplicateCount > 0 
+            ? `✅ FREE access granted to Group ${groupLetter}!\n${successCount} new grants, ${duplicateCount} already existed`
+            : `✅ FREE access granted to Group ${groupLetter} for ${selectedNoteIds.size} note(s)`;
+          
+          await customAlert('Success', message);
           
         } else {
           // Individual students
@@ -2137,15 +2150,31 @@
             }
           }
 
-          const { error } = await supabase
-            .from('note_free_access')
-            .insert(records);
+          let successCount = 0;
+          let duplicateCount = 0;
 
-          if (error && error.code !== '23505') { // Ignore duplicate errors
-            throw error;
+          // Insert records one by one to handle duplicates gracefully
+          for (const record of records) {
+            const { error } = await supabase
+              .from('note_free_access')
+              .insert(record);
+
+            if (error) {
+              // Ignore duplicate errors (PostgreSQL error code 23505 or HTTP 409)
+              if (error.code === '23505' || error.message?.includes('duplicate') || error.status === 409) {
+                duplicateCount++;
+                continue;
+              }
+              throw error;
+            }
+            successCount++;
           }
 
-          await customAlert('Success', `✅ FREE access granted to ${freeSelectedStudents.size} student(s) for ${selectedNoteIds.size} note(s)`);
+          const message = duplicateCount > 0 
+            ? `✅ FREE access granted to ${freeSelectedStudents.size} student(s)!\n${successCount} new grants, ${duplicateCount} already existed`
+            : `✅ FREE access granted to ${freeSelectedStudents.size} student(s) for ${selectedNoteIds.size} note(s)`;
+
+          await customAlert('Success', message);
         }
 
         closeFreeAccessModal();
