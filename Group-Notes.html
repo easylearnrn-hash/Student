@@ -31,7 +31,6 @@
       color: white;
     }
 
-    /* PERFORMANCE: Reduced gradient opacity and removed animation */
     body::before {
       content: '';
       position: fixed;
@@ -40,17 +39,16 @@
       width: 100%;
       height: 100%;
       background:
-        radial-gradient(circle at 20% 30%, rgba(102, 126, 234, 0.08) 0%, transparent 50%),
-        radial-gradient(circle at 80% 70%, rgba(118, 75, 162, 0.06) 0%, transparent 50%);
+        radial-gradient(circle at 20% 30%, rgba(102, 126, 234, 0.15) 0%, transparent 50%),
+        radial-gradient(circle at 80% 70%, rgba(118, 75, 162, 0.12) 0%, transparent 50%);
+      animation: gradientShift 20s ease infinite;
       z-index: -1;
     }
 
-    /* PERFORMANCE: Disabled expensive animation
     @keyframes gradientShift {
       0%, 100% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.85; transform: scale(1.1); }
     }
-    */
 
     .container {
       max-width: 1600px;
@@ -417,9 +415,6 @@
           </div>
         </div>
         <div class="header-actions">
-          <button class="btn-secondary" onclick="findDuplicates()" title="Find Duplicate Notes" style="background: rgba(251, 146, 60, 0.15); border-color: rgba(251, 146, 60, 0.4); color: #fdba74;">
-            🔍 Find Duplicates
-          </button>
           <button class="btn-secondary" onclick="window.location.href='Student-Portal-Admin.html'">
             ← Back to Admin
           </button>
@@ -459,7 +454,7 @@
             type="text" 
             id="searchInput" 
             placeholder="🔍 Search notes across all systems..." 
-            oninput="debouncedRenderSystems()"
+            oninput="renderSystems()"
             style="flex: 1; padding: 12px 20px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 12px; color: white; font-size: 14px;"
           />
           <label style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(255, 255, 255, 0.05); border-radius: 10px; cursor: pointer; white-space: nowrap;">
@@ -591,58 +586,6 @@
     let allNotes = [];
     let permissions = [];
 
-    // ===== PERFORMANCE: DATA CACHE =====
-    const DATA_CACHE = {
-      notes: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 }, // 5 min
-      permissions: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 }
-    };
-
-    function getCachedData(key) {
-      const cache = DATA_CACHE[key];
-      if (!cache) return null;
-      const now = Date.now();
-      if (cache.data && (now - cache.timestamp) < cache.ttl) {
-        if (DEBUG_MODE) console.log(`✅ Cache hit: ${key} (age: ${Math.round((now - cache.timestamp) / 1000)}s)`);
-        return cache.data;
-      }
-      return null;
-    }
-
-    function setCachedData(key, data) {
-      if (DATA_CACHE[key]) {
-        DATA_CACHE[key].data = data;
-        DATA_CACHE[key].timestamp = Date.now();
-        if (DEBUG_MODE) console.log(`💾 Cached: ${key}`);
-      }
-    }
-
-    function clearCache(key) {
-      if (key) {
-        if (DATA_CACHE[key]) {
-          DATA_CACHE[key].data = null;
-          DATA_CACHE[key].timestamp = 0;
-        }
-      } else {
-        Object.keys(DATA_CACHE).forEach(k => {
-          DATA_CACHE[k].data = null;
-          DATA_CACHE[k].timestamp = 0;
-        });
-      }
-    }
-
-    // ===== PERFORMANCE: DEBOUNCE HELPER =====
-    function debounce(func, wait) {
-      let timeout;
-      return function executedFunction(...args) {
-        const later = () => {
-          clearTimeout(timeout);
-          func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-      };
-    }
-
     // ===== INITIALIZATION =====
     (async function init() {
       try {
@@ -668,48 +611,26 @@
       container.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading systems and notes...</div></div>';
 
       try {
-        // Check cache first
-        const cachedNotes = getCachedData('notes');
-        const cachedPerms = getCachedData('permissions');
-        
-        if (cachedNotes && cachedPerms) {
-          if (DEBUG_MODE) console.log('✅ Using cached data');
-          allNotes = cachedNotes;
-          permissions = cachedPerms;
-          renderSystems();
-          return;
-        }
-
-        if (DEBUG_MODE) console.log('🔄 Fetching fresh data...');
-
-        // PERFORMANCE: Add limit to prevent loading thousands of notes
         // Load all notes (no deleted column, just fetch active notes)
         const { data: notes, error: notesError } = await supabase
           .from('student_notes')
           .select('*')
-          .order('class_date', { ascending: false })
-          .limit(500); // PERFORMANCE: Limit to 500 most recent notes
+          .order('class_date', { ascending: false });
 
         if (notesError) throw notesError;
         allNotes = notes || [];
 
         if (DEBUG_MODE) console.log('📚 Loaded notes:', allNotes.length);
 
-        // PERFORMANCE: Add limit to permissions query
         // Load all permissions
         const { data: perms, error: permsError } = await supabase
           .from('student_note_permissions')
-          .select('*')
-          .limit(1000); // PERFORMANCE: Limit permissions
+          .select('*');
 
         if (permsError) throw permsError;
         permissions = perms || [];
 
         if (DEBUG_MODE) console.log('🔑 Loaded permissions:', permissions.length);
-
-        // Cache the results
-        setCachedData('notes', allNotes);
-        setCachedData('permissions', permissions);
 
         renderSystems();
 
@@ -741,7 +662,6 @@
       const container = document.getElementById('systemsContainer');
       const searchInput = document.getElementById('searchInput').value.toLowerCase();
 
-      // PERFORMANCE: Use document fragment for batch DOM updates
       const systemsHTML = SYSTEMS.map(system => {
         // Flexible column detection - check multiple possible column names
         let systemNotes = allNotes.filter(note => {
@@ -793,7 +713,7 @@
                   type="text" 
                   class="system-search" 
                   placeholder="🔍 Search in ${system.name}..." 
-                  oninput="debouncedFilterSystemNotes('${system.name.replace(/[^a-zA-Z0-9]/g, '')}')"
+                  oninput="filterSystemNotes('${system.name.replace(/[^a-zA-Z0-9]/g, '')}')"
                   onclick="event.stopPropagation()"
                   style="width: 100%; padding: 10px 16px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 10px; color: white; font-size: 13px;"
                 />
@@ -819,9 +739,6 @@
 
       container.innerHTML = systemsHTML;
     }
-
-    // PERFORMANCE: Debounced version for search input
-    const debouncedRenderSystems = debounce(renderSystems, 300);
 
     // ===== RENDER NOTE CARD =====
     function renderNoteCard(note) {
@@ -882,7 +799,7 @@
       const system = SYSTEMS.find(s => s.name.replace(/[^a-zA-Z0-9]/g, '') === systemId);
       if (!system) return;
       
-      // PERFORMANCE: Filter notes efficiently
+      // Filter notes for this system
       let systemNotes = allNotes.filter(note => {
         const noteSystem = note.system || note.system_category || note.category || note.group_name;
         return noteSystem === system.name;
@@ -908,9 +825,6 @@
       }
     }
 
-    // PERFORMANCE: Create debounced version for system search
-    const debouncedFilterSystemNotes = debounce(filterSystemNotes, 300);
-
     // ===== GRANT ACCESS =====
     async function grantAccess(noteId, title) {
       try {
@@ -931,31 +845,22 @@
           // Update local state
           existing.is_accessible = true;
         } else {
-          // Create new using upsert to handle conflicts
+          // Create new
           const { data, error } = await supabase
             .from('student_note_permissions')
-            .upsert({
+            .insert({
               note_id: noteId,
               group_name: currentGroup,
-              student_id: null,
               is_accessible: true
-            }, {
-              onConflict: 'note_id,student_id,group_name',
-              ignoreDuplicates: false
             })
             .select()
             .single();
 
           if (error) throw error;
 
-          // Add to local state if it's new
-          if (data && !permissions.find(p => p.id === data.id)) {
-            permissions.push(data);
-          }
+          // Add to local state
+          permissions.push(data);
         }
-
-        // PERFORMANCE: Clear permissions cache after mutation
-        clearCache('permissions');
 
         renderSystems();
 
@@ -983,9 +888,6 @@
 
         // Update local state
         permission.is_accessible = false;
-
-        // PERFORMANCE: Clear permissions cache after mutation
-        clearCache('permissions');
 
         renderSystems();
 
@@ -1040,284 +942,6 @@
       if (bytes < 1024) return bytes + ' B';
       if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
       return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    }
-
-    // ===== DUPLICATE DETECTION =====
-    async function findDuplicates() {
-      try {
-        // Find duplicates based on similar titles
-        const duplicateGroups = {};
-        const normalizedTitles = new Map();
-
-        allNotes.forEach(note => {
-          // Normalize title: lowercase, remove extra spaces, common words
-          const normalized = (note.title || '')
-            .toLowerCase()
-            .replace(/\s+/g, ' ')
-            .trim();
-
-          if (normalized) {
-            if (!normalizedTitles.has(normalized)) {
-              normalizedTitles.set(normalized, []);
-            }
-            normalizedTitles.get(normalized).push(note);
-          }
-        });
-
-        // Filter to only groups with duplicates
-        const duplicates = [];
-        normalizedTitles.forEach((notes, title) => {
-          if (notes.length > 1) {
-            duplicates.push({
-              title: title,
-              count: notes.length,
-              notes: notes
-            });
-          }
-        });
-
-        if (duplicates.length === 0) {
-          await customAlert('✅ No duplicate notes found!');
-          return;
-        }
-
-        // Sort by count descending
-        duplicates.sort((a, b) => b.count - a.count);
-
-        // Display results in a modal
-        showDuplicatesModal(duplicates);
-
-      } catch (error) {
-        console.error('Error finding duplicates:', error);
-        await customAlert('Failed to find duplicates: ' + error.message);
-      }
-    }
-
-    function showDuplicatesModal(duplicates) {
-      const totalDuplicates = duplicates.reduce((sum, group) => sum + group.count, 0);
-      
-      const modalHTML = `
-        <div style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px); z-index: 10000; display: flex; align-items: center; justify-content: center;" id="duplicatesModal" onclick="if(event.target.id === 'duplicatesModal') closeDuplicatesModal()">
-          <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 20px; padding: 30px; max-width: 900px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.1);" onclick="event.stopPropagation()">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-              <h3 style="margin: 0; font-size: 22px; font-weight: 700; background: linear-gradient(135deg, #fb923c 0%, #f97316 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-                🔍 Duplicate Notes Found
-              </h3>
-              <button onclick="closeDuplicatesModal()" style="background: rgba(255, 255, 255, 0.1); border: none; color: white; font-size: 24px; cursor: pointer; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center;">×</button>
-            </div>
-            
-            <div style="background: rgba(251, 146, 60, 0.15); border: 1px solid rgba(251, 146, 60, 0.3); border-radius: 12px; padding: 16px; margin-bottom: 20px;">
-              <div style="font-size: 14px; color: #fdba74; margin-bottom: 8px;">
-                Found <strong>${duplicates.length}</strong> groups with duplicates (<strong>${totalDuplicates}</strong> total notes)
-              </div>
-              <div style="font-size: 12px; color: rgba(253, 186, 116, 0.7); margin-bottom: 12px;">
-                Review these notes and delete unnecessary duplicates to clean up your library.
-              </div>
-              <button onclick="deleteAllDuplicates(${JSON.stringify(duplicates).replace(/"/g, '&quot;')})" style="width: 100%; padding: 10px 16px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 8px; color: #fca5a5; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s;">
-                🗑️ Delete All Duplicates (Keep Most Recent)
-              </button>
-            </div>
-
-            <div style="display: flex; flex-direction: column; gap: 16px;">
-              ${duplicates.map((group, idx) => `
-                <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 16px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                    <div style="font-size: 15px; font-weight: 600; color: #fdba74;">
-                      ${idx + 1}. "${group.title}"
-                    </div>
-                    <div style="background: rgba(251, 146, 60, 0.2); border: 1px solid rgba(251, 146, 60, 0.4); border-radius: 8px; padding: 4px 12px; font-size: 12px; font-weight: 700; color: #fdba74;">
-                      ${group.count} duplicates
-                    </div>
-                  </div>
-                  
-                  <div style="display: flex; flex-direction: column; gap: 8px;">
-                    ${group.notes.map(note => {
-                      const system = note.system || note.system_category || note.category || note.group_name || 'Unknown';
-                      const date = note.class_date ? new Date(note.class_date).toLocaleDateString() : 'No date';
-                      const size = note.file_size ? formatFileSize(note.file_size) : '-';
-                      
-                      return `
-                        <div style="background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 12px; display: flex; justify-content: space-between; align-items: center;">
-                          <div style="flex: 1;">
-                            <div style="font-size: 13px; color: white; margin-bottom: 4px;">${note.title}</div>
-                            <div style="font-size: 11px; color: rgba(255, 255, 255, 0.5);">
-                              📁 ${system} • 📅 ${date} • 💾 ${size}
-                            </div>
-                          </div>
-                          <div style="display: flex; gap: 8px;">
-                            <button onclick="viewNote(${note.id})" style="padding: 6px 12px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 6px; color: #93c5fd; font-size: 11px; cursor: pointer; font-weight: 600;">
-                              View
-                            </button>
-                            <button onclick="confirmDeleteDuplicate(${note.id}, '${note.title?.replace(/'/g, "\\'")}', closeDuplicatesModal)" style="padding: 6px 12px; background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 6px; color: #fca5a5; font-size: 11px; cursor: pointer; font-weight: 600;">
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      `;
-                    }).join('')}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-
-            <div style="margin-top: 20px; text-align: center;">
-              <button onclick="closeDuplicatesModal()" style="padding: 12px 24px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 10px; color: white; font-size: 14px; cursor: pointer; font-weight: 600;">
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      `;
-
-      document.body.insertAdjacentHTML('beforeend', modalHTML);
-    }
-
-    function closeDuplicatesModal() {
-      const modal = document.getElementById('duplicatesModal');
-      if (modal) {
-        modal.remove();
-      }
-    }
-
-    async function confirmDeleteDuplicate(noteId, title, callback) {
-      const confirmed = await customConfirm(`Delete duplicate note:\n\n"${title}"\n\nThis action cannot be undone.`);
-      if (!confirmed) return;
-
-      try {
-        // Delete from database
-        const { error } = await supabase
-          .from('student_notes')
-          .delete()
-          .eq('id', noteId);
-
-        if (error) throw error;
-
-        // Also delete from storage if it has a file_path
-        const note = allNotes.find(n => n.id === noteId);
-        if (note?.file_path) {
-          try {
-            await supabase.storage
-              .from(BUCKET_NAME)
-              .remove([note.file_path]);
-          } catch (storageError) {
-            console.warn('Storage deletion error:', storageError);
-          }
-        }
-
-        // Remove from local array
-        const index = allNotes.findIndex(n => n.id === noteId);
-        if (index > -1) {
-          allNotes.splice(index, 1);
-        }
-
-        // Clear cache and reload
-        clearCache('notes');
-        
-        await customAlert('✓ Duplicate note deleted successfully');
-        
-        // Close modal and reload data
-        if (callback) callback();
-        await loadData();
-
-      } catch (error) {
-        console.error('Error deleting duplicate:', error);
-        await customAlert('Failed to delete note: ' + error.message);
-      }
-    }
-
-    async function deleteAllDuplicates(duplicates) {
-      try {
-        // Calculate total notes to delete (all duplicates except one per group)
-        const totalToDelete = duplicates.reduce((sum, group) => sum + (group.count - 1), 0);
-        
-        const confirmed = await customConfirm(
-          `⚠️ Delete All Duplicates?\n\n` +
-          `This will delete ${totalToDelete} duplicate notes, keeping only the most recent version of each.\n\n` +
-          `• ${duplicates.length} groups found\n` +
-          `• ${totalToDelete} notes will be deleted\n\n` +
-          `This action cannot be undone.`
-        );
-        
-        if (!confirmed) return;
-
-        let deletedCount = 0;
-        let errorCount = 0;
-        const notesToDelete = [];
-
-        // For each duplicate group, keep the most recent (highest ID or latest date)
-        duplicates.forEach(group => {
-          // Sort by class_date descending (most recent first), then by ID descending
-          const sorted = [...group.notes].sort((a, b) => {
-            const dateA = a.class_date ? new Date(a.class_date) : new Date(0);
-            const dateB = b.class_date ? new Date(b.class_date) : new Date(0);
-            
-            if (dateB - dateA !== 0) {
-              return dateB - dateA; // Most recent first
-            }
-            return b.id - a.id; // Highest ID first
-          });
-
-          // Keep the first (most recent), delete the rest
-          const toDelete = sorted.slice(1);
-          notesToDelete.push(...toDelete);
-        });
-
-        // Delete all duplicates
-        for (const note of notesToDelete) {
-          try {
-            // Delete from database
-            const { error } = await supabase
-              .from('student_notes')
-              .delete()
-              .eq('id', note.id);
-
-            if (error) throw error;
-
-            // Delete from storage if it has a file_path
-            if (note.file_path) {
-              try {
-                await supabase.storage
-                  .from(BUCKET_NAME)
-                  .remove([note.file_path]);
-              } catch (storageError) {
-                console.warn('Storage deletion error for note', note.id, ':', storageError);
-              }
-            }
-
-            // Remove from local array
-            const index = allNotes.findIndex(n => n.id === note.id);
-            if (index > -1) {
-              allNotes.splice(index, 1);
-            }
-
-            deletedCount++;
-
-          } catch (error) {
-            console.error('Error deleting note', note.id, ':', error);
-            errorCount++;
-          }
-        }
-
-        // Clear cache
-        clearCache('notes');
-
-        // Close modal and show success message
-        closeDuplicatesModal();
-
-        await customAlert(
-          `✅ Cleanup Complete!\n\n` +
-          `• ${deletedCount} duplicate notes deleted\n` +
-          `• Kept ${duplicates.length} most recent versions\n` +
-          (errorCount > 0 ? `\n⚠️ ${errorCount} errors occurred` : '')
-        );
-
-        // Reload data
-        await loadData();
-
-      } catch (error) {
-        console.error('Error deleting all duplicates:', error);
-        await customAlert('Failed to delete duplicates: ' + error.message);
-      }
     }
 
     function openNotesManager() {
@@ -1490,9 +1114,6 @@
           }
         }
 
-        // PERFORMANCE: Clear cache after batch operation
-        clearCache('permissions');
-
         await customAlert(`✓ ${successCount} note(s) shown${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
         clearSelection();
         renderSystems();
@@ -1547,9 +1168,6 @@
             errorCount++;
           }
         }
-
-        // PERFORMANCE: Clear cache after batch operation
-        clearCache('permissions');
 
         await customAlert(`✓ ${successCount} note(s) hidden${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
         clearSelection();
@@ -1840,7 +1458,7 @@
         const { error } = await supabase
           .from('student_note_permissions')
           .upsert(permissions, {
-            onConflict: 'note_id,student_id,group_name',
+            onConflict: 'note_id,student_id',
             ignoreDuplicates: false
           });
 
