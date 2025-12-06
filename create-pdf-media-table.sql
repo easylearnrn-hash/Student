@@ -41,20 +41,7 @@ CREATE POLICY "Students can view media for their notes"
     EXISTS (
       SELECT 1 FROM student_notes sn
       WHERE sn.id = pdf_media.note_id
-      AND (
-        -- Public notes (no payment required)
-        sn.requires_payment = false
-        OR
-        -- Notes they have access to via note_permissions
-        EXISTS (
-          SELECT 1 FROM note_permissions np
-          WHERE np.note_id = sn.id
-          AND np.group_name = (
-            SELECT group_letter FROM students
-            WHERE auth_user_id = auth.uid()
-          )
-        )
-      )
+      AND sn.requires_payment = false
     )
   );
 
