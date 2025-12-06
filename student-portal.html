@@ -7340,16 +7340,32 @@
         
         if (DEBUG_MODE) console.log(`✅ Loaded ${notes?.length || 0} notes`);
         
+        // Check if current student has paid (has any payment record with status 'paid')
+        const { data: paidPayments } = await supabase
+          .from('payment_records')
+          .select('id')
+          .eq('student_id', studentId)
+          .eq('status', 'paid')
+          .limit(1);
+        
+        const studentHasPaid = paidPayments && paidPayments.length > 0;
+        
+        if (DEBUG_MODE) console.log(`💰 Student payment status: ${studentHasPaid ? 'PAID' : 'UNPAID'}`);
+        
         // Transform notes to match expected format
         const transformedNotes = notes.map(note => {
           const classDate = new Date(note.class_date);
-          // 🔓 All notes are unlocked for students with individual access
-          const isPaid = true;
+          
+          // Check if this specific note requires payment
+          const noteRequiresPayment = note.requires_payment === true;
+          
+          // Student can access if: note doesn't require payment OR student has paid
+          const isPaid = !noteRequiresPayment || studentHasPaid;
           
           // Get system category from whatever column exists (try system, system_category, group_name, etc.)
           const systemName = note.system || note.system_category || note.category || note.group_name || 'General';
           
-          return {
+          const transformedNote = {
             id: note.id,
             date: classDate,
             title: note.title || 'Untitled Note',
@@ -7363,7 +7379,7 @@
             read: false, // TODO: Track which notes have been opened
             attachments: (note.file_path || note.pdf_url) ? [{
               title: (note.title || 'Note') + '.pdf',
-              url: note.file_path || note.pdf_url, // Use actual Supabase storage URL
+              url: note.file_path || note.pdf_url, // Storage path for Protected-PDF-Viewer
               noteId: note.id,
               type: 'pdf'
             }] : []
@@ -8170,9 +8186,11 @@
                       attachment.type === 'link' ? '🔗' : 
                       attachment.type === 'pdf' ? '📄' : '📎';
           
-          // For PDF attachments from our system, use Protected-PDF-Viewer
+          // For PDF attachments from our system, use Protected-PDF-Viewer-v3 (new filename to bypass cache)
+          // Pass student info in URL since sessionStorage doesn't transfer to new tabs
+          const cacheBuster = Date.now();
           const clickHandler = attachment.type === 'pdf' 
-            ? `event.stopPropagation(); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&title=${encodeURIComponent(attachment.title)}', '_blank')`
+            ? `event.stopPropagation(); window.open('Protected-PDF-Viewer-v3.html?url=${encodeURIComponent(attachment.url)}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&v=${cacheBuster}', '_blank')`
             : `event.stopPropagation(); window.open('${attachment.url}', '_blank')`;
           
           attachmentsHTML += `
