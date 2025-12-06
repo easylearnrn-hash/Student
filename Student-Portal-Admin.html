@@ -33,8 +33,9 @@
       left: 0;
       right: 0;
       bottom: 0;
-      background: radial-gradient(circle at 20% 50%, rgba(102,126,234,0.08) 0%, transparent 50%),
-                  radial-gradient(circle at 80% 80%, rgba(118,75,162,0.08) 0%, transparent 50%);
+      /* PERFORMANCE: Reduced opacity to lighten GPU load */
+      background: radial-gradient(circle at 20% 50%, rgba(102,126,234,0.05) 0%, transparent 50%),
+                  radial-gradient(circle at 80% 80%, rgba(118,75,162,0.05) 0%, transparent 50%);
       pointer-events: none;
       z-index: 0;
     }
@@ -217,6 +218,16 @@
     
     tr:hover {
       background: rgba(102,126,234,0.08);
+    }
+    
+    /* Red strip for students with unpaid balance */
+    tr.has-unpaid {
+      border-left: 4px solid #ef4444;
+      background: rgba(239, 68, 68, 0.05);
+    }
+    
+    tr.has-unpaid:hover {
+      background: rgba(239, 68, 68, 0.08);
     }
     
     .action-btn {
@@ -1634,6 +1645,62 @@
     let currentStudentId = null;
     let currentEmail = null; // Track admin email for audit logging
     
+    // ===== PERFORMANCE: DATA CACHE =====
+    const DATA_CACHE = {
+      students: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 }, // 5 min
+      notes: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 },
+      payments: { data: null, timestamp: 0, ttl: 3 * 60 * 1000 }, // 3 min
+      forum: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 },
+      stats: { data: null, timestamp: 0, ttl: 2 * 60 * 1000 } // 2 min
+    };
+
+    function getCachedData(key) {
+      const cache = DATA_CACHE[key];
+      if (!cache) return null;
+      const now = Date.now();
+      if (cache.data && (now - cache.timestamp) < cache.ttl) {
+        console.log(`✅ Cache hit: ${key} (age: ${Math.round((now - cache.timestamp) / 1000)}s)`);
+        return cache.data;
+      }
+      return null;
+    }
+
+    function setCachedData(key, data) {
+      if (DATA_CACHE[key]) {
+        DATA_CACHE[key].data = data;
+        DATA_CACHE[key].timestamp = Date.now();
+        console.log(`💾 Cached: ${key}`);
+      }
+    }
+
+    function clearCache(key) {
+      if (key) {
+        if (DATA_CACHE[key]) {
+          DATA_CACHE[key].data = null;
+          DATA_CACHE[key].timestamp = 0;
+        }
+      } else {
+        // Clear all caches
+        Object.keys(DATA_CACHE).forEach(k => {
+          DATA_CACHE[k].data = null;
+          DATA_CACHE[k].timestamp = 0;
+        });
+      }
+    }
+
+    // ===== PERFORMANCE: DEBOUNCE HELPER =====
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+    
     // Tab Switching
     function switchTab(tab) {
       // Update tabs
@@ -1644,7 +1711,7 @@
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
       document.getElementById(tab + 'Tab').classList.add('active');
       
-      // Load data for tab
+      // Load data for tab (with caching)
       if (tab === 'students') loadStudents();
       if (tab === 'notes') loadNotes();
       // Group Notes tab now uses standalone page (Group-Notes.html)
@@ -1657,27 +1724,38 @@
     async function loadStats() {
       try {
         console.log('📊 [loadStats] Starting stats load...');
+        
+        // Check cache first
+        const cached = getCachedData('stats');
+        if (cached) {
+          console.log('✅ Using cached stats');
+          updateStatsUI(cached);
+          return;
+        }
+        
         // TEMPORARILY SKIP AUTH CHECK - remove this later
         // await ensureAdminSession();
+        
+        console.log('🔄 Fetching fresh stats...');
         
         // Total Students
         const { count: studentCount, error: studentError } = await supabase
           .from('students')
           .select('*', { count: 'exact', head: true });
         console.log('👥 [loadStats] Students count:', studentCount, 'Error:', studentError);
-        document.getElementById('totalStudents').textContent = studentCount || 0;
         
         // Total Notes - ONLY count non-deleted notes
+        let notesCount = 0;
         try {
-          const { count: notesCount, error: notesError } = await supabase
+          const { count, error: notesError } = await supabase
             .from('student_notes')
             .select('*', { count: 'exact', head: true })
             .eq('deleted', false);
-          console.log('📝 [loadStats] Notes count (deleted=false):', notesCount, 'Error:', notesError);
-          document.getElementById('totalNotes').textContent = notesCount || 0;
+          console.log('📝 [loadStats] Notes count (deleted=false):', count, 'Error:', notesError);
+          notesCount = count || 0;
         } catch (err) {
           console.warn('❌ [loadStats] Could not load notes count (RLS?):', err);
-          document.getElementById('totalNotes').textContent = '-';
+          notesCount = '-';
         }
         
         // Total Payments - ONLY count paid status from payment_records + all Zelle
@@ -1691,24 +1769,43 @@
             .select('*', { count: 'exact', head: true })
         ]);
         console.log('💰 [loadStats] Payment counts - Manual (paid only):', manualCount.count, 'Zelle:', zelleCount.count);
-        console.log('💰 [loadStats] Manual error:', manualCount.error, 'Zelle error:', zelleCount.error);
         const totalPayments = (manualCount.count || 0) + (zelleCount.count || 0);
-        console.log('💰 [loadStats] Total payments:', totalPayments);
-        document.getElementById('totalPayments').textContent = totalPayments;
         
         // Forum Messages (may fail if RLS restricts access)
+        let forumCount = 0;
         try {
-          const { count: forumCount } = await supabase
+          const { count } = await supabase
             .from('nurses_forum')
             .select('*', { count: 'exact', head: true })
             .is('parent_id', null);
-          document.getElementById('forumMessages').textContent = forumCount || 0;
+          forumCount = count || 0;
         } catch (err) {
           console.warn('Could not load forum count (RLS?):', err);
-          document.getElementById('forumMessages').textContent = '-';
+          forumCount = '-';
         }
+        
+        const stats = {
+          students: studentCount || 0,
+          notes: notesCount,
+          payments: totalPayments,
+          forum: forumCount
+        };
+        
+        // Cache the results
+        setCachedData('stats', stats);
+        updateStatsUI(stats);
+        
       } catch (error) {
         console.error('Error loading stats:', error);
+      }
+    }
+    
+    function updateStatsUI(stats) {
+      document.getElementById('totalStudents').textContent = stats.students;
+      document.getElementById('totalNotes').textContent = stats.notes;
+      document.getElementById('totalPayments').textContent = stats.payments;
+      if (document.getElementById('forumMessages')) {
+        document.getElementById('forumMessages').textContent = stats.forum;
       }
     }
     
@@ -1807,14 +1904,22 @@
     async function loadStudents() {
       console.log('🔄 Loading students...');
       try {
+        // Check cache first
+        const cached = getCachedData('students');
+        if (cached) {
+          console.log('✅ Using cached students data');
+          renderStudentsTable(cached);
+          return;
+        }
+        
         // TEMPORARILY SKIP AUTH CHECK - remove this later
         console.log('⚠️ Skipping auth check temporarily...');
         // await ensureAdminSession();
         
         console.log('📊 Fetching students and groups...');
-        // Fetch students and groups
+        // Fetch students and groups (limit to prevent overload)
         const [studentsResult, groupsResult] = await Promise.all([
-          supabase.from('students').select('*').order('name'),
+          supabase.from('students').select('*').order('name').limit(500),
           supabase.from('groups').select('*')
         ]);
         
@@ -1836,10 +1941,14 @@
         let allSessionsMap = {};
         try {
           // FIX: Query student_sessions table (not session_logs)
+          // PERFORMANCE: Only fetch sessions updated in last hour to reduce data transfer
+          const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
           const sessionsResult = await supabase
             .from('student_sessions')
             .select('student_id, is_active, last_activity')
-            .eq('is_active', true);
+            .eq('is_active', true)
+            .gte('last_activity', oneHourAgo)
+            .limit(200);
           
           if (!sessionsResult.error) {
             const allSessions = sessionsResult.data || [];
@@ -1856,11 +1965,11 @@
             console.log('⚠️ Student sessions query error:', sessionsResult.error);
           }
           
-          // Also get all students who have ever logged in
+          // Also get all students who have ever logged in (with limit)
           const allSessionsResult = await supabase
             .from('student_sessions')
             .select('student_id')
-            .limit(1000);
+            .limit(500);
           
           if (!allSessionsResult.error) {
             const allSessions = allSessionsResult.data || [];
@@ -1889,78 +1998,100 @@
           }
         });
         
-        // Populate group filter dropdown
-        const groupFilter = document.getElementById('groupFilterSelect');
-        if (groupFilter) {
-          // Store current selection
-          const currentSelection = groupFilter.value;
-          
-          // Build options
-          const options = ['<option value="">All Groups</option>'];
-          Array.from(uniqueGroups).sort().forEach(code => {
-            options.push(`<option value="${code}">${formatGroupLabel(code)}</option>`);
-          });
-          groupFilter.innerHTML = options.join('');
-          
-          // Restore selection if it still exists
-          if (currentSelection && uniqueGroups.has(currentSelection)) {
-            groupFilter.value = currentSelection;
-          }
-        }
+        const data = {
+          students,
+          groups,
+          groupMap,
+          uniqueGroups,
+          onlineMap,
+          allSessionsMap
+        };
         
-        const tbody = document.getElementById('studentsTableBody');
+        // Cache the data
+        setCachedData('students', data);
+        renderStudentsTable(data);
         
-        if (students.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">👥</div><div>No students found</div></td></tr>';
-          return;
-        }
-        
-        tbody.innerHTML = students.map(student => {
-          const groupCode = canonicalizeGroupCode(student.group_name || student.group || '');
-          const group = groupMap[groupCode];
-          const schedule = group ? formatScheduleDisplay(group.schedule) : '-';
-          const isOnline = onlineMap[student.id];
-          const hasLoggedIn = allSessionsMap[student.id];
-          
-          // Determine status class: online (bright green) | was-online (dark green) | default (blue)
-          let statusClass = '';
-          if (isOnline) {
-            statusClass = 'online';
-          } else if (hasLoggedIn) {
-            statusClass = 'was-online';
-          }
-          
-          return `
-          <tr data-group="${groupCode}" data-student-name="${(student.name || '').toLowerCase()}" data-active="${student.show_in_grid ? 'true' : 'false'}">
-            <td>${student.name || '-'}</td>
-            <td>${student.email || '-'}</td>
-            <td>${formatGroupLabel(groupCode)}</td>
-            <td>${schedule}</td>
-            <td><span class="badge ${student.show_in_grid ? 'active' : 'inactive'}">${student.show_in_grid ? 'Active' : 'Inactive'}</span></td>
-            <td>
-              <button class="action-btn info ${statusClass}" onclick="showStudentStatus(${student.id}, '${student.name?.replace(/'/g, "\\'") || 'Unknown'}')">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="10"></circle>
-                  <line x1="12" y1="16" x2="12" y2="12"></line>
-                  <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                </svg>
-              </button>
-              <button class="action-btn view" onclick="impersonateStudent(${student.id}, '${student.name?.replace(/'/g, "\\'") || 'Unknown'}')">👁️ View as Student</button>
-              <button class="action-btn edit" onclick="editStudent(${student.id})">Edit</button>
-              <button class="action-btn delete" onclick="deleteStudent(${student.id})">Delete</button>
-            </td>
-          </tr>
-        `;
-        }).join('');
-        
-        // Apply active filter if it's enabled by default
-        if (showActiveOnly) {
-          console.log('✅ Applying default active filter on page load');
-          filterStudents();
-        }
       } catch (error) {
         console.error('Error loading students:', error);
         document.getElementById('studentsTableBody').innerHTML = '<tr><td colspan="6" style="text-align:center; color: #ef4444;">Error loading students</td></tr>';
+      }
+    }
+    
+    function renderStudentsTable(data) {
+      const { students, groupMap, uniqueGroups, onlineMap, allSessionsMap } = data;
+      
+      // Populate group filter dropdown
+      const groupFilter = document.getElementById('groupFilterSelect');
+      if (groupFilter) {
+        // Store current selection
+        const currentSelection = groupFilter.value;
+        
+        // Build options
+        const options = ['<option value="">All Groups</option>'];
+        Array.from(uniqueGroups).sort().forEach(code => {
+          options.push(`<option value="${code}">${formatGroupLabel(code)}</option>`);
+        });
+        groupFilter.innerHTML = options.join('');
+        
+        // Restore selection if it still exists
+        if (currentSelection && uniqueGroups.has(currentSelection)) {
+          groupFilter.value = currentSelection;
+        }
+      }
+      
+      const tbody = document.getElementById('studentsTableBody');
+      
+      if (students.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">👥</div><div>No students found</div></td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = students.map(student => {
+        const groupCode = canonicalizeGroupCode(student.group_name || student.group || '');
+        const group = groupMap[groupCode];
+        const schedule = group ? formatScheduleDisplay(group.schedule) : '-';
+        const isOnline = onlineMap[student.id];
+        const hasLoggedIn = allSessionsMap[student.id];
+        
+        // Check for unpaid balance (negative balance = owes money)
+        const balance = parseFloat(student.balance) || 0;
+        const hasUnpaid = balance < 0;
+        
+        // Determine status class: online (bright green) | was-online (dark green) | default (blue)
+        let statusClass = '';
+        if (isOnline) {
+          statusClass = 'online';
+        } else if (hasLoggedIn) {
+          statusClass = 'was-online';
+        }
+        
+        return `
+        <tr class="${hasUnpaid ? 'has-unpaid' : ''}" data-group="${groupCode}" data-student-name="${(student.name || '').toLowerCase()}" data-active="${student.show_in_grid ? 'true' : 'false'}">
+          <td>${student.name || '-'}</td>
+          <td>${student.email || '-'}</td>
+          <td>${formatGroupLabel(groupCode)}</td>
+          <td>${schedule}</td>
+          <td><span class="badge ${student.show_in_grid ? 'active' : 'inactive'}">${student.show_in_grid ? 'Active' : 'Inactive'}</span></td>
+          <td>
+            <button class="action-btn info ${statusClass}" onclick="showStudentStatus(${student.id}, '${student.name?.replace(/'/g, "\\'") || 'Unknown'}')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+            </button>
+            <button class="action-btn view" onclick="impersonateStudent(${student.id}, '${student.name?.replace(/'/g, "\\'") || 'Unknown'}')">👁️ View as Student</button>
+            <button class="action-btn edit" onclick="editStudent(${student.id})">Edit</button>
+            <button class="action-btn delete" onclick="deleteStudent(${student.id})">Delete</button>
+          </td>
+        </tr>
+      `;
+      }).join('');
+      
+      // Apply active filter if it's enabled by default
+      if (showActiveOnly) {
+        console.log('✅ Applying default active filter on page load');
+        filterStudents();
       }
     }
     
@@ -2204,6 +2335,10 @@
           if (error) throw error;
           alert('Student added successfully!');
         }
+        
+        // PERFORMANCE: Clear cache after mutation
+        clearCache('students');
+        clearCache('stats');
         
         closeStudentModal();
         loadStudents();
@@ -2600,6 +2735,10 @@
         
         if (error) throw error;
         
+        // PERFORMANCE: Clear cache after mutation
+        clearCache('students');
+        clearCache('stats');
+        
         alert('Student deleted successfully!');
         loadStudents();
         loadStats();
@@ -2734,6 +2873,9 @@
       const selectedGroup = document.getElementById('groupFilterSelect')?.value || '';
       const rows = document.querySelectorAll('#studentsTableBody tr');
       
+      // PERFORMANCE: Use document fragment to batch DOM updates
+      let visibleCount = 0;
+      
       rows.forEach(row => {
         const text = row.textContent.toLowerCase();
         const rowGroup = row.getAttribute('data-group') || '';
@@ -2757,10 +2899,15 @@
                           (!showOnlineOnly || isOnline) &&
                           (!showActiveOnly || isActive);
         row.style.display = shouldShow ? '' : 'none';
+        if (shouldShow) visibleCount++;
       });
+      
+      console.log(`🔍 Filtered students: ${visibleCount}/${rows.length} visible`);
     }
     
-    function filterNotes() {
+    // Create debounced versions of filter functions
+    const debouncedFilterStudents = debounce(filterStudents, 300);
+    const debouncedFilterNotes = debounce(function() {
       const search = document.getElementById('notesSearch').value.toLowerCase();
       const rows = document.querySelectorAll('#notesTableBody tr');
       
@@ -2768,9 +2915,8 @@
         const text = row.textContent.toLowerCase();
         row.style.display = text.includes(search) ? '' : 'none';
       });
-    }
-    
-    function filterPayments() {
+    }, 300);
+    const debouncedFilterPayments = debounce(function() {
       const search = document.getElementById('paymentsSearch').value.toLowerCase();
       const rows = document.querySelectorAll('#paymentsTableBody tr');
       
@@ -2778,9 +2924,8 @@
         const text = row.textContent.toLowerCase();
         row.style.display = text.includes(search) ? '' : 'none';
       });
-    }
-    
-    function filterForum() {
+    }, 300);
+    const debouncedFilterForum = debounce(function() {
       const search = document.getElementById('forumSearch').value.toLowerCase();
       const rows = document.querySelectorAll('#forumTableBody tr');
       
@@ -2788,6 +2933,18 @@
         const text = row.textContent.toLowerCase();
         row.style.display = text.includes(search) ? '' : 'none';
       });
+    }, 300);
+    
+    function filterNotes() {
+      debouncedFilterNotes();
+    }
+    
+    function filterPayments() {
+      debouncedFilterPayments();
+    }
+    
+    function filterForum() {
+      debouncedFilterForum();
     }
     
     // Initialize

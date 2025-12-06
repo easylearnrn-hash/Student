@@ -5593,8 +5593,10 @@
           .eq('student_id', student.id);
         
         if (!error && data) {
-          absences = data.map(a => a.class_date);
+          // Extract just YYYY-MM-DD portion to match scheduled date format
+          absences = data.map(a => a.class_date ? a.class_date.substring(0, 10) : a.class_date);
           console.debug(`✅ Loaded ${absences.length} absences for student:`, absences);
+          console.debug(`📋 Raw absence data:`, data);
         } else if (error) {
           console.debug('⚠️ Error loading absences:', error);
         }
@@ -5611,10 +5613,28 @@
           .eq('student_id', student.id);
         
         if (!error && data) {
-          creditPayments = data.map(cp => cp.class_date);
+          // Extract just YYYY-MM-DD portion to match scheduled date format
+          creditPayments = data.map(cp => cp.class_date ? cp.class_date.substring(0, 10) : cp.class_date);
         }
       } catch (err) {
         console.debug('⚠️ Could not load credit payments:', err);
+      }
+      
+      // Fetch skipped_classes to exclude cancelled classes from schedule
+      let skippedClassDates = [];
+      try {
+        const { data, error } = await supabase
+          .from('skipped_classes')
+          .select('*')
+          .eq('group_name', student.group_name || student.group);
+        
+        if (!error && data) {
+          // Extract just YYYY-MM-DD portion to match scheduled date format
+          skippedClassDates = data.map(sc => sc.class_date ? sc.class_date.substring(0, 10) : sc.class_date);
+          console.debug(`✅ Loaded ${skippedClassDates.length} skipped classes for group:`, skippedClassDates);
+        }
+      } catch (err) {
+        console.debug('⚠️ Could not load skipped classes:', err);
       }
       
       // Parse schedule string to extract active days
@@ -5664,18 +5684,30 @@
       // Generate all scheduled class dates until today
       for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
         const dayName = daysOfWeek[d.getDay()];
+        // Use local date format instead of UTC to avoid timezone shift
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+        console.debug(`🔍 Checking ${dateStr} (${dayName}, day#${d.getDay()}) - in schedule? ${scheduleActiveDays.includes(dayName)}`);
         if (scheduleActiveDays.includes(dayName)) {
-          const dateStr = d.toISOString().split('T')[0];
-          scheduledDates.push(dateStr);
+          // Skip if this class was cancelled/skipped in the Calendar
+          if (!skippedClassDates.includes(dateStr)) {
+            scheduledDates.push(dateStr);
+            console.debug(`✅ Added ${dateStr} as scheduled class`);
+          } else {
+            console.debug(`⏭️ ${dateStr}: Class was skipped/cancelled in Calendar`);
+          }
         }
       }
       
-      console.debug(`📅 Generated ${scheduledDates.length} scheduled class dates`);
+      console.debug(`📅 Generated ${scheduledDates.length} scheduled class dates (after excluding ${skippedClassDates.length} skipped classes)`);
       
       // Check each scheduled date for payment status
       const unpaidClasses = [];
       const absentClasses = []; // Track absent classes for display
       for (const dateStr of scheduledDates) {
+        console.debug(`🔍 Checking date ${dateStr} against absences:`, absences, `includes? ${absences.includes(dateStr)}`);
         // Mark if absent (show in payment history but don't count as unpaid)
         if (absences.includes(dateStr)) {
           console.debug(`⚪ ${dateStr}: Student was absent (no payment expected)`);
@@ -5873,9 +5905,9 @@
       if (unpaidClasses && unpaidClasses.length > 0) {
         console.debug(`📋 Displaying ${unpaidClasses.length} unpaid class dates`);
         unpaidClasses.forEach(unpaidClass => {
-          // Extract just YYYY-MM-DD portion and add T00:00:00 to avoid timezone issues
-          const dateOnly = unpaidClass.date.substring(0, 10);
-          const classDate = new Date(dateOnly + 'T00:00:00');
+          // Extract just YYYY-MM-DD portion and add local midnight time to avoid timezone shift
+          const dateOnlyStr = unpaidClass.date ? unpaidClass.date.substring(0, 10) : unpaidClass.date;
+          const classDate = new Date(dateOnlyStr + 'T00:00:00');
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           const dateStr = `${monthNames[classDate.getMonth()]} ${classDate.getDate()}, ${classDate.getFullYear()}`;
           
@@ -5898,7 +5930,9 @@
       if (absentClasses && absentClasses.length > 0) {
         console.debug(`📋 Displaying ${absentClasses.length} absent class dates`);
         absentClasses.forEach(absentClass => {
-          const classDate = new Date(absentClass.date);
+          // Extract just YYYY-MM-DD portion and add local midnight time to avoid timezone shift
+          const dateOnlyStr = absentClass.date ? absentClass.date.substring(0, 10) : absentClass.date;
+          const classDate = new Date(dateOnlyStr + 'T00:00:00');
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           const dateStr = `${monthNames[classDate.getMonth()]} ${classDate.getDate()}, ${classDate.getFullYear()}`;
           

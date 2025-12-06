@@ -5247,12 +5247,12 @@ ORDER BY timestamp DESC;</pre>
             dateISO: date.toISOString()
           });
 
-          // Show the exact stored time in LA local time (already adjusted when parsing Gmail)
+          // Show the exact stored time (already adjusted when parsing Gmail)
           const formatter = new Intl.DateTimeFormat('en-US', {
             hour: 'numeric',
             minute: '2-digit',
-            hour12: true
-            // No timeZone specified = uses browser's local timezone (LA)
+            hour12: true,
+            timeZone: 'UTC'
           });
           const label = formatter.format(date);
           formatCache.timeLabel.set(timestampMs, label);
@@ -7712,40 +7712,20 @@ ORDER BY timestamp DESC;</pre>
           // Get Gmail's delivery time exactly as it is
           const gmailTimestamp = dateHeader ? new Date(dateHeader.value) : new Date();
 
-          // Check timezone offset from localStorage (synced from Supabase on page load)
+          // Check timezone offset toggles
+          // Read from localStorage cache (synced from Supabase on page load and every toggle change)
           const offset12 = localStorage.getItem('la-offset-12') === 'true';
           const offset11 = localStorage.getItem('la-offset-11') === 'true';
-
-          console.log('🕐 TIMEZONE CHECK IN parseZelleEmail:');
-          console.log('   localStorage la-offset-12:', localStorage.getItem('la-offset-12'));
-          console.log('   localStorage la-offset-11:', localStorage.getItem('la-offset-11'));
-          console.log('   offset12 (boolean):', offset12);
-          console.log('   offset11 (boolean):', offset11);
 
           // Apply offset if toggle is on
           let finalTimestamp = gmailTimestamp;
           let offsetApplied = 'none';
-          
-          console.log('⏰ BEFORE OFFSET:');
-          
-          console.log('⏰ BEFORE OFFSET:');
-          console.log('   gmailTimestamp:', gmailTimestamp.toISOString());
-          console.log('   offset12?', offset12, 'offset11?', offset11);
-          
           if (offset12) {
             finalTimestamp = new Date(gmailTimestamp.getTime() - (12 * 60 * 60 * 1000));
             offsetApplied = '-12h (Winter)';
-            console.log('✅ APPLYING -12 HOUR OFFSET!');
-            console.log('   Original:', gmailTimestamp.toISOString());
-            console.log('   After -12h:', finalTimestamp.toISOString());
           } else if (offset11) {
             finalTimestamp = new Date(gmailTimestamp.getTime() - (11 * 60 * 60 * 1000));
             offsetApplied = '-11h (Summer)';
-            console.log('✅ APPLYING -11 HOUR OFFSET!');
-            console.log('   Original:', gmailTimestamp.toISOString());
-            console.log('   After -11h:', finalTimestamp.toISOString());
-          } else {
-            console.log('❌ NO OFFSET APPLIED - offset12 and offset11 are both FALSE!');
           }
           
           if (offsetApplied !== 'none') {
@@ -7754,20 +7734,29 @@ ORDER BY timestamp DESC;</pre>
             console.log(`   Adjusted: ${finalTimestamp.toISOString()}`);
           }
 
-          // Extract date and time components from the final timestamp using LOCAL time methods
-          // This preserves the actual LA time that the payment was received
-          const year = finalTimestamp.getFullYear();
-          const month = String(finalTimestamp.getMonth() + 1).padStart(2, '0');
-          const day = String(finalTimestamp.getDate()).padStart(2, '0');
-          const hours = String(finalTimestamp.getHours()).padStart(2, '0');
-          const minutes = String(finalTimestamp.getMinutes()).padStart(2, '0');
-          const seconds = String(finalTimestamp.getSeconds()).padStart(2, '0');
+          // Extract date and time components from the final timestamp
+          // Extract date and time in PST timezone (America/Los_Angeles)
+          // This ensures correct dates regardless of browser's local timezone (e.g., Armenia)
+          const pstDateStr = finalTimestamp.toLocaleString('en-US', { 
+            timeZone: 'America/Los_Angeles',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+          });
+          
+          // Parse PST date string (format: "MM/DD/YYYY, HH:MM:SS")
+          const [datePart, timePart] = pstDateStr.split(', ');
+          const [month, day, year] = datePart.split('/');
+          const [hours, minutes, seconds] = timePart.split(':');
           
           const dateStr = `${year}-${month}-${day}`;
           const timestampStr = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
-
-          console.log('📅 EXTRACTED DATE STRING:', dateStr);
-          console.log('⏰ EXTRACTED TIMESTAMP STRING:', timestampStr);
+          console.log(`📅 Final date extracted (PST): ${dateStr} at ${hours}:${minutes}:${seconds}`);
+          const timestampStr = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
 
           let bodyText = '';
           if (messageData.payload.body && messageData.payload.body.data) {
@@ -7804,7 +7793,7 @@ ORDER BY timestamp DESC;</pre>
           }
 
           // Parse amount - universal pattern
-          const amountMatch = bodyText.match(/\$[\d,]+\.\d{2}/);
+          const amountMatch = bodyText.match(/$[\d,]+\.\d{2}/);
           const amount = amountMatch ? parseFloat(amountMatch[0].replace(/[$,]/g, '')) : 0;
 
           // Parse sender name - try multiple patterns
@@ -7822,24 +7811,27 @@ ORDER BY timestamp DESC;</pre>
             }
           }
 
-          // Parse memo/message - ONLY for display, NEVER use as student name
+          // Parse memo/message - try multiple patterns
           let memo = '';
+          let studentNameFromMessage = '';
 
-          // Pattern 1: "Message from [Payer]: [Text]" (US Bank specific)
+          // Pattern 1: "Message from [Payer]: [Student Name]" (US Bank specific - extract student name)
+          // STOP BEFORE footer text like "The money is ready", "Pay it forward", etc.
           let messageFromMatch = bodyText.match(
             /Message\s+from\s+[^:]+:\s*([A-Za-z\s,'"\-]+?)(?=\s*(?:The money|Pay it forward|If you'd|Thanks|You can add|View transaction|\*\s*If you|\n\n|$))/i
           );
           if (messageFromMatch) {
-            let messageText = messageFromMatch[1].trim();
+            studentNameFromMessage = messageFromMatch[1].trim();
 
-            // Clean footer fragments and special characters
-            messageText = messageText
+            // Extra safety filter to remove any footer fragments and special characters
+            studentNameFromMessage = studentNameFromMessage
               .replace(/(The money.*|Pay it forward.*|If you'd.*|Thanks.*|You can add.*|View transaction.*|\*\s*If you.*)/i, '')
-              .replace(/[⚠️*]/g, '')
+              .replace(/[⚠️*]/g, '') // Remove emoji and asterisks
               .trim();
 
-            if (messageText.length > 0) {
-              memo = messageText;
+            // Only use as memo if it's not empty after cleaning
+            if (studentNameFromMessage.length > 0) {
+              memo = studentNameFromMessage;
             }
           } else {
             // Pattern 2: "Memo:" or "Message:" or "Note:" (text/plain format)
@@ -7849,7 +7841,7 @@ ORDER BY timestamp DESC;</pre>
               // Clean footer from memo as well
               memo = memo
                 .replace(/(The money.*|Pay it forward.*|If you'd.*|Thanks.*|You can add.*|View transaction.*|\*\s*If you.*)/i, '')
-                .replace(/[⚠️*]/g, '')
+                .replace(/[⚠️*]/g, '') // Remove emoji and asterisks
                 .trim();
             }
           }
@@ -7857,6 +7849,7 @@ ORDER BY timestamp DESC;</pre>
           // Final check: if memo contains footer keywords, clear it
           if (memo && /(?:if you'd|pay it forward|the money is ready|view transaction)/i.test(memo)) {
             memo = '';
+            studentNameFromMessage = '';
           }
 
           if (!amount || !senderName) return null;
@@ -7880,6 +7873,7 @@ ORDER BY timestamp DESC;</pre>
             timestamp: timestampStr,
             email_date: timestampStr,
             memo: memo,
+            studentNameFromMessage: studentNameFromMessage,
             status: 'unmatched'
           };
         } catch (error) {
@@ -8018,77 +8012,17 @@ ORDER BY timestamp DESC;</pre>
           return { data: [], error: null };
         }
 
-        // Load all students for matching
-        const { data: allStudents, error: studentsError } = await supabase
-          .from('students')
-          .select('id, name, email, aliases');
-        
-        if (studentsError) {
-          console.error('Error loading students for matching:', studentsError);
-        }
-
-        // Match each payment to a student ID - ONLY by payer name, NEVER by message text
-        const supabasePayments = payments.map(p => {
-          let linked_student_id = null;
-          let matched_student_name = null;
-          
-          // Only match by PAYER name, never by message/memo content
-          if (p.payer && allStudents) {
-            const payerName = p.payer.toLowerCase();
-            
-            // Try exact name match first
-            let matchedStudent = allStudents.find(s => 
-              s.name && s.name.toLowerCase() === payerName
-            );
-            
-            // Try partial name match (all words in payer name appear in student name)
-            if (!matchedStudent) {
-              matchedStudent = allStudents.find(s => {
-                if (!s.name) return false;
-                const name = s.name.toLowerCase();
-                const nameParts = payerName.split(/\s+/);
-                return nameParts.every(part => name.includes(part));
-              });
-            }
-            
-            // Try aliases match
-            if (!matchedStudent) {
-              matchedStudent = allStudents.find(s => {
-                if (!s.aliases) return false;
-                let aliases = [];
-                try {
-                  aliases = typeof s.aliases === 'string' ? JSON.parse(s.aliases) : s.aliases;
-                } catch (e) {
-                  aliases = [s.aliases];
-                }
-                return aliases.some(alias => 
-                  alias && alias.toLowerCase() === payerName
-                );
-              });
-            }
-            
-            if (matchedStudent) {
-              linked_student_id = matchedStudent.id;
-              matched_student_name = matchedStudent.name;
-              debugLog(`✅ Matched payer "${p.payer}" → Student "${matchedStudent.name}" (ID: ${linked_student_id})`);
-            } else {
-              debugLog(`⚠️ No match for payer "${p.payer}" - will show as Unmatched`);
-            }
-          }
-          
-          return {
-            id: p.gmailId,
-            gmail_id: p.gmailId,
-            payer_name: p.payer,
-            amount: p.amount,
-            date: p.date,
-            email_date: p.timestamp,
-            memo: p.memo,
-            student_name: matched_student_name, // Only set if matched, otherwise null
-            linked_student_id: linked_student_id,
-            status: linked_student_id ? 'matched' : 'unmatched'
-          };
-        });
+        const supabasePayments = payments.map(p => ({
+          id: p.gmailId,
+          gmail_id: p.gmailId,
+          payer_name: p.payer,
+          amount: p.amount,
+          date: p.date,
+          email_date: p.timestamp,
+          memo: p.memo,
+          student_name: p.studentNameFromMessage,
+          status: p.status
+        }));
 
         const { data, error } = await supabase
           .from('payments')
@@ -8100,8 +8034,7 @@ ORDER BY timestamp DESC;</pre>
           return { data: null, error };
         }
 
-        const matchedCount = supabasePayments.filter(p => p.linked_student_id).length;
-        debugLog(`💾 [${contextLabel}] Saved ${data.length} payments to Supabase (${matchedCount} matched to students)`);
+  debugLog(`💾 [${contextLabel}] Saved ${data.length} payments to Supabase`);
         return { data, error: null };
       }
 
