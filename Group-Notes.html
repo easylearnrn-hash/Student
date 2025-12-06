@@ -403,6 +403,28 @@
         grid-template-columns: 1fr;
       }
     }
+    
+    @keyframes slideIn {
+      from {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
+    }
+    
+    @keyframes slideOut {
+      from {
+        transform: translateX(0);
+        opacity: 1;
+      }
+      to {
+        transform: translateX(100%);
+        opacity: 0;
+      }
+    }
   </style>
 </head>
 <body>
@@ -728,6 +750,13 @@
     // ===== INITIALIZATION =====
     (async function init() {
       try {
+        // Wait for Supabase to be ready
+        if (!window.supabase) {
+          console.error('Supabase client not initialized');
+          window.location.href = 'index.html';
+          return;
+        }
+        
         const session = window.ArnomaAuth
           ? await window.ArnomaAuth.ensureSession(supabase, { redirectToLogin: true })
           : (await supabase.auth.getSession()).data.session;
@@ -740,7 +769,11 @@
         await loadData();
       } catch (error) {
         console.error('Init error:', error);
-        alert('Failed to initialize: ' + error.message);
+        // Don't show alert if AUTH_REQUIRED (redirect is happening)
+        if (error.message !== 'AUTH_REQUIRED') {
+          alert('Failed to initialize: ' + error.message);
+        }
+        // If AUTH_REQUIRED, redirect should already be happening via ensureSession
       }
     })();
 
@@ -817,6 +850,70 @@
 
       renderSystems();
     }
+    
+    // ===== ONGOING SYSTEM MANAGEMENT =====
+    function showToast(message, type = 'info') {
+      const toast = document.createElement('div');
+      toast.style.cssText = `
+        position: fixed;
+        top: 80px;
+        right: 20px;
+        padding: 16px 24px;
+        background: ${type === 'success' ? 'rgba(34,197,94,0.95)' : 'rgba(59,130,246,0.95)'};
+        color: white;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        z-index: 10000;
+        font-weight: 600;
+        animation: slideIn 0.3s ease-out;
+      `;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.style.animation = 'slideOut 0.3s ease-in';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+    
+    // Toggle ongoing status for a system in Group Notes
+    function toggleSystemOngoing(systemName, isChecked) {
+      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+      const ongoingSystemsMap = JSON.parse(localStorage.getItem('arnoma-ongoing-systems') || '{}');
+      
+      if (isChecked) {
+        // Set this system as ongoing for this group
+        ongoingSystemsMap[groupLetter] = systemName;
+        
+        // Uncheck all other ongoing checkboxes for this group
+        document.querySelectorAll('.system-ongoing-checkbox').forEach(checkbox => {
+          if (checkbox.dataset.system !== systemName) {
+            checkbox.checked = false;
+          }
+        });
+        
+        showToast(`✅ "${systemName}" set as ongoing for Group ${groupLetter}`, 'success');
+      } else {
+        // Remove ongoing status
+        delete ongoingSystemsMap[groupLetter];
+        showToast(`✅ Ongoing status cleared for Group ${groupLetter}`, 'success');
+      }
+      
+      // Save to localStorage
+      localStorage.setItem('arnoma-ongoing-systems', JSON.stringify(ongoingSystemsMap));
+    }
+    
+    // Load ongoing checkbox states when rendering systems
+    function updateOngoingCheckboxes() {
+      const groupLetter = currentGroup.replace('Group ', '');
+      const ongoingSystemsMap = JSON.parse(localStorage.getItem('arnoma-ongoing-systems') || '{}');
+      const ongoingSystem = ongoingSystemsMap[groupLetter];
+      
+      // Update all checkboxes
+      document.querySelectorAll('.system-ongoing-checkbox').forEach(checkbox => {
+        checkbox.checked = (checkbox.dataset.system === ongoingSystem);
+      });
+    }
 
     // ===== RENDER SYSTEMS =====
     function renderSystems() {
@@ -856,6 +953,17 @@
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 12px; margin-left: auto;">
+                <label style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(251, 188, 4, 0.1); border: 1px solid rgba(251, 188, 4, 0.3); border-radius: 8px; cursor: pointer; transition: all 0.2s;" onclick="event.stopPropagation()" onmouseover="this.style.background='rgba(251, 188, 4, 0.15)'" onmouseout="this.style.background='rgba(251, 188, 4, 0.1)'">
+                  <input 
+                    type="checkbox" 
+                    class="system-ongoing-checkbox" 
+                    data-system="${system.name}"
+                    onchange="toggleSystemOngoing('${system.name.replace(/'/g, "\\'")}', this.checked)" 
+                    style="width: 16px; height: 16px; cursor: pointer;"
+                  >
+                  <span style="font-size: 12px; font-weight: 600; color: #fbbc04; white-space: nowrap;">✅ Ongoing</span>
+                </label>
+                
                 <label style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(102, 126, 234, 0.1); border: 1px solid rgba(102, 126, 234, 0.3); border-radius: 8px; cursor: pointer; transition: all 0.2s;" onclick="event.stopPropagation()" onmouseover="this.style.background='rgba(102, 126, 234, 0.15)'" onmouseout="this.style.background='rgba(102, 126, 234, 0.1)'">
                   <input 
                     type="checkbox" 
@@ -866,6 +974,7 @@
                   >
                   <span style="font-size: 12px; font-weight: 600; color: #8ab4ff; white-space: nowrap;">Select All</span>
                 </label>
+                
                 <div class="system-expand">▼</div>
               </div>
             </div>
@@ -900,6 +1009,9 @@
       }
 
       container.innerHTML = systemsHTML;
+      
+      // Update ongoing checkbox states after rendering
+      updateOngoingCheckboxes();
     }
 
     // PERFORMANCE: Debounced version for search input
