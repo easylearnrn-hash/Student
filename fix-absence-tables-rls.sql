@@ -31,7 +31,7 @@ ON student_absences
 FOR ALL
 USING (
   auth.uid() IN (
-    SELECT auth_user_id FROM admin_accounts WHERE is_active = true
+    SELECT auth_user_id FROM admin_accounts
   )
 );
 
@@ -67,7 +67,7 @@ ON skipped_classes
 FOR ALL
 USING (
   auth.uid() IN (
-    SELECT auth_user_id FROM admin_accounts WHERE is_active = true
+    SELECT auth_user_id FROM admin_accounts
   )
 );
 
