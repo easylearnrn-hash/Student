@@ -8486,18 +8486,28 @@
         if (folders && folders.length) {
           nclexSystems = folders.map(folder => {
             const totalTemplates = folder.note_templates?.length || 0;
-            const systemNotes = assignmentStats.get(folder.folder_name)?.totalNotes || 0;
+            const stats = assignmentStats.get(folder.folder_name);
+            const systemNotes = stats?.totalNotes || 0;
+            const viewedNotes = stats?.viewedNotes || 0;
             
             // Calculate progress:
-            // If we have actual notes assigned to student, use that as indicator
-            // If totalTemplates exists, calculate percentage
-            // Otherwise, if student has notes, assume in-progress
+            // Priority 1: If all notes are viewed, 100% complete
+            // Priority 2: If we have templates, calculate percentage
+            // Priority 3: If student has notes but no templates, use viewed ratio
             let progress = 0;
-            if (totalTemplates > 0 && systemNotes > 0) {
+            
+            if (systemNotes > 0 && viewedNotes === systemNotes) {
+              // All notes viewed = 100% complete
+              progress = 100;
+            } else if (totalTemplates > 0 && systemNotes > 0) {
+              // Use template-based calculation
               progress = Math.min(100, Math.round((systemNotes / totalTemplates) * 100));
+            } else if (systemNotes > 0 && viewedNotes > 0) {
+              // Use viewed/total ratio (capped at 90% to avoid false completion)
+              progress = Math.min(90, Math.round((viewedNotes / systemNotes) * 100));
             } else if (systemNotes > 0) {
-              // Student has notes but no template count - assume in-progress (50%)
-              progress = 50;
+              // Has notes but none viewed - assume just started (10%)
+              progress = 10;
             }
             
             return {
