@@ -888,21 +888,32 @@
         // UPDATE DATABASE: Set is_current = TRUE for this folder, FALSE for all others
         try {
           // First, unset all folders' is_current
-          await supabase
+          const { error: error1 } = await supabase
             .from('note_folders')
             .update({ is_current: false })
             .neq('folder_name', systemName);
           
+          if (error1) {
+            console.error('❌ Failed to unset other folders:', error1);
+            throw error1;
+          }
+          
           // Then set this folder as current
-          await supabase
+          const { error: error2 } = await supabase
             .from('note_folders')
             .update({ is_current: true })
             .eq('folder_name', systemName);
+          
+          if (error2) {
+            console.error('❌ Failed to set folder as current:', error2);
+            throw error2;
+          }
           
           console.log(`✅ Database updated: "${systemName}" set as ongoing (is_current = TRUE)`);
         } catch (error) {
           console.error('❌ Failed to update database:', error);
           showToast('⚠️ Failed to save to database', 'error');
+          return; // Don't proceed if database update failed
         }
         
         // Uncheck all other ongoing checkboxes for this group
@@ -932,15 +943,21 @@
         
         // UPDATE DATABASE: Unset is_current for this folder
         try {
-          await supabase
+          const { error } = await supabase
             .from('note_folders')
             .update({ is_current: false })
             .eq('folder_name', systemName);
+          
+          if (error) {
+            console.error('❌ Failed to clear ongoing status:', error);
+            throw error;
+          }
           
           console.log(`✅ Database updated: "${systemName}" ongoing cleared (is_current = FALSE)`);
         } catch (error) {
           console.error('❌ Failed to update database:', error);
           showToast('⚠️ Failed to save to database', 'error');
+          return; // Don't proceed if database update failed
         }
         
         // Remove tint from this system
