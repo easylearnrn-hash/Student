@@ -8360,7 +8360,9 @@
                 viewedNotes: 0,
                 assignedTemplates: new Set(),
                 lockedUnread: 0,
-                unlockedUnread: 0
+                unlockedUnread: 0,
+                lockedNotes: 0,
+                unlockedNotes: 0
               });
             }
             const entry = stats.get(normalizedName);
@@ -8371,6 +8373,13 @@
             // Count viewed notes (opened PDFs)
             if (note.read) {
               entry.viewedNotes += 1;
+            }
+            
+            // Count locked vs unlocked (paid) notes
+            if (note.isPaid) {
+              entry.unlockedNotes += 1;
+            } else {
+              entry.lockedNotes += 1;
             }
             
             const templateKey = note.templateId || note.id;
@@ -8488,19 +8497,35 @@
             const totalTemplates = folder.note_templates?.length || 0;
             const stats = assignmentStats.get(folder.folder_name);
             const systemNotes = stats?.totalNotes || 0;
+            const lockedNotes = stats?.lockedNotes || 0;
+            const unlockedNotes = stats?.unlockedNotes || 0;
             
-            // Calculate progress based on POSTED notes (not viewed):
-            // Progress = (notes posted / total templates) * 100
-            // If totalTemplates not defined, assume all posted = 100%
+            // Calculate progress based on POSTED + UNLOCKED notes:
+            // - All notes posted + ALL unlocked → 100% COMPLETED (green)
+            // - All notes posted + SOME locked → IN PROGRESS (blue)
+            // - Payment status DOES affect completion
             let progress = 0;
             
             if (totalTemplates > 0) {
               // We have template count - calculate exact percentage
               progress = Math.min(100, Math.round((systemNotes / totalTemplates) * 100));
+              
+              // But if there are locked notes, cap at 90% (not fully complete)
+              if (lockedNotes > 0) {
+                progress = Math.min(90, progress);
+              }
             } else if (systemNotes > 0) {
               // No templates defined but notes exist
-              // Assume: All notes posted = 100% COMPLETED
-              progress = 100;
+              if (lockedNotes === 0 && unlockedNotes > 0) {
+                // All notes unlocked → 100% COMPLETED
+                progress = 100;
+              } else if (lockedNotes > 0) {
+                // Some notes locked → IN PROGRESS (calculate ratio)
+                progress = Math.min(90, Math.round((unlockedNotes / systemNotes) * 100));
+              } else {
+                // No unlocked notes yet → low progress
+                progress = 10;
+              }
             }
             
             return {
