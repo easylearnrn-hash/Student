@@ -54,7 +54,7 @@ ON skipped_classes
 FOR SELECT
 USING (
   group_name IN (
-    SELECT COALESCE(group_name, "group") 
+    SELECT group_name 
     FROM students 
     WHERE auth_user_id = auth.uid()
   )
@@ -87,5 +87,5 @@ ORDER BY tablename, policyname;
 -- );
 
 -- SELECT * FROM skipped_classes WHERE group_name IN (
---   SELECT COALESCE(group_name, "group") FROM students WHERE auth_user_id = 'c7b21994-a096-4f16-949b-70548ef6a961'
+--   SELECT group_name FROM students WHERE auth_user_id = 'c7b21994-a096-4f16-949b-70548ef6a961'
 -- );
