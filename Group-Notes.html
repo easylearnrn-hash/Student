@@ -975,19 +975,45 @@
     }
     
     // Load ongoing checkbox states when rendering systems
-    function updateOngoingCheckboxes() {
-      const groupLetter = currentGroup.replace('Group ', '');
-      const ongoingSystemsMap = JSON.parse(localStorage.getItem('arnoma-ongoing-systems') || '{}');
-      const ongoingSystem = ongoingSystemsMap[groupLetter];
-      
-      // Update all checkboxes and apply tint to ongoing system
-      document.querySelectorAll('.system-ongoing-checkbox').forEach(checkbox => {
-        const isOngoing = (checkbox.dataset.system === ongoingSystem);
-        checkbox.checked = isOngoing;
+    async function updateOngoingCheckboxes() {
+      try {
+        // Fetch which folder is marked as current from database
+        const { data: folders, error } = await supabase
+          .from('note_folders')
+          .select('folder_name, is_current')
+          .eq('is_current', true)
+          .is('deleted_at', null)
+          .limit(1);
         
-        // Apply or remove tint based on ongoing status
-        const systemId = checkbox.dataset.system.replace(/[^a-zA-Z0-9]/g, '');
-        const systemSection = document.getElementById(`system-${systemId}`);
+        if (error) {
+          console.error('❌ Failed to load ongoing status:', error);
+          return;
+        }
+        
+        const ongoingSystemName = folders && folders.length > 0 ? folders[0].folder_name : null;
+        
+        console.log(`🟡 Ongoing system from database: "${ongoingSystemName || 'None'}"`);
+        
+        // Update all checkboxes and apply tint to ongoing system
+        document.querySelectorAll('.system-ongoing-checkbox').forEach(checkbox => {
+          const isOngoing = (checkbox.dataset.system === ongoingSystemName);
+          checkbox.checked = isOngoing;
+          
+          // Apply or remove tint based on ongoing status
+          const systemId = checkbox.dataset.system.replace(/[^a-zA-Z0-9]/g, '');
+          const systemSection = document.getElementById(`system-${systemId}`);
+          if (systemSection) {
+            if (isOngoing) {
+              systemSection.style.background = 'rgba(255, 152, 0, 0.08)'; // Light orange tint
+            } else {
+              systemSection.style.background = '';
+            }
+          }
+        });
+      } catch (error) {
+        console.error('❌ Error updating ongoing checkboxes:', error);
+      }
+    }
         if (systemSection) {
           if (isOngoing) {
             systemSection.style.background = 'rgba(255, 152, 0, 0.08)'; // Light orange tint
