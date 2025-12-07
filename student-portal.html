@@ -8541,56 +8541,111 @@
       const carousel = document.getElementById('systemsCarousel');
       if (!carousel) return;
 
-      // Clear and rebuild
-      carousel.innerHTML = '';
-
       if (!nclexSystems.length) {
         carousel.innerHTML = '<div class="system-card" style="min-height:140px;justify-content:center;align-items:center;">No systems configured</div>';
         return;
       }
 
-      // Create all cards
+      // DOM Reuse: Track existing cards by system name
+      const existingCards = new Map();
+      Array.from(carousel.children).forEach(card => {
+        const systemName = card.dataset.systemName;
+        if (systemName) existingCards.set(systemName, card);
+      });
+
       const fragment = document.createDocumentFragment();
+      const usedCards = new Set();
       
       nclexSystems.forEach((system, index) => {
-        const card = document.createElement('div');
-        card.className = `system-card ${system.status || 'not-started'}`;
-        card.dataset.systemName = system.name;
-        card.style.animationDelay = `${index * 0.05}s`;
+        let card = existingCards.get(system.name);
+        
+        // Reuse existing card or create new one
+        if (card) {
+          usedCards.add(system.name);
+          // Update only changed properties (avoid full innerHTML replacement)
+          card.className = `system-card ${system.status || 'not-started'}`;
+          if (selectedSystem === system.name) card.classList.add('selected');
+          card.style.animationDelay = `${index * 0.05}s`;
+          
+          const stats = systemAssignmentStats.get(system.name);
+          const totalNotes = stats?.totalNotes || 0;
+          const statusLabel = getSystemStatusLabel(system.status);
+          
+          // Update individual elements instead of innerHTML
+          const iconEl = card.querySelector('.system-icon');
+          const nameEl = card.querySelector('.system-name');
+          const progressEl = card.querySelector('.system-progress');
+          const barFillEl = card.querySelector('.system-bar-fill');
+          const statusEl = card.querySelector('.system-status');
+          
+          if (iconEl) iconEl.textContent = system.icon;
+          if (nameEl) nameEl.textContent = system.name;
+          if (progressEl) progressEl.textContent = `${system.progress}% Complete`;
+          if (barFillEl) barFillEl.style.width = `${system.progress}%`;
+          if (statusEl) statusEl.textContent = statusLabel;
+          
+          // Update/create notification badge
+          let notificationEl = card.querySelector('.system-notification');
+          if (totalNotes > 0) {
+            if (!notificationEl) {
+              notificationEl = document.createElement('div');
+              notificationEl.className = 'system-notification unlocked';
+              notificationEl.innerHTML = '<span class="notification-count"></span><div class="notification-pulse"></div>';
+              card.insertBefore(notificationEl, card.firstChild);
+            }
+            const countEl = notificationEl.querySelector('.notification-count');
+            if (countEl) countEl.textContent = totalNotes;
+          } else if (notificationEl) {
+            notificationEl.remove();
+          }
+        } else {
+          // Create new card only if it doesn't exist
+          card = document.createElement('div');
+          card.className = `system-card ${system.status || 'not-started'}`;
+          card.dataset.systemName = system.name;
+          card.style.animationDelay = `${index * 0.05}s`;
 
-        if (selectedSystem === system.name) card.classList.add('selected');
+          if (selectedSystem === system.name) card.classList.add('selected');
 
-        const stats = systemAssignmentStats.get(system.name);
-        const totalNotes = stats?.totalNotes || 0;
-        const statusLabel = getSystemStatusLabel(system.status);
+          const stats = systemAssignmentStats.get(system.name);
+          const totalNotes = stats?.totalNotes || 0;
+          const statusLabel = getSystemStatusLabel(system.status);
 
-        let badge = '';
-        if (totalNotes > 0) {
-          badge = `<div class="system-notification unlocked"><span class="notification-count">${totalNotes}</span><div class="notification-pulse"></div></div>`;
+          let badge = '';
+          if (totalNotes > 0) {
+            badge = `<div class="system-notification unlocked"><span class="notification-count">${totalNotes}</span><div class="notification-pulse"></div></div>`;
+          }
+
+          card.innerHTML = `
+            ${badge}
+            <div class="system-icon">${system.icon}</div>
+            <div class="system-name">${system.name}</div>
+            <div class="system-progress">${system.progress}% Complete</div>
+            <div class="system-bar"><div class="system-bar-fill" style="width:${system.progress}%"></div></div>
+            <div class="system-status">${statusLabel}</div>
+          `;
+
+          card.onclick = () => {
+            centerSystemCard(card);
+            filterNotesBySystem(system.name);
+          };
         }
 
-        card.innerHTML = `
-          ${badge}
-          <div class="system-icon">${system.icon}</div>
-          <div class="system-name">${system.name}</div>
-          <div class="system-progress">${system.progress}% Complete</div>
-          <div class="system-bar"><div class="system-bar-fill" style="width:${system.progress}%"></div></div>
-          <div class="system-status">${statusLabel}</div>
-        `;
-
-        card.onclick = () => {
-          centerSystemCard(card);
-          filterNotesBySystem(system.name);
-        };
-
         fragment.appendChild(card);
+      });
+
+      // Remove cards that no longer exist in data
+      existingCards.forEach((card, systemName) => {
+        if (!usedCards.has(systemName)) {
+          card.remove();
+        }
       });
 
       carousel.appendChild(fragment);
 
       // Scroll to ongoing/selected card (instant on first load, smooth after)
-      // Use setTimeout to ensure DOM is fully rendered and card dimensions are available
-      setTimeout(() => {
+      // Use requestAnimationFrame to sync with browser paint cycle (avoids layout thrashing)
+      requestAnimationFrame(() => {
         const targetCard = selectedSystem 
           ? carousel.querySelector(`.system-card[data-system-name="${CSS.escape?.(selectedSystem) || selectedSystem}"]`)
           : carousel.querySelector('.system-card.current') || carousel.firstElementChild;
@@ -8612,7 +8667,7 @@
             isInitialCarouselRender = false;
           }
         }
-      }, 100);
+      });
     }
 
     function centerSystemCard(card) {
@@ -8644,43 +8699,99 @@
     // Display notes with lock/unlock status
     function displayNotes(notes) {
       const classroomList = document.getElementById('classroomList');
-      classroomList.innerHTML = '';
       
       if (notes.length === 0) {
-        const emptyMessage = document.createElement('div');
-        emptyMessage.style.cssText = 'text-align: center; color: rgba(255,255,255,0.7); padding: 40px;';
-        emptyMessage.textContent = 'No notes available yet.';
-        classroomList.appendChild(emptyMessage);
+        classroomList.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.7); padding: 40px;">No notes available yet.</div>';
         return;
       }
       
-      // Group notes by system
-      const notesBySystem = new Map();
+      // DOM Reuse: Find or create notes grid
+      let notesGrid = classroomList.querySelector('.notes-grid');
+      if (!notesGrid) {
+        classroomList.innerHTML = ''; // Clear only if grid doesn't exist
+        notesGrid = document.createElement('div');
+        notesGrid.className = 'notes-grid';
+        notesGrid.style.cssText = `
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 20px;
+          padding: 0 4px;
+        `;
+        classroomList.appendChild(notesGrid);
+      }
+      
+      // DOM Reuse: Track existing note cards by ID
+      const existingCards = new Map();
+      Array.from(notesGrid.children).forEach(card => {
+        const noteId = card.id?.replace('note-card-', '');
+        if (noteId) existingCards.set(noteId, card);
+      });
+      
+      const usedCards = new Set();
+      const fragment = document.createDocumentFragment();
+      
+      // Reuse or create note cards
       notes.forEach(note => {
-        const systemName = normalizeSystemName(note.system || 'Other');
-        if (!notesBySystem.has(systemName)) {
-          notesBySystem.set(systemName, []);
+        const noteId = String(note.id);
+        let card = existingCards.get(noteId);
+        
+        if (card) {
+          // Reuse existing card - update only if needed
+          usedCards.add(noteId);
+          
+          const noteTypeClass = note.type === 'warning' ? 'warning' : (note.type || 'material');
+          const lockedClass = !note.isPaid && note.type !== 'warning' ? 'locked' : '';
+          const expectedClass = `classroom-item ${noteTypeClass} ${lockedClass} note-collapsed`;
+          
+          // Only update className if it changed
+          if (card.className !== expectedClass) {
+            card.className = expectedClass;
+          }
+          
+          // Update badge if payment status changed
+          const badgeEl = card.querySelector('.note-badge');
+          if (badgeEl) {
+            let badgeIcon = note.folderIcon || '📄';
+            let badgeText = note.course || 'Note';
+            
+            if (note.type === 'warning' && note.isTemplateMissing) {
+              badgeIcon = '⚠️';
+              badgeText = 'Missing Content';
+            } else if (!note.isPaid) {
+              badgeIcon = '🔒';
+              badgeText = 'Payment Required';
+            } else if (note.type === 'announcement') {
+              badgeIcon = '📢';
+              badgeText = note.course || 'Announcement';
+            } else if (note.type === 'material') {
+              badgeIcon = note.folderIcon || '📚';
+              badgeText = note.course || 'Material';
+            }
+            
+            const iconEl = badgeEl.querySelector('.badge-icon');
+            const textEl = badgeEl.querySelector('.badge-text');
+            if (iconEl && iconEl.textContent !== badgeIcon) iconEl.textContent = badgeIcon;
+            if (textEl && textEl.textContent !== badgeText) textEl.textContent = badgeText;
+          }
+          
+          // Card already exists in DOM, keep it in place
+          fragment.appendChild(card);
+        } else {
+          // Create new card (only when necessary)
+          card = createNoteCard(note);
+          fragment.appendChild(card);
         }
-        notesBySystem.get(systemName).push(note);
       });
       
-      // Render notes in a grid without system headers
-      const notesGrid = document.createElement('div');
-      notesGrid.className = 'notes-grid';
-      notesGrid.style.cssText = `
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 20px;
-        padding: 0 4px;
-      `;
-      
-      // Add all notes to the grid
-      notes.forEach(note => {
-        const item = createNoteCard(note);
-        notesGrid.appendChild(item);
+      // Remove cards that no longer exist in data
+      existingCards.forEach((card, noteId) => {
+        if (!usedCards.has(noteId)) {
+          card.remove();
+        }
       });
       
-      classroomList.appendChild(notesGrid);
+      // Append fragment (only new/reordered cards)
+      notesGrid.appendChild(fragment);
     }
     
     // Helper function to create individual note cards
