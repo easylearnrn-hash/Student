@@ -877,13 +877,33 @@
     }
     
     // Toggle ongoing status for a system in Group Notes
-    function toggleSystemOngoing(systemName, isChecked) {
+    async function toggleSystemOngoing(systemName, isChecked) {
       const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
       const ongoingSystemsMap = JSON.parse(localStorage.getItem('arnoma-ongoing-systems') || '{}');
       
       if (isChecked) {
         // Set this system as ongoing for this group
         ongoingSystemsMap[groupLetter] = systemName;
+        
+        // UPDATE DATABASE: Set is_current = TRUE for this folder, FALSE for all others
+        try {
+          // First, unset all folders' is_current
+          await supabase
+            .from('note_folders')
+            .update({ is_current: false })
+            .neq('folder_name', systemName);
+          
+          // Then set this folder as current
+          await supabase
+            .from('note_folders')
+            .update({ is_current: true })
+            .eq('folder_name', systemName);
+          
+          console.log(`✅ Database updated: "${systemName}" set as ongoing (is_current = TRUE)`);
+        } catch (error) {
+          console.error('❌ Failed to update database:', error);
+          showToast('⚠️ Failed to save to database', 'error');
+        }
         
         // Uncheck all other ongoing checkboxes for this group
         document.querySelectorAll('.system-ongoing-checkbox').forEach(checkbox => {
@@ -910,6 +930,19 @@
         // Remove ongoing status
         delete ongoingSystemsMap[groupLetter];
         
+        // UPDATE DATABASE: Unset is_current for this folder
+        try {
+          await supabase
+            .from('note_folders')
+            .update({ is_current: false })
+            .eq('folder_name', systemName);
+          
+          console.log(`✅ Database updated: "${systemName}" ongoing cleared (is_current = FALSE)`);
+        } catch (error) {
+          console.error('❌ Failed to update database:', error);
+          showToast('⚠️ Failed to save to database', 'error');
+        }
+        
         // Remove tint from this system
         const systemId = systemName.replace(/[^a-zA-Z0-9]/g, '');
         const systemSection = document.getElementById(`system-${systemId}`);
@@ -920,7 +953,7 @@
         showToast(`✅ Ongoing status cleared for Group ${groupLetter}`, 'success');
       }
       
-      // Save to localStorage
+      // Save to localStorage (for backwards compatibility)
       localStorage.setItem('arnoma-ongoing-systems', JSON.stringify(ongoingSystemsMap));
     }
     
