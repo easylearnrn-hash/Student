@@ -5015,20 +5015,36 @@
           const classDate = createDateFromDateStr(dateStr);
           if (!classDate) return null;
 
+          // Extract class month/year for strict matching
+          const classMonth = classDate.getMonth();
+          const classYear = classDate.getFullYear();
+
+          // Priority 1: Exact date match
           const exactMatch = studentPayments.find(payment => payment.dateStr === dateStr);
           if (exactMatch) {
             return exactMatch;
           }
 
+          // No matching for future classes
           if (dateStr >= todayStr) {
             return null;
           }
 
+          // Priority 2: Late payment within 7 days, BUT MUST BE SAME MONTH
           const classTime = classDate.getTime();
           const lateMatch = studentPayments.find(payment => {
             if (!payment.dateStr) return false;
             const paymentDate = createDateFromDateStr(payment.dateStr);
             if (!paymentDate) return false;
+            
+            // CRITICAL: Payment must be in the same month/year as the class
+            const paymentMonth = paymentDate.getMonth();
+            const paymentYear = paymentDate.getFullYear();
+            if (paymentMonth !== classMonth || paymentYear !== classYear) {
+              return false; // Different month - NO MATCH
+            }
+            
+            // Within same month, allow 7-day late window
             const daysDiff = Math.floor((paymentDate.getTime() - classTime) / (1000 * 60 * 60 * 24));
             return daysDiff > 0 && daysDiff <= 7;
           });
