@@ -4580,9 +4580,12 @@
 
         function normalizePaymentDate(payment) {
           if (!payment) return '';
+          
+          // CRITICAL: Use email_date for automated payments (contains actual payment timestamp)
+          // This is the Gmail email delivery time which reflects when payment was sent
           const source =
-            payment.emailDate ||
             payment.email_date ||
+            payment.emailDate ||
             payment.payDate ||
             payment.payment_date ||
             payment.date ||
@@ -4592,14 +4595,46 @@
             payment.raw?.date;
           if (!source) return '';
           
-          // 🔧 FIX: Extract date portion from timestamps BEFORE timezone conversion
-          // Supabase stores dates as "2025-12-07 00:00:00+00" (UTC midnight)
-          // If we convert to LA timezone, it becomes Dec 6 at 4pm, breaking exact matches
+          // ⚡ CRITICAL: Check if timezone offset toggle is enabled
+          // This is set by the admin in Payment-Records and stored in localStorage
+          const offset12 = localStorage.getItem('la-offset-12') === 'true';
+          const offset11 = localStorage.getItem('la-offset-11') === 'true';
+          
+          // If using email_date and offset is enabled, apply timezone adjustment
+          if ((payment.email_date || payment.emailDate) && (offset12 || offset11)) {
+            try {
+              // Parse the timestamp
+              const timestamp = new Date(source);
+              if (!isNaN(timestamp.getTime())) {
+                // Apply offset: -12 hours (winter) or -11 hours (summer DST)
+                const offsetHours = offset12 ? 12 : 11;
+                const adjustedTimestamp = new Date(timestamp.getTime() - (offsetHours * 60 * 60 * 1000));
+                
+                // Extract date components using UTC methods (since we've already applied LA offset)
+                const year = adjustedTimestamp.getUTCFullYear();
+                const month = String(adjustedTimestamp.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(adjustedTimestamp.getUTCDate()).padStart(2, '0');
+                
+                const adjustedDate = `${year}-${month}-${day}`;
+                
+                if (DEBUG_MODE) {
+                  console.log(`📅 Payment date adjusted: ${source} → ${adjustedDate} (offset: -${offsetHours}h)`);
+                }
+                
+                return adjustedDate;
+              }
+            } catch (err) {
+              debugLog('⚠️ Error applying timezone offset to payment date:', err);
+            }
+          }
+          
+          // 🔧 FIX: Extract date portion from timestamps without timezone conversion
+          // For payments that don't need offset (manual records, etc.)
           if (typeof source === 'string') {
             // Extract YYYY-MM-DD from "2025-12-07 00:00:00+00" or "2025-12-07T00:00:00Z"
             const dateOnlyMatch = source.match(/^(\d{4}-\d{2}-\d{2})/);
             if (dateOnlyMatch) {
-              return dateOnlyMatch[1]; // Return "2025-12-07" without timezone conversion
+              return dateOnlyMatch[1];
             }
           }
           
@@ -5015,11 +5050,11 @@
           const classDate = createDateFromDateStr(dateStr);
           if (!classDate) return null;
 
-          // Extract class month/year for strict matching
+          // Extract class month/year for matching
           const classMonth = classDate.getMonth();
           const classYear = classDate.getFullYear();
 
-          // Priority 1: Exact date match
+          // Priority 1: Exact date match (highest priority - specific payment for specific class)
           const exactMatch = studentPayments.find(payment => payment.dateStr === dateStr);
           if (exactMatch) {
             return exactMatch;
@@ -5030,9 +5065,10 @@
             return null;
           }
 
-          // Priority 2: Late payment within 7 days, BUT MUST BE SAME MONTH
-          const classTime = classDate.getTime();
-          const lateMatch = studentPayments.find(payment => {
+          // Priority 2: ANY payment in the same month
+          // User requirement: "whenever the system sees payment from the student it should apply regardless of the date"
+          // This means any December payment can cover any December class
+          const sameMonthPayment = studentPayments.find(payment => {
             if (!payment.dateStr) return false;
             const paymentDate = createDateFromDateStr(payment.dateStr);
             if (!paymentDate) return false;
@@ -5040,16 +5076,11 @@
             // CRITICAL: Payment must be in the same month/year as the class
             const paymentMonth = paymentDate.getMonth();
             const paymentYear = paymentDate.getFullYear();
-            if (paymentMonth !== classMonth || paymentYear !== classYear) {
-              return false; // Different month - NO MATCH
-            }
             
-            // Within same month, allow 7-day late window
-            const daysDiff = Math.floor((paymentDate.getTime() - classTime) / (1000 * 60 * 60 * 24));
-            return daysDiff > 0 && daysDiff <= 7;
+            return (paymentMonth === classMonth && paymentYear === classYear);
           });
 
-          return lateMatch || null;
+          return sameMonthPayment || null;
         }
 
         /**
