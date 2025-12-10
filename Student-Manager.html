@@ -1820,7 +1820,7 @@
           <button class="btn-header-primary" onclick="openAddStudentModal()">➕ Add Student</button>
           <button class="btn-header-secondary" onclick="openBulkAddModal()">📥 Bulk Add</button>
           <button class="btn-header-secondary" onclick="openUploadNotesModal()">📄 Upload Notes</button>
-          <button class="btn-header-secondary" onclick="openWaitingListModal()" id="waitingListBtn">
+          <button class="btn-header-secondary" onclick="openWaitingListModal()" id="waitingListBtn" style="position: relative;">
             ⏳ Waiting List
             <span class="notification-badge" id="waitingListBadge" style="display: none;">0</span>
           </button>
@@ -2023,13 +2023,22 @@
         <!-- Scrollable Content -->
         <div class="action-modal-scroll">
           <div class="action-modal-body">
-            <button class="btn-modal-save" onclick="customAlert('Demo Mode', 'Added to waiting list')" style="width: 100%; margin-bottom: 24px">
-              + Add to Waiting List
-            </button>
-            <div style="padding: 40px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 14px">
-              <div style="font-size: 48px; margin-bottom: 16px">⏳</div>
-              <div>No students in waiting list</div>
-              <div style="font-size: 12px; margin-top: 8px">Click "Add to Waiting List" to add students</div>
+            <!-- Loading State -->
+            <div id="waitingListLoading" style="padding: 40px; text-align: center; color: rgba(255, 255, 255, 0.6);">
+              <div style="font-size: 32px; margin-bottom: 12px">⏳</div>
+              <div>Loading waiting list...</div>
+            </div>
+            
+            <!-- Empty State -->
+            <div id="waitingListEmpty" style="display: none; padding: 40px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 14px">
+              <div style="font-size: 48px; margin-bottom: 16px">📭</div>
+              <div>No pending registrations</div>
+              <div style="font-size: 12px; margin-top: 8px">Students who sign up will appear here</div>
+            </div>
+            
+            <!-- Waiting List Content -->
+            <div id="waitingListContent" style="display: none;">
+              <!-- Dynamic content will be inserted here -->
             </div>
           </div>
         </div>
@@ -2906,11 +2915,24 @@
             phone: student.phone,
             email: primaryEmail,
             college: student.college || null,
-            aliases: cleanAliasesForSave(student.aliases || []),
+            aliases: (() => {
+              const cleaned = cleanAliasesForSave(student.aliases || []);
+              // CRITICAL: Send null instead of [] to avoid "[]" string with brackets
+              return cleaned.length > 0 ? cleaned : null;
+            })(),
             notes: student.notes || '',
             status: student.status || 'active',
+            role: student.role || 'student',  // CRITICAL: Must be 'student' or 'admin'
             show_in_grid: student.showInCalendar !== false
           };
+
+          console.log('📝 Student data to save:', {
+            name: studentData.name,
+            group: studentData.group_name,
+            aliases: studentData.aliases,
+            aliasesType: typeof studentData.aliases,
+            aliasesJSON: JSON.stringify(studentData.aliases)
+          });
 
           debugLog(`💾 Saving ${student.name}:`, {
             showInCalendar_JS: student.showInCalendar,
@@ -2933,7 +2955,34 @@
               .select();
           }
 
-          if (result.error) throw result.error;
+          if (result.error) {
+            // Special handling for aliases constraint violation
+            if (result.error.code === '23514' && result.error.message.includes('aliases_no_special_chars')) {
+              console.error('❌ Aliases constraint violation. Retrying with NULL aliases...');
+              
+              // Retry with NULL aliases (not empty array, as [] gets stringified to "[]")
+              studentData.aliases = null;
+              
+              if (student.id) {
+                result = await supabase
+                  .from('students')
+                  .update(studentData)
+                  .eq('id', student.id)
+                  .select();
+              } else {
+                result = await supabase
+                  .from('students')
+                  .insert([studentData])
+                  .select();
+              }
+              
+              if (result.error) throw result.error;
+              
+              console.warn('⚠️ Student saved with NULL aliases. Original aliases had special characters.');
+            } else {
+              throw result.error;
+            }
+          }
 
           debugLog('✅ Student saved to Supabase:', result.data[0]);
           debugLog(`   show_in_grid saved as:`, result.data[0].show_in_grid);
@@ -3356,10 +3405,337 @@
         document.body.style.overflow = '';
       }
 
-      function openWaitingListModal() {
+      async function openWaitingListModal() {
         const modal = document.getElementById('waitingListModal');
         modal.classList.add('active');
         document.body.style.overflow = 'hidden';
+        
+        // Load waiting list data
+        await loadWaitingList();
+      }
+
+      async function loadWaitingList() {
+        const loadingDiv = document.getElementById('waitingListLoading');
+        const emptyDiv = document.getElementById('waitingListEmpty');
+        const contentDiv = document.getElementById('waitingListContent');
+        
+        // Show loading
+        loadingDiv.style.display = 'block';
+        emptyDiv.style.display = 'none';
+        contentDiv.style.display = 'none';
+        
+        try {
+          const { data: waitingList, error } = await supabase
+            .from('student_waiting_list')
+            .select('*')
+            .order('created_at', { ascending: false });
+          
+          if (error) throw error;
+          
+          // Update badge with total count
+          const waitingListBadge = document.getElementById('waitingListBadge');
+          if (waitingList && waitingList.length > 0) {
+            waitingListBadge.textContent = waitingList.length;
+            waitingListBadge.style.display = 'flex';
+          } else {
+            waitingListBadge.style.display = 'none';
+          }
+          
+          // Hide loading
+          loadingDiv.style.display = 'none';
+          
+          if (!waitingList || waitingList.length === 0) {
+            emptyDiv.style.display = 'block';
+            return;
+          }
+          
+          // Show content
+          contentDiv.style.display = 'block';
+          
+          // Build waiting list HTML
+          contentDiv.innerHTML = `
+            <div style="margin-bottom: 20px; padding: 12px 16px; background: rgba(76, 175, 80, 0.1); border: 1px solid rgba(76, 175, 80, 0.3); border-radius: 8px; color: #4caf50; font-size: 14px;">
+              <strong>${waitingList.length}</strong> pending registration${waitingList.length === 1 ? '' : 's'}
+            </div>
+            
+            <div style="display: grid; gap: 16px;">
+              ${waitingList.map(student => `
+                <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px;">
+                  <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 16px;">
+                    <div>
+                      <div style="font-size: 18px; font-weight: 600; color: #fff; margin-bottom: 4px;">
+                        ${student.first_name} ${student.last_name}
+                      </div>
+                      <div style="font-size: 13px; color: rgba(255,255,255,0.5);">
+                        Registered ${new Date(student.created_at).toLocaleString('en-US', { 
+                          month: 'short', 
+                          day: 'numeric', 
+                          year: 'numeric',
+                          hour: 'numeric',
+                          minute: '2-digit'
+                        })}
+                      </div>
+                    </div>
+                    ${student.contacted_at ? `
+                      <span style="padding: 6px 12px; background: rgba(33, 150, 243, 0.15); border: 1px solid rgba(33, 150, 243, 0.3); border-radius: 6px; color: #2196f3; font-size: 12px; font-weight: 500;">
+                        ✓ Contacted
+                      </span>
+                    ` : `
+                      <span style="padding: 6px 12px; background: rgba(255, 152, 0, 0.15); border: 1px solid rgba(255, 152, 0, 0.3); border-radius: 6px; color: #ff9800; font-size: 12px; font-weight: 500;">
+                        ⏳ Pending
+                      </span>
+                    `}
+                  </div>
+                  
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                    <div>
+                      <div style="font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Email</div>
+                      <div style="color: rgba(255,255,255,0.9); font-size: 14px;">${student.email}</div>
+                    </div>
+                    <div>
+                      <div style="font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Phone</div>
+                      <div style="color: rgba(255,255,255,0.9); font-size: 14px;">${student.phone || '—'}</div>
+                    </div>
+                    <div>
+                      <div style="font-size: 11px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px;">Language</div>
+                      <div style="color: rgba(255,255,255,0.9); font-size: 14px;">${student.preferred_language || '—'}</div>
+                    </div>
+                  </div>
+                  
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button 
+                      onclick="approveWaitingListStudent('${student.id}', '${student.first_name}', '${student.last_name}', '${student.email}', '${student.phone || ''}', '${student.preferred_language || ''}')"
+                      style="flex: 1; min-width: 140px; padding: 10px 16px; background: linear-gradient(135deg, #4caf50 0%, #45a049 100%); border: none; border-radius: 8px; color: white; font-weight: 600; cursor: pointer; font-size: 14px; transition: all 0.2s;"
+                      onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(76, 175, 80, 0.4)'"
+                      onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'"
+                    >
+                      ✓ Approve & Create Student
+                    </button>
+                    
+                    ${!student.contacted_at ? `
+                      <button 
+                        onclick="markAsContacted('${student.id}')"
+                        style="padding: 10px 16px; background: rgba(33, 150, 243, 0.15); border: 1px solid rgba(33, 150, 243, 0.3); border-radius: 8px; color: #2196f3; font-weight: 600; cursor: pointer; font-size: 14px; transition: all 0.2s;"
+                        onmouseover="this.style.background='rgba(33, 150, 243, 0.25)'"
+                        onmouseout="this.style.background='rgba(33, 150, 243, 0.15)'"
+                      >
+                        📞 Mark Contacted
+                      </button>
+                    ` : ''}
+                    
+                    <button 
+                      onclick="deleteWaitingListStudent('${student.id}', '${student.first_name} ${student.last_name}')"
+                      style="padding: 10px 16px; background: rgba(244, 67, 54, 0.15); border: 1px solid rgba(244, 67, 54, 0.3); border-radius: 8px; color: #f44336; font-weight: 600; cursor: pointer; font-size: 14px; transition: all 0.2s;"
+                      onmouseover="this.style.background='rgba(244, 67, 54, 0.25)'"
+                      onmouseout="this.style.background='rgba(244, 67, 54, 0.15)'"
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          `;
+          
+        } catch (error) {
+          console.error('Error loading waiting list:', error);
+          loadingDiv.style.display = 'none';
+          contentDiv.style.display = 'block';
+          contentDiv.innerHTML = `
+            <div style="padding: 40px; text-align: center; color: rgba(244, 67, 54, 0.8);">
+              <div style="font-size: 48px; margin-bottom: 16px">⚠️</div>
+              <div>Error loading waiting list</div>
+              <div style="font-size: 12px; margin-top: 8px; color: rgba(255,255,255,0.4)">${error.message}</div>
+            </div>
+          `;
+        }
+      }
+
+      async function approveWaitingListStudent(id, firstName, lastName, email, phone, language) {
+        const confirmed = await customConfirm(
+          'Approve Student',
+          `Create student account for ${firstName} ${lastName}?\n\nEmail: ${email}\nPhone: ${phone || 'Not provided'}`
+        );
+        
+        if (!confirmed) return;
+        
+        try {
+          // Build notes with registration info
+          const registrationDate = new Date().toLocaleDateString('en-US', {
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric'
+          });
+          
+          const notes = `✅ Registered via waiting list on ${registrationDate}`;
+          
+          // Create student record with essential contact information
+          const { data: newStudent, error: studentError } = await supabase
+            .from('students')
+            .insert([{
+              name: `${firstName} ${lastName}`,
+              email: email || null,
+              phone: phone || null,
+              status: 'active',
+              show_in_grid: true,
+              balance: 0,
+              price_per_class: 0,
+              notes: notes
+            }])
+            .select()
+            .single();
+          
+          if (studentError) throw studentError;
+          
+          // Send welcome email if email is provided
+          if (email) {
+            try {
+              const welcomeEmailHTML = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh;">
+    <div style="max-width: 600px; margin: 40px auto; background: white; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 32px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 32px; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">🎓 Welcome to ARNOMA!</h1>
+        </div>
+        <div style="padding: 40px 32px; line-height: 1.6; color: #374151;">
+            <p style="font-size: 18px; margin-top: 0;">Hi <strong>${firstName}</strong>,</p>
+            <p>Congratulations! Your student account has been approved and is now active. We're excited to have you join ARNOMA! 🎉</p>
+            
+            <div style="background: linear-gradient(135deg, rgba(102,126,234,0.1), rgba(118,75,162,0.1)); border: 2px solid rgba(102,126,234,0.3); border-radius: 16px; padding: 24px; margin: 24px 0;">
+                <h3 style="color: #667eea; margin-top: 0;">📋 Next Steps</h3>
+                <ol style="margin: 16px 0; padding-left: 20px;">
+                    <li style="margin: 8px 0;">Check your email for your student portal login credentials</li>
+                    <li style="margin: 8px 0;">Access your student portal to view notes, tests, and schedule</li>
+                    <li style="margin: 8px 0;">Your teacher will contact you shortly with class schedule details</li>
+                </ol>
+            </div>
+
+            <div style="background: linear-gradient(135deg, rgba(102,126,234,0.1), rgba(118,75,162,0.1)); border: 2px solid rgba(102,126,234,0.3); border-radius: 16px; padding: 24px; margin: 24px 0;">
+                <h3 style="color: #667eea; margin-top: 0;">📚 Getting Started</h3>
+                <ul style="margin: 16px 0; padding-left: 20px;">
+                    <li style="margin: 8px 0;"><strong>Student Portal:</strong> Access your notes, tests, and class materials</li>
+                    <li style="margin: 8px 0;"><strong>Payment Information:</strong> Payment details will be shared by your teacher</li>
+                    <li style="margin: 8px 0;"><strong>Class Schedule:</strong> You'll receive your personalized schedule soon</li>
+                </ul>
+            </div>
+
+            <p style="margin-top: 32px;">If you have any questions, don't hesitate to reach out. We're here to help! 💜</p>
+
+            <div style="margin-top: 40px; padding-top: 24px; border-top: 2px solid rgba(102,126,234,0.2);">
+                <p style="margin: 8px 0;">Best regards,</p>
+                <p style="margin: 8px 0; font-weight: 600; color: #667eea;">ARNOMA Team</p>
+                <div style="margin-top: 20px; padding: 16px; background: linear-gradient(135deg, rgba(102,126,234,0.08), rgba(118,75,162,0.08)); border-radius: 12px; border: 1px solid rgba(102,126,234,0.2);">
+                    <p style="margin: 6px 0; font-size: 13px; color: #6b7280;">
+                        <em>This email was sent automatically from ARNOMA Student Management System</em>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>`;
+
+              const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+              const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+              
+              const emailResponse = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({
+                  to: email,
+                  subject: '🎓 Welcome to ARNOMA - Your Account is Active!',
+                  html: welcomeEmailHTML
+                })
+              });
+
+              if (emailResponse.ok) {
+                debugLog('✅ Welcome email sent to:', email);
+              } else {
+                console.warn('⚠️ Failed to send welcome email, but student was created successfully');
+              }
+            } catch (emailError) {
+              console.warn('⚠️ Email sending failed:', emailError);
+              // Don't throw - student creation succeeded
+            }
+          }
+          
+          // Delete from waiting list
+          const { error: deleteError } = await supabase
+            .from('student_waiting_list')
+            .delete()
+            .eq('id', id);
+          
+          if (deleteError) throw deleteError;
+          
+          await customAlert(
+            'Success', 
+            `✅ Student account created for ${firstName} ${lastName}!\n\n` +
+            `${email ? 'A welcome email has been sent to ' + email : 'The student has been added to your active students list.'}`
+          );
+          
+          // Reload waiting list
+          await loadWaitingList();
+          
+          // Refresh main student list
+          await loadStudents();
+          
+        } catch (error) {
+          console.error('Error approving student:', error);
+          await customAlert('Error', `Failed to create student account: ${error.message}`);
+        }
+      }
+
+      async function markAsContacted(id) {
+        try {
+          const { error } = await supabase
+            .from('student_waiting_list')
+            .update({ contacted_at: new Date().toISOString() })
+            .eq('id', id);
+          
+          if (error) throw error;
+          
+          // Reload waiting list
+          await loadWaitingList();
+          
+        } catch (error) {
+          console.error('Error marking as contacted:', error);
+          await customAlert('Error', `Failed to update: ${error.message}`);
+        }
+      }
+
+      async function deleteWaitingListStudent(id, name) {
+        const confirmed = await customConfirm(
+          'Delete Registration',
+          `Delete ${name} from waiting list? This cannot be undone.`
+        );
+        
+        if (!confirmed) return;
+        
+        try {
+          const { error } = await supabase
+            .from('student_waiting_list')
+            .delete()
+            .eq('id', id);
+          
+          if (error) throw error;
+          
+          await customAlert('Deleted', `${name} removed from waiting list.`);
+          
+          // Reload waiting list
+          await loadWaitingList();
+          
+        } catch (error) {
+          console.error('Error deleting student:', error);
+          await customAlert('Error', `Failed to delete: ${error.message}`);
+        }
       }
 
       function closeWaitingListModal() {
@@ -3592,19 +3968,34 @@
         renderStudentCards();
       }
 
-      function selectGroup(letter, btn) {
-        const normalizedLetter = canonicalizeGroupCode(letter);
-        // Remove active from all group buttons
-        document.querySelectorAll('#groupButtons .btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+      async function selectGroup(letter, btn) {
+        console.log('🔄 selectGroup called:', { letter, currentStudent: currentStudent?.name });
+        
+        try {
+          const normalizedLetter = canonicalizeGroupCode(letter);
+          console.log('✅ Normalized letter:', normalizedLetter);
+          
+          // Remove active from all group buttons
+          document.querySelectorAll('#groupButtons .btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
 
-        if (currentStudent) {
-          currentStudent.groupCode = normalizedLetter;
-          currentStudent.group = formatGroupDisplay(normalizedLetter);
-          document.getElementById('modalGroup').textContent = currentStudent.group;
-          debugLog(`Group changed to: ${currentStudent.group}`);
-          saveStudent(currentStudent);
-          renderStudentCards();
+          if (currentStudent) {
+            currentStudent.groupCode = normalizedLetter;
+            currentStudent.group = formatGroupDisplay(normalizedLetter);
+            document.getElementById('modalGroup').textContent = currentStudent.group;
+            console.log(`✅ Group changed to: ${currentStudent.group}`);
+            
+            const result = await saveStudent(currentStudent);
+            console.log('✅ Save result:', result);
+            
+            await renderStudentCards();
+            console.log('✅ Cards rendered');
+          } else {
+            console.error('❌ No currentStudent set!');
+          }
+        } catch (error) {
+          console.error('❌ Error in selectGroup:', error);
+          alert(`Error changing group: ${error.message}`);
         }
       }
 
@@ -3707,11 +4098,14 @@
       // REAL-TIME NOTIFICATIONS FOR NEW STUDENT REGISTRATIONS
       // ============================================================
       let newRegistrationsCount = 0;
-      const waitingListBtn = document.getElementById('waitingListBtn');
-      const waitingListBadge = document.getElementById('waitingListBadge');
 
       // Update notification badge
       function updateNotificationBadge(count) {
+        const waitingListBtn = document.getElementById('waitingListBtn');
+        const waitingListBadge = document.getElementById('waitingListBadge');
+        
+        if (!waitingListBadge || !waitingListBtn) return;
+        
         if (count > 0) {
           waitingListBadge.textContent = count;
           waitingListBadge.style.display = 'flex';
@@ -3732,19 +4126,18 @@
         try {
           debugLog('👂 Subscribing to student_waiting_list real-time updates...');
 
-          // Get current count of uncontacted students
+          // Get current count of ALL waiting list students
           const { data: initialData, error: initialError } = await supabase
             .from('student_waiting_list')
-            .select('id')
-            .is('contacted_at', null);
+            .select('id');
 
           if (!initialError && initialData) {
             newRegistrationsCount = initialData.length;
             updateNotificationBadge(newRegistrationsCount);
-            debugLog(`📊 Initial pending registrations: ${newRegistrationsCount}`);
+            debugLog(`📊 Initial waiting list count: ${newRegistrationsCount}`);
           }
 
-          // Subscribe to INSERT events on student_waiting_list
+          // Subscribe to INSERT and DELETE events on student_waiting_list
           const subscription = supabase
             .channel('student_registrations')
             .on(
@@ -3775,6 +4168,21 @@
                 debugLog(`✨ New student registered: ${studentName} (${newStudent.email})`);
               }
             )
+            .on(
+              'postgres_changes',
+              {
+                event: 'DELETE',
+                schema: 'public',
+                table: 'student_waiting_list',
+              },
+              payload => {
+                debugLog('🗑️ Student removed from waiting list', payload);
+
+                // Decrement counter
+                newRegistrationsCount = Math.max(0, newRegistrationsCount - 1);
+                updateNotificationBadge(newRegistrationsCount);
+              }
+            )
             .subscribe(status => {
               if (status === 'SUBSCRIBED') {
                 debugLog('✅ Successfully subscribed to student registration notifications');
@@ -3795,12 +4203,10 @@
         }
       }
 
-      // Clear notifications when waiting list is opened
+      // Override openWaitingListModal to refresh badge on open
       const originalOpenWaitingListModal = window.openWaitingListModal;
       window.openWaitingListModal = function () {
-        // Reset counter and hide badge
-        newRegistrationsCount = 0;
-        updateNotificationBadge(0);
+        // Note: Badge will be updated by loadWaitingList() with actual count
 
         // Call original function
         if (originalOpenWaitingListModal) {

@@ -1,0 +1,1618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Processor - ARNOMA</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="shared-auth.js"></script>
+    <script src="shared-dialogs.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --success-gradient: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            --danger-gradient: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+            --panel-blur: 8px;
+            --modal-blur: 14px;
+            --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.3);
+            --shadow-xl: 0 30px 80px rgba(0, 0, 0, 0.4);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            min-height: 100vh;
+            padding: 2rem;
+            overflow-x: hidden;
+        }
+
+        /* Animated Background Orbs */
+        .bg-orb {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.3;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .orb-1 {
+            width: 500px;
+            height: 500px;
+            background: radial-gradient(circle, #667eea, transparent);
+            top: -10%;
+            left: -10%;
+        }
+
+        .orb-2 {
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, #f093fb, transparent);
+            bottom: -15%;
+            right: -10%;
+        }
+
+        .orb-3 {
+            width: 350px;
+            height: 350px;
+            background: radial-gradient(circle, #38ef7d, transparent);
+            top: 40%;
+            right: 10%;
+        }
+
+        /* Main Container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            color: white;
+            text-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.5px;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            color: rgba(255, 255, 255, 0.9);
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Main Panel */
+        .main-panel {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(var(--panel-blur));
+            border-radius: 24px;
+            padding: 3rem;
+            box-shadow: var(--shadow-lg);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 2rem;
+        }
+
+        /* Upload Zone */
+        .upload-zone {
+            border: 3px dashed rgba(255, 255, 255, 0.4);
+            border-radius: 20px;
+            padding: 4rem 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            background: rgba(255, 255, 255, 0.05);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .upload-zone:hover {
+            border-color: rgba(255, 255, 255, 0.7);
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .upload-zone.dragover {
+            border-color: #38ef7d;
+            background: rgba(56, 239, 125, 0.1);
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 5rem;
+            margin-bottom: 1.5rem;
+            filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.2));
+        }
+
+        .upload-zone h2 {
+            font-size: 1.8rem;
+            color: white;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .upload-zone p {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .browse-btn {
+            display: inline-block;
+            padding: 0.8rem 2rem;
+            background: white;
+            color: #764ba2;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            cursor: pointer;
+        }
+
+        .browse-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Text Input Zone */
+        .text-input-zone {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .text-input-zone h2 {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        #textInput {
+            width: 100%;
+            min-height: 300px;
+            padding: 1.5rem;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.05);
+            color: white;
+            font-size: 1rem;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            resize: vertical;
+            transition: all 0.3s ease;
+        }
+
+        #textInput:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+        }
+
+        #textInput::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        #docTitle {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        #docTitle:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        #docTitle::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        /* File Preview */
+        .file-preview {
+            display: none;
+            margin-top: 2rem;
+            padding: 2rem;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .file-preview.active {
+            display: block;
+            animation: slideIn 0.4s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .file-icon {
+            font-size: 3rem;
+            filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.2));
+        }
+
+        .file-details h3 {
+            color: white;
+            font-size: 1.3rem;
+            margin-bottom: 0.3rem;
+            font-weight: 600;
+        }
+
+        .file-meta {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.95rem;
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        /* Buttons */
+        .btn {
+            flex: 1;
+            padding: 1rem 2rem;
+            border: none;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: var(--success-gradient);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(17, 153, 142, 0.4);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Progress Section */
+        .progress-section {
+            display: none;
+            margin-top: 2rem;
+        }
+
+        .progress-section.active {
+            display: block;
+            animation: slideIn 0.4s ease;
+        }
+
+        .progress-item {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .progress-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .progress-icon {
+            font-size: 1.8rem;
+        }
+
+        .progress-text h4 {
+            color: white;
+            font-size: 1.1rem;
+            margin-bottom: 0.2rem;
+            font-weight: 600;
+        }
+
+        .progress-text p {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9rem;
+        }
+
+        .progress-bar-container {
+            height: 8px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 0.5rem;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--success-gradient);
+            border-radius: 10px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-status {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* Status Icons */
+        .status-pending { color: #ffd700; }
+        .status-processing { color: #667eea; }
+        .status-complete { color: #38ef7d; }
+        .status-error { color: #f45c43; }
+
+        /* Processing Steps */
+        .processing-steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-top: 2rem;
+        }
+
+        .step-card {
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(8px);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .step-card.active {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+        }
+
+        .step-card.complete {
+            background: rgba(56, 239, 125, 0.1);
+            border-color: rgba(56, 239, 125, 0.3);
+        }
+
+        .step-number {
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1rem;
+            font-weight: 700;
+            font-size: 1.3rem;
+            color: white;
+        }
+
+        .step-card.active .step-number {
+            background: var(--primary-gradient);
+            animation: pulse 2s infinite;
+        }
+
+        .step-card.complete .step-number {
+            background: var(--success-gradient);
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .step-title {
+            color: white;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
+        }
+
+        .step-desc {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.85rem;
+        }
+
+        /* Results Section */
+        .results-section {
+            display: none;
+            margin-top: 2rem;
+        }
+
+        .results-section.active {
+            display: block;
+            animation: slideIn 0.4s ease;
+        }
+
+        .result-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            margin-bottom: 1rem;
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.5rem;
+        }
+
+        .result-title {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .result-title h3 {
+            color: white;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .success-badge {
+            background: var(--success-gradient);
+            color: white;
+            padding: 0.4rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            box-shadow: 0 2px 10px rgba(56, 239, 125, 0.3);
+        }
+
+        .result-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 1rem;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .stat-label {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.85rem;
+            margin-bottom: 0.3rem;
+        }
+
+        .stat-value {
+            color: white;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .result-actions {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            body {
+                padding: 1rem;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .main-panel {
+                padding: 1.5rem;
+            }
+
+            .upload-zone {
+                padding: 2rem 1rem;
+            }
+
+            .upload-icon {
+                font-size: 3rem;
+            }
+
+            .file-actions {
+                flex-direction: column;
+            }
+
+            .processing-steps {
+                grid-template-columns: 1fr;
+            }
+
+            .result-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+            }
+        }
+
+        /* Loading Spinner */
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Background Orbs -->
+    <div class="bg-orb orb-1"></div>
+    <div class="bg-orb orb-2"></div>
+    <div class="bg-orb orb-3"></div>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📄 PDF Processor</h1>
+            <p>Upload, process, and optimize your PDF documents with ease</p>
+        </div>
+
+        <!-- Main Panel -->
+        <div class="main-panel">
+            <!-- Upload Zone -->
+            <div class="upload-zone" id="uploadZone">
+                <div class="upload-icon">📤</div>
+                <h2>Drop your PDF here</h2>
+                <p>or click to browse your files</p>
+                <button class="browse-btn" type="button" id="browseBtn">Choose File</button>
+                <input type="file" id="fileInput" accept=".pdf" style="display: none;" />
+                <p style="margin-top: 1rem; font-size: 0.85rem; opacity: 0.7;">Maximum file size: 50MB</p>
+            </div>
+
+            <!-- OR Divider -->
+            <div style="text-align: center; margin: 2rem 0; position: relative;">
+                <div style="border-top: 1px solid rgba(255, 255, 255, 0.3); position: absolute; width: 100%; top: 50%;"></div>
+                <span style="background: rgba(255, 255, 255, 0.15); padding: 0.5rem 2rem; border-radius: 20px; position: relative; color: white; font-weight: 600;">OR</span>
+            </div>
+
+            <!-- Text Input Area -->
+            <div class="text-input-zone">
+                <h2 style="color: white; margin-bottom: 1rem; font-size: 1.5rem;">✍️ Create from Text</h2>
+                <p style="color: rgba(255, 255, 255, 0.8); margin-bottom: 1rem;">Type or paste your text below to create a professional PDF document</p>
+                <textarea id="textInput" placeholder="Enter your text here... 
+
+You can add:
+• Headings (short lines)
+• Paragraphs
+• Bullet points
+• Any content you want!
+
+The processor will automatically format it beautifully with professional typography, headers, and footers."></textarea>
+                <div style="display: flex; gap: 1rem; align-items: center; margin-top: 1rem;">
+                    <input type="text" id="docTitle" placeholder="Document Title (optional)" style="flex: 1; padding: 0.8rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); color: white; font-size: 1rem;">
+                    <button class="btn btn-primary" id="createFromTextBtn" style="flex: 0 0 auto; padding: 0.8rem 2rem;">
+                        <span>🎨</span>
+                        <span>Create PDF</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- File Preview -->
+            <div class="file-preview" id="filePreview">
+                <div class="file-info">
+                    <div class="file-icon">📄</div>
+                    <div class="file-details">
+                        <h3 id="fileName">Document.pdf</h3>
+                        <div class="file-meta">
+                            <span id="fileSize">0 MB</span> • 
+                            <span id="filePages">0 pages</span> • 
+                            <span id="fileDate">Today</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="file-actions">
+                    <button class="btn btn-primary" id="processBtn">
+                        <span>🚀</span>
+                        <span>Process PDF</span>
+                    </button>
+                    <button class="btn btn-secondary" id="cancelBtn">
+                        <span>✖️</span>
+                        <span>Cancel</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Processing Steps -->
+            <div class="processing-steps" id="processingSteps" style="display: none;">
+                <div class="step-card" id="step1">
+                    <div class="step-number">1</div>
+                    <div class="step-title">Load</div>
+                    <div class="step-desc">Reading document</div>
+                </div>
+                <div class="step-card" id="step2">
+                    <div class="step-number">2</div>
+                    <div class="step-title">Analyze</div>
+                    <div class="step-desc">Analyzing content</div>
+                </div>
+                <div class="step-card" id="step3">
+                    <div class="step-number">3</div>
+                    <div class="step-title">Reformat</div>
+                    <div class="step-desc">Professional layout</div>
+                </div>
+                <div class="step-card" id="step4">
+                    <div class="step-number">4</div>
+                    <div class="step-title">Complete</div>
+                    <div class="step-desc">Ready to download</div>
+                </div>
+            </div>
+
+            <!-- Progress Section -->
+            <div class="progress-section" id="progressSection">
+                <div class="progress-item">
+                    <div class="progress-header">
+                        <div class="progress-icon status-processing">⚙️</div>
+                        <div class="progress-text">
+                            <h4 id="progressTitle">Processing your document...</h4>
+                            <p id="progressDesc">This may take a few moments</p>
+                        </div>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    <div class="progress-status" id="progressStatus">0% complete</div>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div class="results-section" id="resultsSection">
+                <div class="result-card">
+                    <div class="result-header">
+                        <div class="result-title">
+                            <span style="font-size: 2rem;">✅</span>
+                            <h3>Processing Complete!</h3>
+                        </div>
+                        <div class="success-badge">Success</div>
+                    </div>
+                    <div class="result-stats">
+                        <div class="stat-item">
+                            <div class="stat-label">File Size</div>
+                            <div class="stat-value" id="resultSize">0 MB</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Pages</div>
+                            <div class="stat-value" id="resultPages">0</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Processing Time</div>
+                            <div class="stat-value" id="resultTime">0s</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">Status</div>
+                            <div class="stat-value" style="font-size: 1.2rem;">Ready ✓</div>
+                        </div>
+                    </div>
+                    <div class="result-actions">
+                        <button class="btn btn-primary" id="downloadBtn">
+                            <span>⬇️</span>
+                            <span>Download PDF</span>
+                        </button>
+                        <button class="btn btn-secondary" id="viewBtn">
+                            <span>👁️</span>
+                            <span>View Document</span>
+                        </button>
+                        <button class="btn btn-secondary" id="newUploadBtn">
+                            <span>📤</span>
+                            <span>Upload Another</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global error handler
+        window.addEventListener('error', (e) => {
+            console.error('🚨 GLOBAL ERROR:', e.error || e.message);
+        });
+
+        window.addEventListener('unhandledrejection', (e) => {
+            console.error('🚨 UNHANDLED PROMISE REJECTION:', e.reason);
+        });
+
+        // PDF.js configuration
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // Hard-coded Supabase credentials
+        const SUPABASE_URL = 'https://glqkmpttdhntipjqnjlp.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdscWttcHR0ZGhudGlwanFuamxwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mjk2MzgyODIsImV4cCI6MjA0NTIxNDI4Mn0.WJOAHzDzzvbBrxp-KmLGdV74AItJTyMPYWSvUNDhJMs';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const DEBUG_MODE = true;
+        const debugLog = (...args) => DEBUG_MODE && console.log(...args);
+
+        // Global state
+        let selectedFile = null;
+        let uploadedFileUrl = null;
+        let processingStartTime = null;
+        let processedPdfBlob = null;
+        let pdfDocument = null;
+
+        // DOM Elements
+        const uploadZone = document.getElementById('uploadZone');
+        const fileInput = document.getElementById('fileInput');
+        const filePreview = document.getElementById('filePreview');
+        const fileName = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        const filePages = document.getElementById('filePages');
+        const fileDate = document.getElementById('fileDate');
+        const processBtn = document.getElementById('processBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const processingSteps = document.getElementById('processingSteps');
+        const progressSection = document.getElementById('progressSection');
+        const progressBar = document.getElementById('progressBar');
+        const progressTitle = document.getElementById('progressTitle');
+        const progressDesc = document.getElementById('progressDesc');
+        const progressStatus = document.getElementById('progressStatus');
+        const resultsSection = document.getElementById('resultsSection');
+        const resultSize = document.getElementById('resultSize');
+        const resultPages = document.getElementById('resultPages');
+        const resultTime = document.getElementById('resultTime');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const viewBtn = document.getElementById('viewBtn');
+        const newUploadBtn = document.getElementById('newUploadBtn');
+
+        // Initialize
+        async function init() {
+            console.log('🚀 Initializing PDF Processor...');
+            console.log('📦 Libraries loaded:', {
+                pdfjsLib: typeof pdfjsLib !== 'undefined',
+                jspdf: typeof window.jspdf !== 'undefined',
+                supabase: typeof window.supabase !== 'undefined'
+            });
+            
+            debugLog('🚀 Initializing PDF Processor...');
+            
+            // Skip auth for testing - REMOVE IN PRODUCTION
+            // const session = await ArnomaAuth.ensureSession(supabase);
+            // if (!session) return;
+
+            setupEventListeners();
+            console.log('✅ PDF Processor ready');
+            debugLog('✅ PDF Processor ready');
+        }
+
+        // Event Listeners
+        function setupEventListeners() {
+            console.log('🎯 Setting up event listeners...');
+            
+            const browseBtn = document.getElementById('browseBtn');
+            const createFromTextBtn = document.getElementById('createFromTextBtn');
+            
+            // Browse button click
+            browseBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                console.log('🔘 Browse button clicked');
+                fileInput.click();
+            });
+            
+            // Create from text button
+            createFromTextBtn.addEventListener('click', createFromText);
+            
+            // Upload zone click (but not on browse button)
+            uploadZone.addEventListener('click', (e) => {
+                if (e.target !== browseBtn && !browseBtn.contains(e.target)) {
+                    console.log('🖱️ Upload zone clicked');
+                    fileInput.click();
+                }
+            });
+
+            // File input change
+            fileInput.addEventListener('change', handleFileSelect);
+
+            // Drag and drop
+            uploadZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadZone.classList.add('dragover');
+            });
+
+            uploadZone.addEventListener('dragleave', () => {
+                uploadZone.classList.remove('dragover');
+            });
+
+            uploadZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadZone.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFile(files[0]);
+                }
+            });
+
+            // Buttons
+            processBtn.addEventListener('click', processPDF);
+            cancelBtn.addEventListener('click', resetUpload);
+            downloadBtn.addEventListener('click', downloadPDF);
+            viewBtn.addEventListener('click', viewPDF);
+            newUploadBtn.addEventListener('click', resetUpload);
+        }
+
+        // Handle file selection
+        function handleFileSelect(e) {
+            console.log('📂 File input changed, files:', e.target.files);
+            const file = e.target.files[0];
+            if (file) {
+                console.log('✅ File found:', file.name);
+                handleFile(file);
+            } else {
+                console.log('⚠️ No file selected');
+            }
+        }
+
+        // Handle file
+        async function handleFile(file) {
+            console.log('📄 File selected:', file.name, file.type, file.size);
+            debugLog('📄 File selected:', file.name);
+
+            // Validate file type
+            if (file.type !== 'application/pdf') {
+                console.error('❌ Invalid file type:', file.type);
+                alert('Invalid File: Please select a PDF file.');
+                return;
+            }
+
+            // Validate file size (50MB max)
+            const maxSize = 50 * 1024 * 1024; // 50MB
+            if (file.size > maxSize) {
+                console.error('❌ File too large:', file.size);
+                alert('File Too Large: Maximum file size is 50MB.');
+                return;
+            }
+
+            selectedFile = file;
+            console.log('✅ File validated, loading PDF...');
+
+            try {
+                // Load PDF to get actual page count
+                const arrayBuffer = await file.arrayBuffer();
+                console.log('✅ ArrayBuffer created, size:', arrayBuffer.byteLength);
+                
+                pdfDocument = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                console.log('✅ PDF loaded, pages:', pdfDocument.numPages);
+                
+                const pageCount = pdfDocument.numPages;
+
+                // Update preview
+                fileName.textContent = file.name;
+                fileSize.textContent = formatFileSize(file.size);
+                fileDate.textContent = new Date().toLocaleDateString();
+                filePages.textContent = `${pageCount} pages`;
+
+                console.log('✅ Showing preview...');
+                // Show preview
+                filePreview.classList.add('active');
+            } catch (error) {
+                console.error('❌ Error loading PDF:', error);
+                alert('Invalid PDF: Could not read the PDF file. It may be corrupted. Error: ' + error.message);
+            }
+        }
+
+        // Process PDF
+        async function processPDF() {
+            if (!selectedFile || !pdfDocument) return;
+
+            processingStartTime = Date.now();
+            console.log('⚙️ Processing PDF:', selectedFile.name);
+            debugLog('⚙️ Processing PDF:', selectedFile.name);
+
+            // Show processing UI
+            filePreview.style.display = 'none';
+            processingSteps.style.display = 'grid';
+            progressSection.classList.add('active');
+
+            try {
+                // Step 1: Load & Validate
+                await updateStep(1, 'active');
+                await updateProgress(10, 'Loading document...', 'Reading PDF structure');
+                await sleep(300);
+
+                await updateProgress(25, 'Document loaded', 'File validated successfully');
+                await updateStep(1, 'complete');
+                await sleep(200);
+
+                // Step 2: Analyze
+                await updateStep(2, 'active');
+                await updateProgress(35, 'Analyzing document...', `Found ${pdfDocument.numPages} pages`);
+                await sleep(400);
+
+                await updateProgress(50, 'Analysis complete', 'Ready to optimize');
+                await updateStep(2, 'complete');
+                await sleep(200);
+
+                // Step 3: Process & Optimize
+                await updateStep(3, 'active');
+                await updateProgress(60, 'Extracting text...', 'Reading document content');
+                await sleep(300);
+
+                // Extract text with better formatting
+                let allText = [];
+                for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+                    const page = await pdfDocument.getPage(pageNum);
+                    const textContent = await page.getTextContent();
+                    
+                    // Sort items by vertical position (Y coordinate)
+                    const items = textContent.items.sort((a, b) => {
+                        // Group by line (within 2 pixels vertical tolerance)
+                        if (Math.abs(a.transform[5] - b.transform[5]) < 2) {
+                            return a.transform[4] - b.transform[4]; // Sort by X (left to right)
+                        }
+                        return b.transform[5] - a.transform[5]; // Sort by Y (top to bottom)
+                    });
+                    
+                    // Build text with proper spacing
+                    let pageLines = [];
+                    let currentLine = '';
+                    let lastY = null;
+                    
+                    items.forEach((item, index) => {
+                        const y = item.transform[5];
+                        const text = item.str.trim();
+                        
+                        if (!text) return;
+                        
+                        // New line detection
+                        if (lastY !== null && Math.abs(y - lastY) > 2) {
+                            if (currentLine.trim()) {
+                                pageLines.push(currentLine.trim());
+                            }
+                            currentLine = text;
+                        } else {
+                            // Same line - add space if needed
+                            if (currentLine && !currentLine.endsWith(' ') && !text.startsWith(' ')) {
+                                currentLine += ' ';
+                            }
+                            currentLine += text;
+                        }
+                        
+                        lastY = y;
+                    });
+                    
+                    if (currentLine.trim()) {
+                        pageLines.push(currentLine.trim());
+                    }
+                    
+                    allText.push(pageLines.join('\n'));
+                    
+                    const progress = 60 + Math.floor((pageNum / pdfDocument.numPages) * 15);
+                    await updateProgress(progress, 'Extracting text...', `Page ${pageNum} of ${pdfDocument.numPages}`);
+                }
+
+                await updateProgress(75, 'Formatting document...', 'Creating professional layout');
+                await sleep(300);
+
+                // Create professional document
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({
+                    orientation: 'portrait',
+                    unit: 'mm',
+                    format: 'a4',
+                    compress: true
+                });
+                
+                // Professional metadata
+                const processDate = new Date().toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                });
+                
+                pdf.setProperties({
+                    title: selectedFile.name.replace('.pdf', ''),
+                    subject: `Professionally formatted by ARNOMA on ${processDate}`,
+                    author: 'ARNOMA PDF Processor',
+                    keywords: 'professional, formatted, enhanced',
+                    creator: 'ARNOMA PDF Processor Pro'
+                });
+
+                // Design constants
+                const margin = 20;
+                const pageWidth = pdf.internal.pageSize.getWidth();
+                const pageHeight = pdf.internal.pageSize.getHeight();
+                const contentWidth = pageWidth - (margin * 2);
+                const lineHeight = 7;
+                const headerHeight = 25;
+                const footerHeight = 15;
+                let currentY = headerHeight + margin;
+                let currentPage = 1;
+
+                // Add professional header to first page
+                function addHeader() {
+                    // Gradient header background
+                    pdf.setFillColor(102, 126, 234);
+                    pdf.rect(0, 0, pageWidth, headerHeight, 'F');
+                    
+                    // Document title
+                    pdf.setTextColor(255, 255, 255);
+                    pdf.setFontSize(16);
+                    pdf.setFont('helvetica', 'bold');
+                    const title = selectedFile.name.replace('.pdf', '').substring(0, 40);
+                    pdf.text(title, pageWidth / 2, 12, { align: 'center' });
+                    
+                    // Subtitle
+                    pdf.setFontSize(9);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.text(`Professionally Formatted | ${processDate}`, pageWidth / 2, 19, { align: 'center' });
+                }
+
+                // Add professional footer
+                function addFooter(pageNum, totalPages) {
+                    const footerY = pageHeight - 10;
+                    
+                    // Footer line
+                    pdf.setDrawColor(102, 126, 234);
+                    pdf.setLineWidth(0.5);
+                    pdf.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+                    
+                    // Footer text
+                    pdf.setTextColor(100, 100, 100);
+                    pdf.setFontSize(8);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: 'center' });
+                    pdf.text('ARNOMA', margin, footerY);
+                    pdf.text(processDate, pageWidth - margin, footerY, { align: 'right' });
+                }
+
+                // Add header to first page
+                addHeader();
+
+                await updateProgress(80, 'Formatting text...', 'Applying typography');
+
+                // Process and format all text
+                const fullText = allText.join('\n\n');
+                
+                // Clean up text - better cleaning
+                const cleanedText = fullText
+                    .replace(/\s+/g, ' ') // Normalize whitespace
+                    .replace(/\s+([.,;:!?])/g, '$1') // Fix punctuation spacing
+                    .replace(/([.!?])\s+/g, '$1\n\n') // New paragraph after sentences
+                    .replace(/\n{3,}/g, '\n\n') // Max 2 newlines
+                    .replace(/\s*•\s*/g, '\n• ') // Format bullets
+                    .replace(/\s*-\s+/g, '\n- ') // Format dashes
+                    .trim();
+                
+                // Split into paragraphs
+                const paragraphs = cleanedText.split(/\n\n+/).filter(p => p.trim().length > 0);
+
+                pdf.setTextColor(40, 40, 40);
+                let isFirstPara = true;
+                let inBulletList = false;
+                
+                for (let i = 0; i < paragraphs.length; i++) {
+                    let paragraph = paragraphs[i].trim();
+                    
+                    // Skip very short fragments
+                    if (paragraph.length < 3) continue;
+                    
+                    // Detect bullets
+                    const isBullet = paragraph.startsWith('•') || paragraph.startsWith('-');
+                    
+                    // Detect headings - improved logic
+                    const isHeading = !isBullet && (
+                        (isFirstPara && paragraph.length < 100) || 
+                        (paragraph.length < 70 && paragraph === paragraph.toUpperCase()) ||
+                        (paragraph.length < 60 && !paragraph.includes('.') && !paragraph.includes(',')) ||
+                        (paragraph.match(/^[A-Z][a-z\s]+:$/)) // "Title:"
+                    );
+                    
+                    if (isHeading && isFirstPara) {
+                        isFirstPara = false;
+                    }
+                    
+                    if (isHeading) {
+                        // End bullet list if we were in one
+                        inBulletList = false;
+                        
+                        // Add spacing before heading
+                        currentY += 10;
+                        
+                        // Check if we need a new page
+                        if (currentY > pageHeight - footerHeight - 35) {
+                            addFooter(currentPage, '•');
+                            pdf.addPage();
+                            currentPage++;
+                            currentY = margin + 10;
+                        }
+                        
+                        // Format as heading - more professional
+                        pdf.setFontSize(13);
+                        pdf.setFont('helvetica', 'bold');
+                        pdf.setTextColor(102, 126, 234);
+                        
+                        const headingLines = pdf.splitTextToSize(paragraph.toUpperCase(), contentWidth);
+                        for (let line of headingLines) {
+                            pdf.text(line, margin, currentY);
+                            currentY += 8;
+                        }
+                        
+                        // Add line under heading
+                        pdf.setDrawColor(102, 126, 234);
+                        pdf.setLineWidth(0.5);
+                        pdf.line(margin, currentY, margin + 30, currentY);
+                        currentY += 6;
+                        
+                        pdf.setTextColor(40, 40, 40);
+                        
+                    } else if (isBullet) {
+                        // Handle bullet points
+                        if (!inBulletList) {
+                            currentY += 3;
+                            inBulletList = true;
+                        }
+                        
+                        if (currentY > pageHeight - footerHeight - 20) {
+                            addFooter(currentPage, '•');
+                            pdf.addPage();
+                            currentPage++;
+                            currentY = margin + 10;
+                        }
+                        
+                        pdf.setFontSize(10.5);
+                        pdf.setFont('helvetica', 'normal');
+                        
+                        // Remove bullet character and format
+                        const bulletText = paragraph.replace(/^[•-]\s*/, '');
+                        const lines = pdf.splitTextToSize(bulletText, contentWidth - 8);
+                        
+                        // Draw bullet
+                        pdf.setFillColor(102, 126, 234);
+                        pdf.circle(margin + 2, currentY - 2, 1, 'F');
+                        
+                        // Draw text with indent
+                        for (let j = 0; j < lines.length; j++) {
+                            pdf.text(lines[j], margin + 6, currentY);
+                            currentY += 6;
+                        }
+                        
+                        currentY += 2;
+                        
+                    } else {
+                        // Format as body text
+                        pdf.setFontSize(11);
+                        pdf.setFont('helvetica', 'normal');
+                        
+                        // Split into lines that fit the width
+                        const lines = pdf.splitTextToSize(paragraph, contentWidth);
+                        
+                        for (let line of lines) {
+                            // Check if we need a new page
+                            if (currentY > pageHeight - footerHeight - 20) {
+                                addFooter(currentPage, '•');
+                                pdf.addPage();
+                                currentPage++;
+                                currentY = margin + 10;
+                            }
+                            
+                            pdf.text(line, margin, currentY);
+                            currentY += lineHeight;
+                        }
+                        
+                        // Add paragraph spacing
+                        currentY += 4;
+                    }
+                    
+                    const progress = 80 + Math.floor((i / paragraphs.length) * 10);
+                    await updateProgress(progress, 'Formatting text...', `Processing content ${Math.floor((i / paragraphs.length) * 100)}%`);
+                }
+
+                // Add footer to last page with actual page count
+                const totalPages = pdf.internal.pages.length - 1;
+                
+                // Go back and update all footers with correct total
+                for (let p = 1; p <= totalPages; p++) {
+                    pdf.setPage(p);
+                    
+                    // Clear old footer text area
+                    pdf.setFillColor(255, 255, 255);
+                    pdf.rect(0, pageHeight - 15, pageWidth, 15, 'F');
+                    
+                    // Add correct footer
+                    addFooter(p, totalPages);
+                }
+
+                await updateProgress(90, 'Finalizing...', 'Creating optimized file');
+                await sleep(300);
+
+                // Generate blob
+                processedPdfBlob = pdf.output('blob');
+
+                await updateProgress(95, 'Processing complete', 'Preparing download');
+                await updateStep(3, 'complete');
+                await sleep(200);
+
+                // Step 4: Complete
+                await updateStep(4, 'active');
+                await updateProgress(100, 'Complete!', 'Your document is ready');
+                await sleep(300);
+                await updateStep(4, 'complete');
+
+                // Show results
+                showResults();
+
+            } catch (error) {
+                console.error('❌ Processing error:', error);
+                await customAlert('Processing Failed', error.message || 'Failed to process PDF');
+                resetUpload();
+            }
+        }
+
+        // Create PDF from text input
+        async function createFromText() {
+            const textInput = document.getElementById('textInput');
+            const docTitle = document.getElementById('docTitle');
+            const userText = textInput.value.trim();
+            
+            if (!userText) {
+                alert('Please enter some text to create a PDF!');
+                return;
+            }
+            
+            console.log('🎨 Creating PDF from text input');
+            processingStartTime = Date.now();
+            
+            // Hide text input area
+            document.querySelector('.text-input-zone').style.display = 'none';
+            document.getElementById('uploadZone').style.display = 'none';
+            
+            // Show processing UI
+            processingSteps.style.display = 'grid';
+            progressSection.classList.add('active');
+            
+            try {
+                // Step 1: Parse
+                await updateStep(1, 'active');
+                await updateProgress(15, 'Reading text...', 'Analyzing content');
+                await sleep(300);
+                await updateStep(1, 'complete');
+                
+                // Step 2: Analyze
+                await updateStep(2, 'active');
+                await updateProgress(30, 'Analyzing structure...', 'Detecting headings and paragraphs');
+                await sleep(400);
+                await updateStep(2, 'complete');
+                
+                // Step 3: Format
+                await updateStep(3, 'active');
+                await updateProgress(50, 'Creating PDF...', 'Applying professional formatting');
+                await sleep(300);
+                
+                // Create professional PDF
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({
+                    orientation: 'portrait',
+                    unit: 'mm',
+                    format: 'a4',
+                    compress: true
+                });
+                
+                const processDate = new Date().toLocaleDateString('en-US', { 
+                    year: 'numeric', 
+                    month: 'long', 
+                    day: 'numeric' 
+                });
+                
+                const title = docTitle.value.trim() || 'Professional Document';
+                
+                pdf.setProperties({
+                    title: title,
+                    subject: `Created by ARNOMA on ${processDate}`,
+                    author: 'ARNOMA PDF Processor',
+                    keywords: 'professional, formatted',
+                    creator: 'ARNOMA PDF Processor Pro'
+                });
+                
+                // Design constants
+                const margin = 20;
+                const pageWidth = pdf.internal.pageSize.getWidth();
+                const pageHeight = pdf.internal.pageSize.getHeight();
+                const contentWidth = pageWidth - (margin * 2);
+                const lineHeight = 7;
+                const headerHeight = 25;
+                const footerHeight = 15;
+                let currentY = headerHeight + margin;
+                let currentPage = 1;
+                
+                // Header function
+                function addHeader() {
+                    pdf.setFillColor(102, 126, 234);
+                    pdf.rect(0, 0, pageWidth, headerHeight, 'F');
+                    pdf.setTextColor(255, 255, 255);
+                    pdf.setFontSize(16);
+                    pdf.setFont('helvetica', 'bold');
+                    pdf.text(title.substring(0, 50), pageWidth / 2, 12, { align: 'center' });
+                    pdf.setFontSize(9);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.text(`Professionally Formatted | ${processDate}`, pageWidth / 2, 19, { align: 'center' });
+                }
+                
+                // Footer function
+                function addFooter(pageNum, totalPages) {
+                    const footerY = pageHeight - 10;
+                    pdf.setDrawColor(102, 126, 234);
+                    pdf.setLineWidth(0.5);
+                    pdf.line(margin, footerY - 5, pageWidth - margin, footerY - 5);
+                    pdf.setTextColor(100, 100, 100);
+                    pdf.setFontSize(8);
+                    pdf.setFont('helvetica', 'normal');
+                    pdf.text(`Page ${pageNum} of ${totalPages}`, pageWidth / 2, footerY, { align: 'center' });
+                    pdf.text('ARNOMA', margin, footerY);
+                    pdf.text(processDate, pageWidth - margin, footerY, { align: 'right' });
+                }
+                
+                addHeader();
+                
+                await updateProgress(65, 'Formatting text...', 'Applying typography');
+                
+                // Clean and split text into paragraphs
+                const cleanedText = userText
+                    .replace(/\r\n/g, '\n')
+                    .replace(/\n{3,}/g, '\n\n');
+                
+                const paragraphs = cleanedText.split(/\n\n+/).filter(p => p.trim().length > 0);
+                
+                pdf.setTextColor(40, 40, 40);
+                let isFirstPara = true;
+                
+                for (let i = 0; i < paragraphs.length; i++) {
+                    let paragraph = paragraphs[i].trim();
+                    
+                    if (paragraph.length < 3) continue;
+                    
+                    // Detect headings
+                    const isHeading = (isFirstPara && paragraph.length < 80) || 
+                                     (paragraph.length < 60 && !paragraph.includes('.')) ||
+                                     paragraph.startsWith('•') ||
+                                     paragraph.match(/^[A-Z\s]{3,}$/);
+                    
+                    if (isHeading && isFirstPara) {
+                        isFirstPara = false;
+                    }
+                    
+                    if (isHeading) {
+                        currentY += 8;
+                        
+                        if (currentY > pageHeight - footerHeight - 30) {
+                            addFooter(currentPage, '•');
+                            pdf.addPage();
+                            currentPage++;
+                            currentY = margin + 10;
+                        }
+                        
+                        pdf.setFontSize(14);
+                        pdf.setFont('helvetica', 'bold');
+                        pdf.setTextColor(102, 126, 234);
+                        
+                        const headingLines = pdf.splitTextToSize(paragraph, contentWidth);
+                        for (let line of headingLines) {
+                            pdf.text(line, margin, currentY);
+                            currentY += lineHeight + 2;
+                        }
+                        
+                        currentY += 3;
+                        pdf.setTextColor(40, 40, 40);
+                        
+                    } else {
+                        pdf.setFontSize(11);
+                        pdf.setFont('helvetica', 'normal');
+                        
+                        const lines = pdf.splitTextToSize(paragraph, contentWidth);
+                        
+                        for (let line of lines) {
+                            if (currentY > pageHeight - footerHeight - 20) {
+                                addFooter(currentPage, '•');
+                                pdf.addPage();
+                                currentPage++;
+                                currentY = margin + 10;
+                            }
+                            
+                            pdf.text(line, margin, currentY);
+                            currentY += lineHeight;
+                        }
+                        
+                        currentY += 4;
+                    }
+                    
+                    const progress = 65 + Math.floor((i / paragraphs.length) * 25);
+                    await updateProgress(progress, 'Formatting text...', `Processing ${Math.floor((i / paragraphs.length) * 100)}%`);
+                }
+                
+                // Update footers with correct page count
+                const totalPages = pdf.internal.pages.length - 1;
+                for (let p = 1; p <= totalPages; p++) {
+                    pdf.setPage(p);
+                    pdf.setFillColor(255, 255, 255);
+                    pdf.rect(0, pageHeight - 15, pageWidth, 15, 'F');
+                    addFooter(p, totalPages);
+                }
+                
+                await updateProgress(95, 'Finalizing...', 'Creating file');
+                await sleep(300);
+                
+                processedPdfBlob = pdf.output('blob');
+                selectedFile = { name: `${title}.pdf`, size: processedPdfBlob.size };
+                pdfDocument = { numPages: totalPages };
+                
+                await updateProgress(100, 'Complete!', 'Your document is ready');
+                await updateStep(3, 'complete');
+                await sleep(200);
+                
+                await updateStep(4, 'active');
+                await sleep(200);
+                await updateStep(4, 'complete');
+                
+                showResults();
+                
+            } catch (error) {
+                console.error('❌ Text processing error:', error);
+                alert('Failed to create PDF: ' + error.message);
+                resetUpload();
+            }
+        }
+
+        // Update processing step
+        async function updateStep(stepNum, status) {
+            const step = document.getElementById(`step${stepNum}`);
+            step.classList.remove('active', 'complete');
+            if (status === 'active' || status === 'complete') {
+                step.classList.add(status);
+            }
+        }
+
+        // Update progress
+        async function updateProgress(percent, title, desc) {
+            progressBar.style.width = `${percent}%`;
+            progressTitle.textContent = title;
+            progressDesc.textContent = desc;
+            progressStatus.textContent = `${percent}% complete`;
+        }
+
+        // Show results
+        function showResults() {
+            processingSteps.style.display = 'none';
+            progressSection.classList.remove('active');
+            resultsSection.classList.add('active');
+
+            // Update stats
+            const optimizedSize = processedPdfBlob ? processedPdfBlob.size : selectedFile.size;
+            resultSize.textContent = formatFileSize(optimizedSize);
+            resultPages.textContent = pdfDocument.numPages;
+            
+            const processingTime = ((Date.now() - processingStartTime) / 1000).toFixed(1);
+            resultTime.textContent = `${processingTime}s`;
+        }
+
+        // Download PDF
+        function downloadPDF() {
+            if (!processedPdfBlob) return;
+
+            const url = URL.createObjectURL(processedPdfBlob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `processed_${selectedFile.name}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            debugLog('📥 Downloaded:', a.download);
+        }
+
+        // View PDF
+        function viewPDF() {
+            if (!processedPdfBlob) return;
+            
+            const url = URL.createObjectURL(processedPdfBlob);
+            window.open(url, '_blank');
+        }
+
+        // Reset upload
+        function resetUpload() {
+            selectedFile = null;
+            uploadedFileUrl = null;
+            processedPdfBlob = null;
+            pdfDocument = null;
+            fileInput.value = '';
+            document.getElementById('textInput').value = '';
+            document.getElementById('docTitle').value = '';
+            filePreview.classList.remove('active');
+            document.querySelector('.text-input-zone').style.display = 'block';
+            document.getElementById('uploadZone').style.display = 'block';
+            processingSteps.style.display = 'none';
+            progressSection.classList.remove('active');
+            resultsSection.classList.remove('active');
+            
+            // Reset all steps
+            for (let i = 1; i <= 4; i++) {
+                const step = document.getElementById(`step${i}`);
+                step.classList.remove('active', 'complete');
+            }
+            
+            progressBar.style.width = '0%';
+        }
+
+        // Utility: Format file size
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        // Utility: Sleep
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
+

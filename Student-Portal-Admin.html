@@ -1682,7 +1682,7 @@
       <div class="card" style="padding: 0; overflow: hidden;">
         <iframe 
           id="groupNotesIframe"
-          src="Group-Notes.html?v=18"
+          src="Group-Notes.html?v=23"
           title="Group Notes Manager"
           style="width: 100%; height: 900px; border: none; background: #0b1220;"
           loading="lazy"
@@ -2337,8 +2337,8 @@
         tbody.innerHTML = notes.map(note => `
           <tr>
             <td>${note.title || 'Untitled'}</td>
-            <td>${note.system || '-'}</td>
             <td>${note.group_name || '-'}</td>
+            <td>${note.system || '-'}</td>
             <td>${note.class_date ? new Date(note.class_date).toLocaleDateString() : '-'}</td>
             <td><span class="badge ${note.requires_payment ? 'locked' : 'free'}">${note.requires_payment ? '🔒 Locked' : '✓ Free'}</span></td>
             <td>
@@ -2762,7 +2762,16 @@
           sessions.slice(0, 10).forEach(session => {
             const start = new Date(session.session_start);
             const end = session.session_end ? new Date(session.session_end) : null;
-            const durationMinutes = session.duration_seconds ? Math.floor(session.duration_seconds / 60) : 0;
+            
+            // FIXED: Calculate duration from session_start and session_end (not from non-existent duration_seconds field)
+            let durationMinutes = 0;
+            if (end && start) {
+              durationMinutes = Math.floor((end - start) / 1000 / 60);
+            } else if (session.is_active && start) {
+              // For active sessions, calculate duration from start to now
+              durationMinutes = Math.floor((new Date() - start) / 1000 / 60);
+            }
+            
             const hours = Math.floor(durationMinutes / 60);
             const minutes = durationMinutes % 60;
             const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
@@ -2774,9 +2783,8 @@
                   <span class="history-duration">${session.is_active ? '🟢 Active - ' + durationText : durationText}</span>
                 </div>
                 <div class="history-details">
-                  <span>📄 ${session.total_page_views || 0} pages</span>
-                  <span>📚 ${session.total_notes_viewed || 0} notes</span>
-                  ${end ? '<span>🏁 ' + end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + '</span>' : ''}
+                  <span>⏱️ Duration: ${durationText}</span>
+                  ${end ? '<span>🏁 Ended: ' + end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + '</span>' : '<span>🟢 Currently Active</span>'}
                 </div>
               </div>
             `;
@@ -3834,15 +3842,21 @@
     }
     
     function closeResponsesModal() {
-      document.getElementById('responsesModal').classList.remove('active');
+      const responsesModal = document.getElementById('responsesModal');
+      if (responsesModal) {
+        responsesModal.classList.remove('active');
+      }
     }
     
     // Close responses modal when clicking outside
-    document.getElementById('responsesModal').addEventListener('click', (e) => {
-      if (e.target.id === 'responsesModal') {
-        closeResponsesModal();
-      }
-    });
+    const responsesModal = document.getElementById('responsesModal');
+    if (responsesModal) {
+      responsesModal.addEventListener('click', (e) => {
+        if (e.target.id === 'responsesModal') {
+          closeResponsesModal();
+        }
+      });
+    }
   </script>
 
   <!-- Fullscreen Impersonation Modal -->

@@ -579,7 +579,7 @@
   <div id="freeAccessModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.8); backdrop-filter: blur(8px); z-index: 10000; align-items: center; justify-content: center; overflow: hidden;">
     <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 20px; padding: 30px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.1);">
       <h3 style="margin: 0 0 20px 0; font-size: 22px; font-weight: 700; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
-        🎁 Grant FREE Access (Payment Bypass)
+        Grant FREE Access (Payment Bypass)
       </h3>
       <p style="color: rgba(255, 255, 255, 0.7); margin-bottom: 20px; font-size: 14px;">
         Grant free access to <strong id="freeAccessCount" style="color: #86efac;"></strong> by choosing groups or individual students below.
@@ -648,7 +648,7 @@
           Cancel
         </button>
         <button onclick="grantFreeAccess()" style="padding: 10px 20px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border: none; border-radius: 10px; color: white; font-size: 14px; font-weight: 600; cursor: pointer; box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);">
-          🎁 Grant FREE Access
+          Grant FREE Access
         </button>
       </div>
     </div>
@@ -694,6 +694,12 @@
     let currentGroup = 'Group A';
     let allNotes = [];
     let permissions = [];
+    let freeAccessGrants = []; // Stores free access data from note_free_access table
+
+    // ===== CRITICAL: GLOBAL PERSISTENT CHECKBOX STATE =====
+    // This Set accumulates ALL selected note IDs across all searches/renders
+    // It's cleared only on page refresh or when user manually unchecks
+    const globalCheckedNoteIds = new Set();
 
     // ===== PERFORMANCE: DATA CACHE =====
     const DATA_CACHE = {
@@ -747,6 +753,68 @@
       };
     }
 
+    // ===== LOAD ACTIVE GROUPS FROM STUDENT MANAGER =====
+    let activeGroups = ['Group A', 'Group B', 'Group C', 'Group D', 'Group E', 'Group F']; // Default all groups
+    async function loadActiveGroups() {
+      try {
+        console.log('🔄 Loading active groups from Student Manager...');
+        
+        // Query students table for show_in_grid flag to determine active groups
+        const { data: students, error } = await supabase
+          .from('students')
+          .select('group_name, show_in_grid')
+          .eq('show_in_grid', true);
+        
+        if (error) {
+          console.error('❌ Error loading active groups:', error);
+          return; // Keep all groups if error
+        }
+        
+        console.log('📊 Students with show_in_grid=true:', students);
+        
+        // Extract unique groups that are active
+        const uniqueGroups = new Set();
+        students?.forEach(student => {
+          let groupName = student.group_name;
+          // Normalize to "Group X" format
+          if (groupName && !groupName.toLowerCase().startsWith('group')) {
+            groupName = `Group ${groupName}`;
+          }
+          if (groupName) {
+            uniqueGroups.add(groupName);
+          }
+        });
+        
+        activeGroups = Array.from(uniqueGroups).sort();
+        
+        console.log('✅ Active groups determined:', activeGroups);
+        
+        // Update group tabs visibility
+        document.querySelectorAll('.group-tab').forEach(tab => {
+          const groupName = tab.dataset.group;
+          if (activeGroups.includes(groupName)) {
+            tab.style.display = 'inline-block';
+            console.log(`  ✓ Showing tab: ${groupName}`);
+          } else {
+            tab.style.display = 'none';
+            console.log(`  ✗ Hiding tab: ${groupName}`);
+          }
+        });
+        
+        // Set first active group as current if current group is hidden
+        if (!activeGroups.includes(currentGroup) && activeGroups.length > 0) {
+          currentGroup = activeGroups[0];
+          console.log(`⚠️  Current group was hidden, switched to: ${currentGroup}`);
+          document.querySelectorAll('.group-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.group === currentGroup);
+          });
+        }
+        
+      } catch (error) {
+        console.error('❌ Error in loadActiveGroups:', error);
+      }
+    }
+
     // ===== INITIALIZATION =====
     (async function init() {
       try {
@@ -766,6 +834,7 @@
           return;
         }
 
+        await loadActiveGroups(); // Load active groups first
         await loadData();
       } catch (error) {
         console.error('Init error:', error);
@@ -786,11 +855,13 @@
         // Check cache first
         const cachedNotes = getCachedData('notes');
         const cachedPerms = getCachedData('permissions');
+        const cachedFree = getCachedData('freeAccess');
         
         if (cachedNotes && cachedPerms) {
           if (DEBUG_MODE) console.log('✅ Using cached data');
           allNotes = cachedNotes;
           permissions = cachedPerms;
+          freeAccessGrants = cachedFree || [];
           renderSystems();
           return;
         }
@@ -822,9 +893,23 @@
 
         if (DEBUG_MODE) console.log('🔑 Loaded permissions:', permissions.length);
 
+        // Load free access grants
+        const { data: freeAccess, error: freeError } = await supabase
+          .from('note_free_access')
+          .select('*');
+
+        if (freeError) {
+          console.warn('⚠️ Could not load free access grants:', freeError);
+          freeAccessGrants = [];
+        } else {
+          freeAccessGrants = freeAccess || [];
+          if (DEBUG_MODE) console.log('✨ Loaded free access grants:', freeAccessGrants.length);
+        }
+
         // Cache the results
         setCachedData('notes', allNotes);
         setCachedData('permissions', permissions);
+        setCachedData('freeAccess', freeAccessGrants);
 
         renderSystems();
 
@@ -889,14 +974,15 @@
         // Set this system as ongoing for this group
         ongoingSystemsMap[groupLetter] = systemName;
         
-        // UPDATE DATABASE: Set is_current = TRUE for this folder, FALSE for all others
-        console.log(`💾 Starting database update for "${systemName}"...`);
+        // UPDATE DATABASE: Set is_current = TRUE for this folder, FALSE for all others IN THIS GROUP
+        console.log(`💾 Starting database update for "${systemName}" (Group ${groupLetter})...`);
         try {
-          // First, unset all folders' is_current
-          console.log(`  ⏳ Unsetting all other folders...`);
+          // First, unset all folders' is_current for THIS GROUP ONLY
+          console.log(`  ⏳ Unsetting all other folders for Group ${groupLetter}...`);
           const { error: error1 } = await supabase
             .from('note_folders')
             .update({ is_current: false })
+            .eq('group_letter', groupLetter)
             .neq('folder_name', systemName);
           
           if (error1) {
@@ -904,17 +990,65 @@
             throw error1;
           }
           
-          console.log(`  ✅ Unset complete. Now setting "${systemName}" as current...`);
+          console.log(`  ✅ Unset complete. Now setting "${systemName}" as current for Group ${groupLetter}...`);
           
-          // Then set this folder as current
-          const { error: error2 } = await supabase
+          // Check if group-specific folder exists
+          const { data: existingFolder } = await supabase
             .from('note_folders')
-            .update({ is_current: true })
-            .eq('folder_name', systemName);
+            .select('id')
+            .eq('folder_name', systemName)
+            .eq('group_letter', groupLetter)
+            .limit(1);
           
-          if (error2) {
-            console.error('❌ Failed to set folder as current:', error2);
-            throw error2;
+          if (existingFolder && existingFolder.length > 0) {
+            // Update existing group-specific folder
+            const { error: error2 } = await supabase
+              .from('note_folders')
+              .update({ is_current: true })
+              .eq('folder_name', systemName)
+              .eq('group_letter', groupLetter);
+            
+            if (error2) {
+              console.error('❌ Failed to set folder as current:', error2);
+              throw error2;
+            }
+          } else {
+            // Create new group-specific folder record (copy from global if exists)
+            const { data: globalFolder } = await supabase
+              .from('note_folders')
+              .select('*')
+              .eq('folder_name', systemName)
+              .is('group_letter', null)
+              .limit(1);
+            
+            const folderData = globalFolder && globalFolder.length > 0 
+              ? {
+                  folder_name: globalFolder[0].folder_name,
+                  description: globalFolder[0].description,
+                  icon: globalFolder[0].icon,
+                  sort_order: globalFolder[0].sort_order,
+                  is_current: true,
+                  group_letter: groupLetter
+                }
+              : {
+                  folder_name: systemName,
+                  description: null,
+                  icon: '📚',
+                  sort_order: 0,
+                  is_current: true,
+                  group_letter: groupLetter
+                };
+            
+            const { error: error2 } = await supabase
+              .from('note_folders')
+              .insert(folderData);
+            
+            if (error2) {
+              console.error('❌ Failed to create group-specific folder:', error2);
+              throw error2;
+            }
+            
+            console.log(`✅ Created new group-specific folder for Group ${groupLetter}`);
           }
           
           console.log(`✅ Database updated: "${systemName}" set as ongoing (is_current = TRUE)`);
@@ -949,12 +1083,13 @@
         // Remove ongoing status
         delete ongoingSystemsMap[groupLetter];
         
-        // UPDATE DATABASE: Unset is_current for this folder
+        // UPDATE DATABASE: Unset is_current for this folder IN THIS GROUP ONLY
         try {
           const { error } = await supabase
             .from('note_folders')
             .update({ is_current: false })
-            .eq('folder_name', systemName);
+            .eq('folder_name', systemName)
+            .eq('group_letter', groupLetter);
           
           if (error) {
             console.error('❌ Failed to clear ongoing status:', error);
@@ -985,11 +1120,14 @@
     // Load ongoing checkbox states when rendering systems
     async function updateOngoingCheckboxes() {
       try {
-        // Fetch which folder is marked as current from database
+        const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+        
+        // Fetch which folder is marked as current from database FOR THIS GROUP
         const { data: folders, error } = await supabase
           .from('note_folders')
           .select('folder_name, is_current')
           .eq('is_current', true)
+          .eq('group_letter', groupLetter)  // CRITICAL: Filter by current group
           .is('deleted_at', null)
           .limit(1);
         
@@ -1000,7 +1138,7 @@
         
         const ongoingSystemName = folders && folders.length > 0 ? folders[0].folder_name : null;
         
-        console.log(`🟡 Ongoing system from database: "${ongoingSystemName || 'None'}"`);
+        console.log(`🟡 Ongoing system from database for Group ${groupLetter}: "${ongoingSystemName || 'None'}"`);
         
         // Update all checkboxes and apply tint to ongoing system
         document.querySelectorAll('.system-ongoing-checkbox').forEach(checkbox => {
@@ -1028,6 +1166,12 @@
       const container = document.getElementById('systemsContainer');
       const searchInput = document.getElementById('searchInput').value.toLowerCase();
 
+      // CRITICAL FIX: Update global Set with currently checked boxes before re-render
+      document.querySelectorAll('.note-checkbox:checked').forEach(checkbox => {
+        const noteId = checkbox.getAttribute('data-note-id');
+        if (noteId) globalCheckedNoteIds.add(noteId);
+      });
+
       // PERFORMANCE: Use document fragment for batch DOM updates
       const systemsHTML = SYSTEMS.map(system => {
         // Flexible column detection - check multiple possible column names
@@ -1050,6 +1194,52 @@
         
         if (systemNotes.length === 0) return '';
 
+        // Count how many notes in this system have FREE access for current group
+        const groupLetter = currentGroup.replace('Group ', '');
+        const freeNotesCount = systemNotes.filter(note => 
+          freeAccessGrants.some(grant => 
+            grant.note_id === note.id && 
+            grant.access_type === 'group' && 
+            grant.group_letter === groupLetter
+          )
+        ).length;
+        
+        // Count posted notes = notes shown to current group (via student_note_permissions)
+        // Posted (not free) = shown to group AND not free
+        const postedNotesCount = systemNotes.filter(note => {
+          // Check if note is shown to current group
+          const isShownToGroup = permissions.some(perm => 
+            perm.note_id === note.id && 
+            perm.group_name === currentGroup
+          );
+          
+          // Check if note is free
+          const isFree = freeAccessGrants.some(grant => 
+            grant.note_id === note.id && 
+            grant.access_type === 'group' && 
+            grant.group_letter === groupLetter
+          );
+          
+          // Posted but not free
+          return isShownToGroup && !isFree;
+        }).length;
+        
+        // Unposted = NOT shown to current group AND NOT free
+        const unpostedNotesCount = systemNotes.filter(note => {
+          const isShownToGroup = permissions.some(perm => 
+            perm.note_id === note.id && 
+            perm.group_name === currentGroup
+          );
+          
+          const isFree = freeAccessGrants.some(grant => 
+            grant.note_id === note.id && 
+            grant.access_type === 'group' && 
+            grant.group_letter === groupLetter
+          );
+          
+          return !isShownToGroup && !isFree;
+        }).length;
+
         return `
           <div class="system-section" id="system-${system.name.replace(/[^a-zA-Z0-9]/g, '')}">
             <div class="system-header" onclick="toggleSystem('${system.name.replace(/[^a-zA-Z0-9]/g, '')}')">
@@ -1057,7 +1247,12 @@
                 <div class="system-icon">${system.icon}</div>
                 <div class="system-details">
                   <h3>${system.name}</h3>
-                  <div class="note-count">${systemNotes.length} note${systemNotes.length !== 1 ? 's' : ''}</div>
+                  <div class="note-count">
+                    ${systemNotes.length} note${systemNotes.length !== 1 ? 's' : ''}
+                    ${freeNotesCount > 0 ? `<span style="margin-left: 8px; padding: 2px 8px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white;">Free (${freeNotesCount})</span>` : ''}
+                    ${postedNotesCount > 0 ? `<span style="margin-left: 8px; padding: 2px 8px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white;">Posted (${postedNotesCount})</span>` : ''}
+                    ${unpostedNotesCount > 0 ? `<span style="margin-left: 8px; padding: 2px 8px; background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white;">Unposted (${unpostedNotesCount})</span>` : ''}
+                  </div>
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 12px; margin-left: auto;">
@@ -1118,8 +1313,19 @@
 
       container.innerHTML = systemsHTML;
       
+      // CRITICAL FIX: Restore ALL checkboxes from global persistent Set
+      globalCheckedNoteIds.forEach(noteId => {
+        const checkbox = document.querySelector(`.note-checkbox[data-note-id="${noteId}"]`);
+        if (checkbox) {
+          checkbox.checked = true;
+        }
+      });
+      
       // Update ongoing checkbox states after rendering
       updateOngoingCheckboxes();
+      
+      // Update selected count to reflect restored checkboxes
+      updateSelectedCount();
     }
 
     // PERFORMANCE: Debounced version for search input
@@ -1131,6 +1337,14 @@
         p.note_id === note.id && p.group_name === currentGroup
       );
       const isAccessible = permission?.is_accessible || false;
+      
+      // Check if this note has FREE access for current group
+      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+      const hasFreeAccess = freeAccessGrants.some(grant => 
+        grant.note_id === note.id && 
+        grant.access_type === 'group' && 
+        grant.group_letter === groupLetter
+      );
 
       return `
         <div class="note-card ${isAccessible ? 'accessible' : ''}" data-note-id="${note.id}" onclick="toggleNoteSelection(${note.id}, event)" style="cursor: pointer;">
@@ -1146,6 +1360,7 @@
             </label>
             <div style="flex: 1;">
               <div class="note-title">${note.title}</div>
+              ${hasFreeAccess ? '<div style="display: inline-block; padding: 2px 8px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white; margin-top: 4px;">FREE Access</div>' : ''}
             </div>
             <div class="access-badge ${isAccessible ? 'accessible' : 'restricted'}">
               ${isAccessible ? '✓ Visible' : '✕ Hidden'}
@@ -1180,6 +1395,12 @@
       const searchTerm = searchInput.value.toLowerCase();
       const notesGrid = document.getElementById(`notes-${systemId}`);
       
+      // CRITICAL FIX: Update global Set with currently checked boxes before re-render
+      notesGrid.querySelectorAll('.note-checkbox:checked').forEach(checkbox => {
+        const noteId = checkbox.getAttribute('data-note-id');
+        if (noteId) globalCheckedNoteIds.add(noteId);
+      });
+      
       // Get system name from the ID
       const system = SYSTEMS.find(s => s.name.replace(/[^a-zA-Z0-9]/g, '') === systemId);
       if (!system) return;
@@ -1207,6 +1428,17 @@
         `;
       } else {
         notesGrid.innerHTML = systemNotes.map(note => renderNoteCard(note)).join('');
+        
+        // CRITICAL FIX: Restore ALL checkboxes from global persistent Set
+        globalCheckedNoteIds.forEach(noteId => {
+          const checkbox = notesGrid.querySelector(`.note-checkbox[data-note-id="${noteId}"]`);
+          if (checkbox) {
+            checkbox.checked = true;
+          }
+        });
+        
+        // Update selected count to reflect restored checkboxes
+        updateSelectedCount();
       }
     }
 
@@ -1659,6 +1891,13 @@
       const checkboxes = document.querySelectorAll('.note-checkbox:checked');
       selectedNoteIds = new Set(Array.from(checkboxes).map(cb => parseInt(cb.dataset.noteId)));
       
+      // CRITICAL FIX: Sync global persistent Set with current checkbox states
+      globalCheckedNoteIds.clear();
+      checkboxes.forEach(checkbox => {
+        const noteId = checkbox.getAttribute('data-note-id');
+        if (noteId) globalCheckedNoteIds.add(noteId);
+      });
+      
       const count = selectedNoteIds.size;
       const batchBar = document.getElementById('batchActionBar');
       const countSpan = document.getElementById('selectedCount');
@@ -1672,9 +1911,103 @@
         selectAllCheckbox.checked = false;
       }
       
+      // Update FREE button based on whether selected notes have free access
+      updateFreeButton();
+      
       // Update system-level select-all checkboxes
       updateSystemSelectAllStates();
       updateGlobalSelectAllState();
+    }
+
+    function updateFreeButton() {
+      // Check if all selected notes have free access for current group
+      if (selectedNoteIds.size === 0) return;
+      
+      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+      
+      // Check if ALL selected notes have free access
+      const allHaveFreeAccess = Array.from(selectedNoteIds).every(noteId => {
+        return freeAccessGrants.some(grant => 
+          grant.note_id === noteId && 
+          grant.access_type === 'group' && 
+          grant.group_letter === groupLetter
+        );
+      });
+      
+      // Update the FREE button
+      const freeButton = document.querySelector('button[onclick="openFreeAccessModal()"]');
+      if (freeButton) {
+        if (allHaveFreeAccess) {
+          // Change to Un-Free button
+          freeButton.textContent = 'Un-Free';
+          freeButton.onclick = revokeFreeAccess;
+          freeButton.style.background = 'rgba(239, 68, 68, 0.2)';
+          freeButton.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+          freeButton.style.color = '#fca5a5';
+        } else {
+          // Reset to normal FREE button
+          freeButton.textContent = 'FREE';
+          freeButton.onclick = openFreeAccessModal;
+          freeButton.style.background = 'rgba(34, 197, 94, 0.2)';
+          freeButton.style.borderColor = 'rgba(34, 197, 94, 0.4)';
+          freeButton.style.color = '#86efac';
+        }
+      }
+    }
+
+    async function revokeFreeAccess() {
+      try {
+        if (selectedNoteIds.size === 0) {
+          await customAlert('No Notes Selected', 'Please select at least one note to revoke free access');
+          return;
+        }
+        
+        const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+        
+        const confirmed = await customConfirm(
+          'Revoke FREE Access', 
+          `Remove FREE access for ${selectedNoteIds.size} note(s) from Group ${groupLetter}?`
+        );
+        
+        if (!confirmed) return;
+        
+        let successCount = 0;
+        let notFoundCount = 0;
+        
+        for (const noteId of selectedNoteIds) {
+          const { error } = await supabase
+            .from('note_free_access')
+            .delete()
+            .eq('note_id', noteId)
+            .eq('group_letter', groupLetter)
+            .eq('access_type', 'group');
+          
+          if (error) {
+            console.error(`❌ Error revoking access for note ${noteId}:`, error);
+            throw error;
+          }
+          successCount++;
+        }
+        
+        // Refresh free access grants
+        const { data: updatedGrants } = await supabase
+          .from('note_free_access')
+          .select('*');
+        
+        if (updatedGrants) {
+          freeAccessGrants = updatedGrants;
+        }
+        
+        // Reload notes to show updated FREE badges
+        clearCache(); // Clear cache to force fresh data
+        await loadData();
+        
+        await customAlert('Success', `✅ FREE access revoked from Group ${groupLetter} for ${successCount} note(s)`);
+        
+      } catch (error) {
+        console.error('Error revoking free access:', error);
+        await customAlert('Error', 'Failed to revoke free access: ' + error.message);
+      }
     }
 
     function updateSystemSelectAllStates() {
@@ -2185,6 +2518,14 @@
       // Reset to group mode
       selectFreeAccessType('group');
       
+      // Auto-select the current group if we're on a specific group tab
+      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+      const groupSelect = document.getElementById('freeGroupSelect');
+      if (groupSelect && groupLetter) {
+        groupSelect.value = groupLetter;
+        console.log(`✅ Auto-selected ${currentGroup} (${groupLetter}) for FREE access`);
+      }
+      
       // Load students for individual mode
       await loadFreeStudents();
     }
@@ -2302,8 +2643,14 @@
 
     async function grantFreeAccess() {
       try {
+        console.log('✨ Grant FREE Access called');
+        console.log('   Access type:', freeAccessType);
+        console.log('   Selected notes:', Array.from(selectedNoteIds));
+        
         if (freeAccessType === 'group') {
           const groupLetter = document.getElementById('freeGroupSelect').value;
+          console.log('   Selected group:', groupLetter);
+          
           if (!groupLetter) {
             await customAlert('No Group Selected', 'Please select a group');
             return;
@@ -2313,40 +2660,58 @@
             'Grant FREE Access to Group', 
             `Grant FREE access (payment bypass) for ${selectedNoteIds.size} note(s) to all students in Group ${groupLetter}?`
           );
-          if (!confirmed) return;
+          if (!confirmed) {
+            console.log('   User cancelled');
+            return;
+          }
+
+          // Get admin email for created_by
+          const { data: { session } } = await supabase.auth.getSession();
+          const adminEmail = session?.user?.email;
+          console.log('   Admin email:', adminEmail);
 
           // Update all selected notes to have free access for this group
           let successCount = 0;
           let duplicateCount = 0;
           
           for (const noteId of selectedNoteIds) {
-            const { error } = await supabase
+            console.log(`   Granting access for note ${noteId} to Group ${groupLetter}`);
+            const { data, error } = await supabase
               .from('note_free_access')
               .insert({
                 note_id: noteId,
                 group_letter: groupLetter,
-                access_type: 'group'
-              });
+                access_type: 'group',
+                created_by: adminEmail
+              })
+              .select();
 
             if (error) {
               // Ignore duplicate errors (PostgreSQL error code 23505 or HTTP 409)
               if (error.code === '23505' || error.message?.includes('duplicate') || error.status === 409) {
                 duplicateCount++;
+                console.log(`   ℹ️ Note ${noteId} already has access (skipping duplicate)`);
                 continue;
               }
+              console.error(`   ❌ Error for note ${noteId}:`, error);
               throw error;
             }
             successCount++;
+            console.log(`   ✅ Note ${noteId} access granted`);
           }
 
           const message = duplicateCount > 0 
             ? `✅ FREE access granted to Group ${groupLetter}!\n${successCount} new grants, ${duplicateCount} already existed`
             : `✅ FREE access granted to Group ${groupLetter} for ${selectedNoteIds.size} note(s)`;
           
+          console.log('   ✅ Success:', message);
           await customAlert('Success', message);
           
         } else {
           // Individual students
+          console.log('   Individual students mode');
+          console.log('   Selected students:', Array.from(freeSelectedStudents));
+          
           if (freeSelectedStudents.size === 0) {
             await customAlert('No Students Selected', 'Please select at least one student');
             return;
@@ -2356,7 +2721,15 @@
             'Grant FREE Access to Students', 
             `Grant FREE access (payment bypass) for ${selectedNoteIds.size} note(s) to ${freeSelectedStudents.size} student(s)?`
           );
-          if (!confirmed) return;
+          if (!confirmed) {
+            console.log('   User cancelled');
+            return;
+          }
+
+          // Get admin email for created_by
+          const { data: { session } } = await supabase.auth.getSession();
+          const adminEmail = session?.user?.email;
+          console.log('   Admin email:', adminEmail);
 
           // Update all selected notes to have free access for these students
           const records = [];
@@ -2365,19 +2738,23 @@
               records.push({
                 note_id: noteId,
                 student_id: studentId,
-                access_type: 'individual'
+                access_type: 'individual',
+                created_by: adminEmail
               });
             }
           }
+
+          console.log(`   Inserting ${records.length} free access records...`);
 
           let successCount = 0;
           let duplicateCount = 0;
 
           // Insert records one by one to handle duplicates gracefully
           for (const record of records) {
-            const { error } = await supabase
+            const { data, error } = await supabase
               .from('note_free_access')
-              .insert(record);
+              .insert(record)
+              .select();
 
             if (error) {
               // Ignore duplicate errors (PostgreSQL error code 23505 or HTTP 409)
@@ -2385,6 +2762,7 @@
                 duplicateCount++;
                 continue;
               }
+              console.error('   ❌ Insert error:', error);
               throw error;
             }
             successCount++;
@@ -2394,14 +2772,27 @@
             ? `✅ FREE access granted to ${freeSelectedStudents.size} student(s)!\n${successCount} new grants, ${duplicateCount} already existed`
             : `✅ FREE access granted to ${freeSelectedStudents.size} student(s) for ${selectedNoteIds.size} note(s)`;
 
+          console.log('   ✅ Success:', message);
           await customAlert('Success', message);
+        }
+
+        // Reload free access grants to update the UI badges
+        const { data: freeAccess, error: freeError } = await supabase
+          .from('note_free_access')
+          .select('*');
+
+        if (!freeError && freeAccess) {
+          freeAccessGrants = freeAccess;
+          console.log('🔄 Reloaded free access grants:', freeAccessGrants.length);
+          renderSystems(); // Re-render to show the new FREE badges
         }
 
         closeFreeAccessModal();
         clearSelection();
 
       } catch (error) {
-        console.error('Error granting free access:', error);
+        console.error('❌ Error granting free access:', error);
+        console.error('   Error details:', JSON.stringify(error, null, 2));
         await customAlert('Error', 'Failed to grant free access: ' + error.message);
       }
     }

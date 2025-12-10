@@ -21,15 +21,19 @@ CREATE INDEX IF NOT EXISTS idx_student_sessions_last_activity ON student_session
 -- Enable RLS
 ALTER TABLE student_sessions ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist (safe re-run)
+DROP POLICY IF EXISTS "Admins have full access to student_sessions" ON student_sessions;
+DROP POLICY IF EXISTS "Students can manage their own sessions" ON student_sessions;
+
 -- Policy: Admins can do everything
+-- FIXED: Use simpler email check without JWT function to avoid users table lookup
 CREATE POLICY "Admins have full access to student_sessions"
   ON student_sessions
   FOR ALL
   TO authenticated
   USING (
-    EXISTS (
-      SELECT 1 FROM admin_accounts
-      WHERE admin_accounts.email = auth.jwt() ->> 'email'
+    auth.email() IN (
+      SELECT email FROM admin_accounts WHERE is_active = true
     )
   );
 
@@ -55,6 +59,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger to auto-update updated_at
+DROP TRIGGER IF EXISTS student_sessions_updated_at ON student_sessions;
 CREATE TRIGGER student_sessions_updated_at
   BEFORE UPDATE ON student_sessions
   FOR EACH ROW

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calendar Payment Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a1a;
+      color: #e0e0e0;
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    h1 { color: #26ffe6; }
+    h2 { color: #8a4dff; margin-top: 30px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      background: #2a2a2a;
+    }
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #444;
+    }
+    th {
+      background: #333;
+      color: #26ffe6;
+    }
+    .paid { color: #22c55e; }
+    .unpaid { color: #ef4444; }
+    .automated { background: rgba(38, 255, 230, 0.1); }
+    .manual { background: rgba(138, 77, 255, 0.1); }
+    pre {
+      background: #222;
+      padding: 15px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    .stat {
+      display: inline-block;
+      margin: 10px 20px 10px 0;
+      padding: 10px 20px;
+      background: rgba(38, 255, 230, 0.1);
+      border-radius: 8px;
+      border: 1px solid rgba(38, 255, 230, 0.3);
+    }
+    .stat strong { color: #26ffe6; }
+  </style>
+</head>
+<body>
+  <h1>📊 Calendar Payment System Test</h1>
+  <p>Testing payment loading and matching for Dec 1-7, 2025</p>
+  
+  <div id="stats"></div>
+  <div id="payments"></div>
+  <div id="students"></div>
+  <div id="matching"></div>
+
+  <script>
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    async function testPaymentSystem() {
+      console.log('🔄 Loading data...');
+
+      // Load automated payments
+      const { data: automatedPayments, error: autoError } = await supabase
+        .from('payments')
+        .select('*')
+        .gte('date', '2025-12-01')
+        .lte('date', '2025-12-07')
+        .order('date', { ascending: false });
+
+      if (autoError) {
+        console.error('❌ Error loading automated payments:', autoError);
+      }
+
+      // Load manual payments
+      const { data: manualPayments, error: manualError } = await supabase
+        .from('payment_records')
+        .select('*')
+        .gte('date', '2025-12-01')
+        .lte('date', '2025-12-07')
+        .order('date', { ascending: false });
+
+      if (manualError) {
+        console.error('❌ Error loading manual payments:', manualError);
+      }
+
+      // Load students
+      const { data: students, error: studError } = await supabase
+        .from('students')
+        .select('*')
+        .order('name');
+
+      if (studError) {
+        console.error('❌ Error loading students:', studError);
+      }
+
+      // Display stats
+      const auto = automatedPayments || [];
+      const manual = manualPayments || [];
+      const total = auto.length + manual.length;
+      
+      document.getElementById('stats').innerHTML = `
+        <div class="stat"><strong>${total}</strong> Total Payments</div>
+        <div class="stat"><strong>${auto.length}</strong> Automated</div>
+        <div class="stat"><strong>${manual.length}</strong> Manual</div>
+        <div class="stat"><strong>${students?.length || 0}</strong> Students</div>
+      `;
+
+      // Display automated payments
+      document.getElementById('payments').innerHTML = `
+        <h2>🤖 Automated Payments (from 'payments' table)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Student ID</th>
+              <th>Linked ID</th>
+              <th>Name</th>
+              <th>Payer</th>
+              <th>Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${auto.map(p => `
+              <tr class="automated">
+                <td>${p.date}</td>
+                <td>${p.student_id || '-'}</td>
+                <td>${p.linked_student_id || '-'}</td>
+                <td>${p.resolved_student_name || '-'}</td>
+                <td>${p.payer_name || '-'}</td>
+                <td class="paid">$${p.amount}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <h2>✍️ Manual Payments (from 'payment_records' table)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Student ID</th>
+              <th>Amount</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${manual.map(p => `
+              <tr class="manual">
+                <td>${p.date}</td>
+                <td>${p.student_id || '-'}</td>
+                <td class="${p.status === 'paid' ? 'paid' : 'unpaid'}">$${p.amount}</td>
+                <td class="${p.status === 'paid' ? 'paid' : 'unpaid'}">${p.status}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+
+      // Show student mapping
+      const studentMap = new Map();
+      (students || []).forEach(s => {
+        studentMap.set(String(s.id), s.name);
+      });
+
+      document.getElementById('students').innerHTML = `
+        <h2>👥 Student ID → Name Mapping (for matching)</h2>
+        <pre>${Array.from(studentMap.entries()).map(([id, name]) => `${id} → ${name}`).join('\n')}</pre>
+      `;
+
+      // Test matching logic (MATCHES CALENDAR.HTML LOGIC EXACTLY)
+      const allPayments = [...auto, ...manual];
+      const matched = [];
+      const unmatched = [];
+
+      allPayments.forEach(payment => {
+        // Calendar uses this exact logic from resolveStudentIdForPayment()
+        const candidateIds = [
+          payment.student_id,
+          payment.studentid,
+          payment.linked_student_id,
+          payment.derived_student_id,
+        ].filter(Boolean);
+
+        let studentId = null;
+        
+        // Try direct ID matches (convert to string like Calendar does)
+        for (const candidate of candidateIds) {
+          const key = String(candidate);
+          if (studentMap.has(key)) {
+            studentId = key;
+            break;
+          }
+        }
+
+        const studentName = studentId 
+          ? studentMap.get(studentId)
+          : payment.resolved_student_name || payment.payer_name || 'Unknown';
+        
+        if (studentId) {
+          matched.push({ 
+            payment, 
+            studentId, 
+            studentName,
+            matchMethod: payment.linked_student_id ? 'linked_student_id' : 'student_id',
+            idType: typeof (payment.linked_student_id || payment.student_id)
+          });
+        } else {
+          unmatched.push({ 
+            payment, 
+            studentName,
+            attemptedIds: candidateIds.map(id => `${id} (${typeof id})`).join(', ')
+          });
+        }
+      });
+
+      document.getElementById('matching').innerHTML = `
+        <h2>🎯 Payment Matching Results</h2>
+        <div class="stat"><strong>${matched.length}</strong> Matched to Students</div>
+        <div class="stat"><strong>${unmatched.length}</strong> Unmatched</div>
+        
+        <h3 style="color: #22c55e;">✅ Matched Payments</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Student ID</th>
+              <th>Student Name</th>
+              <th>Amount</th>
+              <th>Source</th>
+              <th>Match Method</th>
+              <th>ID Type</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${matched.map(m => `
+              <tr>
+                <td>${m.payment.date}</td>
+                <td>${m.studentId}</td>
+                <td>${m.studentName}</td>
+                <td class="paid">$${m.payment.amount}</td>
+                <td>${m.payment.status ? 'manual' : 'automated'}</td>
+                <td>${m.matchMethod}</td>
+                <td><code>${m.idType}</code></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        ${unmatched.length > 0 ? `
+          <h3 style="color: #ef4444;">⚠️ Unmatched Payments</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Name (from payment)</th>
+                <th>Amount</th>
+                <th>Attempted IDs</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${unmatched.map(u => `
+                <tr>
+                  <td>${u.payment.date}</td>
+                  <td>${u.studentName}</td>
+                  <td>$${u.payment.amount}</td>
+                  <td><code>${u.attemptedIds || 'none'}</code></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : ''}
+      `;
+
+      console.log('✅ Test complete!');
+      console.log('Automated payments:', auto);
+      console.log('Manual payments:', manual);
+      console.log('Students:', students);
+      console.log('Matched:', matched);
+      console.log('Unmatched:', unmatched);
+    }
+
+    testPaymentSystem();
+  </script>
+</body>
+</html>

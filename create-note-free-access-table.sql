@@ -26,12 +26,16 @@ CREATE TABLE IF NOT EXISTS note_free_access (
 );
 
 -- Create indexes for performance
-CREATE INDEX idx_note_free_access_note_id ON note_free_access(note_id);
-CREATE INDEX idx_note_free_access_group ON note_free_access(group_letter) WHERE group_letter IS NOT NULL;
-CREATE INDEX idx_note_free_access_student ON note_free_access(student_id) WHERE student_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_note_free_access_note_id ON note_free_access(note_id);
+CREATE INDEX IF NOT EXISTS idx_note_free_access_group ON note_free_access(group_letter) WHERE group_letter IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_note_free_access_student ON note_free_access(student_id) WHERE student_id IS NOT NULL;
 
 -- Enable RLS
 ALTER TABLE note_free_access ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Admin full access to note_free_access" ON note_free_access;
+DROP POLICY IF EXISTS "Students can view their free access" ON note_free_access;
 
 -- Admin policy: Full access
 CREATE POLICY "Admin full access to note_free_access"
@@ -67,6 +71,15 @@ CREATE POLICY "Students can view their free access"
       )
     )
   );
+
+-- Anon policy: Allow read during impersonation mode
+-- When admin impersonates a student, student-portal uses anon key (no auth.uid())
+-- This policy allows all anon SELECT queries - student portal will filter by student_id/group_letter
+CREATE POLICY "Allow anon read for impersonation"
+  ON note_free_access
+  FOR SELECT
+  TO anon
+  USING (true);
 
 -- Comments
 COMMENT ON TABLE note_free_access IS 'Stores free access grants (payment bypass) for student notes';
