@@ -6859,6 +6859,213 @@
       });
     }
 
+    // ==========================================================================
+    // PAYMENT-LOCKED NOTES ENGINE
+    // Automatically unlocks group notes based on paid calendar classes
+    // ==========================================================================
+
+    /**
+     * Computes all class dates for a student in a given month based on their schedule
+     * @param {Object} scheduleData - Schedule object with weekly recurring and one-time schedules
+     * @param {number} year - Year (e.g., 2025)
+     * @param {number} month - Month (1-12)
+     * @returns {Array<string>} Array of date strings in YYYY-MM-DD format
+     */
+    function computeClassDatesForMonth(scheduleData, year, month) {
+      const classDates = [];
+      
+      if (!scheduleData || !scheduleData.schedule) {
+        console.warn('⚠️ No schedule data available for class date computation');
+        return classDates;
+      }
+      
+      // Day name mapping
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      
+      // Parse recurring schedule to get class days of week
+      const classDaysOfWeek = new Set();
+      Object.entries(scheduleData.schedule).forEach(([day, times]) => {
+        if (times && times.length > 0) {
+          const dayIndex = dayNames.indexOf(day);
+          if (dayIndex !== -1) {
+            classDaysOfWeek.add(dayIndex);
+          }
+        }
+      });
+      
+      // Generate all dates in the month that match class days
+      const firstDay = new Date(year, month - 1, 1);
+      const lastDay = new Date(year, month, 0);
+      
+      for (let date = new Date(firstDay); date <= lastDay; date.setDate(date.getDate() + 1)) {
+        const dayOfWeek = date.getDay();
+        if (classDaysOfWeek.has(dayOfWeek)) {
+          // Use local date string to avoid timezone issues
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0');
+          const day = String(date.getDate()).padStart(2, '0');
+          const dateStr = `${year}-${month}-${day}`;
+          classDates.push(dateStr);
+        }
+      }
+      
+      // Add one-time scheduled classes for this month
+      if (scheduleData.one_time_schedules && Array.isArray(scheduleData.one_time_schedules)) {
+        scheduleData.one_time_schedules.forEach(schedule => {
+          if (schedule.date) {
+            const scheduleDate = new Date(schedule.date);
+            if (scheduleDate.getFullYear() === year && scheduleDate.getMonth() === month - 1) {
+              // Use local date string to avoid timezone issues
+              const y = scheduleDate.getFullYear();
+              const m = String(scheduleDate.getMonth() + 1).padStart(2, '0');
+              const d = String(scheduleDate.getDate()).padStart(2, '0');
+              const dateStr = `${y}-${m}-${d}`;
+              if (!classDates.includes(dateStr)) {
+                classDates.push(dateStr);
+              }
+            }
+          }
+        });
+      }
+      
+      return classDates.sort();
+    }
+
+    /**
+     * Maps a note to its corresponding class date based on posted_at timestamp
+     * @param {Date} notePostedAt - When the note was posted
+     * @param {Array<string>} classDates - Sorted array of class dates (YYYY-MM-DD)
+     * @returns {string|null} The class date this note belongs to (YYYY-MM-DD) or null
+     */
+    function mapNoteToClassDate(notePostedAt, classDates) {
+      if (!notePostedAt || !classDates || classDates.length === 0) {
+        return null;
+      }
+      
+      const noteDateStr = notePostedAt.toISOString().split('T')[0];
+      
+      // Find the most recent class date on or before the note's posted date
+      let matchedClassDate = null;
+      
+      for (let i = 0; i < classDates.length; i++) {
+        const classDate = classDates[i];
+        
+        if (classDate <= noteDateStr) {
+          // This class date is on or before the note date
+          matchedClassDate = classDate;
+        } else {
+          // We've passed the note date, stop searching
+          break;
+        }
+      }
+      
+      // If note is posted before the first class, map it to the first class
+      if (!matchedClassDate && classDates.length > 0) {
+        matchedClassDate = classDates[0];
+      }
+      
+      return matchedClassDate;
+    }
+
+    /**
+     * Checks if a specific class date is paid for a student
+     * @param {string} classDate - Class date in YYYY-MM-DD format
+     * @param {Set<string>} paidDatesSet - Set of paid dates
+     * @returns {boolean} True if class is paid
+     */
+    function isClassDatePaid(classDate, paidDatesSet) {
+      return paidDatesSet.has(classDate);
+    }
+
+    /**
+     * Determines if a note should be unlocked for a student
+     * @param {Object} note - Note object with posted_at, requires_payment, etc.
+     * @param {Object} student - Student object with schedule data
+     * @param {Set<string>} paidDatesSet - Set of dates the student has paid for
+     * @param {Object} scheduleData - Student's schedule data
+     * @returns {boolean} True if note should be unlocked
+     */
+    function shouldUnlockNote(note, student, paidDatesSet, scheduleData) {
+      // If note doesn't require payment, unlock it
+      if (!note.requires_payment) {
+        return true;
+      }
+      
+      // If note has a specific class_date, check if that date is paid
+      if (note.class_date) {
+        const noteClassDate = note.class_date.split('T')[0];
+        return paidDatesSet.has(noteClassDate);
+      }
+      
+      // If note has posted_at, map it to a class date based on student's schedule
+      if (note.updated_at || note.created_at) {
+        const postedAt = new Date(note.updated_at || note.created_at);
+        const postedYear = postedAt.getFullYear();
+        const postedMonth = postedAt.getMonth() + 1;
+        
+        // Compute all class dates for the month when note was posted
+        const classDatesForMonth = computeClassDatesForMonth(scheduleData, postedYear, postedMonth);
+        
+        if (classDatesForMonth.length === 0) {
+          // No classes scheduled for this month - unlock note (admin override)
+          console.warn(`⚠️ No classes found for ${postedYear}-${postedMonth}, unlocking note`);
+          return true;
+        }
+        
+        // Map note to closest class date
+        const mappedClassDate = mapNoteToClassDate(postedAt, classDatesForMonth);
+        
+        if (!mappedClassDate) {
+          // Couldn't map to a class date - unlock note (fail-safe)
+          console.warn('⚠️ Could not map note to class date, unlocking by default');
+          return true;
+        }
+        
+        // Check if the mapped class date is paid
+        const isPaid = paidDatesSet.has(mappedClassDate);
+        
+        if (DEBUG_MODE) {
+          console.log(`📝 Note "${note.title}" posted ${postedAt.toISOString().split('T')[0]} → Class ${mappedClassDate} → ${isPaid ? 'UNLOCKED' : 'LOCKED'}`);
+        }
+        
+        return isPaid;
+      }
+      
+      // If we can't determine, unlock by default (fail-safe)
+      return true;
+    }
+
+    /**
+     * Computes payment status for all notes based on class dates and payments
+     * @param {Array<Object>} notes - Array of notes
+     * @param {Object} student - Student object
+     * @param {Array<Object>} paymentRecords - Array of payment records
+     * @param {Object} scheduleData - Student's schedule data
+     * @returns {Map<number, boolean>} Map of noteId -> isPaid status
+     */
+    function computeNotePaymentStatus(notes, student, paymentRecords, scheduleData) {
+      const notePaymentStatus = new Map();
+      
+      // Build set of paid dates
+      const paidDatesSet = new Set(
+        (paymentRecords || [])
+          .filter(p => p.status === 'paid')
+          .map(p => p.date.split('T')[0])
+      );
+      
+      if (DEBUG_MODE) {
+        console.log(`💰 Student has ${paidDatesSet.size} paid dates:`, Array.from(paidDatesSet).sort());
+      }
+      
+      // Check each note
+      notes.forEach(note => {
+        const isPaid = shouldUnlockNote(note, student, paidDatesSet, scheduleData);
+        notePaymentStatus.set(note.id, isPaid);
+      });
+      
+      return notePaymentStatus;
+    }
+
     async function loadScheduleForStudent(student) {
       currentGroupScheduleData = null;
       currentGroupScheduleSummary = null;
@@ -8582,6 +8789,22 @@
         
         if (DEBUG_MODE) debugLog(`✨ FREE access notes: ${freeNoteIds.size} notes`);
         
+        // 🔐 PAYMENT-LOCKED NOTES ENGINE: Compute payment status for all notes
+        // This uses the student's schedule and payment history to determine which notes are unlocked
+        const notePaymentStatus = computeNotePaymentStatus(
+          notes,
+          currentStudent,
+          studentPayments || [],
+          currentGroupScheduleData  // Student's schedule data loaded earlier
+        );
+        
+        if (DEBUG_MODE) {
+          console.log('🔐 Payment-locked notes engine results:');
+          console.log(`   - Total notes: ${notes.length}`);
+          console.log(`   - Unlocked by payment: ${Array.from(notePaymentStatus.values()).filter(v => v).length}`);
+          console.log(`   - Locked: ${Array.from(notePaymentStatus.values()).filter(v => !v).length}`);
+        }
+        
         // Transform notes to match expected format
         const transformedNotes = notes.map(note => {
           // Use updated_at for display date (when admin last modified/posted it), fallback to created_at
@@ -8593,21 +8816,16 @@
           // Check if student has FREE access to this note
           const hasFreeAccess = freeNoteIds.has(note.id);
           
-          // CRITICAL PAYMENT CHECK:
-          // For notes that require payment, check if student paid for the specific class_date
-          let studentHasPaidForThisNote = false;
-          if (noteRequiresPayment && note.class_date) {
-            // Extract just the date part (YYYY-MM-DD)
-            const noteDate = note.class_date.split('T')[0];
-            studentHasPaidForThisNote = paidDates.has(noteDate);
-            
-            if (DEBUG_MODE && !studentHasPaidForThisNote && !hasFreeAccess) {
-              debugLog(`🔒 Note "${note.title}" (${noteDate}) is LOCKED - requires payment`);
-            }
-          }
+          // 🔐 Use payment-locked notes engine result
+          const studentHasPaidForThisNote = notePaymentStatus.get(note.id) || false;
           
           // Student can access if: note doesn't require payment OR paid for this date OR has free access
           const isPaid = !noteRequiresPayment || studentHasPaidForThisNote || hasFreeAccess;
+          
+          if (DEBUG_MODE && noteRequiresPayment && !isPaid && !hasFreeAccess) {
+            const classDate = note.class_date || (note.updated_at ? new Date(note.updated_at).toISOString().split('T')[0] : 'unknown');
+            debugLog(`🔒 Note "${note.title}" (${classDate}) is LOCKED - payment required`);
+          }
           
           // CONSISTENT: Use helper function to get system name
           const systemName = getSystemNameFromNote(note);
