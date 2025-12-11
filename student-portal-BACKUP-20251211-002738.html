@@ -3984,6 +3984,14 @@
       return studentData;
     }
     
+    // Admin credentials for testing
+    const ADMIN_EMAIL = 'hrachfilm@gmail.com';
+    const ADMIN_PASSWORD = 'Richy1977';
+    
+    // Google Classroom API Configuration
+    const GOOGLE_CLIENT_ID = '503155871883-q4mr96hfcq2vt42acnrve8eini85hpju.apps.googleusercontent.com';
+    const SCOPES = 'https://www.googleapis.com/auth/classroom.courses.readonly https://www.googleapis.com/auth/classroom.announcements.readonly https://www.googleapis.com/auth/classroom.coursework.me.readonly';
+    
     // ==========================================================================
     // DEBUG MODE - Set to false for production
     // ==========================================================================
@@ -4061,9 +4069,11 @@
       marks: {},
       mark(label) {
         this.marks[label] = performance.now() - this.start;
+        if (DEBUG_MODE) console.log(`⏱️ ${label}: ${this.marks[label].toFixed(0)}ms`);
       },
       summary() {
         const total = performance.now() - this.start;
+        console.log(`🏁 Portal loaded in ${total.toFixed(0)}ms`);
         if (DEBUG_MODE) console.table(this.marks);
       }
     };
@@ -4071,6 +4081,7 @@
     let currentStudent = null;
     let currentEmail = null;
     let isAdmin = false;
+    let googleAccessToken = null;
     let impersonationMode = false;
     let impersonationToken = null;
     let impersonationTimer = null;
@@ -4686,6 +4697,12 @@
         day: days[newDayIndex],
         time: `${displayHours}:${minutes} ${newMeridiem}`,
       };
+    }
+    
+    // Convert day name to 3-letter abbreviation
+    function abbreviateDay(day) {
+      // Return full day name instead of abbreviation
+      return day;
     }
     
     // Format schedule elegantly (returns HTML string)
@@ -5959,6 +5976,48 @@
     // PAYMENT FUNCTIONS
     // ==========================================================================
     
+    // ---------- Mock Payment Generator ----------
+    // Generate mock payment history
+    function generateMockPayments() {
+      const payments = [];
+      const currentDate = new Date();
+      const currentYear = currentDate.getFullYear();
+      const currentMonth = currentDate.getMonth();
+      
+      // Generate 12 months of payment history
+      for (let i = 0; i < 12; i++) {
+        const month = currentMonth - i;
+        const year = month < 0 ? currentYear - 1 : currentYear;
+        const adjustedMonth = month < 0 ? 12 + month : month;
+        
+        // 2-4 classes per month
+        const classesPerMonth = 2 + Math.floor(Math.random() * 3);
+        for (let j = 0; j < classesPerMonth; j++) {
+          const day = 5 + (j * 7);
+          if (day <= 28) {
+            const date = new Date(year, adjustedMonth, day);
+            const rand = Math.random();
+            
+            let status, amount;
+            if (rand > 0.85) {
+              status = 'absent';
+              amount = 0;
+            } else if (rand > 0.75) {
+              status = 'unpaid';
+              amount = 50;
+            } else {
+              status = 'paid';
+              amount = 50;
+            }
+            
+            payments.push({ date, status, amount, day });
+          }
+        }
+      }
+      
+      return payments.sort((a, b) => b.date - a.date);
+    }
+    
     // ---------- Payment History Loader ----------
     /**
      * Loads payment history from Supabase by querying multiple tables.
@@ -6045,6 +6104,11 @@
         
         // 2. Query payments table (Zelle emails) - ULTRA-BROAD MATCHING
 
+        // Build comprehensive search patterns
+        const nameParts = (student.name || '').split(/\s+/).filter(Boolean);
+        const payerNameLike = nameParts.length ? `%${nameParts.join('%')}%` : `%${student.name || ''}%`;
+        const studentNameLike = payerNameLike; // Same pattern for student_name field
+        
         // Parse student emails (could be array or string) - SAFELY
         let studentEmails = [];
         if (Array.isArray(student.email)) {
@@ -6909,6 +6973,9 @@
      * @param {Set<string>} paidDatesSet - Set of paid dates
      * @returns {boolean} True if class is paid
      */
+    function isClassDatePaid(classDate, paidDatesSet) {
+      return paidDatesSet.has(classDate);
+    }
 
     /**
      * Determines if a note should be unlocked for a student
@@ -7129,6 +7196,7 @@
     // ==========================================================================
     
     let forumMessages = [];
+    let forumUpdateInterval = null;
     
     // Toggle Forum Modal
     function toggleForum() {
@@ -7688,7 +7756,7 @@
      * - created_at: ISO timestamp
      * 
      * @example
-     * <textarea id="forumMessageInput" onkeypress="if(event.key==='Enter') sendForumMessage()"></textarea>
+     * <input id="forumInput" onkeypress="if(event.key==='Enter') sendForumMessage()" />
      */
     async function sendForumMessage() {
       const input = document.getElementById('forumInput');
@@ -8402,6 +8470,163 @@
       });
     }
     
+    // Google Classroom Integration
+    let isGoogleConnected = false;
+    let googleClient = null;
+    
+    // Initialize Google Classroom
+    async function initGoogleClassroom() {
+      try {
+        // Auto-connect using student's email
+        await connectGoogleClassroom();
+      } catch (error) {
+        console.error('Google Classroom init error:', error);
+        // Show connect button if auto-connect fails
+      }
+    }
+    
+    // Connect to Google Classroom
+    async function connectGoogleClassroom() {
+      try {
+        // Initialize Google API client
+        await new Promise((resolve) => {
+          gapi.load('client:auth2', resolve);
+        });
+        
+        await gapi.client.init({
+          apiKey: firebaseConfig.apiKey,
+          clientId: GOOGLE_CLIENT_ID,
+          discoveryDocs: ['https://classroom.googleapis.com/$discovery/rest?version=v1'],
+          scope: SCOPES
+        });
+        
+        // Sign in with student's email
+        const auth2 = gapi.auth2.getAuthInstance();
+        if (!auth2.isSignedIn.get()) {
+          await auth2.signIn({ prompt: 'consent', login_hint: currentEmail });
+        }
+        
+        isGoogleConnected = true;
+        // Load real classroom data
+        await loadRealClassroomUpdates();
+        
+      } catch (error) {
+        console.error('Google Classroom connection error:', error);
+        // Fall back to demo data
+        loadClassroomUpdates();
+      }
+    }
+    
+    // Load real classroom updates from Google Classroom API
+    async function loadRealClassroomUpdates() {
+      try {
+        const updates = [];
+        
+        // Get courses
+        const coursesResponse = await gapi.client.classroom.courses.list({
+          courseStates: ['ACTIVE']
+        });
+        
+        const courses = coursesResponse.result.courses || [];
+        
+        for (const course of courses.slice(0, 5)) { // Limit to 5 courses
+          // Get announcements
+          try {
+            const announcementsResponse = await gapi.client.classroom.courses.announcements.list({
+              courseId: course.id,
+              pageSize: 3
+            });
+            
+            const announcements = announcementsResponse.result.announcements || [];
+            announcements.forEach(announcement => {
+              updates.push({
+                type: 'announcement',
+                course: course.name,
+                title: announcement.text ? announcement.text.substring(0, 50) + '...' : 'New Announcement',
+                text: announcement.text || 'Check Google Classroom for details',
+                date: getRelativeTime(announcement.creationTime)
+              });
+            });
+          } catch (e) {
+          }
+          
+          // Get coursework
+          try {
+            const courseworkResponse = await gapi.client.classroom.courses.courseWork.list({
+              courseId: course.id,
+              pageSize: 3
+            });
+            
+            const coursework = courseworkResponse.result.courseWork || [];
+            coursework.forEach(work => {
+              updates.push({
+                type: 'material',
+                course: course.name,
+                title: work.title,
+                text: work.description || 'New course material posted',
+                date: getRelativeTime(work.creationTime)
+              });
+            });
+          } catch (e) {
+          }
+        }
+        
+        // Sort by date and display
+        displayClassroomUpdates(updates);
+        
+      } catch (error) {
+        console.error('Error loading classroom updates:', error);
+        // Fall back to demo data
+        loadClassroomUpdates();
+      }
+    }
+    
+    // Get relative time
+    function getRelativeTime(timestamp) {
+      const now = new Date();
+      const date = new Date(timestamp);
+      const diff = now - date;
+      const hours = Math.floor(diff / (1000 * 60 * 60));
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      
+      if (hours < 1) return 'Just now';
+      if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+      if (days < 7) return `${days} day${days > 1 ? 's' : ''} ago`;
+      return date.toLocaleDateString();
+    }
+    
+    // Display classroom updates
+    function displayClassroomUpdates(updates) {
+      const classroomList = document.getElementById('classroomList');
+      classroomList.innerHTML = '';
+      
+      if (updates.length === 0) {
+        classroomList.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.7); padding: 40px;">No recent updates found.</div>';
+        return;
+      }
+      
+      updates.forEach(update => {
+        const item = document.createElement('div');
+        item.className = `classroom-item ${update.type}`;
+        
+        const badgeText = update.type === 'announcement' ? '📢 Announcement' : '📄 Material';
+        
+        item.innerHTML = `
+          <div class="classroom-header">
+            <div>
+              <div class="classroom-title">${update.title}</div>
+              <div class="classroom-course">${update.course}</div>
+            </div>
+            <div class="classroom-date">${update.date}</div>
+          </div>
+          <div class="classroom-text">${update.text}</div>
+          <span class="classroom-badge ${update.type}">${badgeText}</span>
+        `;
+        
+        classroomList.appendChild(item);
+      });
+    }
+    
     /**
      * Loads classroom notes/assignments filtered by student's group and payment status.
      * 
@@ -8574,6 +8799,8 @@
         );
         
         if (DEBUG_MODE) {
+          console.log('🔐 Payment-locked notes engine results:');
+          console.log(`   - Total notes: ${notes.length}`);
           console.log(`   - Unlocked by payment: ${Array.from(notePaymentStatus.values()).filter(v => v).length}`);
           console.log(`   - Locked: ${Array.from(notePaymentStatus.values()).filter(v => !v).length}`);
         }
@@ -8615,7 +8842,7 @@
             type: 'material',
             isTemplateMissing: false,
             system: systemName,
-            read: isNoteOpened(note.id), // Track which notes have been opened
+            read: false, // TODO: Track which notes have been opened
             attachments: (note.file_path || note.pdf_url) ? [{
               title: (note.title || 'Note') + '.pdf',
               url: note.file_path || note.pdf_url, // Storage path for Protected-PDF-Viewer
@@ -8654,6 +8881,72 @@
         updateSystemNotifications();
         return [];
       }
+    }
+    
+    // Generate demo notes based on payment history
+    function generateDemoNotes(payments) {
+      const demoNotes = [];
+      const today = new Date();
+      
+      // NCLEX systems for note categorization
+      const systemsList = [
+        'Cardiovascular System', 'Endocrine System', 'Gastrointestinal System',
+        'Respiratory System', 'Pharmacology', 'Medical Terminology',
+        'Human Anatomy', 'Medication Suffixes & Classes'
+      ];
+      
+      // Generate notes for last 30 days based on attendance
+      for (let i = 0; i < 30; i++) {
+        const noteDate = new Date(today);
+        noteDate.setDate(today.getDate() - i);
+        
+        // Check if there's a payment for this date
+        const payment = payments.find(p => 
+          p.date.getDate() === noteDate.getDate() &&
+          p.date.getMonth() === noteDate.getMonth() &&
+          p.date.getFullYear() === noteDate.getFullYear()
+        );
+        
+        if (payment && payment.status !== 'absent') {
+          const isPaid = payment.status === 'paid';
+          const randomSystem = systemsList[Math.floor(Math.random() * systemsList.length)];
+          
+          const noteTypes = [
+            { title: 'NCLEX Practice Questions', text: 'Complete set of practice questions covering today\'s topics with detailed explanations and rationales.' },
+            { title: 'Pharmacology Review', text: 'Comprehensive medication guide including drug classes, mechanisms of action, and nursing considerations.' },
+            { title: 'Lab Values & Diagnostics', text: 'Essential laboratory values reference sheet with normal ranges and clinical significance.' },
+            { title: 'Patient Care Study', text: 'Real-world case study demonstrating critical thinking and prioritization skills for NCLEX preparation.' },
+            { title: 'Systems Review Notes', text: 'Detailed notes on body systems, pathophysiology, and key nursing interventions for exam success.' }
+          ];
+          
+          const randomNote = noteTypes[Math.floor(Math.random() * noteTypes.length)];
+          
+          demoNotes.push({
+            date: new Date(noteDate),
+            title: `${randomNote.title} - ${noteDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+            text: isPaid ? randomNote.text : 'Unlock this content by completing payment for this class session.',
+            isPaid: isPaid,
+            course: currentStudent?.group || 'Your Class',
+            type: i % 3 === 0 ? 'announcement' : 'material',
+            system: randomSystem,
+            read: i > 5 ? true : false, // Last 5 notes are unread
+            attachments: isPaid ? [
+              {
+                title: `${randomNote.title}.pdf`,
+                url: '#',
+                thumbnailUrl: null,
+                type: 'file'
+              }
+            ] : []
+          });
+        }
+      }
+      
+      // Store globally for filtering
+      allSystemNotes = demoNotes;
+      refreshSystemAssignmentStats();
+      
+      return demoNotes;
     }
     
     // Filter notes by system and update UI
@@ -8921,6 +9214,26 @@
       });
     }
     
+    // Helper function to check if a date is paid
+    function checkIfPaid(date, payments) {
+      if (!payments || payments.length === 0) return false;
+      
+      const payment = payments.find(p => 
+        p.date.getDate() === date.getDate() &&
+        p.date.getMonth() === date.getMonth() &&
+        p.date.getFullYear() === date.getFullYear()
+      );
+      
+      return payment && payment.status === 'paid';
+    }
+    
+    // Helper function to get course name by ID
+    function getCourseNameById(courseId, courses) {
+      if (!courses) return 'Your Class';
+      const course = courses.find(c => c.id === courseId);
+      return course ? course.name : 'Your Class';
+    }
+    
     // Fetch data from Google Classroom API
     async function fetchGoogleClassroomData(type, accessToken, studentEmail) {
       let endpoint = '';
@@ -8989,6 +9302,41 @@
       return allResults;
     }
     
+    // Get service account token from Firebase Cloud Function
+    async function getServiceAccountToken() {
+      try {
+        // Call your Firebase function to get service account access token
+        const getToken = functions.httpsCallable('getClassroomServiceToken');
+        const result = await getToken();
+        
+        if (result.data && result.data.accessToken) {
+          const token = result.data.accessToken;
+          // Cache for 50 minutes (tokens expire in 60)
+          localStorage.setItem('classroomAccessToken', token);
+          localStorage.setItem('tokenExpiry', Date.now() + (50 * 60 * 1000));
+          return token;
+        }
+      } catch (error) {
+        console.error('Error getting service account token:', error);
+      }
+      return null;
+    }
+    
+    // Check if cached token is still valid
+    function getCachedToken() {
+      const token = localStorage.getItem('classroomAccessToken');
+      const expiry = localStorage.getItem('tokenExpiry');
+      
+      if (token && expiry && Date.now() < parseInt(expiry)) {
+        return token;
+      }
+      
+      // Token expired or doesn't exist
+      localStorage.removeItem('classroomAccessToken');
+      localStorage.removeItem('tokenExpiry');
+      return null;
+    }
+    
     // ==========================================================================
     // NCLEX SYSTEMS PROGRESS
     // ==========================================================================
@@ -9029,6 +9377,7 @@
         let allSystemNotes = [];
         let selectedSystem = null;
         let isInitialCarouselRender = true; // Track first render to prevent animation jump
+        let systemMetaMap = new Map();
         let systemAssignmentStats = new Map();
 
         // ============================================================================
@@ -9148,6 +9497,20 @@
           systemStatsCacheKey = cacheKey;
         }
 
+        function calculateSystemProgressFromCounts(assignedCount, totalTemplates) {
+          // NEW: Calculate progress based on notes viewed, not just assigned
+          const stats = systemAssignmentStats.get('Cardiovascular'); // Example - will be replaced per system
+          if (stats && stats.totalNotes > 0) {
+            // Progress = (viewed notes / total notes) * 100
+            return Math.min(100, Math.round((stats.viewedNotes / stats.totalNotes) * 100));
+          }
+          // Fallback to old logic if no stats available
+          if (totalTemplates > 0) {
+            return Math.min(100, Math.round((assignedCount / totalTemplates) * 100));
+          }
+          return assignedCount > 0 ? 60 : 0;
+        }
+
         function determineSystemStatus(progress) {
           // 100% = Completed (Green)
           if (progress === 100) return 'completed';
@@ -9234,9 +9597,12 @@
         let allNotes, folders;
         
         if (isCacheValid()) {
+          console.log('⚡ Using cached systems data');
           allNotes = systemsDataCache.allNotes;
           folders = systemsDataCache.folders;
         } else {
+          console.log('🔄 Fetching fresh systems data');
+          
           // Fetch ALL notes to count per system (not filtered by student access)
           // Note: student_notes table might not have 'system' column, so we select all possible variants
           const { data: fetchedNotes, error: notesError } = await supabase
@@ -9294,6 +9660,9 @@
         
         // Build systems array from folders or use defaults
         if (folders && folders.length) {
+          console.log(`🔍 Raw folders from database: ${folders.length}`);
+          console.log('📋 All folder names:', folders.map(f => `"${f.folder_name}" (group: ${f.group_letter})`));
+          
           // CRITICAL: Deduplicate folders by NORMALIZED name (case-insensitive, handle variations)
           const folderMap = new Map();
           folders.forEach(folder => {
@@ -9304,8 +9673,21 @@
             // Keep this folder if: no existing, OR existing is global (null) but this is group-specific
             if (!existing || (existing.group_letter === null && folder.group_letter !== null)) {
               folderMap.set(normalizedKey, folder);
+            } else {
+              console.log(`⏭️ Skipping duplicate: "${folder.folder_name}" (${folder.group_letter}) - keeping "${existing.folder_name}" (${existing.group_letter})`);
             }
           });
+          
+          console.log(`📊 Deduplicated folders: ${folders.length} → ${folderMap.size} unique systems`);
+          console.log('✅ Final unique systems:', Array.from(folderMap.values()).map(f => `"${f.folder_name}"`));
+          
+          // DETAILED LIST: Show all 30 systems line by line
+          console.log('📝 ========== ALL 30 SYSTEMS (line by line) ==========');
+          Array.from(folderMap.values()).forEach((f, idx) => {
+            console.log(`${idx + 1}. "${f.folder_name}" (id: ${f.id}, group: ${f.group_letter})`);
+          });
+          console.log('📝 ====================================================');
+          
           // Now map unique folders to system objects
           const mappedSystems = Array.from(folderMap.values()).map(folder => {
             const totalTemplates = folder.note_templates?.length || 0;
@@ -9393,6 +9775,8 @@
             };
           });
           
+          console.log(`🎯 Mapped systems (before filtering): ${mappedSystems.length}`);
+          
           // CRITICAL FILTER: Only show systems that have notes OR are marked as ongoing
           // This prevents empty/unused systems from cluttering the carousel
           const filteredSystems = mappedSystems.filter(sys => {
@@ -9400,10 +9784,17 @@
             const isOngoing = sys.status === 'current';
             const shouldShow = hasNotes || isOngoing;
             
+            if (!shouldShow) {
+              console.log(`🗑️ Filtering out empty system: "${sys.name}" (0 notes, not ongoing)`);
+            }
+            
             return shouldShow;
           });
           
+          console.log(`✅ Systems after filtering: ${mappedSystems.length} → ${filteredSystems.length} (removed ${mappedSystems.length - filteredSystems.length} empty)`);
+          
           nclexSystems = filteredSystems;
+          console.log(`🎯 nclexSystems assigned: ${nclexSystems.length}`);
         } else {
           nclexSystems = DEFAULT_SYSTEMS.map(system => ({
             ...system,
@@ -9413,6 +9804,9 @@
             status: 'not-started'
           }));
         }
+
+        console.log(`📦 nclexSystems before current check: ${nclexSystems.length} systems`);
+
         // Database is_current flag is the source of truth (set by Group-Notes.html)
         // Just ensure only ONE system has 'current' status (in case of data issues)
         let foundCurrent = false;
@@ -9448,10 +9842,16 @@
           return b.progress - a.progress;
         });
 
+        console.log(`📦 nclexSystems after sorting: ${nclexSystems.length} systems`);
+        console.log(`📋 System names after sort:`, nclexSystems.map(s => s.name));
+
         // Calculate elapsed time and ensure minimum loading with render buffer
         const elapsedTime = Date.now() - loadStartTime;
         const minLoadingTime = 800; // Reduced from 3200ms to 800ms for faster load
         const remainingTime = Math.max(0, minLoadingTime - elapsedTime);
+        
+        console.log(`⏱️ Data loaded in ${elapsedTime}ms, waiting ${remainingTime}ms more...`);
+        
         // Wait for remaining time before rendering
         await new Promise(resolve => setTimeout(resolve, remainingTime));
         
@@ -9505,14 +9905,19 @@
           }
         });
         nclexSystems = deduped;
+        console.log('✅ Force-deduplicated to:', nclexSystems.map(s => s.name));
       }
 
-      // Hide carousel during render
+      // DON'T clear carousel yet - keep spinner visible during render
+      // We'll clear it right before showing the carousel
+      
+      // Hide carousel during render (spinner still shows because it's inside)
       carousel.setAttribute('data-ready', 'false');
       
       const fragment = document.createDocumentFragment();
       
       nclexSystems.forEach((system, index) => {
+        // Always create fresh cards to avoid state issues
         const card = document.createElement('div');
         card.className = `system-card ${system.status || 'not-started'}`;
         card.dataset.systemName = system.name;
@@ -9529,10 +9934,16 @@
 
         let badge = '';
         if (totalNotes > 0) {
-          let badgeLeft = 20;
+          // Position badge along progress bar respecting card edges
+          // Badge width = 32px, card has 20px padding
+          // Min position = 20px (left padding)
+          // Max position = calc(100% - 52px) (right padding + badge width)
+          let badgeLeft = 20; // Default to left edge
           if (progressValue > 0) {
+            // Scale progress to usable width (accounting for badge size and padding)
             const minLeft = 20;
-            const maxLeft = 'calc(100% - 52px)';
+            const maxLeft = 'calc(100% - 52px)'; // 20px padding + 32px badge
+            badgeLeft = progressValue >= 90 ? maxLeft : `calc(${minLeft}px + (${progressValue}% - ${minLeft}px))`;
             if (progressValue >= 90) {
               badgeLeft = maxLeft;
             } else {
@@ -9542,17 +9953,21 @@
           badge = `<div class="system-notification unlocked" style="left: ${badgeLeft};"><span class="notification-count">${totalNotes}</span><div class="notification-pulse"></div></div>`;
         }
         
-        let statusPosition = '60px';
-        let statusZIndex = 5;
+        // Position status badge along progress bar (centered with translateX(-50%))
+        // Status badge needs more room due to text width
+        // Min = 60px (half badge width + padding), Max = calc(100% - 60px)
+        let statusPosition = '60px'; // Default near left
+        let statusZIndex = 5; // Default z-index
         if (progressValue > 0) {
           if (progressValue >= 85) {
-            statusPosition = 'calc(100% - 80px)';
+            statusPosition = 'calc(100% - 80px)'; // Keep away from right edge
             if (progressValue === 100) {
+              // At 100%, position over the green badge and increase z-index
               statusPosition = 'calc(100% - 52px)';
-              statusZIndex = 15;
+              statusZIndex = 15; // Higher than notification badge (z-index: 10)
             }
           } else if (progressValue <= 15) {
-            statusPosition = '60px';
+            statusPosition = '60px'; // Keep away from left edge
           } else {
             statusPosition = `${progressValue}%`;
           }
@@ -9577,35 +9992,39 @@
         fragment.appendChild(card);
       });
 
-      // Clear spinner and append cards
+      // NOW clear the spinner right before appending cards
       carousel.innerHTML = '';
+      
       carousel.appendChild(fragment);
       
-      // Find target card and calculate scroll position BEFORE showing carousel
-      const targetCard = selectedSystem 
-        ? carousel.querySelector(`.system-card[data-system-name="${CSS.escape?.(selectedSystem) || selectedSystem}"]`)
-        : carousel.querySelector('.system-card.current') || carousel.firstElementChild;
+      // Force layout calculation by accessing offsetHeight
+      carousel.offsetHeight;
       
-      // Set scroll position IMMEDIATELY (synchronously) before any paint
-      if (targetCard) {
-        const container = carousel.parentElement;
-        if (container) {
-          const containerWidth = container.getBoundingClientRect().width;
-          const cardWidth = targetCard.getBoundingClientRect().width;
-          const scrollLeft = targetCard.offsetLeft - (containerWidth / 2) + (cardWidth / 2);
-          const maxScroll = carousel.scrollWidth - carousel.clientWidth;
-          const clamped = Math.max(0, Math.min(scrollLeft, maxScroll));
-          
-          // Always use instant scroll on initial render to prevent flash
-          if (isInitialCarouselRender) {
+      // Set scroll position IMMEDIATELY after forcing layout (on first load only)
+      if (isInitialCarouselRender) {
+        const targetCard = selectedSystem 
+          ? carousel.querySelector(`.system-card[data-system-name="${selectedSystem}"]`)
+          : carousel.querySelector('.system-card.current') || carousel.firstElementChild;
+        
+        if (targetCard) {
+          const container = carousel.parentElement;
+          if (container) {
+            // Force layout of target card
+            targetCard.offsetHeight;
+            
+            const containerWidth = container.getBoundingClientRect().width;
+            const cardWidth = targetCard.getBoundingClientRect().width;
+            const scrollLeft = targetCard.offsetLeft - (containerWidth / 2) + (cardWidth / 2);
+            const maxScroll = carousel.scrollWidth - carousel.clientWidth;
+            const clamped = Math.max(0, Math.min(scrollLeft, maxScroll));
+            
+            // Set position synchronously BEFORE any animations
             carousel.scrollLeft = clamped;
-          } else {
-            carousel.scrollTo({ left: clamped, behavior: 'smooth' });
           }
         }
       }
       
-      // Set progress bar widths immediately (no transition on initial render)
+      // Set progress bar widths AFTER cards are in DOM
       nclexSystems.forEach((system) => {
         const progressValue = Math.max(0, Math.min(100, system.progress || 0));
         const card = carousel.querySelector(`.system-card[data-system-name="${system.name}"]`);
@@ -9613,8 +10032,10 @@
         
         const barFill = card.querySelector('.system-bar-fill');
         if (barFill) {
+          // Disable transition for instant update
           barFill.style.transition = 'none';
           
+          // Hide bar completely if progress is 0% (prevent glow from showing)
           if (progressValue === 0) {
             barFill.style.setProperty('width', '0%', 'important');
             barFill.style.setProperty('opacity', '0', 'important');
@@ -9623,38 +10044,47 @@
             barFill.style.setProperty('opacity', '1', 'important');
           }
           
-          // Re-enable transitions after next frame
+          // Force reflow
+          barFill.offsetHeight;
+          
+          // Re-enable transitions
           requestAnimationFrame(() => {
             barFill.style.transition = 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease';
           });
         }
       });
 
-      // NOW show carousel after scroll position is set (use requestAnimationFrame to sync with paint)
+      // Scroll to ongoing/selected card (instant on first load, smooth after)
+      // Use requestAnimationFrame to sync with browser paint cycle (avoids layout thrashing)
       requestAnimationFrame(() => {
-        carousel.setAttribute('data-ready', 'true');
-        isInitialCarouselRender = false;
-      });
-    }
+        const targetCard = selectedSystem 
+          ? carousel.querySelector(`.system-card[data-system-name="${CSS.escape?.(selectedSystem) || selectedSystem}"]`)
+          : carousel.querySelector('.system-card.current') || carousel.firstElementChild;
+        
+        if (!isInitialCarouselRender && targetCard) {
+          // Only do smooth scroll on subsequent renders
+          const container = carousel.parentElement;
+          if (container) {
+            const containerWidth = container.getBoundingClientRect().width;
+            const cardWidth = targetCard.getBoundingClientRect().width;
+            const scrollLeft = targetCard.offsetLeft - (containerWidth / 2) + (cardWidth / 2);
+            const maxScroll = carousel.scrollWidth - carousel.clientWidth;
+            const clamped = Math.max(0, Math.min(scrollLeft, maxScroll));
 
-    // Scroll carousel left/right by one card width
-    function scrollCarousel(direction) {
-      const carousel = document.getElementById('systemsCarousel');
-      if (!carousel) return;
-      
-      const cards = carousel.querySelectorAll('.system-card');
-      if (!cards.length) return;
-      
-      const cardWidth = cards[0].getBoundingClientRect().width;
-      const gap = 20; // Gap between cards (from CSS)
-      const scrollAmount = cardWidth + gap;
-      
-      const currentScroll = carousel.scrollLeft;
-      const newScroll = currentScroll + (scrollAmount * direction);
-      
-      carousel.scrollTo({
-        left: newScroll,
-        behavior: 'smooth'
+            carousel.scrollTo({
+              left: clamped,
+              behavior: 'smooth'
+            });
+          }
+        }
+        
+        // Show carousel after a brief delay to ensure scroll position has painted
+        setTimeout(() => {
+          // Show carousel by setting data-ready attribute
+          carousel.setAttribute('data-ready', 'true');
+          console.log('✅ Carousel rendered with', nclexSystems.length, 'systems');
+          isInitialCarouselRender = false;
+        }, 100); // Increased delay to ensure layout is complete
       });
     }
 
@@ -9672,6 +10102,16 @@
       const clamped = Math.max(0, Math.min(scrollLeft, maxScroll));
 
       carousel.scrollTo({ left: clamped, behavior: 'smooth' });
+    }
+    
+    // Carousel navigation
+    function scrollCarousel(direction) {
+      const carousel = document.getElementById('systemsCarousel');
+      const scrollAmount = 220; // card width + gap
+      carousel.scrollBy({
+        left: direction * scrollAmount,
+        behavior: 'smooth'
+      });
     }
     
     /**
@@ -9876,6 +10316,7 @@
       }
       
       // For locked notes, blur everything except title and date
+      const contentBlur = !note.isPaid ? 'filter: blur(8px); user-select: none; pointer-events: none;' : '';
       const badgeBlur = !note.isPaid ? 'filter: blur(8px);' : '';
       
       // Check if note is new (not opened yet)
