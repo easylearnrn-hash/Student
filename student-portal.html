@@ -10476,7 +10476,7 @@
   </script>
 
   <!-- ============================================================================
-       CHRISTMAS THEME INITIALIZATION & SNOW ACCUMULATION EFFECT
+       CHRISTMAS THEME INITIALIZATION & SNOW EFFECT
        ============================================================================ -->
   <script>
     /* ============================================================
@@ -10497,233 +10497,71 @@
     })();
 
     /* ============================================================
-       ❄️ SNOW ACCUMULATION ENGINE
+       ❄️ GSAP FALLING SNOW EFFECT
        ============================================================
-       Advanced snow that accumulates on student name and box edges
-       Scans DOM elements and detects collision boundaries
+       Simple falling snow particles with GSAP animation
+       Only runs when Christmas theme is enabled
        ============================================================ */
     (function() {
       const christmasEnabled = localStorage.getItem('arnoma:christmas-theme') === 'true';
       if (!christmasEnabled) return;
 
-      const canvas = document.querySelector("#snowCanvas");
-      if (!canvas) {
+      const arr2 = []; // snow particles
+      const c2 = document.querySelector("#snowCanvas");
+      if (!c2) {
         console.warn('❄️ Snow canvas not found');
         return;
       }
 
-      const ctx = canvas.getContext("2d");
-      const DPR = Math.min(2, window.devicePixelRatio || 1);
-      
-      // Set high-res canvas
-      canvas.width = window.innerWidth * DPR;
-      canvas.height = window.innerHeight * DPR;
-      
-      const cw = canvas.width;
-      const ch = canvas.height;
+      const ctx2 = c2.getContext("2d");
+      const cw = (c2.width = 4000);
+      const ch = (c2.height = 4000);
+      const T = Math.PI * 2;
 
-      // Snow particles
-      const flakes = [];
-      const MAX_FLAKES = 300;
-      const ACCUM_RATE = 1.2;
-
-      // Collision buckets (for accumulation detection)
-      const BUCKETS = 400;
-      const bucketWidth = cw / BUCKETS;
-      const buckets = new Array(BUCKETS).fill(null).map(() => ({ y: ch, snow: [] }));
-
-      // Detect elements for collision
-      const detectionElements = [];
-
-      function scanDOMForCollision() {
-        detectionElements.length = 0;
-        
-        // Get student name element
-        const welcomeMsg = document.getElementById('welcomeMessage');
-        if (welcomeMsg) {
-          const rect = welcomeMsg.getBoundingClientRect();
-          detectionElements.push({
-            x: rect.left * DPR,
-            y: rect.top * DPR,
-            width: rect.width * DPR,
-            height: rect.height * DPR,
-            element: welcomeMsg,
-            type: 'name'
-          });
-        }
-
-        // Get all card elements (boxes)
-        const cards = document.querySelectorAll('.card');
-        cards.forEach(card => {
-          const rect = card.getBoundingClientRect();
-          if (rect.top < window.innerHeight && rect.bottom > 0) {
-            detectionElements.push({
-              x: rect.left * DPR,
-              y: rect.top * DPR,
-              width: rect.width * DPR,
-              height: rect.height * DPR,
-              element: card,
-              type: 'card'
-            });
-          }
+      // Create 999 snow particles
+      for (let i = 0; i < 999; i++) {
+        arr2.push({
+          x: cw * Math.random(),
+          y: -9,
+          i,
+          s: 3 + 5 * Math.random(),
+          a: 0.1 + 0.5 * Math.random(),
         });
 
-        // Update bucket collision boundaries
-        for (let i = 0; i < BUCKETS; i++) {
-          const bucketX = i * bucketWidth;
-          let minY = ch;
-
-          detectionElements.forEach(elem => {
-            if (bucketX >= elem.x && bucketX <= elem.x + elem.width) {
-              if (elem.y < minY) {
-                minY = elem.y;
-              }
-            }
-          });
-
-          buckets[i].y = minY;
-          // Reset accumulated snow on boundary change
-          if (buckets[i].snow.length > 100) {
-            buckets[i].snow = buckets[i].snow.slice(-50);
-          }
-        }
+        arr2[i].t = gsap
+          .to(arr2[i], { ease: "none", y: ch, repeat: -1 })
+          .seek(Math.random() * 99)
+          .timeScale(arr2[i].s / 700);
       }
 
-      // Spawn snowflake
-      function spawnFlake() {
-        if (flakes.length >= MAX_FLAKES) return;
+      ctx2.fillStyle = "#fff";
+      gsap.ticker.add(render);
 
-        flakes.push({
-          x: Math.random() * cw,
-          y: -10,
-          vx: (Math.random() - 0.5) * 30 * DPR,
-          vy: (50 + Math.random() * 80) * DPR,
-          r: (2 + Math.random() * 3) * DPR,
-          rotation: Math.random() * Math.PI * 2,
-          rotationSpeed: (Math.random() - 0.5) * 0.05,
-          opacity: 0.6 + Math.random() * 0.4,
-        });
-      }
-
-      // Update physics
-      function update(dt) {
-        // Spawn new flakes
-        if (Math.random() < 0.5) {
-          spawnFlake();
-        }
-
-        // Update flakes
-        for (let i = flakes.length - 1; i >= 0; i--) {
-          const f = flakes[i];
-          
-          f.x += f.vx * dt;
-          f.y += f.vy * dt;
-          f.rotation += f.rotationSpeed;
-
-          // Get bucket for this flake
-          const bucketIdx = Math.floor(f.x / bucketWidth);
-          if (bucketIdx >= 0 && bucketIdx < BUCKETS) {
-            const bucket = buckets[bucketIdx];
-
-            // Check collision with boundary or accumulated snow
-            let collisionY = bucket.y;
-            if (bucket.snow.length > 0) {
-              collisionY = Math.min(...bucket.snow.map(s => s.y));
-            }
-
-            if (f.y + f.r >= collisionY) {
-              // Snow hit something - accumulate
-              bucket.snow.push({ x: f.x, y: collisionY - f.r, r: f.r });
-              bucket.y = Math.min(bucket.y, collisionY - ACCUM_RATE * DPR);
-              flakes.splice(i, 1);
-              continue;
-            }
-          }
-
-          // Remove if off screen
-          if (f.y > ch + 20 || f.x < -20 || f.x > cw + 20) {
-            flakes.splice(i, 1);
-          }
-        }
-      }
-
-      // Render
       function render() {
-        ctx.clearRect(0, 0, cw, ch);
-
-        // Draw accumulated snow
-        ctx.fillStyle = "#fff";
-        buckets.forEach(bucket => {
-          bucket.snow.forEach(s => {
-            ctx.beginPath();
-            ctx.arc(s.x, s.y, s.r * 1.5, 0, Math.PI * 2);
-            ctx.fill();
-          });
-        });
-
-        // Draw falling flakes
-        flakes.forEach(f => {
-          ctx.save();
-          ctx.globalAlpha = f.opacity;
-          ctx.translate(f.x, f.y);
-          ctx.rotate(f.rotation);
-          
-          // Draw snowflake shape
-          ctx.fillStyle = "#fff";
-          ctx.beginPath();
-          for (let i = 0; i < 6; i++) {
-            const angle = (i * Math.PI) / 3;
-            const x = Math.cos(angle) * f.r;
-            const y = Math.sin(angle) * f.r;
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-          }
-          ctx.closePath();
-          ctx.fill();
-          
-          // Add glow
-          ctx.shadowBlur = 4 * DPR;
-          ctx.shadowColor = "rgba(255,255,255,0.5)";
-          ctx.beginPath();
-          ctx.arc(0, 0, f.r * 0.8, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.shadowBlur = 0;
-          
-          ctx.restore();
-        });
+        ctx2.clearRect(0, 0, cw, ch);
+        arr2.forEach(drawSnow);
       }
 
-      // Animation loop
-      let lastTime = performance.now();
-      function loop(time) {
-        const dt = Math.min(0.033, (time - lastTime) / 1000);
-        lastTime = time;
+      function drawSnow(p) {
+        const ys = gsap.utils.interpolate(1.3, 0.1, p.y / ch);
 
-        update(dt);
-        render();
-        requestAnimationFrame(loop);
+        ctx2.save();
+        ctx2.translate(p.x, p.y);
+        ctx2.rotate(50 * p.t.progress());
+        ctx2.beginPath();
+        ctx2.arc(
+          gsap.utils.interpolate(-55, 55, p.i / 999),
+          gsap.utils.interpolate(-25, 25, p.i / 999),
+          p.s * ys,
+          0,
+          T
+        );
+        ctx2.globalAlpha = p.a * ys;
+        ctx2.fill();
+        ctx2.restore();
       }
 
-      // Resize handler
-      function onResize() {
-        canvas.width = window.innerWidth * DPR;
-        canvas.height = window.innerHeight * DPR;
-        scanDOMForCollision();
-      }
-
-      window.addEventListener('resize', onResize);
-      
-      // Initial scan and start
-      setTimeout(() => {
-        scanDOMForCollision();
-        console.log('❄️ Snow Accumulation: Detected', detectionElements.length, 'elements');
-      }, 500);
-
-      // Rescan periodically for dynamic content
-      setInterval(scanDOMForCollision, 3000);
-
-      loop(performance.now());
-      console.log('❄️ Snow Accumulation Engine: Started');
+      console.log('❄️ Snow Effect: Started (999 particles)');
     })();
   </script>
 </body>
