@@ -19,7 +19,6 @@ CREATE POLICY "Admins can read portal settings"
     EXISTS (
       SELECT 1 FROM admin_accounts
       WHERE email = auth.jwt()->>'email'
-      AND is_active = true
     )
   );
 
@@ -32,7 +31,6 @@ CREATE POLICY "Admins can update portal settings"
     EXISTS (
       SELECT 1 FROM admin_accounts
       WHERE email = auth.jwt()->>'email'
-      AND is_active = true
     )
   );
 
