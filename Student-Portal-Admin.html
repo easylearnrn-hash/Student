@@ -2036,45 +2036,80 @@
     }
     
     // Load Settings Tab
-    function loadSettings() {
-      const isEnabled = localStorage.getItem('arnoma:christmas-theme') === 'true';
+    async function loadSettings() {
       const checkbox = document.getElementById('christmasThemeToggle');
       const status = document.getElementById('themeStatus');
       
-      if (checkbox) {
-        checkbox.checked = isEnabled;
-      }
-      if (status) {
-        status.style.display = isEnabled ? 'block' : 'none';
+      try {
+        // Fetch current setting from Supabase
+        const { data, error } = await supabase
+          .from('portal_settings')
+          .select('setting_value')
+          .eq('setting_key', 'christmas_theme')
+          .single();
+        
+        if (error) {
+          console.error('Error loading Christmas theme setting:', error);
+          return;
+        }
+        
+        const isEnabled = data?.setting_value?.enabled === true;
+        
+        if (checkbox) {
+          checkbox.checked = isEnabled;
+        }
+        if (status) {
+          status.style.display = isEnabled ? 'block' : 'none';
+        }
+        
+        console.log('🎄 Loaded Christmas theme setting from database:', isEnabled);
+      } catch (err) {
+        console.error('Failed to load settings:', err);
       }
     }
     
     // Toggle Christmas Theme
-    function toggleChristmasTheme() {
+    async function toggleChristmasTheme() {
       const checkbox = document.getElementById('christmasThemeToggle');
       const status = document.getElementById('themeStatus');
       const isEnabled = checkbox.checked;
       
       console.log('🎄 Checkbox state:', isEnabled);
-      console.log('🎄 Setting localStorage to:', isEnabled ? 'true' : 'false');
+      console.log('🎄 Saving to Supabase...');
       
-      localStorage.setItem('arnoma:christmas-theme', isEnabled ? 'true' : 'false');
-      
-      // Verify it was set
-      const verifyValue = localStorage.getItem('arnoma:christmas-theme');
-      console.log('🎄 Verified localStorage value:', verifyValue);
-      
-      if (status) {
-        status.style.display = isEnabled ? 'block' : 'none';
-      }
-      
-      console.log('🎄 Christmas Theme:', isEnabled ? 'ENABLED ✅' : 'DISABLED ❌');
-      
-      // Alert user
-      if (isEnabled) {
-        alert('✅ Christmas Theme Enabled!\n\nStudents will now see:\n• Snowflakes ❄️\n• Christmas tree 🎄\n• Falling snow\n• Festive font ✍️\n\nThey need to reload the portal to see changes.');
-      } else {
-        alert('❌ Christmas Theme Disabled\n\nAll Christmas decorations will be hidden when students reload the portal.');
+      try {
+        // Update setting in Supabase
+        const { error } = await supabase
+          .from('portal_settings')
+          .update({ 
+            setting_value: { enabled: isEnabled },
+            updated_at: new Date().toISOString()
+          })
+          .eq('setting_key', 'christmas_theme');
+        
+        if (error) {
+          console.error('Error saving Christmas theme setting:', error);
+          alert('❌ Failed to save setting. Please try again.');
+          checkbox.checked = !isEnabled; // Revert checkbox
+          return;
+        }
+        
+        console.log('🎄 Christmas Theme saved to database:', isEnabled ? 'ENABLED ✅' : 'DISABLED ❌');
+        
+        if (status) {
+          status.style.display = isEnabled ? 'block' : 'none';
+        }
+        
+        // Alert user
+        if (isEnabled) {
+          alert('✅ Christmas Theme Enabled!\n\nAll students will now see:\n• Snowflakes ❄️\n• Christmas tree 🎄\n• Falling snow\n• Festive font ✍️\n\nChanges take effect immediately when they reload the portal.');
+        } else {
+          alert('❌ Christmas Theme Disabled\n\nAll Christmas decorations will be hidden when students reload the portal.');
+        }
+      } catch (err) {
+        console.error('Failed to save setting:', err);
+        alert('❌ Failed to save setting. Please try again.');
+        checkbox.checked = !isEnabled; // Revert checkbox
       }
     }
     

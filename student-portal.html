@@ -10491,114 +10491,133 @@
     /* ============================================================
        🎄 CHRISTMAS THEME INITIALIZATION
        ============================================================
-       Check localStorage and apply .christmas-theme class to body
+       Check Supabase portal_settings and apply .christmas-theme class to body
        This controls visibility of: tree, snow, fonts, snowflakes
        ============================================================ */
-    (function() {
-      const christmasEnabled = localStorage.getItem('arnoma:christmas-theme') === 'true';
-      
-      console.log('🎄 Christmas Theme Check:', christmasEnabled ? 'ENABLED' : 'DISABLED');
-      console.log('🎄 localStorage value:', localStorage.getItem('arnoma:christmas-theme'));
-      
-      if (christmasEnabled) {
-        document.body.classList.add('christmas-theme');
-        console.log('🎄 Christmas Theme: Class added to body');
-        console.log('🎄 Body classes:', document.body.className);
-      } else {
-        console.log('🎄 Christmas Theme: Not enabled, no class added');
-      }
-      
-      // Show debug panel (remove this in production)
-      setTimeout(() => {
-        const debugPanel = document.getElementById('christmasDebug');
-        if (debugPanel) {
-          debugPanel.style.display = 'block';
-          document.getElementById('debugLocalStorage').textContent = 
-            `localStorage: "${localStorage.getItem('arnoma:christmas-theme')}"`;
-          document.getElementById('debugBodyClass').textContent = 
-            `Body class: "${document.body.className}"`;
-          document.getElementById('debugSnowCanvas').textContent = 
-            `Snow canvas: ${document.querySelector('#snowCanvas') ? 'Found' : 'NOT FOUND'}`;
-          document.getElementById('debugTreeContainer').textContent = 
-            `Tree container: ${document.querySelector('#christmas-tree-container') ? 'Found' : 'NOT FOUND'}`;
+    (async function() {
+      try {
+        console.log('🎄 Fetching Christmas theme setting from database...');
+        
+        // Fetch setting from Supabase
+        const { data, error } = await window.supabase
+          .from('portal_settings')
+          .select('setting_value')
+          .eq('setting_key', 'christmas_theme')
+          .single();
+        
+        if (error) {
+          console.error('🎄 Error fetching Christmas theme:', error);
+          return;
         }
-      }, 500);
+        
+        const christmasEnabled = data?.setting_value?.enabled === true;
+        
+        console.log('🎄 Christmas Theme Check:', christmasEnabled ? 'ENABLED' : 'DISABLED');
+        console.log('🎄 Database value:', data?.setting_value);
+        
+        if (christmasEnabled) {
+          document.body.classList.add('christmas-theme');
+          console.log('🎄 Christmas Theme: Class added to body');
+          console.log('🎄 Body classes:', document.body.className);
+          
+          // Initialize snow effect
+          initializeSnowEffect();
+        } else {
+          console.log('🎄 Christmas Theme: Not enabled, no class added');
+        }
+        
+        // Show debug panel
+        setTimeout(() => {
+          const debugPanel = document.getElementById('christmasDebug');
+          if (debugPanel) {
+            debugPanel.style.display = 'block';
+            document.getElementById('debugLocalStorage').textContent = 
+              `Database: ${christmasEnabled ? 'ENABLED' : 'DISABLED'}`;
+            document.getElementById('debugBodyClass').textContent = 
+              `Body class: "${document.body.className}"`;
+            document.getElementById('debugSnowCanvas').textContent = 
+              `Snow canvas: ${document.querySelector('#snowCanvas') ? 'Found' : 'NOT FOUND'}`;
+            document.getElementById('debugTreeContainer').textContent = 
+              `Tree container: ${document.querySelector('#christmas-tree-container') ? 'Found' : 'NOT FOUND'}`;
+          }
+        }, 500);
+      } catch (err) {
+        console.error('🎄 Failed to check Christmas theme:', err);
+      }
     })();
 
     /* ============================================================
-       ❄️ GSAP FALLING SNOW EFFECT
-       ============================================================
-       Simple falling snow particles with GSAP animation
-       Only runs when Christmas theme is enabled
+       ❄️ SNOW EFFECT INITIALIZATION
        ============================================================ */
-    (function() {
-      const christmasEnabled = localStorage.getItem('arnoma:christmas-theme') === 'true';
-      console.log('❄️ Snow Effect: Checking if enabled...', christmasEnabled);
+    function initializeSnowEffect() {
+      console.log('❄️ Snow Effect: Initializing...');
       
-      if (!christmasEnabled) {
-        console.log('❄️ Snow Effect: Disabled, skipping initialization');
-        return;
-      }
-
-      const arr2 = []; // snow particles
-      const c2 = document.querySelector("#snowCanvas");
-      if (!c2) {
-        console.warn('❄️ Snow canvas not found - DOM element #snowCanvas missing');
+      const canvas = document.querySelector('#snowCanvas');
+      if (!canvas) {
+        console.warn('❄️ Snow canvas not found!');
         return;
       }
       
-      console.log('❄️ Snow canvas found:', c2);
-
-      const ctx2 = c2.getContext("2d");
-      const cw = (c2.width = 4000);
-      const ch = (c2.height = 4000);
-      const T = Math.PI * 2;
-
-      // Create 999 snow particles
-      for (let i = 0; i < 999; i++) {
-        arr2.push({
-          x: cw * Math.random(),
-          y: -9,
-          i,
-          s: 3 + 5 * Math.random(),
-          a: 0.1 + 0.5 * Math.random(),
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width = 4000;
+      const h = canvas.height = 4000;
+      
+      const particles = [];
+      const particleCount = 999;
+      
+      // Create particles
+      for (let i = 0; i < particleCount; i++) {
+        particles.push({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          radius: Math.random() * 4 + 1,
+          density: Math.random() * particleCount
         });
-
-        arr2[i].t = gsap
-          .to(arr2[i], { ease: "none", y: ch, repeat: -1 })
-          .seek(Math.random() * 99)
-          .timeScale(arr2[i].s / 700);
       }
-
-      ctx2.fillStyle = "#fff";
-      gsap.ticker.add(render);
-
+      
+      // Animation loop
       function render() {
-        ctx2.clearRect(0, 0, cw, ch);
-        arr2.forEach(drawSnow);
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.beginPath();
+        
+        for (let i = 0; i < particleCount; i++) {
+          const p = particles[i];
+          ctx.moveTo(p.x, p.y);
+          ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2, true);
+        }
+        
+        ctx.fill();
+        update();
       }
-
-      function drawSnow(p) {
-        const ys = gsap.utils.interpolate(1.3, 0.1, p.y / ch);
-
-        ctx2.save();
-        ctx2.translate(p.x, p.y);
-        ctx2.rotate(50 * p.t.progress());
-        ctx2.beginPath();
-        ctx2.arc(
-          gsap.utils.interpolate(-55, 55, p.i / 999),
-          gsap.utils.interpolate(-25, 25, p.i / 999),
-          p.s * ys,
-          0,
-          T
-        );
-        ctx2.globalAlpha = p.a * ys;
-        ctx2.fill();
-        ctx2.restore();
+      
+      // Update particle positions
+      function update() {
+        for (let i = 0; i < particleCount; i++) {
+          const p = particles[i];
+          p.y += Math.cos(p.density) + 1 + p.radius / 2;
+          p.x += Math.sin(0) * 2;
+          
+          if (p.y > h) {
+            p.y = 0;
+            p.x = Math.random() * w;
+          }
+        }
       }
-
+      
+      // Start animation with GSAP ticker
+      gsap.ticker.add(render);
       console.log('❄️ Snow Effect: Started (999 particles)');
-    })();
+    }
+  </script>
+
+  <!-- ============================================================================
+       CHRISTMAS TREE ANIMATION (Right Side)
+       ============================================================================ -->
+  <script>
+    // Christmas tree is always in DOM but hidden by CSS
+    // Only visible when body.christmas-theme class is present
+    console.log('🎄 Christmas tree container loaded (visibility controlled by CSS)');
   </script>
 </body>
 </html>
