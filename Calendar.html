@@ -2758,6 +2758,14 @@
         position: relative;
       }
 
+      .quick-action-btn.pause {
+        background: #3a3a3c;
+      }
+
+      .quick-action-btn.forward {
+        background: #3a3a3c;
+      }
+
       .quick-action-btn.email-reminder {
         background: #fbbf24;
         color: #000;
@@ -2766,6 +2774,17 @@
 
       .quick-action-btn.tertiary {
         background: #3a3a3c;
+      }
+
+      .quick-action-btn.payment {
+        background: #3a3a3c;
+      }
+
+      .quick-action-btn.secondary {
+        background: #3a3a3c;
+        width: auto;
+        padding: 0 20px;
+        font-size: 14px;
       }
 
       .quick-action-btn:hover {
@@ -9545,6 +9564,20 @@
             </button>
           `;
           
+          // Pause/Forward - only for unpaid students
+          if (student.status === 'unpaid') {
+            actionButtons += `
+              <button class="dot-action-btn warning" onclick="event.stopPropagation(); pauseStudent(${student.id}, '${safeName}')">
+                <span class="btn-icon">⏸</span>
+                <span class="btn-text">Pause</span>
+              </button>
+              <button class="dot-action-btn purple" onclick="event.stopPropagation(); forwardStudent(${student.id}, '${safeName}')">
+                <span class="btn-icon">⏭</span>
+                <span class="btn-text">Forward</span>
+              </button>
+            `;
+          }
+          
           // Move Payment to Older/Newer Class - only for paid students (bidirectional arrows)
           if (student.status === 'paid' || student.status === 'credit') {
             actionButtons += `
@@ -10628,6 +10661,97 @@
         // Example: await updateAutoReminder(studentId, !isPaused);
       }
 
+      // Pause Student
+      async function pauseStudent(studentId, studentName) {
+        try {
+          debugLog(`Preparing to pause student ${studentName}`, { studentId });
+
+          // Show confirmation dialog
+          const confirmed = await showConfirmDialog(
+            'Pause Student?',
+            `
+              <div style="text-align: left; line-height: 1.6;">
+                <div style="margin-bottom: 12px;"><strong>Student:</strong> ${studentName}</div>
+                <div style="margin-top: 16px; padding: 12px; background: rgba(255,193,7,0.1); border-radius: 8px; font-size: 13px; color: rgba(255,255,255,0.8);">
+                  This will temporarily pause all classes for this student. They won't appear on the calendar until resumed.
+                </div>
+              </div>
+            `
+          );
+
+          if (!confirmed) return;
+
+          // Update student status to paused
+          try {
+            const { error } = await window.supabaseClient
+              .from('students')
+              .update({ status: 'paused' })
+              .eq('id', studentId);
+
+            if (error) throw error;
+
+            showSuccessToast(`⏸ ${studentName} has been paused`);
+            debugLog(`✅ Student paused: ${studentName}`);
+            
+            // Refresh calendar
+            await loadAllData();
+            renderCalendar(currentDate);
+          } catch (dbErr) {
+            console.error('❌ Failed to pause student:', dbErr);
+            showErrorToast(`❌ Failed to pause student: ${dbErr.message}`);
+          }
+        } catch (err) {
+          console.error('❌ Error pausing student:', err);
+          showErrorToast('❌ Error pausing student. Please try again.');
+        }
+      }
+
+      // Forward Student to Next Payment Cycle
+      async function forwardStudent(studentId, studentName) {
+        try {
+          debugLog(`Preparing to forward student ${studentName}`, { studentId });
+
+          // Show confirmation dialog
+          const confirmed = await showConfirmDialog(
+            'Forward to Next Cycle?',
+            `
+              <div style="text-align: left; line-height: 1.6;">
+                <div style="margin-bottom: 12px;"><strong>Student:</strong> ${studentName}</div>
+                <div style="margin-top: 16px; padding: 12px; background: rgba(38,255,230,0.1); border-radius: 8px; font-size: 13px; color: rgba(255,255,255,0.8);">
+                  This will move the student to the next payment cycle, clearing current unpaid classes.
+                </div>
+              </div>
+            `
+          );
+
+          if (!confirmed) return;
+
+          // Update last payment date to current date
+          try {
+            const today = new Date().toISOString().split('T')[0];
+            const { error } = await window.supabaseClient
+              .from('students')
+              .update({ last_payment_date: today })
+              .eq('id', studentId);
+
+            if (error) throw error;
+
+            showSuccessToast(`⏭ ${studentName} forwarded to next cycle`);
+            debugLog(`✅ Student forwarded: ${studentName}`);
+            
+            // Refresh calendar
+            await loadAllData();
+            renderCalendar(currentDate);
+          } catch (dbErr) {
+            console.error('❌ Failed to forward student:', dbErr);
+            showErrorToast(`❌ Failed to forward student: ${dbErr.message}`);
+          }
+        } catch (err) {
+          console.error('❌ Error forwarding student:', err);
+          showErrorToast('❌ Error forwarding student. Please try again.');
+        }
+      }
+
       // Send Manual Reminder
       async function sendManualReminder(studentId, studentName) {
         try {
@@ -11702,6 +11826,16 @@
           // ONLY truly unpaid classes get payment reminder actions (not upcoming)
           const safeName = student.name.replace(/'/g, "\\'");
           let buttons = `
+            <button class="quick-action-btn pause" 
+                    onclick="event.stopPropagation(); pauseStudent(${student.id}, '${safeName}')"
+                    title="Pause student">
+              ⏸
+            </button>
+            <button class="quick-action-btn forward" 
+                    onclick="event.stopPropagation(); forwardStudent(${student.id}, '${safeName}')"
+                    title="Forward to next cycle">
+              ⏭
+            </button>
             <button class="quick-action-btn email-reminder" 
                     onclick="event.stopPropagation(); sendManualReminder(${student.id}, '${safeName}')"
                     title="Send payment reminder">

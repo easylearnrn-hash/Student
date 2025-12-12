@@ -216,6 +216,11 @@
       border-bottom: 1px solid rgba(255,255,255,0.08);
     }
     
+    /* Prevent action buttons from wrapping */
+    td:last-child {
+      white-space: nowrap;
+    }
+    
     tr:hover {
       background: rgba(102,126,234,0.08);
     }
@@ -231,15 +236,14 @@
     }
     
     .action-btn {
-      padding: 6px 12px;
+      padding: 8px 16px;
       border: 1px solid rgba(255,255,255,0.12);
       border-radius: 8px;
       cursor: pointer;
       transition: all 0.2s;
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 600;
-      margin-right: 6px;
-      white-space: nowrap;
+      margin-right: 8px;
     }
     
     .action-btn.view {
@@ -263,11 +267,6 @@
     .action-btn:hover {
       transform: translateY(-2px);
       box-shadow: 0 4px 12px rgba(102,126,234,0.2);
-    }
-    
-    /* Force Actions column to stay in one line */
-    #studentsTable td:last-child {
-      white-space: nowrap;
     }
     
     .search-bar {
@@ -834,7 +833,7 @@
 
     .action-btn.info {
       background: linear-gradient(135deg, #3b82f6, #2563eb);
-      padding: 6px 10px;
+      padding: 8px 12px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -1597,7 +1596,7 @@
       <div class="tab" onclick="switchTab('notes')">
         <span>📄</span> PDF Notes
       </div>
-      <div class="tab" onclick="switchTab('groupNotes')">
+      <div class="tab" onclick="openGroupNotesModal()">
         <span>📚</span> Group Notes
       </div>
       <div class="tab" onclick="switchTab('payments')">
@@ -1682,18 +1681,73 @@
       </div>
     </div>
     
-    <!-- Group Notes Tab -->
-    <div id="groupNotesTab" class="tab-content">
-      <!-- Embedded Group Notes Manager -->
-      <div class="card" style="padding: 0; overflow: hidden;">
-        <iframe 
-          id="groupNotesIframe"
-          src="Group-Notes.html?v=23"
-          title="Group Notes Manager"
-          style="width: 100%; height: 900px; border: none; background: #0b1220;"
-          loading="lazy"
+    <!-- Group Notes Modal -->
+    <div id="groupNotesModal" style="
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 10000;
+      backdrop-filter: blur(8px);
+    ">
+      <div style="
+        position: relative;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      ">
+        <!-- Close Button -->
+        <button 
+          onclick="closeGroupNotesModal()"
+          style="
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 48px;
+            height: 48px;
+            background: rgba(239, 68, 68, 0.2);
+            border: 2px solid rgba(239, 68, 68, 0.6);
+            border-radius: 50%;
+            color: #ef4444;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 10001;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+          "
+          onmouseover="this.style.background='rgba(239, 68, 68, 0.3)'; this.style.transform='scale(1.1)'"
+          onmouseout="this.style.background='rgba(239, 68, 68, 0.2)'; this.style.transform='scale(1)'"
         >
-        </iframe>
+          ✕
+        </button>
+        
+        <!-- Iframe Container -->
+        <div style="
+          width: 100%;
+          height: 100%;
+          max-width: 1800px;
+          background: #0b1220;
+          border-radius: 16px;
+          overflow: hidden;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        ">
+          <iframe 
+            id="groupNotesIframe"
+            src=""
+            title="Group Notes Manager"
+            style="width: 100%; height: 100%; border: none;"
+          >
+          </iframe>
+        </div>
       </div>
     </div>
     
@@ -1937,11 +1991,48 @@
       // Load data for tab (with caching)
       if (tab === 'students') loadStudents();
       if (tab === 'notes') loadNotes();
-      // Group Notes tab now uses standalone page (Group-Notes.html)
       if (tab === 'payments') loadPayments();
       if (tab === 'forum') loadForum();
       if (tab === 'systems') loadSystems();
     }
+    
+    // Group Notes Modal Functions
+    function openGroupNotesModal() {
+      const modal = document.getElementById('groupNotesModal');
+      const iframe = document.getElementById('groupNotesIframe');
+      
+      // Load the iframe src when opening (lazy load)
+      if (!iframe.src || iframe.src === '' || iframe.src === window.location.href) {
+        iframe.src = 'Group-Notes.html?v=' + Date.now();
+      }
+      
+      modal.style.display = 'flex';
+      document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    }
+    
+    function closeGroupNotesModal() {
+      const modal = document.getElementById('groupNotesModal');
+      modal.style.display = 'none';
+      document.body.style.overflow = ''; // Restore scrolling
+    }
+    
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        const modal = document.getElementById('groupNotesModal');
+        if (modal && modal.style.display === 'flex') {
+          closeGroupNotesModal();
+        }
+      }
+    });
+    
+    // Close modal when clicking backdrop
+    document.addEventListener('click', function(e) {
+      const modal = document.getElementById('groupNotesModal');
+      if (e.target === modal) {
+        closeGroupNotesModal();
+      }
+    });
     
     // Load Stats
     async function loadStats() {
@@ -2343,8 +2434,8 @@
         tbody.innerHTML = notes.map(note => `
           <tr>
             <td>${note.title || 'Untitled'}</td>
-            <td>${note.group_name || '-'}</td>
             <td>${note.system || '-'}</td>
+            <td>${note.group_name || '-'}</td>
             <td>${note.class_date ? new Date(note.class_date).toLocaleDateString() : '-'}</td>
             <td><span class="badge ${note.requires_payment ? 'locked' : 'free'}">${note.requires_payment ? '🔒 Locked' : '✓ Free'}</span></td>
             <td>
@@ -3848,21 +3939,15 @@
     }
     
     function closeResponsesModal() {
-      const responsesModal = document.getElementById('responsesModal');
-      if (responsesModal) {
-        responsesModal.classList.remove('active');
-      }
+      document.getElementById('responsesModal').classList.remove('active');
     }
     
     // Close responses modal when clicking outside
-    const responsesModal = document.getElementById('responsesModal');
-    if (responsesModal) {
-      responsesModal.addEventListener('click', (e) => {
-        if (e.target.id === 'responsesModal') {
-          closeResponsesModal();
-        }
-      });
-    }
+    document.getElementById('responsesModal').addEventListener('click', (e) => {
+      if (e.target.id === 'responsesModal') {
+        closeResponsesModal();
+      }
+    });
   </script>
 
   <!-- Fullscreen Impersonation Modal -->
