@@ -299,6 +299,62 @@ window.customPrompt = function(title, message, placeholder = '', defaultValue = 
   });
 };
 
+// Custom Prompt with Date Picker
+window.customPromptWithDate = (title, message, dateLabel = 'Select date:', defaultDate = null) => {
+  initCustomDialogs();
+  return new Promise((resolve) => {
+    const overlay = document.getElementById('customAlertOverlay');
+    const titleEl = document.getElementById('customAlertTitle');
+    const messageEl = document.getElementById('customAlertMessage');
+    const inputEl = document.getElementById('customAlertInput');
+    const okBtn = document.getElementById('customAlertOk');
+    const cancelBtn = document.getElementById('customAlertCancel');
+
+    titleEl.textContent = title;
+    messageEl.innerHTML = `${message}<br><br><label style="display: block; color: rgba(255,255,255,0.8); font-size: 14px; margin-bottom: 8px;">${dateLabel}</label>`;
+    inputEl.style.display = 'block';
+    inputEl.type = 'date';
+    inputEl.value = defaultDate || new Date().toISOString().split('T')[0];
+    cancelBtn.style.display = 'inline-block';
+    okBtn.textContent = 'Post';
+    okBtn.className = 'custom-alert-btn ok';
+
+    const handleOk = () => {
+      const value = inputEl.value;
+      overlay.classList.remove('active');
+      document.body.classList.remove('dialog-open');
+      okBtn.removeEventListener('click', handleOk);
+      cancelBtn.removeEventListener('click', handleCancel);
+      inputEl.removeEventListener('keypress', handleEnter);
+      inputEl.type = 'text'; // Reset for future prompts
+      resolve(value || null);
+    };
+
+    const handleCancel = () => {
+      overlay.classList.remove('active');
+      document.body.classList.remove('dialog-open');
+      okBtn.removeEventListener('click', handleOk);
+      cancelBtn.removeEventListener('click', handleCancel);
+      inputEl.removeEventListener('keypress', handleEnter);
+      inputEl.type = 'text'; // Reset for future prompts
+      resolve(null);
+    };
+
+    const handleEnter = (e) => {
+      if (e.key === 'Enter') handleOk();
+    };
+
+    okBtn.addEventListener('click', handleOk);
+    cancelBtn.addEventListener('click', handleCancel);
+    inputEl.addEventListener('keypress', handleEnter);
+    overlay.classList.add('active');
+    document.body.classList.add('dialog-open');
+
+    // Focus input
+    setTimeout(() => inputEl.focus(), 100);
+  });
+};
+
 // Initialize on load
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initCustomDialogs);
