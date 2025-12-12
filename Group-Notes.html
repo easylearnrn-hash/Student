@@ -2135,9 +2135,10 @@
           freeAccessGrants = updatedGrants;
         }
         
-        // Reload notes to show updated FREE badges
+        // CRITICAL: Reload all data to ensure UI is fully refreshed
         clearCache(); // Clear cache to force fresh data
-        await loadData();
+        await loadData(); // Reload notes from database
+        renderSystems(); // Re-render to show updated FREE badges
         
         await customAlert('Success', `✅ FREE access revoked from Group ${groupLetter} for ${successCount} note(s)`);
         
@@ -2267,7 +2268,10 @@
 
         await customAlert(`✓ ${successCount} note(s) shown${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
         clearSelection();
-        renderSystems();
+        
+        // CRITICAL: Reload all data to ensure UI is fully refreshed
+        await loadData(); // Reload notes from database
+        renderSystems(); // Re-render UI
       } catch (error) {
         console.error('Batch show error:', error);
         await customAlert('Failed to show notes: ' + error.message);
@@ -2325,7 +2329,10 @@
 
         await customAlert(`✓ ${successCount} note(s) hidden${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
         clearSelection();
-        renderSystems();
+        
+        // CRITICAL: Reload all data to ensure UI is fully refreshed
+        await loadData(); // Reload notes from database
+        renderSystems(); // Re-render UI
       } catch (error) {
         console.error('Batch hide error:', error);
         await customAlert('Failed to hide notes: ' + error.message);
@@ -2446,6 +2453,14 @@
       const confirmed = await customConfirm('Show Notes', `Show ${noteIds.length} note(s) to ${currentGroup} for ${classDate}?`);
       if (!confirmed) return;
 
+      // DEBUG: Log the exact date string being sent to database
+      console.log('📅 DATE PICKER DEBUG:', {
+        selectedDate: classDate,
+        dateType: typeof classDate,
+        dateLength: classDate?.length,
+        isoCheck: classDate
+      });
+
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const adminEmail = session?.user?.email;
@@ -2457,6 +2472,17 @@
           .in('id', noteIds);
 
         if (updateError) throw updateError;
+
+        // DEBUG: Verify what was actually stored
+        const { data: verifyData } = await supabase
+          .from('student_notes')
+          .select('id, class_date')
+          .in('id', noteIds);
+        
+        console.log('📅 DATABASE VERIFICATION:', {
+          sentDate: classDate,
+          storedDates: verifyData?.map(n => ({ id: n.id, class_date: n.class_date }))
+        });
 
         // Then create permissions
         const records = noteIds.map(noteId => ({
@@ -3152,6 +3178,20 @@
         console.log('   Access type:', freeAccessType);
         console.log('   Selected notes:', Array.from(selectedNoteIds));
         
+        // Ask for the class date first
+        const classDate = await customPromptWithDate(
+          'Set Class Date for Free Access',
+          'What date should these notes show as opened for free?',
+          new Date().toISOString().split('T')[0]
+        );
+        
+        if (!classDate) {
+          console.log('   User cancelled - no date selected');
+          return;
+        }
+        
+        console.log('   Selected class date:', classDate);
+        
         if (freeAccessType === 'group') {
           const groupLetter = document.getElementById('freeGroupSelect').value;
           console.log('   Selected group:', groupLetter);
@@ -3163,7 +3203,7 @@
 
           const confirmed = await customConfirm(
             'Grant FREE Access to Group', 
-            `Grant FREE access (payment bypass) for ${selectedNoteIds.size} note(s) to all students in Group ${groupLetter}?`
+            `Grant FREE access (payment bypass) for ${selectedNoteIds.size} note(s) to all students in Group ${groupLetter} with date ${classDate}?`
           );
           if (!confirmed) {
             console.log('   User cancelled');
@@ -3174,6 +3214,18 @@
           const { data: { session } } = await supabase.auth.getSession();
           const adminEmail = session?.user?.email;
           console.log('   Admin email:', adminEmail);
+          
+          // First update the class_date for all selected notes
+          const { error: updateError } = await supabase
+            .from('student_notes')
+            .update({ class_date: classDate })
+            .in('id', Array.from(selectedNoteIds));
+
+          if (updateError) {
+            console.error('   ❌ Error updating class_date:', updateError);
+            throw updateError;
+          }
+          console.log('   ✅ Updated class_date for all notes to:', classDate);
 
           // Update all selected notes to have free access for this group
           let successCount = 0;
@@ -3224,7 +3276,7 @@
 
           const confirmed = await customConfirm(
             'Grant FREE Access to Students', 
-            `Grant FREE access (payment bypass) for ${selectedNoteIds.size} note(s) to ${freeSelectedStudents.size} student(s)?`
+            `Grant FREE access (payment bypass) for ${selectedNoteIds.size} note(s) to ${freeSelectedStudents.size} student(s) with date ${classDate}?`
           );
           if (!confirmed) {
             console.log('   User cancelled');
@@ -3235,6 +3287,18 @@
           const { data: { session } } = await supabase.auth.getSession();
           const adminEmail = session?.user?.email;
           console.log('   Admin email:', adminEmail);
+          
+          // First update the class_date for all selected notes
+          const { error: updateError } = await supabase
+            .from('student_notes')
+            .update({ class_date: classDate })
+            .in('id', Array.from(selectedNoteIds));
+
+          if (updateError) {
+            console.error('   ❌ Error updating class_date:', updateError);
+            throw updateError;
+          }
+          console.log('   ✅ Updated class_date for all notes to:', classDate);
 
           // Update all selected notes to have free access for these students
           const records = [];
@@ -3289,8 +3353,12 @@
         if (!freeError && freeAccess) {
           freeAccessGrants = freeAccess;
           console.log('🔄 Reloaded free access grants:', freeAccessGrants.length);
-          renderSystems(); // Re-render to show the new FREE badges
         }
+        
+        // CRITICAL: Reload all data to ensure UI is fully refreshed
+        clearCache(); // Clear cache to force fresh data
+        await loadData(); // Reload notes from database
+        renderSystems(); // Re-render to show the new FREE badges
 
         closeFreeAccessModal();
         clearSelection();

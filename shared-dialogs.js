@@ -314,13 +314,24 @@ window.customPromptWithDate = (title, message, dateLabel = 'Select date:', defau
     messageEl.innerHTML = `${message}<br><br><label style="display: block; color: rgba(255,255,255,0.8); font-size: 14px; margin-bottom: 8px;">${dateLabel}</label>`;
     inputEl.style.display = 'block';
     inputEl.type = 'date';
-    inputEl.value = defaultDate || new Date().toISOString().split('T')[0];
+    // Get local date in YYYY-MM-DD format without timezone conversion
+    if (defaultDate) {
+      inputEl.value = defaultDate;
+    } else {
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      inputEl.value = `${year}-${month}-${day}`;
+    }
     cancelBtn.style.display = 'inline-block';
     okBtn.textContent = 'Post';
     okBtn.className = 'custom-alert-btn ok';
 
     const handleOk = () => {
       const value = inputEl.value;
+      // Ensure the date string stays in local timezone YYYY-MM-DD format
+      // The input type="date" already returns this format, but we verify it here
       overlay.classList.remove('active');
       document.body.classList.remove('dialog-open');
       okBtn.removeEventListener('click', handleOk);

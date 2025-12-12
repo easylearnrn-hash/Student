@@ -4751,14 +4751,31 @@
             ">Zelle</p>
           </div>
           
-          <p style="
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 13px;
-            line-height: 1.5;
+          <div style="
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1));
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 16px;
             margin: 0 0 20px 0;
+            text-align: left;
           ">
-            Once payment is confirmed, your notes will be automatically unlocked.
-          </p>
+            <p style="
+              color: rgba(255, 255, 255, 0.95);
+              font-size: 14px;
+              font-weight: 600;
+              margin: 0 0 10px 0;
+            ">⚠️ Important: Include Class Date</p>
+            <p style="
+              color: rgba(255, 255, 255, 0.8);
+              font-size: 13px;
+              line-height: 1.6;
+              margin: 0;
+            ">
+              In the Zelle <strong>memo/description field</strong>, you must include the <strong>exact class date</strong> you want to access.<br><br>
+              <span style="color: rgba(255, 255, 255, 0.95); font-weight: 600;">Example:</span> "Dec 13, 2025" or "12/13/2025"<br><br>
+              Without the date in your payment memo, the system cannot automatically unlock your notes.
+            </p>
+          </div>
           
           <button id="closePaymentInfoBtn" style="
             width: 100%;
@@ -7274,35 +7291,8 @@
           }
         }
         
-        // Check 3: Reverse cumulative - count payments and unlock newest notes first
-        // Get all notes with class_date that require payment, sorted by date (newest first)
-        const notesWithDates = (allNotesWithDates || [])
-          .filter(n => n.requires_payment && n.class_date)
-          .map(n => ({
-            ...n,
-            classDateStr: n.class_date.split('T')[0]
-          }))
-          .sort((a, b) => new Date(b.classDateStr) - new Date(a.classDateStr)); // Newest first
-        
-        // Count total payments
-        const paymentCount = paidDatesSet.size;
-        
-        // Find this note's position in the sorted list (0-indexed)
-        const noteIndex = notesWithDates.findIndex(n => n.id === note.id);
-        
-        if (noteIndex !== -1) {
-          // Unlock if this note is within the payment count (from newest)
-          if (noteIndex < paymentCount) {
-            console.log(`✅ Note "${note.title}" for ${noteClassDate} - unlocked by reverse cumulative (payment ${noteIndex + 1} of ${paymentCount}) - UNLOCKED`);
-            return true;
-          } else {
-            console.log(`🔒 Note "${note.title}" for ${noteClassDate} - locked (needs ${noteIndex + 1} payments, only ${paymentCount} made) - LOCKED`);
-            return false;
-          }
-        }
-        
-        // Fallback: If we couldn't determine position, lock it
-        console.log(`🔒 Note "${note.title}" for ${noteClassDate} - no exact match, no grace period, insufficient payments - LOCKED`);
+        // NO REVERSE CUMULATIVE - Students must pay for the specific class date
+        console.log(`🔒 Note "${note.title}" for ${noteClassDate} - no exact payment match, no grace period payment - LOCKED`);
         return false;
       }
       
@@ -8950,8 +8940,24 @@
         
         // Transform notes to match expected format
         const transformedNotes = notes.map(note => {
-          // Use updated_at for display date (when admin last modified/posted it), fallback to created_at
-          const displayDate = note.updated_at ? new Date(note.updated_at) : new Date(note.created_at);
+          // Use class_date if available (preferred), fallback to updated_at/created_at
+          // CRITICAL: Parse dates in LOCAL timezone to prevent UTC shift
+          let displayDate;
+          if (note.class_date) {
+            // Parse class_date in local timezone (YYYY-MM-DD format)
+            const dateParts = note.class_date.split('T')[0].split('-');
+            displayDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+          } else if (note.updated_at) {
+            // Parse updated_at in local timezone
+            const dateStr = note.updated_at.split('T')[0];
+            const dateParts = dateStr.split('-');
+            displayDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+          } else {
+            // Parse created_at in local timezone
+            const dateStr = note.created_at.split('T')[0];
+            const dateParts = dateStr.split('-');
+            displayDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+          }
           
           // Check if this specific note requires payment
           const noteRequiresPayment = note.requires_payment === true;
@@ -8966,7 +8972,7 @@
           const isPaid = !noteRequiresPayment || studentHasPaidForThisNote || hasFreeAccess;
           
           if (DEBUG_MODE && noteRequiresPayment && !isPaid && !hasFreeAccess) {
-            const classDate = note.class_date || (note.updated_at ? new Date(note.updated_at).toISOString().split('T')[0] : 'unknown');
+            const classDate = note.class_date ? note.class_date.split('T')[0] : 'unknown';
             debugLog(`🔒 Note "${note.title}" (${classDate}) is LOCKED - payment required`);
           }
           
