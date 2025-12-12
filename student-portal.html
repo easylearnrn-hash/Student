@@ -35,6 +35,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500;600;700&display=swap" rel="stylesheet">
   
+  <!-- Google Fonts - Great Vibes for Snow Effect -->
+  <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap" rel="stylesheet">
+  
   <style>
     /* ==========================================================================
        CSS VARIABLES - CHRISTMAS ICY THEME ❄️
@@ -133,7 +136,13 @@
     }
     
     /* ❄️ CHRISTMAS THEME - Icy Snowflake Background ❄️ */
-    body::before {
+    /* Hidden by default, shown when .christmas-theme class is on body */
+    body::before,
+    body::after {
+      display: none;
+    }
+    
+    body.christmas-theme::before {
       content: '❄ ❄ ❄ ❄ ❄ ❄ ❄ ❄ ❄ ❄';
       position: fixed;
       top: -50px;
@@ -146,9 +155,10 @@
       pointer-events: none;
       z-index: 0;
       opacity: 0.6;
+      display: block;
     }
     
-    body::after {
+    body.christmas-theme::after {
       content: '❄ ❄ ❄ ❄ ❄ ❄ ❄ ❄ ❄ ❄';
       position: fixed;
       bottom: -50px;
@@ -161,6 +171,7 @@
       pointer-events: none;
       z-index: 0;
       opacity: 0.6;
+      display: block;
     }
     
     /* Background overlay removed for performance */
@@ -316,7 +327,8 @@
     }
     
     /* ❄️ CHRISTMAS THEME - Dancing Script Font ❄️ */
-    #welcomeMessage {
+    /* Only applies when .christmas-theme class is on body */
+    body.christmas-theme #welcomeMessage {
       font-family: 'Dancing Script', cursive !important;
       font-weight: 600;
       color: var(--accent-primary);
@@ -324,7 +336,7 @@
       letter-spacing: 0.5px;
     }
     
-    .card-title {
+    body.christmas-theme .card-title {
       font-family: 'Dancing Script', cursive !important;
       font-weight: 600;
       color: var(--accent-primary);
@@ -3391,6 +3403,11 @@
       pointer-events: none;
       z-index: 1;
       opacity: 1;
+      display: none; /* Hidden by default */
+    }
+    
+    body.christmas-theme #christmas-tree-container {
+      display: block; /* Show when Christmas theme enabled */
     }
     
     #christmas-tree-canvas {
@@ -3413,7 +3430,43 @@
     
     @media (max-width: 1024px) {
       #christmas-tree-container {
-        display: none;
+        display: none !important; /* Always hide on mobile */
+      }
+    }
+    
+    /* ==========================================================================
+       SNOW EFFECT - Full Screen Overlay (GSAP-based falling snow)
+       ========================================================================== */
+    #fixed-bg {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 9999;
+      display: none; /* Hidden by default */
+    }
+    
+    body.christmas-theme #fixed-bg {
+      display: block; /* Show when Christmas theme enabled */
+    }
+    
+    #snowCanvas {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      aspect-ratio: 1;
+      width: 100%;
+      height: auto;
+    }
+    
+    @media (max-aspect-ratio: 1) {
+      #snowCanvas {
+        width: auto;
+        height: 100%;
       }
     }
   </style>
@@ -3422,6 +3475,11 @@
   <!-- Christmas Tree - Fixed Right Side -->
   <div id="christmas-tree-container">
     <canvas id="christmas-tree-canvas"></canvas>
+  </div>
+  
+  <!-- Snow Effect - Full Screen -->
+  <div id="fixed-bg">
+    <canvas id="snowCanvas"></canvas>
   </div>
   
   <!-- Background animations removed for performance -->
@@ -10414,6 +10472,96 @@
         y: ch * 1.2,
         ease: "power2.inOut"
       });
+    })();
+  </script>
+
+  <!-- ============================================================================
+       CHRISTMAS THEME INITIALIZATION & SNOW EFFECT
+       ============================================================================ -->
+  <script>
+    /* ============================================================
+       🎄 CHRISTMAS THEME INITIALIZATION
+       ============================================================
+       Check localStorage and apply .christmas-theme class to body
+       This controls visibility of: tree, snow, fonts, snowflakes
+       ============================================================ */
+    (function() {
+      const christmasEnabled = localStorage.getItem('arnoma:christmas-theme') === 'true';
+      
+      if (christmasEnabled) {
+        document.body.classList.add('christmas-theme');
+        console.log('🎄 Christmas Theme: ENABLED');
+      } else {
+        console.log('🎄 Christmas Theme: DISABLED');
+      }
+    })();
+
+    /* ============================================================
+       ❄️ GSAP FALLING SNOW EFFECT
+       ============================================================
+       Simple falling snow particles with GSAP animation
+       Only runs when Christmas theme is enabled
+       ============================================================ */
+    (function() {
+      const christmasEnabled = localStorage.getItem('arnoma:christmas-theme') === 'true';
+      if (!christmasEnabled) return;
+
+      const arr2 = []; // snow particles
+      const c2 = document.querySelector("#snowCanvas");
+      if (!c2) {
+        console.warn('❄️ Snow canvas not found');
+        return;
+      }
+
+      const ctx2 = c2.getContext("2d");
+      const cw = (c2.width = 4000);
+      const ch = (c2.height = 4000);
+      const T = Math.PI * 2;
+
+      // Create 999 snow particles
+      for (let i = 0; i < 999; i++) {
+        arr2.push({
+          x: cw * Math.random(),
+          y: -9,
+          i,
+          s: 3 + 5 * Math.random(),
+          a: 0.1 + 0.5 * Math.random(),
+        });
+
+        arr2[i].t = gsap
+          .to(arr2[i], { ease: "none", y: ch, repeat: -1 })
+          .seek(Math.random() * 99)
+          .timeScale(arr2[i].s / 700);
+      }
+
+      ctx2.fillStyle = "#fff";
+      gsap.ticker.add(render);
+
+      function render() {
+        ctx2.clearRect(0, 0, cw, ch);
+        arr2.forEach(drawSnow);
+      }
+
+      function drawSnow(p) {
+        const ys = gsap.utils.interpolate(1.3, 0.1, p.y / ch);
+
+        ctx2.save();
+        ctx2.translate(p.x, p.y);
+        ctx2.rotate(50 * p.t.progress());
+        ctx2.beginPath();
+        ctx2.arc(
+          gsap.utils.interpolate(-55, 55, p.i / 999),
+          gsap.utils.interpolate(-25, 25, p.i / 999),
+          p.s * ys,
+          0,
+          T
+        );
+        ctx2.globalAlpha = p.a * ys;
+        ctx2.fill();
+        ctx2.restore();
+      }
+
+      console.log('❄️ Snow Effect: Started (999 particles)');
     })();
   </script>
 </body>
