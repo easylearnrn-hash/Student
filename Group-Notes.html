@@ -542,7 +542,7 @@
           type="text" 
           id="studentSearchInput" 
           placeholder="🔍 Search students by name..." 
-          oninput="filterStudentList()"
+          oninput="debouncedFilterStudentList()"
           style="width: 100%; padding: 12px 16px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 10px; color: white; font-size: 14px; box-sizing: border-box;"
         />
       </div>
@@ -621,7 +621,7 @@
             type="text" 
             id="freeStudentSearch" 
             placeholder="🔍 Search students..." 
-            oninput="filterFreeStudentList()"
+            oninput="debouncedFilterFreeStudentList()"
             style="width: 100%; padding: 12px 16px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 10px; color: white; font-size: 14px; box-sizing: border-box;"
           />
         </div>
@@ -676,7 +676,7 @@
           type="text" 
           id="filteredNotesSearch" 
           placeholder="🔍 Search notes by title..."
-          oninput="filterAndRenderNotes()"
+          oninput="debouncedFilterAndRenderNotes()"
           style="width: 100%; padding: 12px 40px 12px 16px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 10px; color: white; font-size: 14px; box-sizing: border-box;"
         />
         <button 
@@ -735,6 +735,168 @@
     
     // Debug mode
     const DEBUG_MODE = false;
+
+    // ===== EMAIL NOTIFICATION FOR POSTED NOTES =====
+    async function sendNotePostedEmail(groupName, noteTitle, noteCategory) {
+      try {
+        console.log(`📧 Sending email notification for posted note to Group ${groupName}`);
+        
+        // Get all students in this specific group
+        const { data: students, error: studentsError } = await supabase
+          .from('students')
+          .select('email, name, group_name')
+          .eq('group_name', groupName)
+          .eq('show_in_grid', true)
+          .not('email', 'is', null);
+
+        if (studentsError) {
+          console.error('❌ Error fetching students:', studentsError);
+          throw studentsError;
+        }
+        
+        if (!students || students.length === 0) {
+          console.warn(`⚠️ No students found in Group ${groupName} with email addresses`);
+          return;
+        }
+
+        console.log(`✅ Found ${students.length} students in Group ${groupName}:`, students.map(s => s.name));
+
+        // Send email to each student in the group
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const student of students) {
+          if (!student.email) continue;
+
+          console.log(`📤 Sending email to ${student.name} (${student.email})...`);
+
+          const emailBody = {
+            email_type: 'new_note_notification',
+            to_email: student.email,
+            to_name: student.name || 'Student',
+            subject: 'New Class Note Posted — Keep Going! 🌟',
+            html_content: `
+              <!DOCTYPE html>
+              <html lang="en">
+              <head>
+                <meta charset="UTF-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+                <title>New Class Note Posted</title>
+                <style>
+                  body {
+                    margin: 0;
+                    padding: 20px;
+                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+                    background: #f3f4f6;
+                  }
+                  .email-container {
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 12px;
+                    overflow: hidden;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+                  }
+                  .email-header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 32px 40px;
+                    text-align: center;
+                  }
+                  .email-header h1 {
+                    margin: 0;
+                    font-size: 24px;
+                    font-weight: 700;
+                  }
+                  .email-body {
+                    padding: 32px 40px;
+                    color: #1f2937;
+                    line-height: 1.6;
+                  }
+                  .info-box {
+                    background: #f9fafb;
+                    border-left: 4px solid #667eea;
+                    padding: 16px 20px;
+                    margin: 20px 0;
+                    border-radius: 8px;
+                  }
+                  .info-box p {
+                    margin: 4px 0;
+                  }
+                  .email-footer {
+                    background: #f9fafb;
+                    padding: 24px 40px;
+                    text-align: center;
+                    color: #6b7280;
+                    font-size: 13px;
+                    border-top: 1px solid #e5e7eb;
+                  }
+                  strong {
+                    color: #1f2937;
+                    font-weight: 600;
+                  }
+                </style>
+              </head>
+              <body>
+                <div class="email-container">
+                  <div class="email-header">
+                    <h1>New Class Note Posted — Keep Going! 🌟</h1>
+                  </div>
+
+                  <div class="email-body">
+                    <p>Dear <strong>${student.name || 'Nurse'}</strong>,</p>
+
+                    <p><strong>Yohoo! One down 🎉</strong></p>
+
+                    <p>Another class note has just been posted by your instructor.</p>
+
+                    <div class="info-box">
+                      <p><strong>📚 Note:</strong> ${noteTitle}</p>
+                      <p><strong>📂 Category:</strong> ${noteCategory}</p>
+                      <p><strong>👥 Group:</strong> ${groupName}</p>
+                    </div>
+
+                    <p>Head over to your student portal to access the note and keep learning!</p>
+
+                    <p style="margin-top: 24px;">You're making progress every day. Keep it up!</p>
+                  </div>
+
+                  <div class="email-footer">
+                    <p>© 2025 ARNOMA NCLEX-RN. All rights reserved.</p>
+                    <p>This is an automated message. Please do not reply to this email.</p>
+                  </div>
+                </div>
+              </body>
+              </html>
+            `
+          };
+
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify(emailBody)
+          });
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ Failed to send email to ${student.email}:`, response.status, errorText);
+            failCount++;
+          } else {
+            console.log(`✅ Email sent successfully to ${student.name}`);
+            successCount++;
+          }
+        }
+
+        console.log(`📊 Email summary: ${successCount} sent, ${failCount} failed`);
+        return { successCount, failCount, total: students.length };
+      } catch (error) {
+        console.error('❌ Email notification error:', error);
+        throw error;
+      }
+    }
 
         const SYSTEMS = [
       { name: 'Medical Terminology', icon: '📖' },
@@ -829,11 +991,16 @@
       };
     }
 
+    // Create debounced versions of filter functions (300ms delay)
+    const debouncedFilterStudentList = debounce(filterStudentList, 300);
+    const debouncedFilterFreeStudentList = debounce(filterFreeStudentList, 300);
+    const debouncedFilterAndRenderNotes = debounce(filterAndRenderNotes, 300);
+
     // ===== LOAD ACTIVE GROUPS FROM STUDENT MANAGER =====
     let activeGroups = ['Group A', 'Group B', 'Group C', 'Group D', 'Group E', 'Group F']; // Default all groups
     async function loadActiveGroups() {
       try {
-        console.log('🔄 Loading active groups from Student Manager...');
+        // PERFORMANCE: Removed console.log
         
         // Query students table for show_in_grid flag to determine active groups
         const { data: students, error } = await supabase
@@ -846,7 +1013,7 @@
           return; // Keep all groups if error
         }
         
-        console.log('📊 Students with show_in_grid=true:', students);
+        // PERFORMANCE: Removed console.log
         
         // Extract unique groups that are active
         const uniqueGroups = new Set();
@@ -863,24 +1030,21 @@
         
         activeGroups = Array.from(uniqueGroups).sort();
         
-        console.log('✅ Active groups determined:', activeGroups);
+        // PERFORMANCE: Removed console.log
         
         // Update group tabs visibility
         document.querySelectorAll('.group-tab').forEach(tab => {
           const groupName = tab.dataset.group;
           if (activeGroups.includes(groupName)) {
             tab.style.display = 'inline-block';
-            console.log(`  ✓ Showing tab: ${groupName}`);
           } else {
             tab.style.display = 'none';
-            console.log(`  ✗ Hiding tab: ${groupName}`);
           }
         });
         
         // Set first active group as current if current group is hidden
         if (!activeGroups.includes(currentGroup) && activeGroups.length > 0) {
           currentGroup = activeGroups[0];
-          console.log(`⚠️  Current group was hidden, switched to: ${currentGroup}`);
           document.querySelectorAll('.group-tab').forEach(tab => {
             tab.classList.toggle('active', tab.dataset.group === currentGroup);
           });
@@ -1039,22 +1203,18 @@
     
     // Toggle ongoing status for a system in Group Notes
     async function toggleSystemOngoing(systemName, isChecked) {
-      console.log(`🟡 toggleSystemOngoing called: "${systemName}", checked=${isChecked}`);
-      
       const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
       const ongoingSystemsMap = JSON.parse(localStorage.getItem('arnoma-ongoing-systems') || '{}');
       
       if (isChecked) {
-        console.log(`✅ Setting "${systemName}" as ONGOING for Group ${groupLetter}`);
+        // PERFORMANCE: Removed console.log
         
         // Set this system as ongoing for this group
         ongoingSystemsMap[groupLetter] = systemName;
         
         // UPDATE DATABASE: Set is_current = TRUE for this folder, FALSE for all others IN THIS GROUP
-        console.log(`💾 Starting database update for "${systemName}" (Group ${groupLetter})...`);
         try {
           // First, unset all folders' is_current for THIS GROUP ONLY
-          console.log(`  ⏳ Unsetting all other folders for Group ${groupLetter}...`);
           const { error: error1 } = await supabase
             .from('note_folders')
             .update({ is_current: false })
@@ -1066,7 +1226,7 @@
             throw error1;
           }
           
-          console.log(`  ✅ Unset complete. Now setting "${systemName}" as current for Group ${groupLetter}...`);
+          // PERFORMANCE: Removed console.log
           
           // Check if group-specific folder exists
           const { data: existingFolder } = await supabase
@@ -1124,10 +1284,10 @@
               throw error2;
             }
             
-            console.log(`✅ Created new group-specific folder for Group ${groupLetter}`);
+            // PERFORMANCE: Removed console.log
           }
           
-          console.log(`✅ Database updated: "${systemName}" set as ongoing (is_current = TRUE)`);
+          // PERFORMANCE: Removed console.log
         } catch (error) {
           console.error('❌ Failed to update database:', error);
           showToast('⚠️ Failed to save to database', 'error');
@@ -1172,7 +1332,7 @@
             throw error;
           }
           
-          console.log(`✅ Database updated: "${systemName}" ongoing cleared (is_current = FALSE)`);
+          // PERFORMANCE: Removed console.log
         } catch (error) {
           console.error('❌ Failed to update database:', error);
           showToast('⚠️ Failed to save to database', 'error');
@@ -1214,7 +1374,7 @@
         
         const ongoingSystemName = folders && folders.length > 0 ? folders[0].folder_name : null;
         
-        console.log(`🟡 Ongoing system from database for Group ${groupLetter}: "${ongoingSystemName || 'None'}"`);
+        // PERFORMANCE: Removed console.log
         
         // Update all checkboxes and apply tint to ongoing system
         document.querySelectorAll('.system-ongoing-checkbox').forEach(checkbox => {
@@ -1643,7 +1803,7 @@
     // ===== VIEW NOTE =====
     async function viewNote(noteId) {
       try {
-        console.log('Attempting to view note id:', noteId);
+        // PERFORMANCE: Removed console.log
 
         const { data: note, error: noteError } = await supabase
           .from('student_notes')
@@ -1661,7 +1821,7 @@
           throw new Error('Missing file path for note');
         }
 
-        console.log('Attempting to view file at path:', filePath);
+        // PERFORMANCE: Removed console.log
 
         const { data, error } = await supabase.storage
           .from(BUCKET_NAME)
@@ -1672,7 +1832,7 @@
           throw error;
         }
         
-        console.log('Signed URL created:', data.signedUrl);
+        // PERFORMANCE: Removed console.log
         window.open(data.signedUrl, '_blank');
       } catch (error) {
         console.error('Full error:', error);
@@ -1999,38 +2159,41 @@
     }
 
     function updateSelectedCount() {
+      // PERFORMANCE: Cache DOM queries
       const checkboxes = document.querySelectorAll('.note-checkbox:checked');
-      selectedNoteIds = new Set(Array.from(checkboxes).map(cb => parseInt(cb.dataset.noteId)));
+      const count = checkboxes.length;
       
-      // CRITICAL FIX: Sync global persistent Set with current checkbox states
-      globalCheckedNoteIds.clear();
-      checkboxes.forEach(checkbox => {
-        const noteId = checkbox.getAttribute('data-note-id');
-        if (noteId) globalCheckedNoteIds.add(noteId);
-      });
-      
-      const count = selectedNoteIds.size;
+      // Quick update of core UI (batch bar)
       const batchBar = document.getElementById('batchActionBar');
       const countSpan = document.getElementById('selectedCount');
-      const selectAllCheckbox = document.getElementById('selectAllCheckbox');
       
       if (count > 0) {
         batchBar.style.display = 'flex';
         countSpan.textContent = `${count} selected`;
       } else {
         batchBar.style.display = 'none';
-        selectAllCheckbox.checked = false;
+        document.getElementById('selectAllCheckbox').checked = false;
       }
       
-      // Update FREE button based on whether selected notes have free access
-      updateFreeButton();
-      
-      // Update system-level select-all checkboxes
-      updateSystemSelectAllStates();
-      updateGlobalSelectAllState();
-      
-      // Update quick action buttons for each system
-      updateSystemQuickActions();
+      // PERFORMANCE: Defer heavy updates using requestAnimationFrame
+      // This makes selection feel instant while batching expensive operations
+      requestAnimationFrame(() => {
+        // Build sets from checkboxes (happens in next frame)
+        selectedNoteIds = new Set(Array.from(checkboxes).map(cb => parseInt(cb.dataset.noteId)));
+        
+        // Sync global persistent Set
+        globalCheckedNoteIds.clear();
+        checkboxes.forEach(checkbox => {
+          const noteId = checkbox.getAttribute('data-note-id');
+          if (noteId) globalCheckedNoteIds.add(noteId);
+        });
+        
+        // Update FREE button, select-all states, and quick actions
+        updateFreeButton();
+        updateSystemSelectAllStates();
+        updateGlobalSelectAllState();
+        updateSystemQuickActions();
+      });
     }
 
     function updateSystemQuickActions() {
@@ -2453,13 +2616,7 @@
       const confirmed = await customConfirm('Show Notes', `Show ${noteIds.length} note(s) to ${currentGroup} for ${classDate}?`);
       if (!confirmed) return;
 
-      // DEBUG: Log the exact date string being sent to database
-      console.log('📅 DATE PICKER DEBUG:', {
-        selectedDate: classDate,
-        dateType: typeof classDate,
-        dateLength: classDate?.length,
-        isoCheck: classDate
-      });
+      // PERFORMANCE: Removed date picker debug logs
 
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -2473,16 +2630,7 @@
 
         if (updateError) throw updateError;
 
-        // DEBUG: Verify what was actually stored
-        const { data: verifyData } = await supabase
-          .from('student_notes')
-          .select('id, class_date')
-          .in('id', noteIds);
-        
-        console.log('📅 DATABASE VERIFICATION:', {
-          sentDate: classDate,
-          storedDates: verifyData?.map(n => ({ id: n.id, class_date: n.class_date }))
-        });
+        // PERFORMANCE: Removed database verification logs
 
         // Then create permissions
         const records = noteIds.map(noteId => ({
@@ -2723,7 +2871,16 @@
 
         if (error) throw error;
 
-        await customAlert('Success', `Posted ${noteIds.length} note(s) to ${currentGroup}`);
+        // Send email notifications to students in the group
+        console.log('📧 Starting email notification process...');
+        try {
+          const emailResult = await sendNotePostedEmail(currentGroup, `${noteIds.length} new note(s)`, systemName);
+          console.log('✅ Email notifications sent successfully!', emailResult);
+          await customAlert('Success', `Posted ${noteIds.length} note(s) to ${currentGroup}\n📧 Email sent to ${emailResult.successCount} student(s)`);
+        } catch (emailError) {
+          console.error('❌ Email notification failed:', emailError);
+          await customAlert('Success', `Posted ${noteIds.length} note(s) to ${currentGroup}\n⚠️ Note: Email notifications failed to send`);
+        }
         
         // Clear selection and refresh
         selectedCheckboxes.forEach(cb => cb.checked = false);
@@ -3054,7 +3211,7 @@
       const groupSelect = document.getElementById('freeGroupSelect');
       if (groupSelect && groupLetter) {
         groupSelect.value = groupLetter;
-        console.log(`✅ Auto-selected ${currentGroup} (${groupLetter}) for FREE access`);
+        // PERFORMANCE: Removed console.log
       }
       
       // Load students for individual mode
@@ -3174,10 +3331,6 @@
 
     async function grantFreeAccess() {
       try {
-        console.log('✨ Grant FREE Access called');
-        console.log('   Access type:', freeAccessType);
-        console.log('   Selected notes:', Array.from(selectedNoteIds));
-        
         // Ask for the class date first
         const classDate = await customPromptWithDate(
           'Set Class Date for Free Access',
@@ -3186,15 +3339,11 @@
         );
         
         if (!classDate) {
-          console.log('   User cancelled - no date selected');
           return;
         }
         
-        console.log('   Selected class date:', classDate);
-        
         if (freeAccessType === 'group') {
           const groupLetter = document.getElementById('freeGroupSelect').value;
-          console.log('   Selected group:', groupLetter);
           
           if (!groupLetter) {
             await customAlert('No Group Selected', 'Please select a group');
@@ -3206,14 +3355,12 @@
             `Grant FREE access (payment bypass) for ${selectedNoteIds.size} note(s) to all students in Group ${groupLetter} with date ${classDate}?`
           );
           if (!confirmed) {
-            console.log('   User cancelled');
             return;
           }
 
           // Get admin email for created_by
           const { data: { session } } = await supabase.auth.getSession();
           const adminEmail = session?.user?.email;
-          console.log('   Admin email:', adminEmail);
           
           // First update the class_date for all selected notes
           const { error: updateError } = await supabase
@@ -3225,14 +3372,12 @@
             console.error('   ❌ Error updating class_date:', updateError);
             throw updateError;
           }
-          console.log('   ✅ Updated class_date for all notes to:', classDate);
 
           // Update all selected notes to have free access for this group
           let successCount = 0;
           let duplicateCount = 0;
           
           for (const noteId of selectedNoteIds) {
-            console.log(`   Granting access for note ${noteId} to Group ${groupLetter}`);
             const { data, error } = await supabase
               .from('note_free_access')
               .insert({
@@ -3247,28 +3392,21 @@
               // Ignore duplicate errors (PostgreSQL error code 23505 or HTTP 409)
               if (error.code === '23505' || error.message?.includes('duplicate') || error.status === 409) {
                 duplicateCount++;
-                console.log(`   ℹ️ Note ${noteId} already has access (skipping duplicate)`);
                 continue;
               }
               console.error(`   ❌ Error for note ${noteId}:`, error);
               throw error;
             }
             successCount++;
-            console.log(`   ✅ Note ${noteId} access granted`);
           }
 
           const message = duplicateCount > 0 
             ? `✅ FREE access granted to Group ${groupLetter}!\n${successCount} new grants, ${duplicateCount} already existed`
             : `✅ FREE access granted to Group ${groupLetter} for ${selectedNoteIds.size} note(s)`;
-          
-          console.log('   ✅ Success:', message);
           await customAlert('Success', message);
           
         } else {
           // Individual students
-          console.log('   Individual students mode');
-          console.log('   Selected students:', Array.from(freeSelectedStudents));
-          
           if (freeSelectedStudents.size === 0) {
             await customAlert('No Students Selected', 'Please select at least one student');
             return;
@@ -3279,14 +3417,12 @@
             `Grant FREE access (payment bypass) for ${selectedNoteIds.size} note(s) to ${freeSelectedStudents.size} student(s) with date ${classDate}?`
           );
           if (!confirmed) {
-            console.log('   User cancelled');
             return;
           }
 
           // Get admin email for created_by
           const { data: { session } } = await supabase.auth.getSession();
           const adminEmail = session?.user?.email;
-          console.log('   Admin email:', adminEmail);
           
           // First update the class_date for all selected notes
           const { error: updateError } = await supabase
@@ -3298,7 +3434,6 @@
             console.error('   ❌ Error updating class_date:', updateError);
             throw updateError;
           }
-          console.log('   ✅ Updated class_date for all notes to:', classDate);
 
           // Update all selected notes to have free access for these students
           const records = [];
@@ -3312,8 +3447,6 @@
               });
             }
           }
-
-          console.log(`   Inserting ${records.length} free access records...`);
 
           let successCount = 0;
           let duplicateCount = 0;
@@ -3341,7 +3474,6 @@
             ? `✅ FREE access granted to ${freeSelectedStudents.size} student(s)!\n${successCount} new grants, ${duplicateCount} already existed`
             : `✅ FREE access granted to ${freeSelectedStudents.size} student(s) for ${selectedNoteIds.size} note(s)`;
 
-          console.log('   ✅ Success:', message);
           await customAlert('Success', message);
         }
 
@@ -3352,7 +3484,6 @@
 
         if (!freeError && freeAccess) {
           freeAccessGrants = freeAccess;
-          console.log('🔄 Reloaded free access grants:', freeAccessGrants.length);
         }
         
         // CRITICAL: Reload all data to ensure UI is fully refreshed
