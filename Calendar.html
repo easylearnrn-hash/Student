@@ -4861,23 +4861,7 @@
           const cacheKeys = getStudentPaymentCacheKeys(student);
           const existingKey = cacheKeys.find(key => studentPaymentMatchCache.has(key));
           if (existingKey) {
-            const cached = studentPaymentMatchCache.get(existingKey);
-            
-            // DEBUG: Show December payments for Stella
-            if (isDebugStudent) {
-              const decemberPayments = cached.filter(p => 
-                p.dateStr && p.dateStr >= '2025-12-01' && p.dateStr < '2026-01-01'
-              );
-              console.log('   📅 DECEMBER 2025 PAYMENTS for', student.name, ':');
-              decemberPayments.forEach(p => {
-                console.log('      ', p.dateStr, '- $' + p.amount, '(source:', p.source + ')');
-              });
-              console.log('   💰 Total December amount:', 
-                decemberPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
-              );
-            }
-            
-            return cached;
+            return studentPaymentMatchCache.get(existingKey);
           }
 
           const matchNames = new Set();
@@ -4892,6 +4876,10 @@
           }
 
           const idKey = student?.id != null ? String(student.id) : null;
+          
+          if (isDebugStudent) {
+            console.log('   🔑 Student ID key:', idKey, '(type:', typeof idKey, ')');
+          }
           
           // 1. Collect regular payments from payments table
           const matchedPayments = (window.paymentsCache || [])
@@ -4957,21 +4945,8 @@
 
           if (isDebugStudent || DEBUG_MODE) {
             console.log(`   ✅ Matched ${matchedPayments.length} total payments for ${student.name}`);
-            
-            // Show December payments specifically
-            const decemberPayments = matchedPayments.filter(p => 
-              p.dateStr && p.dateStr >= '2025-12-01' && p.dateStr < '2026-01-01'
-            );
-            console.log('   📅 DECEMBER 2025 PAYMENTS:');
-            decemberPayments.forEach(p => {
-              console.log('      ', p.dateStr, '- $' + p.amount, '(source:', p.source + ')');
-            });
-            console.log('   💰 Total December amount:', 
-              decemberPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
-            );
-            
             if (matchedPayments.length > 0) {
-              console.log('   All payment dates:', matchedPayments.map(p => `${p.dateStr} $${p.amount} (${p.source})`));
+              console.log('   Payment dates:', matchedPayments.map(p => `${p.dateStr} $${p.amount} (${p.source})`));
             } else {
               console.log('   ❌ NO PAYMENTS MATCHED - checking first 5 payments in cache:');
               (window.paymentsCache || []).slice(0, 5).forEach(p => {
@@ -4993,6 +4968,13 @@
         function doesPaymentBelongToStudent(payment, idKey, matchNames) {
           if (!payment || payment.ignored) return false;
 
+          // DEBUG for specific students
+          const debugStudents = ['stella ghazaryan', 'anahit aslanian', 'sona husikyan'];
+          const isDebugPayment = debugStudents.some(name => 
+            (payment.payer_name || '').toLowerCase().includes(name) ||
+            (payment.resolved_student_name || '').toLowerCase().includes(name)
+          );
+
           if (idKey) {
             const candidateIds = [
               payment.student_id,
@@ -5003,6 +4985,13 @@
             ]
               .map(value => (value != null ? String(value) : null))
               .filter(Boolean);
+            
+            if (isDebugPayment) {
+              console.log('      🔍 Checking payment:', payment.payer_name, payment.amount);
+              console.log('         idKey:', idKey, 'candidateIds:', candidateIds);
+              console.log('         Match?', candidateIds.includes(idKey));
+            }
+            
             if (candidateIds.includes(idKey)) {
               return true;
             }
