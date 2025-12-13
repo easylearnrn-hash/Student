@@ -1618,7 +1618,7 @@
       <div class="card">
         <div class="card-title">Manage Students</div>
         <div class="search-bar">
-          <input type="text" class="search-input" placeholder="Search students..." id="studentSearch" onkeyup="filterStudents()">
+          <input type="text" class="search-input" placeholder="Search students..." id="studentSearch" onkeyup="debouncedFilterStudents()">
           <select class="group-filter" id="groupFilterSelect" onchange="filterStudents()" title="Filter by group">
             <option value="">All Groups</option>
           </select>
@@ -1657,7 +1657,7 @@
       <div class="card">
         <div class="card-title">Manage PDF Notes (Legacy)</div>
         <div class="search-bar">
-          <input type="text" class="search-input" placeholder="Search notes..." id="notesSearch" onkeyup="filterNotes()">
+          <input type="text" class="search-input" placeholder="Search notes..." id="notesSearch" onkeyup="debouncedFilterNotes()">
           <button class="add-btn" onclick="window.open('Notes-Manager.html', '_blank')">+ Upload New Note</button>
           <button class="add-btn" onclick="window.open('PDF-Media-Manager.html', '_blank')" style="background: linear-gradient(135deg, #c084fc, #f9a8d4); margin-left: 8px;">📸 Manage Media</button>
           <button class="add-btn" onclick="window.open('Group-Notes.html', '_blank')" style="background: linear-gradient(135deg, #22c55e, #16a34a); margin-left: 8px;">FREE Access</button>
@@ -1759,7 +1759,7 @@
       <div class="card">
         <div class="card-title">Manage Payments</div>
         <div class="search-bar">
-          <input type="text" class="search-input" placeholder="Search payments..." id="paymentsSearch" onkeyup="filterPayments()">
+          <input type="text" class="search-input" placeholder="Search payments..." id="paymentsSearch" onkeyup="debouncedFilterPayments()">
           <button class="add-btn" onclick="window.open('Payment-Records.html', '_blank')">+ Add Payment</button>
         </div>
         <div class="table-container">
@@ -1789,7 +1789,7 @@
       <div class="card">
         <div class="card-title">Forum Messages</div>
         <div class="search-bar">
-          <input type="text" class="search-input" placeholder="Search messages..." id="forumSearch" onkeyup="filterForum()">
+          <input type="text" class="search-input" placeholder="Search messages..." id="forumSearch" onkeyup="debouncedFilterForum()">
         </div>
         <div class="table-container">
           <table id="forumTable">
@@ -1974,7 +1974,6 @@
       if (!cache) return null;
       const now = Date.now();
       if (cache.data && (now - cache.timestamp) < cache.ttl) {
-        console.log(`✅ Cache hit: ${key} (age: ${Math.round((now - cache.timestamp) / 1000)}s)`);
         return cache.data;
       }
       return null;
@@ -1984,7 +1983,6 @@
       if (DATA_CACHE[key]) {
         DATA_CACHE[key].data = data;
         DATA_CACHE[key].timestamp = Date.now();
-        console.log(`💾 Cached: ${key}`);
       }
     }
 
@@ -2061,8 +2059,6 @@
         if (status) {
           status.style.display = isEnabled ? 'block' : 'none';
         }
-        
-        console.log('🎄 Loaded Christmas theme setting from database:', isEnabled);
       } catch (err) {
         console.error('Failed to load settings:', err);
       }
@@ -2073,9 +2069,6 @@
       const checkbox = document.getElementById('christmasThemeToggle');
       const status = document.getElementById('themeStatus');
       const isEnabled = checkbox.checked;
-      
-      console.log('🎄 Checkbox state:', isEnabled);
-      console.log('🎄 Saving to Supabase...');
       
       try {
         // Update setting in Supabase
@@ -2093,8 +2086,6 @@
           checkbox.checked = !isEnabled; // Revert checkbox
           return;
         }
-        
-        console.log('🎄 Christmas Theme saved to database:', isEnabled ? 'ENABLED ✅' : 'DISABLED ❌');
         
         if (status) {
           status.style.display = isEnabled ? 'block' : 'none';
@@ -2133,33 +2124,33 @@
       document.body.style.overflow = ''; // Restore scrolling
     }
     
-    // Close modal on Escape key
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
+    // Initialize Group Notes modal event listeners after DOM loads
+    document.addEventListener('DOMContentLoaded', function() {
+      // Close modal on Escape key
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+          const modal = document.getElementById('groupNotesModal');
+          if (modal && modal.style.display === 'flex') {
+            closeGroupNotesModal();
+          }
+        }
+      });
+      
+      // Close modal when clicking backdrop
+      document.addEventListener('click', function(e) {
         const modal = document.getElementById('groupNotesModal');
-        if (modal && modal.style.display === 'flex') {
+        if (e.target === modal) {
           closeGroupNotesModal();
         }
-      }
-    });
-    
-    // Close modal when clicking backdrop
-    document.addEventListener('click', function(e) {
-      const modal = document.getElementById('groupNotesModal');
-      if (e.target === modal) {
-        closeGroupNotesModal();
-      }
+      });
     });
     
     // Load Stats
     async function loadStats() {
       try {
-        console.log('📊 [loadStats] Starting stats load...');
-        
         // Check cache first
         const cached = getCachedData('stats');
         if (cached) {
-          console.log('✅ Using cached stats');
           updateStatsUI(cached);
           return;
         }
@@ -2167,13 +2158,10 @@
         // TEMPORARILY SKIP AUTH CHECK - remove this later
         // await ensureAdminSession();
         
-        console.log('🔄 Fetching fresh stats...');
-        
         // Total Students
         const { count: studentCount, error: studentError } = await supabase
           .from('students')
           .select('*', { count: 'exact', head: true });
-        console.log('👥 [loadStats] Students count:', studentCount, 'Error:', studentError);
         
         // Total Notes - ONLY count non-deleted notes
         let notesCount = 0;
@@ -2182,7 +2170,6 @@
             .from('student_notes')
             .select('*', { count: 'exact', head: true })
             .eq('deleted', false);
-          console.log('📝 [loadStats] Notes count (deleted=false):', count, 'Error:', notesError);
           notesCount = count || 0;
         } catch (err) {
           console.warn('❌ [loadStats] Could not load notes count (RLS?):', err);
@@ -2199,7 +2186,6 @@
             .from('payments')
             .select('*', { count: 'exact', head: true })
         ]);
-        console.log('💰 [loadStats] Payment counts - Manual (paid only):', manualCount.count, 'Zelle:', zelleCount.count);
         const totalPayments = (manualCount.count || 0) + (zelleCount.count || 0);
         
         // Forum Messages (may fail if RLS restricts access)
@@ -2333,29 +2319,22 @@
     
     // Load Students
     async function loadStudents() {
-      console.log('🔄 Loading students...');
       try {
         // Check cache first
         const cached = getCachedData('students');
         if (cached) {
-          console.log('✅ Using cached students data');
           renderStudentsTable(cached);
           return;
         }
         
         // TEMPORARILY SKIP AUTH CHECK - remove this later
-        console.log('⚠️ Skipping auth check temporarily...');
         // await ensureAdminSession();
         
-        console.log('📊 Fetching students and groups...');
         // Fetch students and groups (limit to prevent overload)
         const [studentsResult, groupsResult] = await Promise.all([
           supabase.from('students').select('*').order('name').limit(500),
           supabase.from('groups').select('*')
         ]);
-        
-        console.log('Students result:', studentsResult);
-        console.log('Groups result:', groupsResult);
         
         if (studentsResult.error) {
           console.error('❌ Students query error:', studentsResult.error);
@@ -2364,8 +2343,6 @@
         
         const students = studentsResult.data || [];
         const groups = groupsResult.data || [];
-        
-        console.log(`✅ Loaded ${students.length} students and ${groups.length} groups`);
         
         // Try to fetch active sessions (may fail if table doesn't exist yet)
         let activeSessions = [];
@@ -2383,7 +2360,6 @@
           
           if (!sessionsResult.error) {
             const allSessions = sessionsResult.data || [];
-            console.log('✅ Raw active sessions from student_sessions:', allSessions);
             
             // CRITICAL FIX: Only consider sessions with activity in last 10 minutes as "online"
             // This prevents stale sessions from showing students as online when they're not
@@ -2391,9 +2367,6 @@
             activeSessions = allSessions.filter(session => {
               return session.last_activity && session.last_activity > tenMinutesAgo;
             });
-            console.log(`✅ Filtered to ${activeSessions.length} truly active sessions (activity < 10 min ago)`);
-          } else {
-            console.log('⚠️ Student sessions query error:', sessionsResult.error);
           }
           
           // Also get all students who have ever logged in (with limit)
@@ -2409,7 +2382,7 @@
             });
           }
         } catch (sessionError) {
-          console.log('⚠️ Student sessions table not available yet (table may not exist):', sessionError);
+          // Student sessions table not available yet
         }
         
         // Create online status map
@@ -2521,7 +2494,6 @@
       
       // Apply active filter if it's enabled by default
       if (showActiveOnly) {
-        console.log('✅ Applying default active filter on page load');
         filterStudents();
       }
     }
@@ -2815,13 +2787,6 @@
       try {
         await ensureAdminSession();
         
-        // CRITICAL DEBUG: Log the student ID being queried
-        console.log('🔍 Querying sessions for student:', {
-          studentId,
-          studentIdType: typeof studentId,
-          studentName
-        });
-        
         // FIX: Query student_sessions table (not session_logs)
         // CRITICAL: Ensure studentId is a number for proper filtering
         const numericStudentId = parseInt(studentId);
@@ -2842,8 +2807,6 @@
           console.error('Session query error:', error);
           throw error;
         }
-        
-        console.log(`✅ Found ${sessions?.length || 0} sessions for student ${numericStudentId}:`, sessions);
         
         // Calculate statistics (FIX: student_sessions doesn't have duration_seconds, page_views, or notes_viewed)
         // We need to calculate duration from session_start and session_end
@@ -3041,8 +3004,6 @@
 
     async function impersonateStudent(studentId, studentName) {
       try {
-        console.log('🚪 Starting impersonation request', { studentId, studentName, studentIdType: typeof studentId });
-        
         // Ensure studentId is a number (not string)
         const numericStudentId = parseInt(studentId);
         if (isNaN(numericStudentId)) {
@@ -3062,15 +3023,6 @@
         // Store in BOTH sessionStorage AND localStorage for reliability
         sessionStorage.setItem('impersonation_token', JSON.stringify(impersonationToken));
         localStorage.setItem('impersonation_token', JSON.stringify(impersonationToken));
-        
-        // Log audit trail
-        console.log('🎭 Impersonation started:', {
-          admin: impersonationToken.adminEmail,
-          student: studentName,
-          studentId: studentId,
-          timestamp: new Date(impersonationToken.timestamp).toISOString()
-        });
-        console.log('✅ Token stored in storage:', JSON.stringify(impersonationToken));
         
         // Small delay to ensure storage write completes
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -3113,8 +3065,6 @@
       sessionStorage.removeItem('admin_chat_token');
       localStorage.removeItem('admin_chat_token');
       
-      console.log('🚪 Impersonation/Admin chat session closed');
-      
       // Refresh student list to update any changes
       loadStudents();
     }
@@ -3154,8 +3104,6 @@
         
         // Show modal
         modal.classList.add('active');
-        
-        console.log('💬 Admin chat opened for:', adminChatToken.adminEmail);
         
       } catch (error) {
         console.error('Error opening admin chat:', error);
@@ -3340,95 +3288,80 @@
         row.style.display = shouldShow ? '' : 'none';
         if (shouldShow) visibleCount++;
       });
-      
-      console.log(`🔍 Filtered students: ${visibleCount}/${rows.length} visible`);
     }
     
-    // Create debounced versions of filter functions
+    // Create debounced versions of filter functions (300ms delay) - MUST be after functions are defined
     const debouncedFilterStudents = debounce(filterStudents, 300);
-    const debouncedFilterNotes = debounce(function() {
-      const search = document.getElementById('notesSearch').value.toLowerCase();
+    const debouncedFilterNotes = debounce(() => {
+      const search = document.getElementById('notesSearch')?.value.toLowerCase() || '';
       const rows = document.querySelectorAll('#notesTableBody tr');
-      
       rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(search) ? '' : 'none';
+        row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
       });
     }, 300);
-    const debouncedFilterPayments = debounce(function() {
-      const search = document.getElementById('paymentsSearch').value.toLowerCase();
+    const debouncedFilterPayments = debounce(() => {
+      const search = document.getElementById('paymentsSearch')?.value.toLowerCase() || '';
       const rows = document.querySelectorAll('#paymentsTableBody tr');
-      
       rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(search) ? '' : 'none';
+        row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
       });
     }, 300);
-    const debouncedFilterForum = debounce(function() {
-      const search = document.getElementById('forumSearch').value.toLowerCase();
+    const debouncedFilterForum = debounce(() => {
+      const search = document.getElementById('forumSearch')?.value.toLowerCase() || '';
       const rows = document.querySelectorAll('#forumTableBody tr');
-      
       rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        row.style.display = text.includes(search) ? '' : 'none';
+        row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
       });
     }, 300);
-    
-    function filterNotes() {
-      debouncedFilterNotes();
-    }
-    
-    function filterPayments() {
-      debouncedFilterPayments();
-    }
-    
-    function filterForum() {
-      debouncedFilterForum();
-    }
+    const debouncedFilterStudentList = debounce(() => {
+      const search = document.getElementById('studentAlertSearch')?.value.toLowerCase() || '';
+      document.querySelectorAll('.alert-student-item').forEach(item => {
+        item.style.display = item.textContent.toLowerCase().includes(search) ? '' : 'none';
+      });
+    }, 300);
     
     // Initialize
     document.addEventListener('DOMContentLoaded', async () => {
-      console.log('🚀 DOMContentLoaded fired!');
-      console.log('🔧 Supabase client:', supabase);
-      
       try {
         // Get current admin email with timeout
-        console.log('🔍 Getting session...');
-        
         const sessionPromise = supabase.auth.getSession();
         const timeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Session timeout after 5s')), 5000)
         );
         
         const { data: { session } } = await Promise.race([sessionPromise, timeoutPromise]);
-        console.log('📧 Session:', session);
         
         if (session && session.user) {
           currentEmail = session.user.email;
-          console.log('✅ Admin email:', currentEmail);
-        } else {
-          console.log('⚠️ No session found');
         }
         
-        console.log('📊 Loading stats...');
         loadStats();
-        
-        console.log('👥 Loading students...');
         loadStudents();
       } catch (error) {
         console.error('❌ Initialization error:', error);
-        console.log('🔄 Attempting to load without session...');
         loadStats();
         loadStudents();
       }
 
-      // Close modal when clicking outside
+      // Close responses modal when clicking outside
+      const responsesModal = document.getElementById('responsesModal');
+      if (responsesModal) {
+        responsesModal.addEventListener('click', (e) => {
+          if (e.target.id === 'responsesModal') {
+            closeResponsesModal();
+          }
+        });
+      }
+      
+      // Close status modal when clicking backdrop
       const statusModal = document.getElementById('statusModal');
-      statusModal.addEventListener('click', (e) => {
-        if (e.target === statusModal) {
-          closeStatusModal();
-        }
-      });
+      if (statusModal) {
+        statusModal.addEventListener('click', (e) => {
+          if (e.target === statusModal) {
+            closeStatusModal();
+          }
+        });
+      }
     });
   </script>
 
@@ -3521,43 +3454,48 @@
       }
     }
 
-    // Close modal on ESC key
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        const modal = document.getElementById('notesManagerModal');
-        if (modal.classList.contains('active')) {
-          closeNotesManager();
+    // Initialize Notes Manager modal event listeners after DOM loads
+    document.addEventListener('DOMContentLoaded', () => {
+      // Close modal on ESC key
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          const modal = document.getElementById('notesManagerModal');
+          if (modal && modal.classList.contains('active')) {
+            closeNotesManager();
+          }
         }
-      }
-    });
+      });
 
-    // Close modal on background click
-    document.getElementById('notesManagerModal').addEventListener('click', (e) => {
-      if (e.target.id === 'notesManagerModal') {
-        closeNotesManager();
+      // Close modal on background click
+      const notesModal = document.getElementById('notesManagerModal');
+      if (notesModal) {
+        notesModal.addEventListener('click', (e) => {
+          if (e.target.id === 'notesManagerModal') {
+            closeNotesManager();
+          }
+        });
       }
-    });
 
-    // Listen for messages from embedded iframes (e.g., Group Notes Manager, Impersonation)
-    window.addEventListener('message', (event) => {
-      if (event.data && event.data.action === 'openNotesManager') {
-        openNotesManager();
-      }
-      
-      // Handle impersonation iframe messages
-      if (event.data && event.data.action === 'closeImpersonation') {
-        console.log('📨 Received close impersonation message:', event.data.reason);
-        closeImpersonation();
+      // Listen for messages from embedded iframes (e.g., Group Notes Manager, Impersonation)
+      window.addEventListener('message', (event) => {
+        if (event.data && event.data.action === 'openNotesManager') {
+          openNotesManager();
+        }
         
-        // Show error message based on reason
-        if (event.data.reason === 'not_found') {
-          alert('Student not found in database. Please refresh the page and try again.');
-        } else if (event.data.reason === 'expired') {
-          alert('Impersonation session expired.');
-        } else if (event.data.reason === 'no_token') {
-          alert('Impersonation token not found. Please try again.');
+        // Handle impersonation iframe messages
+        if (event.data && event.data.action === 'closeImpersonation') {
+          closeImpersonation();
+        
+          // Show error message based on reason
+          if (event.data.reason === 'not_found') {
+            alert('Student not found in database. Please refresh the page and try again.');
+          } else if (event.data.reason === 'expired') {
+            alert('Impersonation session expired.');
+          } else if (event.data.reason === 'no_token') {
+            alert('Impersonation token not found. Please try again.');
+          }
         }
-      }
+      });
     });
 
     // ===== ALERT SYSTEM FUNCTIONS =====
@@ -3661,8 +3599,6 @@
       const searchTerm = document.getElementById('alertStudentSearch').value.toLowerCase();
       const checkboxGroup = document.getElementById('studentCheckboxGroup');
       
-      console.log('🔍 Search triggered:', searchTerm, 'Total students:', allStudentsData.length);
-      
       if (!allStudentsData || allStudentsData.length === 0) {
         console.warn('⚠️ No students data available for filtering');
         return;
@@ -3678,8 +3614,6 @@
                email.includes(searchTerm) || 
                group.includes(searchTerm);
       });
-      
-      console.log('✅ Filtered results:', filtered.length, 'students');
       
       if (filtered.length === 0) {
         checkboxGroup.innerHTML = `
@@ -3748,7 +3682,6 @@
       
       // Show visual feedback
       const selectedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
-      console.log(`${newState ? '✅ Selected' : '❌ Deselected'} Group ${groupLetter} (${selectedCount} total selected)`);
     }
     
     function toggleSelectAll() {
@@ -3861,6 +3794,34 @@
         }
         
         await customAlert('Success!', `Alert created for ${alerts.length} student${alerts.length > 1 ? 's' : ''}!`);
+        
+        // Ask if user wants to save as template
+        const saveAsTemplate = await customConfirm('Save as Template?', 'Would you like to save this alert as a template for future use?');
+        
+        if (saveAsTemplate) {
+          const templateName = await customPrompt('Template Name', 'Enter a name for this template');
+          
+          if (templateName) {
+            const templates = loadTemplatesFromStorage();
+            const newTemplate = {
+              id: 'custom-' + Date.now(),
+              name: templateName,
+              message: message,
+              type: alertType,
+              hasQuestion: hasQuestion,
+              questionText: hasQuestion ? questionText : '',
+              answerOption1: hasQuestion ? answerOption1 : '',
+              answerOption2: hasQuestion ? answerOption2 : '',
+              showOnOpen: showOnOpen
+            };
+            
+            templates.push(newTemplate);
+            saveTemplatesToStorage(templates);
+            
+            await customAlert('Saved!', 'Template saved successfully!');
+          }
+        }
+        
         closeAlertModal();
         
       } catch (error) {
@@ -3909,8 +3870,14 @@
     
     // ===== ALERT RESPONSES VIEWER =====
     
-    async function viewAlertResponses() {
+    async function viewAlertResponses(tab = 'viewed') {
       try {
+        // Close alert modal if it's open
+        const alertModal = document.getElementById('alertModal');
+        if (alertModal) {
+          alertModal.classList.remove('active');
+        }
+        
         const modal = document.getElementById('responsesModal');
         const content = document.getElementById('responsesContent');
         
@@ -3918,138 +3885,324 @@
         modal.classList.add('active');
         content.innerHTML = '<div class="loading">Loading responses...</div>';
         
-        // Fetch all alerts with questions and their answers
-        const { data: alerts, error } = await supabase
-          .from('student_alerts')
-          .select(`
-            id,
-            message,
-            question_text,
-            answer_option_1,
-            answer_option_2,
-            student_answer,
-            answered_at,
-            created_at,
-            alert_type,
-            student_id,
-            students (
-              name,
-              email,
-              group_name,
-              group
-            )
-          `)
-          .eq('has_question', true)
-          .order('created_at', { ascending: false });
+        console.log('📊 Loading alert responses - Tab:', tab);
         
-        if (error) throw error;
+        // Create tab navigation
+        const tabsHTML = `
+          <div style="display: flex; gap: 12px; margin-bottom: 24px; border-bottom: 2px solid rgba(255,255,255,0.1); padding-bottom: 12px;">
+            <button 
+              onclick="viewAlertResponses('viewed')" 
+              style="padding: 12px 24px; background: ${tab === 'viewed' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'rgba(255,255,255,0.05)'}; border: 1px solid ${tab === 'viewed' ? 'rgba(102,126,234,0.5)' : 'rgba(255,255,255,0.1)'}; border-radius: 10px; color: white; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s;">
+              ✅ Alert Views & History
+            </button>
+            <button 
+              onclick="viewAlertResponses('questions')" 
+              style="padding: 12px 24px; background: ${tab === 'questions' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'rgba(255,255,255,0.05)'}; border: 1px solid ${tab === 'questions' ? 'rgba(102,126,234,0.5)' : 'rgba(255,255,255,0.1)'}; border-radius: 10px; color: white; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s;">
+              📊 Question Responses
+            </button>
+          </div>
+          <div style="margin-bottom: 24px;">
+            <input 
+              type="text" 
+              id="alertSearchInput" 
+              placeholder="🔍 Search by student name..." 
+              oninput="filterAlertsByStudent(this.value)"
+              style="width: 100%; padding: 12px 16px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: white; font-size: 14px;"
+            />
+          </div>
+        `;
         
-        if (!alerts || alerts.length === 0) {
-          content.innerHTML = `
-            <div class="empty-state">
-              <div class="empty-state-icon">📭</div>
-              <p>No questions have been sent yet</p>
-            </div>
-          `;
-          return;
+        if (tab === 'viewed') {
+          // First, fetch all students
+          const { data: students, error: studentsError } = await supabase
+            .from('students')
+            .select('id, name, email, group_name');
+          
+          if (studentsError) throw studentsError;
+          
+          // Create a lookup map
+          const studentMap = {};
+          students.forEach(s => {
+            studentMap[s.id] = s;
+          });
+          
+          // Then fetch ALL alerts with read status
+          const { data: alerts, error } = await supabase
+            .from('student_alerts')
+            .select('id, message, alert_type, is_read, created_at, student_id')
+            .order('created_at', { ascending: false });
+          
+          if (error) throw error;
+          
+          if (!alerts || alerts.length === 0) {
+            content.innerHTML = tabsHTML + `
+              <div class="empty-state">
+                <div class="empty-state-icon">📭</div>
+                <p>No alerts have been sent yet</p>
+              </div>
+            `;
+            return;
+          }
+          
+          // Group alerts by message and type to find unique alerts
+          const groupedAlerts = {};
+          alerts.forEach(alert => {
+            const key = `${alert.message}_${alert.alert_type}_${new Date(alert.created_at).toLocaleDateString()}`;
+            if (!groupedAlerts[key]) {
+              groupedAlerts[key] = {
+                message: alert.message,
+                alert_type: alert.alert_type,
+                created_at: alert.created_at,
+                students: []
+              };
+            }
+            
+            // Get student data from the map
+            const student = studentMap[alert.student_id] || { name: 'Unknown', email: '', group_name: '' };
+            
+            groupedAlerts[key].students.push({
+              name: student.name,
+              email: student.email,
+              group: student.group_name,
+              is_read: alert.is_read
+            });
+          });
+          
+          // Show ONLY the most recent alert (ONE example)
+          let html = tabsHTML;
+          const allGroups = Object.values(groupedAlerts);
+          
+          // Sort by most recent first
+          allGroups.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          
+          // Take only the FIRST (most recent) alert
+          const group = allGroups[0];
+          
+          if (group) {
+            const alertTypeIcon = group.alert_type === 'urgent' ? '🚨' : group.alert_type === 'info' ? 'ℹ️' : '⚠️';
+            const alertTypeColor = group.alert_type === 'urgent' ? '#ef4444' : group.alert_type === 'info' ? '#3b82f6' : '#f59e0b';
+            const readCount = group.students.filter(s => s.is_read).length;
+            const unreadCount = group.students.filter(s => !s.is_read).length;
+            const totalStudents = group.students.length;
+            
+            // Get all student names for filtering
+            const studentNames = group.students.map(s => s.name.toLowerCase()).join('|');
+            
+            html += `
+              <div class="card alert-card" data-student-names="${studentNames}" style="margin-bottom: 24px;">
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                  <div style="flex: 1;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                      <span style="font-size: 32px;">${alertTypeIcon}</span>
+                      <div>
+                        <div style="font-size: 16px; font-weight: 700; color: ${alertTypeColor}; text-transform: uppercase; letter-spacing: 0.5px;">
+                          ${group.alert_type} Alert
+                        </div>
+                        <div style="font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 4px;">
+                          Sent: ${new Date(group.created_at).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px; margin-top: 12px;">
+                      <div style="font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.9); white-space: pre-wrap;">${group.message}</div>
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 12px; align-items: center; margin-left: 24px;">
+                    <div class="badge" style="background: rgba(34,197,94,0.2); color: #22c55e; font-size: 14px; padding: 8px 16px;">
+                      ✅ ${readCount} Read
+                    </div>
+                    <div class="badge" style="background: rgba(239,68,68,0.2); color: #ef4444; font-size: 14px; padding: 8px 16px;">
+                      ⏳ ${unreadCount} Unread
+                    </div>
+                    <div class="badge" style="background: rgba(102,126,234,0.2); color: #8ab4ff; font-size: 14px; padding: 8px 16px;">
+                      👥 ${totalStudents} Total
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="table-container" style="margin-top: 20px;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Status</th>
+                        <th>Student</th>
+                        <th>Group</th>
+                        <th>Email</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${group.students.sort((a, b) => {
+                        // Sort: read first, then by name
+                        if (a.is_read === b.is_read) return a.name.localeCompare(b.name);
+                        return a.is_read ? -1 : 1;
+                      }).map(student => `
+                        <tr style="background: ${student.is_read ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)'};">
+                          <td>
+                            ${student.is_read ? 
+                              '<span style="font-size: 24px; filter: drop-shadow(0 2px 4px rgba(34,197,94,0.5));">✅</span>' : 
+                              '<span style="font-size: 24px; opacity: 0.3;">⬜</span>'}
+                          </td>
+                          <td>
+                            <div style="font-weight: 600; font-size: 14px;">${student.name}</div>
+                          </td>
+                          <td>
+                            <span class="badge" style="background: rgba(147,51,234,0.2); color: #c084fc;">${student.group || 'N/A'}</span>
+                          </td>
+                          <td style="font-size: 13px; color: rgba(255,255,255,0.6);">${student.email}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          }
+          
+          content.innerHTML = html;
+          
+        } else {
+          // Questions tab - original logic
+          const { data: alerts, error } = await supabase
+            .from('student_alerts')
+            .select(`
+              id,
+              message,
+              question_text,
+              answer_option_1,
+              answer_option_2,
+              student_answer,
+              answered_at,
+              created_at,
+              alert_type,
+              student_id,
+              students (
+                name,
+                email,
+                group_name
+              )
+            `)
+            .eq('has_question', true)
+            .order('created_at', { ascending: false });
+          
+          if (error) throw error;
+          
+          if (!alerts || alerts.length === 0) {
+            content.innerHTML = tabsHTML + `
+              <div class="empty-state">
+                <div class="empty-state-icon">📭</div>
+                <p>No questions have been sent yet</p>
+              </div>
+            `;
+            return;
+          }
+          
+          // Group alerts by question text
+          const groupedAlerts = {};
+          alerts.forEach(alert => {
+            const key = alert.question_text || 'Unknown Question';
+            if (!groupedAlerts[key]) {
+              groupedAlerts[key] = {
+                question: alert.question_text,
+                created_at: alert.created_at,
+                alert_type: alert.alert_type,
+                answer_option_1: alert.answer_option_1 || 'Yes',
+                answer_option_2: alert.answer_option_2 || 'No',
+                responses: []
+              };
+            }
+            groupedAlerts[key].responses.push({
+              student_name: alert.students?.name || 'Unknown',
+              student_email: alert.students?.email || '',
+              student_group: alert.students?.group_name || alert.students?.group || '',
+              answer: alert.student_answer,
+              answered_at: alert.answered_at
+            });
+          });
+          
+          // Render grouped responses
+          let html = tabsHTML;
+          Object.values(groupedAlerts).forEach(group => {
+            const option1 = group.answer_option_1;
+            const option2 = group.answer_option_2;
+            const totalResponses = group.responses.filter(r => r.answer).length;
+            const option1Count = group.responses.filter(r => r.answer === option1).length;
+            const option2Count = group.responses.filter(r => r.answer === option2).length;
+            const noResponseCount = group.responses.filter(r => !r.answer).length;
+            
+            // Get all student names for filtering
+            const studentNames = group.responses.map(r => r.student_name.toLowerCase()).join('|');
+            
+            html += `
+              <div class="card alert-card" data-student-names="${studentNames}" style="margin-bottom: 24px;">
+                <div class="card-title" style="display: flex; justify-content: space-between; align-items: flex-start;">
+                  <div style="flex: 1;">
+                    <div style="font-size: 18px; margin-bottom: 8px;">${group.question}</div>
+                    <div style="font-size: 12px; color: rgba(255,255,255,0.5);">
+                      Sent: ${new Date(group.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 12px; align-items: center;">
+                    <div class="badge" style="background: rgba(34,197,94,0.2); color: #22c55e; font-size: 14px; padding: 8px 16px;">
+                      ✅ ${option1Count} ${option1}
+                    </div>
+                    <div class="badge" style="background: rgba(239,68,68,0.2); color: #ef4444; font-size: 14px; padding: 8px 16px;">
+                      ❌ ${option2Count} ${option2}
+                    </div>
+                    <div class="badge" style="background: rgba(148,163,184,0.2); color: #94a3b8; font-size: 14px; padding: 8px 16px;">
+                      ⏳ ${noResponseCount} No Response
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="table-container" style="margin-top: 20px;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Student</th>
+                        <th>Group</th>
+                        <th>Answer</th>
+                        <th>Answered At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${group.responses.map(response => `
+                        <tr>
+                          <td>
+                            <div>${response.student_name}</div>
+                            <div style="font-size: 11px; color: rgba(255,255,255,0.5);">${response.student_email}</div>
+                          </td>
+                          <td>${response.student_group || 'N/A'}</td>
+                          <td>
+                            ${response.answer === option1 ? `<span class="badge" style="background: rgba(34,197,94,0.2); color: #22c55e;">✅ ${option1}</span>` : 
+                              response.answer === option2 ? `<span class="badge" style="background: rgba(239,68,68,0.2); color: #ef4444;">❌ ${option2}</span>` : 
+                              '<span class="badge" style="background: rgba(148,163,184,0.2); color: #94a3b8;">⏳ No Response</span>'}
+                          </td>
+                          <td>${response.answered_at ? new Date(response.answered_at).toLocaleString() : '—'}</td>
+                        </tr>
+                      `).join('')}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          });
+          
+          content.innerHTML = html;
         }
         
-        // Group alerts by question text
-        const groupedAlerts = {};
-        alerts.forEach(alert => {
-          const key = alert.question_text || 'Unknown Question';
-          if (!groupedAlerts[key]) {
-            groupedAlerts[key] = {
-              question: alert.question_text,
-              created_at: alert.created_at,
-              alert_type: alert.alert_type,
-              answer_option_1: alert.answer_option_1 || 'Yes',
-              answer_option_2: alert.answer_option_2 || 'No',
-              responses: []
-            };
-          }
-          groupedAlerts[key].responses.push({
-            student_name: alert.students?.name || 'Unknown',
-            student_email: alert.students?.email || '',
-            student_group: alert.students?.group_name || alert.students?.group || '',
-            answer: alert.student_answer,
-            answered_at: alert.answered_at
-          });
-        });
-        
-        // Render grouped responses
-        let html = '';
-        Object.values(groupedAlerts).forEach(group => {
-          const option1 = group.answer_option_1;
-          const option2 = group.answer_option_2;
-          const totalResponses = group.responses.filter(r => r.answer).length;
-          const option1Count = group.responses.filter(r => r.answer === option1).length;
-          const option2Count = group.responses.filter(r => r.answer === option2).length;
-          const noResponseCount = group.responses.filter(r => !r.answer).length;
-          
-          html += `
-            <div class="card" style="margin-bottom: 24px;">
-              <div class="card-title" style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <div style="flex: 1;">
-                  <div style="font-size: 18px; margin-bottom: 8px;">${group.question}</div>
-                  <div style="font-size: 12px; color: rgba(255,255,255,0.5);">
-                    Sent: ${new Date(group.created_at).toLocaleString()}
-                  </div>
-                </div>
-                <div style="display: flex; gap: 12px; align-items: center;">
-                  <div class="badge" style="background: rgba(34,197,94,0.2); color: #22c55e; font-size: 14px; padding: 8px 16px;">
-                    ✅ ${option1Count} ${option1}
-                  </div>
-                  <div class="badge" style="background: rgba(239,68,68,0.2); color: #ef4444; font-size: 14px; padding: 8px 16px;">
-                    ❌ ${option2Count} ${option2}
-                  </div>
-                  <div class="badge" style="background: rgba(148,163,184,0.2); color: #94a3b8; font-size: 14px; padding: 8px 16px;">
-                    ⏳ ${noResponseCount} No Response
-                  </div>
-                </div>
-              </div>
-              
-              <div class="table-container" style="margin-top: 20px;">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Student</th>
-                      <th>Group</th>
-                      <th>Answer</th>
-                      <th>Answered At</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${group.responses.map(response => `
-                      <tr>
-                        <td>
-                          <div>${response.student_name}</div>
-                          <div style="font-size: 11px; color: rgba(255,255,255,0.5);">${response.student_email}</div>
-                        </td>
-                        <td>${response.student_group || 'N/A'}</td>
-                        <td>
-                          ${response.answer === option1 ? `<span class="badge" style="background: rgba(34,197,94,0.2); color: #22c55e;">✅ ${option1}</span>` : 
-                            response.answer === option2 ? `<span class="badge" style="background: rgba(239,68,68,0.2); color: #ef4444;">❌ ${option2}</span>` : 
-                            '<span class="badge" style="background: rgba(148,163,184,0.2); color: #94a3b8;">⏳ No Response</span>'}
-                        </td>
-                        <td>${response.answered_at ? new Date(response.answered_at).toLocaleString() : '—'}</td>
-                      </tr>
-                    `).join('')}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          `;
-        });
-        
-        content.innerHTML = html;
-        
       } catch (error) {
-        console.error('Error loading responses:', error);
+        console.error('❌ Error loading responses:', error);
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          tab: tab
+        });
         document.getElementById('responsesContent').innerHTML = `
           <div class="empty-state">
             <div class="empty-state-icon">⚠️</div>
-            <p>Failed to load responses. Please try again.</p>
+            <p>Failed to load responses</p>
+            <p style="font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 8px;">Error: ${error.message}</p>
+            <p style="font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 4px;">Check browser console for details</p>
           </div>
         `;
       }
@@ -4059,12 +4212,23 @@
       document.getElementById('responsesModal').classList.remove('active');
     }
     
-    // Close responses modal when clicking outside
-    document.getElementById('responsesModal').addEventListener('click', (e) => {
-      if (e.target.id === 'responsesModal') {
-        closeResponsesModal();
-      }
-    });
+    // Filter alerts by student name
+    function filterAlertsByStudent(searchTerm) {
+      const cards = document.querySelectorAll('.alert-card');
+      const lowerSearch = searchTerm.toLowerCase().trim();
+      
+      cards.forEach(card => {
+        if (!lowerSearch) {
+          // Show all if search is empty
+          card.style.display = '';
+        } else {
+          // Check if any student name matches
+          const studentNames = card.getAttribute('data-student-names');
+          const matches = studentNames.includes(lowerSearch);
+          card.style.display = matches ? '' : 'none';
+        }
+      });
+    }
   </script>
 
   <!-- Fullscreen Impersonation Modal -->
@@ -4088,6 +4252,9 @@
           <span>Create Student Alert</span>
         </div>
         <div style="display: flex; gap: 12px; align-items: center;">
+          <button type="button" class="back-btn" onclick="openTemplateModal()" style="margin: 0;">
+            📋 Templates
+          </button>
           <button type="button" class="back-btn" onclick="viewAlertResponses()" style="margin: 0;">
             📊 View Responses
           </button>
@@ -4155,7 +4322,7 @@
             id="alertStudentSearch" 
             class="form-input" 
             placeholder="🔍 Search students by name, email, or group..."
-            oninput="filterStudentList()"
+            oninput="debouncedFilterStudentList()"
             style="margin-bottom: 12px;"
           />
           <button type="button" class="select-all-btn" onclick="toggleSelectAll()">
@@ -4280,20 +4447,267 @@
 
   <!-- Alert Responses Modal -->
   <div id="responsesModal" class="alert-modal">
-    <div class="alert-modal-content" style="max-width: 900px;">
+    <div class="alert-modal-content" style="max-width: 1200px; max-height: 90vh; overflow-y: auto;">
       <div class="alert-modal-header">
         <div class="alert-modal-title">
           <span>📊</span>
-          <span>Student Alert Responses</span>
+          <span>Student Alert Responses & History</span>
         </div>
         <button class="close-modal" onclick="closeResponsesModal()">×</button>
       </div>
       
-      <div id="responsesContent">
+      <div id="responsesContent" style="padding: 24px;">
         <div class="loading">Loading responses...</div>
       </div>
     </div>
   </div>
 
+  <!-- Alert Template Modal -->
+  <div id="templateModal" class="alert-modal">
+    <div class="alert-modal-content" style="max-width: 1000px; max-height: 90vh; overflow-y: auto;">
+      <div class="alert-modal-header">
+        <div class="alert-modal-title">
+          <span>📋</span>
+          <span>Alert Templates</span>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center;">
+          <button type="button" class="back-btn" onclick="showCreateTemplate()" style="margin: 0;">
+            ➕ New Template
+          </button>
+          <button class="close-modal" onclick="closeTemplateModal()">×</button>
+        </div>
+      </div>
+      
+      <div id="templateContent" style="padding: 24px;">
+        <div class="loading">Loading templates...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== ALERT TEMPLATE MANAGEMENT =====
+    const TEMPLATES_STORAGE_KEY = 'arnoma-alert-templates-v1';
+
+    function loadTemplatesFromStorage() {
+      const stored = localStorage.getItem(TEMPLATES_STORAGE_KEY);
+      if (stored) {
+        try {
+          return JSON.parse(stored);
+        } catch (e) {
+          console.error('Error parsing templates:', e);
+          return getDefaultTemplates();
+        }
+      }
+      return getDefaultTemplates();
+    }
+
+    function saveTemplatesToStorage(templates) {
+      localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
+    }
+
+    function getDefaultTemplates() {
+      return [
+        {
+          id: 'makeup-class',
+          name: 'Makeup Class Notification',
+          message: 'Hi {student_name},\n\nWe have a makeup class scheduled for [DATE] at [TIME].\n\nPlease confirm your attendance.\n\nThank you!',
+          type: 'info',
+          hasQuestion: true,
+          questionText: 'Will you attend the makeup class?',
+          answerOption1: 'Yes, I will attend',
+          answerOption2: 'No, I cannot attend',
+          showOnOpen: true
+        },
+        {
+          id: 'payment-reminder',
+          name: 'Payment Reminder',
+          message: 'Dear {student_name},\n\nThis is a friendly reminder about your outstanding balance.\n\nPlease submit your payment at your earliest convenience.\n\nThank you!',
+          type: 'warning',
+          hasQuestion: false,
+          showOnOpen: false
+        },
+        {
+          id: 'test-announcement',
+          name: 'Test Announcement',
+          message: 'Hi {student_name},\n\nWe have an upcoming test on [DATE].\n\nTopic: [TOPIC]\nDuration: [DURATION]\n\nPlease prepare accordingly.\n\nGood luck!',
+          type: 'info',
+          hasQuestion: false,
+          showOnOpen: true
+        },
+        {
+          id: 'urgent-update',
+          name: 'Urgent Update',
+          message: 'URGENT: {student_name},\n\n[YOUR URGENT MESSAGE HERE]\n\nPlease respond immediately if you have any questions.',
+          type: 'urgent',
+          hasQuestion: false,
+          showOnOpen: true
+        }
+      ];
+    }
+
+    function openTemplateModal() {
+      const modal = document.getElementById('templateModal');
+      const content = document.getElementById('templateContent');
+      
+      modal.classList.add('active');
+      renderTemplates();
+    }
+
+    function closeTemplateModal() {
+      document.getElementById('templateModal').classList.remove('active');
+    }
+
+    function renderTemplates() {
+      const templates = loadTemplatesFromStorage();
+      const content = document.getElementById('templateContent');
+      
+      if (templates.length === 0) {
+        content.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">📭</div>
+            <p>No templates yet</p>
+            <button onclick="showCreateTemplate()" class="add-btn" style="margin-top: 16px;">
+              ➕ Create Your First Template
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      let html = `
+        <div style="display: grid; gap: 16px;">
+          ${templates.map(template => `
+            <div class="card" style="padding: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                <div style="flex: 1;">
+                  <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 8px; color: rgba(255,255,255,0.95);">${template.name}</h3>
+                  <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <span class="badge" style="background: ${template.type === 'urgent' ? 'rgba(239,68,68,0.2)' : template.type === 'warning' ? 'rgba(245,158,11,0.2)' : 'rgba(59,130,246,0.2)'}; color: ${template.type === 'urgent' ? '#fca5a5' : template.type === 'warning' ? '#fbbf24' : '#93c5fd'};">
+                      ${template.type === 'urgent' ? '🚨' : template.type === 'warning' ? '⚠️' : 'ℹ️'} ${template.type}
+                    </span>
+                    ${template.hasQuestion ? '<span class="badge" style="background: rgba(147,51,234,0.2); color: #c084fc;">❓ Has Question</span>' : ''}
+                    ${template.showOnOpen ? '<span class="badge" style="background: rgba(34,197,94,0.2); color: #86efac;">👁️ Show on Open</span>' : ''}
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                  <button onclick="useTemplate('${template.id}')" class="action-btn view" title="Use Template">
+                    ✅ Use
+                  </button>
+                  <button onclick="editTemplate('${template.id}')" class="action-btn edit" title="Edit Template">
+                    ✏️
+                  </button>
+                  ${!template.id.startsWith('default-') ? `
+                    <button onclick="deleteTemplate('${template.id}')" class="action-btn delete" title="Delete Template">
+                      🗑️
+                    </button>
+                  ` : ''}
+                </div>
+              </div>
+              
+              <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px; font-size: 14px; line-height: 1.6; color: rgba(255,255,255,0.8); white-space: pre-wrap;">${template.message}</div>
+              
+              ${template.hasQuestion ? `
+                <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.1);">
+                  <div style="font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.7); margin-bottom: 8px;">Question: ${template.questionText}</div>
+                  <div style="display: flex; gap: 8px;">
+                    <span class="badge" style="background: rgba(34,197,94,0.2); color: #86efac;">✅ ${template.answerOption1}</span>
+                    <span class="badge" style="background: rgba(239,68,68,0.2); color: #fca5a5;">❌ ${template.answerOption2}</span>
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+      
+      content.innerHTML = html;
+    }
+
+    function useTemplate(templateId) {
+      const templates = loadTemplatesFromStorage();
+      const template = templates.find(t => t.id === templateId);
+      
+      if (!template) {
+        customAlert('Error', 'Template not found');
+        return;
+      }
+
+      // Fill the alert form with template data
+      document.getElementById('alertMessage').value = template.message;
+      document.getElementById('alertType').value = template.type;
+      document.getElementById('showOnOpen').checked = template.showOnOpen;
+      document.getElementById('hasQuestion').checked = template.hasQuestion;
+      
+      if (template.hasQuestion) {
+        document.getElementById('questionFieldContainer').style.display = 'block';
+        document.getElementById('questionText').value = template.questionText || '';
+        document.getElementById('answerOption1').value = template.answerOption1 || 'Yes';
+        document.getElementById('answerOption2').value = template.answerOption2 || 'No';
+      }
+
+      closeTemplateModal();
+      customAlert('Success', `Template "${template.name}" loaded into alert form`);
+    }
+
+    async function showCreateTemplate() {
+      const name = await customPrompt('Template Name', 'Enter a name for your template');
+      if (!name) return;
+
+      const message = await customPrompt('Template Message', 'Enter message (use {student_name}, {group}, {email} for variables)');
+      if (!message) return;
+
+      const templates = loadTemplatesFromStorage();
+      const newTemplate = {
+        id: 'custom-' + Date.now(),
+        name: name,
+        message: message,
+        type: 'info',
+        hasQuestion: false,
+        showOnOpen: false
+      };
+
+      templates.push(newTemplate);
+      saveTemplatesToStorage(templates);
+      renderTemplates();
+      await customAlert('Success', 'Template created successfully!');
+    }
+
+    async function editTemplate(templateId) {
+      const templates = loadTemplatesFromStorage();
+      const template = templates.find(t => t.id === templateId);
+      
+      if (!template) {
+        await customAlert('Error', 'Template not found');
+        return;
+      }
+
+      const newName = await customPrompt('Template Name', 'Enter new name', template.name);
+      if (newName === null || newName === '') return;
+
+      const newMessage = await customPrompt('Template Message', 'Enter new message', template.message);
+      if (newMessage === null || newMessage === '') return;
+
+      template.name = newName;
+      template.message = newMessage;
+      
+      saveTemplatesToStorage(templates);
+      renderTemplates();
+      await customAlert('Success', 'Template updated successfully!');
+    }
+
+    async function deleteTemplate(templateId) {
+      const confirmed = await customConfirm('Delete Template', 'Are you sure you want to delete this template?');
+      if (!confirmed) return;
+
+      const templates = loadTemplatesFromStorage();
+      const filtered = templates.filter(t => t.id !== templateId);
+      
+      saveTemplatesToStorage(filtered);
+      renderTemplates();
+      await customAlert('Success', 'Template deleted successfully!');
+    }
+  </script>
+
 </body>
 </html>
+
