@@ -4861,7 +4861,23 @@
           const cacheKeys = getStudentPaymentCacheKeys(student);
           const existingKey = cacheKeys.find(key => studentPaymentMatchCache.has(key));
           if (existingKey) {
-            return studentPaymentMatchCache.get(existingKey);
+            const cached = studentPaymentMatchCache.get(existingKey);
+            
+            // DEBUG: Show December payments for Stella
+            if (isDebugStudent) {
+              const decemberPayments = cached.filter(p => 
+                p.dateStr && p.dateStr >= '2025-12-01' && p.dateStr < '2026-01-01'
+              );
+              console.log('   📅 DECEMBER 2025 PAYMENTS for', student.name, ':');
+              decemberPayments.forEach(p => {
+                console.log('      ', p.dateStr, '- $' + p.amount, '(source:', p.source + ')');
+              });
+              console.log('   💰 Total December amount:', 
+                decemberPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+              );
+            }
+            
+            return cached;
           }
 
           const matchNames = new Set();
@@ -4941,8 +4957,21 @@
 
           if (isDebugStudent || DEBUG_MODE) {
             console.log(`   ✅ Matched ${matchedPayments.length} total payments for ${student.name}`);
+            
+            // Show December payments specifically
+            const decemberPayments = matchedPayments.filter(p => 
+              p.dateStr && p.dateStr >= '2025-12-01' && p.dateStr < '2026-01-01'
+            );
+            console.log('   📅 DECEMBER 2025 PAYMENTS:');
+            decemberPayments.forEach(p => {
+              console.log('      ', p.dateStr, '- $' + p.amount, '(source:', p.source + ')');
+            });
+            console.log('   💰 Total December amount:', 
+              decemberPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
+            );
+            
             if (matchedPayments.length > 0) {
-              console.log('   Payment dates:', matchedPayments.map(p => `${p.dateStr} $${p.amount} (${p.source})`));
+              console.log('   All payment dates:', matchedPayments.map(p => `${p.dateStr} $${p.amount} (${p.source})`));
             } else {
               console.log('   ❌ NO PAYMENTS MATCHED - checking first 5 payments in cache:');
               (window.paymentsCache || []).slice(0, 5).forEach(p => {
