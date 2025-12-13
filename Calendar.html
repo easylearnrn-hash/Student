@@ -4134,6 +4134,9 @@
       }
 
       function computeMonthData(year, month) {
+        // Reset payment allocation tracker for fresh calculation
+        resetPaymentAllocation();
+        
         /* ================================================================
            🛡️ DATA INTEGRITY SAFEGUARDS
            ================================================================
@@ -5134,7 +5137,14 @@
           return allocation;
         }
         
-        function findPaymentMatchForClass(student, dateStr) {
+        // Payment allocation tracker - tracks how much of each payment has been used
+        const paymentAllocationTracker = new Map(); // paymentId -> { total, used, remaining }
+
+        function resetPaymentAllocation() {
+          paymentAllocationTracker.clear();
+        }
+
+        function findPaymentMatchForClass(student, dateStr, pricePerClass) {
           const studentPayments = collectPaymentsForStudentSimple(student);
           if (!studentPayments.length) return null;
 
@@ -5147,44 +5157,81 @@
           const classDate = createDateFromDateStr(dateStr);
           if (!classDate) return null;
 
+          const validPrice = Number(pricePerClass) || 0;
+
           // Priority 1: Exact date match
           const exactMatch = studentPayments.find(payment => payment.dateStr === dateStr);
-          if (exactMatch) return exactMatch;
+          if (exactMatch) {
+            // Check if this payment can cover multiple classes
+            const paymentAmount = Number(exactMatch.amount) || 0;
+            if (paymentAmount >= validPrice * 2) {
+              // Large payment - initialize allocation tracking
+              if (!paymentAllocationTracker.has(exactMatch.id)) {
+                paymentAllocationTracker.set(exactMatch.id, {
+                  total: paymentAmount,
+                  used: validPrice, // Use one class worth for this class
+                  remaining: paymentAmount - validPrice
+                });
+              }
+            }
+            return exactMatch;
+          }
 
-          // Priority 2: Grace period (flexible matching)
-          // For December 2025 onwards: strict matching with grace period until next class
-          // For historical months: more lenient same-week matching
+          // Priority 2: Check if a nearby large payment can cover this class
+          // Look for payments in grace period that have remaining balance
+          let gracePeriodPayments = [];
+          
           if (dateStr >= '2025-12-01') {
             // December 2025+: Use grace period until day before next class
             const nextClassDate = findNextClassDate(student, dateStr);
             if (nextClassDate) {
-              // Grace period ends the day BEFORE next class (at 11:59 PM)
               const gracePeriodEnd = createDateFromDateStr(nextClassDate);
               if (gracePeriodEnd) {
-                gracePeriodEnd.setDate(gracePeriodEnd.getDate() - 1); // Day before next class
+                gracePeriodEnd.setDate(gracePeriodEnd.getDate() - 1);
                 const gracePeriodEndStr = formatDateYYYYMMDD(gracePeriodEnd);
                 
-                // Find payment made between classDate (inclusive) and gracePeriodEndStr (inclusive)
-                const gracePayment = studentPayments.find(payment => 
+                gracePeriodPayments = studentPayments.filter(payment => 
                   payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
                 );
-                
-                if (gracePayment) return gracePayment;
               }
             }
           } else {
-            // Historical data (before December 2025): Use same-week matching for flexibility
-            // This allows payments within ±3 days of the class to count
+            // Historical data: 3-day grace period
             const classDateObj = createDateFromDateStr(dateStr);
             const threeDaysAfter = new Date(classDateObj);
             threeDaysAfter.setDate(threeDaysAfter.getDate() + 3);
             const gracePeriodEndStr = formatDateYYYYMMDD(threeDaysAfter);
             
-            const historicalGracePayment = studentPayments.find(payment => 
+            gracePeriodPayments = studentPayments.filter(payment => 
               payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
             );
+          }
+
+          // Find a payment with remaining balance that can cover this class
+          for (const payment of gracePeriodPayments) {
+            const paymentAmount = Number(payment.amount) || 0;
             
-            if (historicalGracePayment) return historicalGracePayment;
+            // Check allocation tracker
+            if (paymentAllocationTracker.has(payment.id)) {
+              const allocation = paymentAllocationTracker.get(payment.id);
+              if (allocation.remaining >= validPrice) {
+                // This payment has enough remaining balance - use it
+                allocation.used += validPrice;
+                allocation.remaining -= validPrice;
+                return payment;
+              }
+            } else {
+              // Payment not yet tracked - check if it can cover this class
+              if (paymentAmount >= validPrice) {
+                // Initialize tracking for this payment
+                paymentAllocationTracker.set(payment.id, {
+                  total: paymentAmount,
+                  used: validPrice,
+                  remaining: paymentAmount - validPrice
+                });
+                return payment;
+              }
+            }
           }
           
           return null;
@@ -5307,8 +5354,8 @@
             };
           }
 
-          // Priority 3: Check for payment match
-          const paymentMatch = findPaymentMatchForClass(student, dateStr);
+          // Priority 3: Check for payment match (with payment splitting for large payments)
+          const paymentMatch = findPaymentMatchForClass(student, dateStr, validPrice);
           if (paymentMatch && paymentMatch.amount > 0) {
             const paidAmount = paymentMatch.amount;
             const overpayAmount = validPrice > 0 ? paidAmount - validPrice : 0;
@@ -9198,6 +9245,9 @@
 
       function renderCalendar() {
         const { year, month } = getCurrentViewYearMonth();
+
+        // Reset payment allocation tracker for fresh calculation
+        resetPaymentAllocation();
 
         // ⚡ Performance: Check if month data is already cached
         let monthData = DataCache.getMonth(year, month);
