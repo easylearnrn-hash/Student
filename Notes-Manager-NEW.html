@@ -1052,6 +1052,7 @@
     // ===== EMAIL NOTIFICATION FOR NEW NOTES =====
     async function sendNoteNotificationEmail(groupName, noteTitle) {
       try {
+        console.log(`📧 Fetching students in group: ${groupName}`);
         // Get all students in this group
         const { data: students, error: studentsError } = await supabase
           .from('students')
@@ -1059,17 +1060,30 @@
           .eq('group_name', groupName)
           .not('email', 'is', null);
 
-        if (studentsError) throw studentsError;
+        if (studentsError) {
+          console.error('❌ Error fetching students:', studentsError);
+          throw studentsError;
+        }
+        
         if (!students || students.length === 0) {
-          console.log('No students found in group', groupName);
+          console.warn(`⚠️ No students found in group ${groupName}`);
           return;
         }
 
-        console.log(`Sending note notification to ${students.length} students in group ${groupName}`);
+        console.log(`✅ Found ${students.length} students in group ${groupName}:`, students.map(s => s.name));
+        console.log(`📨 Sending ${students.length} email notifications...`);
 
         // Send email to each student
+        let successCount = 0;
+        let failCount = 0;
+        
         for (const student of students) {
-          if (!student.email) continue;
+          if (!student.email) {
+            console.warn(`⚠️ Skipping ${student.name} - no email address`);
+            continue;
+          }
+
+          console.log(`📤 Sending email to ${student.name} (${student.email})...`);
 
           const emailBody = {
             email_type: 'new_note_notification',
@@ -1195,15 +1209,21 @@
           });
 
           if (!response.ok) {
-            console.error(`Failed to send email to ${student.email}`);
+            const errorText = await response.text();
+            console.error(`❌ Failed to send email to ${student.email}:`, response.status, errorText);
+            failCount++;
           } else {
-            console.log(`✅ Email sent to ${student.email}`);
+            console.log(`✅ Email sent successfully to ${student.name} (${student.email})`);
+            successCount++;
           }
         }
 
-        console.log('✅ All note notification emails sent');
+        console.log(`📊 Email notification summary: ${successCount} sent, ${failCount} failed`);
+        if (failCount > 0) {
+          throw new Error(`Failed to send ${failCount} of ${students.length} emails`);
+        }
       } catch (error) {
-        console.error('Email notification error:', error);
+        console.error('❌ Email notification error:', error);
         throw error;
       }
     }
@@ -1447,13 +1467,15 @@
         progressText.textContent = '✅ Upload complete!';
 
         // Send email notification to students in the group
+        console.log('📧 Starting email notification process...');
         try {
           await sendNoteNotificationEmail(systemName, title);
+          console.log('✅ Email notifications sent successfully!');
+          alert('✅ Note uploaded successfully!\n📧 Email notifications sent to all students in the group.');
         } catch (emailError) {
-          console.error('Email notification failed (non-critical):', emailError);
+          console.error('❌ Email notification failed:', emailError);
+          alert('✅ Note uploaded successfully!\n⚠️ Note: Email notifications failed to send. Please check console for details.');
         }
-
-        alert('✅ Note uploaded successfully!');
         
         // Reset form
         document.getElementById('singleUploadForm').reset();
