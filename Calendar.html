@@ -5151,23 +5151,40 @@
           const exactMatch = studentPayments.find(payment => payment.dateStr === dateStr);
           if (exactMatch) return exactMatch;
 
-          // Priority 2: Grace period - payment made between class date and day before next class (11:59 PM)
-          // Example: Class on Oct 1, next class Oct 5 → payments from Oct 1-4 (until Oct 4 11:59 PM) count for Oct 1
-          const nextClassDate = findNextClassDate(student, dateStr);
-          if (nextClassDate) {
-            // Grace period ends the day BEFORE next class (at 11:59 PM)
-            const gracePeriodEnd = createDateFromDateStr(nextClassDate);
-            if (gracePeriodEnd) {
-              gracePeriodEnd.setDate(gracePeriodEnd.getDate() - 1); // Day before next class
-              const gracePeriodEndStr = formatDateYYYYMMDD(gracePeriodEnd);
-              
-              // Find payment made between classDate (inclusive) and gracePeriodEndStr (inclusive)
-              const gracePayment = studentPayments.find(payment => 
-                payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
-              );
-              
-              if (gracePayment) return gracePayment;
+          // Priority 2: Grace period (flexible matching)
+          // For December 2025 onwards: strict matching with grace period until next class
+          // For historical months: more lenient same-week matching
+          if (dateStr >= '2025-12-01') {
+            // December 2025+: Use grace period until day before next class
+            const nextClassDate = findNextClassDate(student, dateStr);
+            if (nextClassDate) {
+              // Grace period ends the day BEFORE next class (at 11:59 PM)
+              const gracePeriodEnd = createDateFromDateStr(nextClassDate);
+              if (gracePeriodEnd) {
+                gracePeriodEnd.setDate(gracePeriodEnd.getDate() - 1); // Day before next class
+                const gracePeriodEndStr = formatDateYYYYMMDD(gracePeriodEnd);
+                
+                // Find payment made between classDate (inclusive) and gracePeriodEndStr (inclusive)
+                const gracePayment = studentPayments.find(payment => 
+                  payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
+                );
+                
+                if (gracePayment) return gracePayment;
+              }
             }
+          } else {
+            // Historical data (before December 2025): Use same-week matching for flexibility
+            // This allows payments within ±3 days of the class to count
+            const classDateObj = createDateFromDateStr(dateStr);
+            const threeDaysAfter = new Date(classDateObj);
+            threeDaysAfter.setDate(threeDaysAfter.getDate() + 3);
+            const gracePeriodEndStr = formatDateYYYYMMDD(threeDaysAfter);
+            
+            const historicalGracePayment = studentPayments.find(payment => 
+              payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
+            );
+            
+            if (historicalGracePayment) return historicalGracePayment;
           }
           
           return null;
