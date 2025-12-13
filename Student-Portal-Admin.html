@@ -1578,14 +1578,6 @@
         <div class="stat-value" id="totalNotes">0</div>
         <div class="stat-label">PDF Notes</div>
       </div>
-      <div class="stat-card">
-        <div class="stat-value" id="totalPayments">0</div>
-        <div class="stat-label">Payments Recorded</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value" id="forumMessages">0</div>
-        <div class="stat-label">Forum Messages</div>
-      </div>
     </div>
     
     <!-- Tabs -->
@@ -1598,15 +1590,6 @@
       </div>
       <div class="tab" onclick="openGroupNotesModal()">
         <span>📚</span> Group Notes
-      </div>
-      <div class="tab" onclick="switchTab('payments')">
-        <span>💳</span> Payments
-      </div>
-      <div class="tab" onclick="switchTab('forum')">
-        <span>💬</span> Forum
-      </div>
-      <div class="tab" onclick="switchTab('systems')">
-        <span>🎯</span> NCLEX Systems
       </div>
       <div class="tab" onclick="switchTab('settings')">
         <span>⚙️</span> Settings
@@ -1751,75 +1734,6 @@
           >
           </iframe>
         </div>
-      </div>
-    </div>
-    
-    <!-- Payments Tab -->
-    <div id="paymentsTab" class="tab-content">
-      <div class="card">
-        <div class="card-title">Manage Payments</div>
-        <div class="search-bar">
-          <input type="text" class="search-input" placeholder="Search payments..." id="paymentsSearch" onkeyup="debouncedFilterPayments()">
-          <button class="add-btn" onclick="window.open('Payment-Records.html', '_blank')">+ Add Payment</button>
-        </div>
-        <div class="table-container">
-          <table id="paymentsTable">
-            <thead>
-              <tr>
-                <th>Student</th>
-                <th>Date</th>
-                <th>Amount</th>
-                <th>Status</th>
-                <th>Method</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="paymentsTableBody">
-              <tr>
-                <td colspan="6" class="loading">Loading payments...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Forum Tab -->
-    <div id="forumTab" class="tab-content">
-      <div class="card">
-        <div class="card-title">Forum Messages</div>
-        <div class="search-bar">
-          <input type="text" class="search-input" placeholder="Search messages..." id="forumSearch" onkeyup="debouncedFilterForum()">
-        </div>
-        <div class="table-container">
-          <table id="forumTable">
-            <thead>
-              <tr>
-                <th>Author</th>
-                <th>Message</th>
-                <th>Date</th>
-                <th>Replies</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="forumTableBody">
-              <tr>
-                <td colspan="5" class="loading">Loading forum messages...</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-    
-    <!-- Systems Tab -->
-    <div id="systemsTab" class="tab-content">
-      <div class="card">
-        <div class="card-title">NCLEX Systems Progress</div>
-        <p style="color: rgba(255,255,255,0.7); margin-bottom: 20px;">
-          Track student progress across all NCLEX systems. System progress is automatically calculated based on completed notes.
-        </p>
-        <div id="systemsOverview" class="loading">Loading systems...</div>
       </div>
     </div>
     
@@ -2027,9 +1941,6 @@
       // Load data for tab (with caching)
       if (tab === 'students') loadStudents();
       if (tab === 'notes') loadNotes();
-      if (tab === 'payments') loadPayments();
-      if (tab === 'forum') loadForum();
-      if (tab === 'systems') loadSystems();
       if (tab === 'settings') loadSettings();
     }
     
@@ -2176,36 +2087,9 @@
           notesCount = '-';
         }
         
-        // Total Payments - ONLY count paid status from payment_records + all Zelle
-        const [manualCount, zelleCount] = await Promise.all([
-          supabase
-            .from('payment_records')
-            .select('*', { count: 'exact', head: true })
-            .eq('status', 'paid'), // Only count paid records
-          supabase
-            .from('payments')
-            .select('*', { count: 'exact', head: true })
-        ]);
-        const totalPayments = (manualCount.count || 0) + (zelleCount.count || 0);
-        
-        // Forum Messages (may fail if RLS restricts access)
-        let forumCount = 0;
-        try {
-          const { count } = await supabase
-            .from('nurses_forum')
-            .select('*', { count: 'exact', head: true })
-            .is('parent_id', null);
-          forumCount = count || 0;
-        } catch (err) {
-          console.warn('Could not load forum count (RLS?):', err);
-          forumCount = '-';
-        }
-        
         const stats = {
           students: studentCount || 0,
-          notes: notesCount,
-          payments: totalPayments,
-          forum: forumCount
+          notes: notesCount
         };
         
         // Cache the results
@@ -2220,10 +2104,6 @@
     function updateStatsUI(stats) {
       document.getElementById('totalStudents').textContent = stats.students;
       document.getElementById('totalNotes').textContent = stats.notes;
-      document.getElementById('totalPayments').textContent = stats.payments;
-      if (document.getElementById('forumMessages')) {
-        document.getElementById('forumMessages').textContent = stats.forum;
-      }
     }
     
     // Helper to parse and format schedule for display
@@ -2424,20 +2304,15 @@
     function renderStudentsTable(data) {
       const { students, groupMap, uniqueGroups, onlineMap, allSessionsMap } = data;
       
-      // Populate group filter dropdown
+      // PERFORMANCE: Immediate UI update for group filter
       const groupFilter = document.getElementById('groupFilterSelect');
       if (groupFilter) {
-        // Store current selection
         const currentSelection = groupFilter.value;
-        
-        // Build options
         const options = ['<option value="">All Groups</option>'];
         Array.from(uniqueGroups).sort().forEach(code => {
           options.push(`<option value="${code}">${formatGroupLabel(code)}</option>`);
         });
         groupFilter.innerHTML = options.join('');
-        
-        // Restore selection if it still exists
         if (currentSelection && uniqueGroups.has(currentSelection)) {
           groupFilter.value = currentSelection;
         }
@@ -2450,52 +2325,56 @@
         return;
       }
       
-      tbody.innerHTML = students.map(student => {
-        const groupCode = canonicalizeGroupCode(student.group_name || student.group || '');
-        const group = groupMap[groupCode];
-        const schedule = group ? formatScheduleDisplay(group.schedule) : '-';
-        const isOnline = onlineMap[student.id];
-        const hasLoggedIn = allSessionsMap[student.id];
+      // PERFORMANCE: Defer heavy DOM operations to next animation frame
+      requestAnimationFrame(() => {
+        // Build all rows in a single innerHTML assignment (faster than createElement loops)
+        tbody.innerHTML = students.map(student => {
+          const groupCode = canonicalizeGroupCode(student.group_name || student.group || '');
+          const group = groupMap[groupCode];
+          const schedule = group ? formatScheduleDisplay(group.schedule) : '-';
+          const isOnline = onlineMap[student.id];
+          const hasLoggedIn = allSessionsMap[student.id];
+          
+          // Check for unpaid balance (negative balance = owes money)
+          const balance = parseFloat(student.balance) || 0;
+          const hasUnpaid = balance < 0;
+          
+          // Determine status class: online (bright green) | was-online (dark green) | default (blue)
+          let statusClass = '';
+          if (isOnline) {
+            statusClass = 'online';
+          } else if (hasLoggedIn) {
+            statusClass = 'was-online';
+          }
+          
+          return `
+          <tr class="${hasUnpaid ? 'has-unpaid' : ''}" data-group="${groupCode}" data-student-name="${(student.name || '').toLowerCase()}" data-active="${student.show_in_grid ? 'true' : 'false'}">
+            <td>${student.name || '-'}</td>
+            <td>${student.email || '-'}</td>
+            <td>${formatGroupLabel(groupCode)}</td>
+            <td>${schedule}</td>
+            <td><span class="badge ${student.show_in_grid ? 'active' : 'inactive'}">${student.show_in_grid ? 'Active' : 'Inactive'}</span></td>
+            <td>
+              <button class="action-btn info ${statusClass}" onclick="showStudentStatus(${student.id}, '${student.name?.replace(/'/g, "\\'") || 'Unknown'}')">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="16" x2="12" y2="12"></line>
+                  <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+              </button>
+              <button class="action-btn view" onclick="impersonateStudent(${student.id}, '${student.name?.replace(/'/g, "\\'") || 'Unknown'}')">👁️ View as Student</button>
+              <button class="action-btn edit" onclick="editStudent(${student.id})">Edit</button>
+              <button class="action-btn delete" onclick="deleteStudent(${student.id})">Delete</button>
+            </td>
+          </tr>
+        `;
+        }).join('');
         
-        // Check for unpaid balance (negative balance = owes money)
-        const balance = parseFloat(student.balance) || 0;
-        const hasUnpaid = balance < 0;
-        
-        // Determine status class: online (bright green) | was-online (dark green) | default (blue)
-        let statusClass = '';
-        if (isOnline) {
-          statusClass = 'online';
-        } else if (hasLoggedIn) {
-          statusClass = 'was-online';
+        // Apply active filter if it's enabled by default
+        if (showActiveOnly) {
+          filterStudents();
         }
-        
-        return `
-        <tr class="${hasUnpaid ? 'has-unpaid' : ''}" data-group="${groupCode}" data-student-name="${(student.name || '').toLowerCase()}" data-active="${student.show_in_grid ? 'true' : 'false'}">
-          <td>${student.name || '-'}</td>
-          <td>${student.email || '-'}</td>
-          <td>${formatGroupLabel(groupCode)}</td>
-          <td>${schedule}</td>
-          <td><span class="badge ${student.show_in_grid ? 'active' : 'inactive'}">${student.show_in_grid ? 'Active' : 'Inactive'}</span></td>
-          <td>
-            <button class="action-btn info ${statusClass}" onclick="showStudentStatus(${student.id}, '${student.name?.replace(/'/g, "\\'") || 'Unknown'}')">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="12" y1="16" x2="12" y2="12"></line>
-                <line x1="12" y1="8" x2="12.01" y2="8"></line>
-              </svg>
-            </button>
-            <button class="action-btn view" onclick="impersonateStudent(${student.id}, '${student.name?.replace(/'/g, "\\'") || 'Unknown'}')">👁️ View as Student</button>
-            <button class="action-btn edit" onclick="editStudent(${student.id})">Edit</button>
-            <button class="action-btn delete" onclick="deleteStudent(${student.id})">Delete</button>
-          </td>
-        </tr>
-      `;
-      }).join('');
-      
-      // Apply active filter if it's enabled by default
-      if (showActiveOnly) {
-        filterStudents();
-      }
+      });
     }
     
     // Load Notes
@@ -2540,160 +2419,6 @@
     }
     
     // Group Notes now handled by standalone Group-Notes.html page
-    
-    // Load Payments
-    async function loadPayments() {
-      try {
-        await ensureAdminSession();
-        // Fetch from BOTH payment_records (manual) and payments (Zelle)
-        const [manualResult, zelleResult] = await Promise.all([
-          supabase
-            .from('payment_records')
-            .select('*, students(name)')
-            .order('date', { ascending: false }),
-          supabase
-            .from('payments')
-            .select('*')
-            .order('payment_date', { ascending: false })
-        ]);
-        
-        if (manualResult.error) throw manualResult.error;
-        if (zelleResult.error) throw zelleResult.error;
-        
-        // Normalize manual payments
-        const manualPayments = (manualResult.data || []).map(p => ({
-          id: p.id,
-          student_name: p.students?.name || 'Unknown',
-          date: p.date,
-          amount: p.amount,
-          status: p.status,
-          method: p.payment_method || 'Manual',
-          source: 'payment_records'
-        }));
-        
-        // Normalize Zelle payments
-        const zellePayments = (zelleResult.data || []).map(p => ({
-          id: p.id,
-          student_name: p.resolved_student_name || p.sender_name || 'Unknown',
-          date: p.payment_date,
-          amount: p.amount,
-          status: 'paid',
-          method: 'Zelle',
-          source: 'payments'
-        }));
-        
-        // Combine and sort by date
-        const allPayments = [...manualPayments, ...zellePayments].sort((a, b) => 
-          new Date(b.date) - new Date(a.date)
-        );
-        
-        const tbody = document.getElementById('paymentsTableBody');
-        
-        if (allPayments.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">💳</div><div>No payments found</div></td></tr>';
-          return;
-        }
-        
-        tbody.innerHTML = allPayments.map(payment => `
-          <tr>
-            <td>${payment.student_name}</td>
-            <td>${payment.date ? new Date(payment.date).toLocaleDateString() : '-'}</td>
-            <td>$${payment.amount || 0}</td>
-            <td><span class="badge ${payment.status === 'paid' ? 'active' : 'inactive'}">${payment.status || 'pending'}</span></td>
-            <td>${payment.method}</td>
-            <td>
-              <button class="action-btn view" onclick="viewPayment('${payment.source}', ${payment.id})">View</button>
-              ${payment.source === 'payment_records' ? `<button class="action-btn delete" onclick="deletePayment(${payment.id})">Delete</button>` : ''}
-            </td>
-          </tr>
-        `).join('');
-      } catch (error) {
-        console.error('Error loading payments:', error);
-        document.getElementById('paymentsTableBody').innerHTML = '<tr><td colspan="6" style="text-align:center; color: #ef4444;">Error loading payments</td></tr>';
-      }
-    }
-    
-    // Load Forum
-    async function loadForum() {
-      try {
-        const { data: messages, error } = await supabase
-          .from('nurses_forum')
-          .select(`
-            *,
-            students (name)
-          `)
-          .is('parent_id', null)
-          .order('created_at', { ascending: false });
-        
-        if (error) throw error;
-        
-        const tbody = document.getElementById('forumTableBody');
-        
-        if (!messages || messages.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" class="empty-state"><div class="empty-state-icon">💬</div><div>No messages found</div></td></tr>';
-          return;
-        }
-        
-        // Count replies for each message
-        const { data: replies } = await supabase
-          .from('nurses_forum')
-          .select('parent_id')
-          .not('parent_id', 'is', null);
-        
-        const replyCounts = {};
-        if (replies) {
-          replies.forEach(reply => {
-            replyCounts[reply.parent_id] = (replyCounts[reply.parent_id] || 0) + 1;
-          });
-        }
-        
-        tbody.innerHTML = messages.map(msg => `
-          <tr>
-            <td>${msg.students?.name || 'Anonymous'}</td>
-            <td>${(msg.message || '').substring(0, 100)}${msg.message?.length > 100 ? '...' : ''}</td>
-            <td>${new Date(msg.created_at).toLocaleDateString()}</td>
-            <td>${replyCounts[msg.id] || 0}</td>
-            <td>
-              <button class="action-btn view" onclick="viewMessage(${msg.id})">View</button>
-              <button class="action-btn delete" onclick="deleteMessage(${msg.id})">Delete</button>
-            </td>
-          </tr>
-        `).join('');
-      } catch (error) {
-        console.error('Error loading forum:', error);
-        document.getElementById('forumTableBody').innerHTML = '<tr><td colspan="5" style="text-align:center; color: #ef4444;">Error loading forum</td></tr>';
-      }
-    }
-    
-    // Load Systems
-    async function loadSystems() {
-      const systemsDiv = document.getElementById('systemsOverview');
-      
-      const systems = [
-        { name: 'Cardiovascular', icon: '❤️' },
-        { name: 'Respiratory', icon: '🫁' },
-        { name: 'Neurological', icon: '🧠' },
-        { name: 'Gastrointestinal', icon: '🏥' },
-        { name: 'Renal', icon: '💧' },
-        { name: 'Endocrine', icon: '⚗️' },
-        { name: 'Musculoskeletal', icon: '🦴' },
-        { name: 'Integumentary', icon: '🩹' },
-        { name: 'Immune', icon: '🛡️' },
-        { name: 'Hematologic', icon: '🩸' }
-      ];
-      
-      systemsDiv.innerHTML = `
-        <div class="stats-grid">
-          ${systems.map(sys => `
-            <div class="stat-card">
-              <div style="font-size: 48px; margin-bottom: 12px;">${sys.icon}</div>
-              <div style="font-weight: 600; color: white; margin-bottom: 8px;">${sys.name}</div>
-              <div style="font-size: 12px; color: rgba(255,255,255,0.6);">System Module</div>
-            </div>
-          `).join('')}
-        </div>
-      `;
-    }
     
     // Student Modal Functions
     function openStudentModal() {
@@ -2796,190 +2521,213 @@
           return;
         }
         
-        const { data: sessions, error } = await supabase
-          .from('student_sessions')
-          .select('*')
-          .eq('student_id', numericStudentId)
-          .order('session_start', { ascending: false })
-          .limit(20);
-        
-        if (error) {
-          console.error('Session query error:', error);
-          throw error;
-        }
-        
-        // Calculate statistics (FIX: student_sessions doesn't have duration_seconds, page_views, or notes_viewed)
-        // We need to calculate duration from session_start and session_end
-        const activeSession = sessions?.find(s => s.is_active);
-        const totalSessions = sessions?.length || 0;
-        
-        // Calculate total seconds by summing up session durations
-        const totalSeconds = sessions?.reduce((sum, s) => {
-          if (s.session_end && s.session_start) {
-            const start = new Date(s.session_start);
-            const end = new Date(s.session_end);
-            return sum + Math.floor((end - start) / 1000);
-          }
-          // For active sessions, calculate from start to now
-          if (s.is_active && s.session_start) {
-            const start = new Date(s.session_start);
-            const now = new Date();
-            return sum + Math.floor((now - start) / 1000);
-          }
-          return sum;
-        }, 0) || 0;
-        
-        const totalHours = (totalSeconds / 3600).toFixed(1);
-        const avgSessionMinutes = totalSessions > 0 ? ((totalSeconds / totalSessions) / 60).toFixed(1) : 0;
-        
-        // Build status HTML
-        let statusHTML = `
+        // PERFORMANCE: Show modal immediately with loading state
+        const modal = document.getElementById('statusModal');
+        const modalContent = document.getElementById('statusModalContent');
+        modalContent.innerHTML = `
           <div class="status-modal-header">
             <h3>${studentName} - Session Analytics</h3>
             <button class="close-btn" onclick="closeStatusModal()">×</button>
           </div>
-          <div class="status-modal-body">
+          <div class="status-modal-body" style="text-align:center; padding: 40px;">
+            <div style="color: rgba(255,255,255,0.6);">Loading session data...</div>
+          </div>
         `;
+        modal.style.display = 'flex';
         
-        // Current Status Section
-        if (activeSession) {
-          const loginTime = new Date(activeSession.session_start);
-          const lastActivity = new Date(activeSession.last_activity);
-          const now = new Date();
-          const sessionDuration = Math.floor((now - loginTime) / 1000 / 60); // minutes
-          const idleMinutes = Math.floor((now - lastActivity) / 1000 / 60);
+        // PERFORMANCE: Defer data fetching to next frame
+        requestAnimationFrame(async () => {
+          const { data: sessions, error } = await supabase
+            .from('student_sessions')
+            .select('*')
+            .eq('student_id', numericStudentId)
+            .order('session_start', { ascending: false })
+            .limit(20);
           
-          statusHTML += `
-            <div class="status-indicator online">
-              <span class="status-dot"></span>
-              <span class="status-text">🟢 Currently Online</span>
-            </div>
-            <div class="status-details">
-              <div class="status-row">
-                <span class="status-label">Login Time:</span>
-                <span class="status-value">${loginTime.toLocaleString()}</span>
+          if (error) {
+            console.error('Session query error:', error);
+            modalContent.innerHTML = `
+              <div class="status-modal-header">
+                <h3>${studentName} - Session Analytics</h3>
+                <button class="close-btn" onclick="closeStatusModal()">×</button>
               </div>
-              <div class="status-row">
-                <span class="status-label">Session Duration:</span>
-                <span class="status-value">${sessionDuration} minutes</span>
+              <div class="status-modal-body" style="text-align:center; padding: 40px; color: #ef4444;">
+                Failed to load session data
               </div>
-              <div class="status-row">
-                <span class="status-label">Last Activity:</span>
-                <span class="status-value">${idleMinutes === 0 ? 'Just now' : idleMinutes + ' minutes ago'}</span>
-              </div>
-            </div>
-          `;
-        } else if (sessions && sessions.length > 0) {
-          const lastSession = sessions[0];
-          // Calculate last session duration
-          let lastSessionMinutes = 0;
-          if (lastSession.session_end && lastSession.session_start) {
-            const start = new Date(lastSession.session_start);
-            const end = new Date(lastSession.session_end);
-            lastSessionMinutes = Math.floor((end - start) / 1000 / 60);
+            `;
+            return;
           }
-          const lastSeen = new Date(lastSession.session_end || lastSession.last_activity);
           
-          statusHTML += `
-            <div class="status-indicator offline">
-              <span class="status-dot"></span>
-              <span class="status-text">🔴 Offline</span>
-            </div>
-            <div class="status-details">
-              <div class="status-row">
-                <span class="status-label">Last Seen:</span>
-                <span class="status-value">${lastSeen.toLocaleString()}</span>
-              </div>
-              <div class="status-row">
-                <span class="status-label">Last Session Duration:</span>
-                <span class="status-value">${lastSessionMinutes} minutes</span>
-              </div>
-            </div>
-          `;
-        } else {
-          statusHTML += `
-            <div class="status-indicator offline">
-              <span class="status-dot"></span>
-              <span class="status-text">⚪ Never Logged In</span>
-            </div>
-          `;
-        }
-        
-        // Overall Statistics Section
-        if (totalSessions > 0) {
-          statusHTML += `
-            <div class="stats-section">
-              <h4>📊 Overall Statistics</h4>
-              <div class="stats-grid">
-                <div class="stat-item">
-                  <div class="stat-value">${totalSessions}</div>
-                  <div class="stat-label">Total Sessions</div>
-                </div>
-                <div class="stat-item">
-                  <div class="stat-value">${totalHours}h</div>
-                  <div class="stat-label">Total Study Time</div>
-                </div>
-                <div class="stat-item">
-                  <div class="stat-value">${avgSessionMinutes}m</div>
-                  <div class="stat-label">Avg Session</div>
-                </div>
-              </div>
-            </div>
-          `;
-        }
-        
-        // Recent Session History
-        if (sessions && sessions.length > 0) {
-          statusHTML += `
-            <div class="status-history">
-              <h4>📅 Recent Session History</h4>
-              <div class="history-list">
-          `;
+          // Calculate statistics (FIX: student_sessions doesn't have duration_seconds, page_views, or notes_viewed)
+          // We need to calculate duration from session_start and session_end
+          const activeSession = sessions?.find(s => s.is_active);
+          const totalSessions = sessions?.length || 0;
           
-          sessions.slice(0, 10).forEach(session => {
-            const start = new Date(session.session_start);
-            const end = session.session_end ? new Date(session.session_end) : null;
-            
-            // FIXED: Calculate duration from session_start and session_end (not from non-existent duration_seconds field)
-            let durationMinutes = 0;
-            if (end && start) {
-              durationMinutes = Math.floor((end - start) / 1000 / 60);
-            } else if (session.is_active && start) {
-              // For active sessions, calculate duration from start to now
-              durationMinutes = Math.floor((new Date() - start) / 1000 / 60);
+          // Calculate total seconds by summing up session durations
+          const totalSeconds = sessions?.reduce((sum, s) => {
+            if (s.session_end && s.session_start) {
+              const start = new Date(s.session_start);
+              const end = new Date(s.session_end);
+              return sum + Math.floor((end - start) / 1000);
             }
-            
-            const hours = Math.floor(durationMinutes / 60);
-            const minutes = durationMinutes % 60;
-            const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+            // For active sessions, calculate from start to now
+            if (s.is_active && s.session_start) {
+              const start = new Date(s.session_start);
+              const now = new Date();
+              return sum + Math.floor((now - start) / 1000);
+            }
+            return sum;
+          }, 0) || 0;
+          
+          const totalHours = (totalSeconds / 3600).toFixed(1);
+          const avgSessionMinutes = totalSessions > 0 ? ((totalSeconds / totalSessions) / 60).toFixed(1) : 0;
+          
+          // Build status HTML
+          let statusHTML = `
+            <div class="status-modal-header">
+              <h3>${studentName} - Session Analytics</h3>
+              <button class="close-btn" onclick="closeStatusModal()">×</button>
+            </div>
+            <div class="status-modal-body">
+          `;
+          
+          // Current Status Section
+          if (activeSession) {
+            const loginTime = new Date(activeSession.session_start);
+            const lastActivity = new Date(activeSession.last_activity);
+            const now = new Date();
+            const sessionDuration = Math.floor((now - loginTime) / 1000 / 60); // minutes
+            const idleMinutes = Math.floor((now - lastActivity) / 1000 / 60);
             
             statusHTML += `
-              <div class="history-item">
-                <div class="history-main">
-                  <span class="history-date">${start.toLocaleDateString()} ${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                  <span class="history-duration">${session.is_active ? '🟢 Active - ' + durationText : durationText}</span>
+              <div class="status-indicator online">
+                <span class="status-dot"></span>
+                <span class="status-text">🟢 Currently Online</span>
+              </div>
+              <div class="status-details">
+                <div class="status-row">
+                  <span class="status-label">Login Time:</span>
+                  <span class="status-value">${loginTime.toLocaleString()}</span>
                 </div>
-                <div class="history-details">
-                  <span>⏱️ Duration: ${durationText}</span>
-                  ${end ? '<span>🏁 Ended: ' + end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + '</span>' : '<span>🟢 Currently Active</span>'}
+                <div class="status-row">
+                  <span class="status-label">Session Duration:</span>
+                  <span class="status-value">${sessionDuration} minutes</span>
+                </div>
+                <div class="status-row">
+                  <span class="status-label">Last Activity:</span>
+                  <span class="status-value">${idleMinutes === 0 ? 'Just now' : idleMinutes + ' minutes ago'}</span>
                 </div>
               </div>
             `;
-          });
-          
-          statusHTML += `
+          } else if (sessions && sessions.length > 0) {
+            const lastSession = sessions[0];
+            // Calculate last session duration
+            let lastSessionMinutes = 0;
+            if (lastSession.session_end && lastSession.session_start) {
+              const start = new Date(lastSession.session_start);
+              const end = new Date(lastSession.session_end);
+              lastSessionMinutes = Math.floor((end - start) / 1000 / 60);
+            }
+            const lastSeen = new Date(lastSession.session_end || lastSession.last_activity);
+            
+            statusHTML += `
+              <div class="status-indicator offline">
+                <span class="status-dot"></span>
+                <span class="status-text">🔴 Offline</span>
               </div>
-            </div>
-          `;
-        }
-        
-        statusHTML += `</div>`;
-        
-        // Show modal
-        const modal = document.getElementById('statusModal');
-        const modalContent = document.getElementById('statusModalContent');
-        modalContent.innerHTML = statusHTML;
-        modal.style.display = 'flex';
+              <div class="status-details">
+                <div class="status-row">
+                  <span class="status-label">Last Seen:</span>
+                  <span class="status-value">${lastSeen.toLocaleString()}</span>
+                </div>
+                <div class="status-row">
+                  <span class="status-label">Last Session Duration:</span>
+                  <span class="status-value">${lastSessionMinutes} minutes</span>
+                </div>
+              </div>
+            `;
+          } else {
+            statusHTML += `
+              <div class="status-indicator offline">
+                <span class="status-dot"></span>
+                <span class="status-text">⚪ Never Logged In</span>
+              </div>
+            `;
+          }
+          
+          // Overall Statistics Section
+          if (totalSessions > 0) {
+            statusHTML += `
+              <div class="stats-section">
+                <h4>📊 Overall Statistics</h4>
+                <div class="stats-grid">
+                  <div class="stat-item">
+                    <div class="stat-value">${totalSessions}</div>
+                    <div class="stat-label">Total Sessions</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-value">${totalHours}h</div>
+                    <div class="stat-label">Total Study Time</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-value">${avgSessionMinutes}m</div>
+                    <div class="stat-label">Avg Session</div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }
+          
+          // Recent Session History
+          if (sessions && sessions.length > 0) {
+            statusHTML += `
+              <div class="status-history">
+                <h4>📅 Recent Session History</h4>
+                <div class="history-list">
+            `;
+            
+            sessions.slice(0, 10).forEach(session => {
+              const start = new Date(session.session_start);
+              const end = session.session_end ? new Date(session.session_end) : null;
+              
+              // FIXED: Calculate duration from session_start and session_end (not from non-existent duration_seconds field)
+              let durationMinutes = 0;
+              if (end && start) {
+                durationMinutes = Math.floor((end - start) / 1000 / 60);
+              } else if (session.is_active && start) {
+                // For active sessions, calculate duration from start to now
+                durationMinutes = Math.floor((new Date() - start) / 1000 / 60);
+              }
+              
+              const hours = Math.floor(durationMinutes / 60);
+              const minutes = durationMinutes % 60;
+              const durationText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+              
+              statusHTML += `
+                <div class="history-item">
+                  <div class="history-main">
+                    <span class="history-date">${start.toLocaleDateString()} ${start.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                    <span class="history-duration">${session.is_active ? '🟢 Active - ' + durationText : durationText}</span>
+                  </div>
+                  <div class="history-details">
+                    <span>⏱️ Duration: ${durationText}</span>
+                    ${end ? '<span>🏁 Ended: ' + end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) + '</span>' : '<span>🟢 Currently Active</span>'}
+                  </div>
+                </div>
+              `;
+            });
+            
+            statusHTML += `
+                </div>
+              </div>
+            `;
+          }
+          
+          statusHTML += `</div>`;
+          
+          // Update modal content
+          modalContent.innerHTML = statusHTML;
+        });
         
       } catch (error) {
         console.error('Error loading student status:', error);
@@ -3258,35 +3006,42 @@
     function filterStudents() {
       const search = document.getElementById('studentSearch').value.toLowerCase();
       const selectedGroup = document.getElementById('groupFilterSelect')?.value || '';
-      const rows = document.querySelectorAll('#studentsTableBody tr');
       
-      // PERFORMANCE: Use document fragment to batch DOM updates
-      let visibleCount = 0;
+      // PERFORMANCE: Immediate count update, defer row filtering
+      const tbody = document.getElementById('studentsTableBody');
+      if (!tbody) return;
       
-      rows.forEach(row => {
-        const text = row.textContent.toLowerCase();
-        const rowGroup = row.getAttribute('data-group') || '';
-        const matchesSearch = text.includes(search);
-        const matchesGroup = !selectedGroup || rowGroup === selectedGroup;
+      const rows = tbody.querySelectorAll('tr');
+      
+      // PERFORMANCE: Defer heavy DOM operations to next animation frame
+      requestAnimationFrame(() => {
+        let visibleCount = 0;
         
-        // Check if student is online (has .online class on status button)
-        const statusBtn = row.querySelector('.action-btn.info');
-        const isOnline = statusBtn && statusBtn.classList.contains('online');
-        
-        // Check if student is active (data-active attribute)
-        const isActive = row.getAttribute('data-active') === 'true';
-        
-        // Show row if it matches all filters:
-        // - search term AND
-        // - group filter AND
-        // - online filter (if enabled) AND
-        // - active filter (if enabled)
-        const shouldShow = matchesSearch && 
-                          matchesGroup && 
-                          (!showOnlineOnly || isOnline) &&
-                          (!showActiveOnly || isActive);
-        row.style.display = shouldShow ? '' : 'none';
-        if (shouldShow) visibleCount++;
+        rows.forEach(row => {
+          const text = row.textContent.toLowerCase();
+          const rowGroup = row.getAttribute('data-group') || '';
+          const matchesSearch = text.includes(search);
+          const matchesGroup = !selectedGroup || rowGroup === selectedGroup;
+          
+          // Check if student is online (has .online class on status button)
+          const statusBtn = row.querySelector('.action-btn.info');
+          const isOnline = statusBtn && statusBtn.classList.contains('online');
+          
+          // Check if student is active (data-active attribute)
+          const isActive = row.getAttribute('data-active') === 'true';
+          
+          // Show row if it matches all filters:
+          // - search term AND
+          // - group filter AND
+          // - online filter (if enabled) AND
+          // - active filter (if enabled)
+          const shouldShow = matchesSearch && 
+                            matchesGroup && 
+                            (!showOnlineOnly || isOnline) &&
+                            (!showActiveOnly || isActive);
+          row.style.display = shouldShow ? '' : 'none';
+          if (shouldShow) visibleCount++;
+        });
       });
     }
     
@@ -3295,20 +3050,6 @@
     const debouncedFilterNotes = debounce(() => {
       const search = document.getElementById('notesSearch')?.value.toLowerCase() || '';
       const rows = document.querySelectorAll('#notesTableBody tr');
-      rows.forEach(row => {
-        row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
-      });
-    }, 300);
-    const debouncedFilterPayments = debounce(() => {
-      const search = document.getElementById('paymentsSearch')?.value.toLowerCase() || '';
-      const rows = document.querySelectorAll('#paymentsTableBody tr');
-      rows.forEach(row => {
-        row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
-      });
-    }, 300);
-    const debouncedFilterForum = debounce(() => {
-      const search = document.getElementById('forumSearch')?.value.toLowerCase() || '';
-      const rows = document.querySelectorAll('#forumTableBody tr');
       rows.forEach(row => {
         row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
       });
@@ -3901,14 +3642,36 @@
               📊 Question Responses
             </button>
           </div>
-          <div style="margin-bottom: 24px;">
+          
+          <div style="display: flex; gap: 12px; margin-bottom: 16px;">
             <input 
               type="text" 
               id="alertSearchInput" 
               placeholder="🔍 Search by student name..." 
               oninput="filterAlertsByStudent(this.value)"
-              style="width: 100%; padding: 12px 16px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: white; font-size: 14px;"
+              style="flex: 1; padding: 12px 16px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: white; font-size: 14px;"
             />
+            <button 
+              id="filterAllBtn"
+              onclick="filterAlertsByStatus('all')" 
+              class="alert-filter-btn active"
+              style="padding: 12px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: 1px solid rgba(102,126,234,0.5); border-radius: 10px; color: white; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; white-space: nowrap;">
+              👥 All
+            </button>
+            <button 
+              id="filterReadBtn"
+              onclick="filterAlertsByStatus('read')" 
+              class="alert-filter-btn"
+              style="padding: 12px 20px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: white; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; white-space: nowrap;">
+              ✅ Read
+            </button>
+            <button 
+              id="filterUnreadBtn"
+              onclick="filterAlertsByStatus('unread')" 
+              class="alert-filter-btn"
+              style="padding: 12px 20px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; color: white; cursor: pointer; font-size: 14px; font-weight: 600; transition: all 0.2s; white-space: nowrap;">
+              ⏳ Unread
+            </button>
           </div>
         `;
         
@@ -3968,17 +3731,15 @@
             });
           });
           
-          // Show ONLY the most recent alert (ONE example)
+          // Show ALL alerts with their student lists
           let html = tabsHTML;
           const allGroups = Object.values(groupedAlerts);
           
           // Sort by most recent first
           allGroups.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
           
-          // Take only the FIRST (most recent) alert
-          const group = allGroups[0];
-          
-          if (group) {
+          // Loop through ALL alerts
+          allGroups.forEach(group => {
             const alertTypeIcon = group.alert_type === 'urgent' ? '🚨' : group.alert_type === 'info' ? 'ℹ️' : '⚠️';
             const alertTypeColor = group.alert_type === 'urgent' ? '#ef4444' : group.alert_type === 'info' ? '#3b82f6' : '#f59e0b';
             const readCount = group.students.filter(s => s.is_read).length;
@@ -4032,11 +3793,11 @@
                     </thead>
                     <tbody>
                       ${group.students.sort((a, b) => {
-                        // Sort: read first, then by name
+                        // Sort: unread first, then by name
                         if (a.is_read === b.is_read) return a.name.localeCompare(b.name);
-                        return a.is_read ? -1 : 1;
+                        return a.is_read ? 1 : -1;
                       }).map(student => `
-                        <tr style="background: ${student.is_read ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)'};">
+                        <tr class="alert-student-row" data-read-status="${student.is_read ? 'read' : 'unread'}" style="background: ${student.is_read ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)'};">
                           <td>
                             ${student.is_read ? 
                               '<span style="font-size: 24px; filter: drop-shadow(0 2px 4px rgba(34,197,94,0.5));">✅</span>' : 
@@ -4056,7 +3817,7 @@
                 </div>
               </div>
             `;
-          }
+          });
           
           content.innerHTML = html;
           
@@ -4227,6 +3988,43 @@
           const matches = studentNames.includes(lowerSearch);
           card.style.display = matches ? '' : 'none';
         }
+      });
+    }
+    
+    // Filter alerts by read/unread status
+    function filterAlertsByStatus(status) {
+      const rows = document.querySelectorAll('.alert-student-row');
+      
+      // Update button styles
+      document.querySelectorAll('.alert-filter-btn').forEach(btn => {
+        btn.style.background = 'rgba(255,255,255,0.05)';
+        btn.style.borderColor = 'rgba(255,255,255,0.1)';
+      });
+      
+      const activeBtn = status === 'all' ? document.getElementById('filterAllBtn') :
+                        status === 'read' ? document.getElementById('filterReadBtn') :
+                        document.getElementById('filterUnreadBtn');
+      
+      if (activeBtn) {
+        activeBtn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+        activeBtn.style.borderColor = 'rgba(102,126,234,0.5)';
+      }
+      
+      // Filter rows
+      rows.forEach(row => {
+        if (status === 'all') {
+          row.style.display = '';
+        } else {
+          const rowStatus = row.getAttribute('data-read-status');
+          row.style.display = rowStatus === status ? '' : 'none';
+        }
+      });
+      
+      // Update badge counts for each alert card
+      document.querySelectorAll('.alert-card').forEach(card => {
+        const visibleRows = card.querySelectorAll('.alert-student-row[style*="display: ;"], .alert-student-row:not([style*="display: none"])');
+        // If no students are visible in this card, hide the entire card
+        card.style.display = visibleRows.length > 0 ? '' : 'none';
       });
     }
   </script>
