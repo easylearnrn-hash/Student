@@ -4836,8 +4836,16 @@
         function collectPaymentsForStudentSimple(student) {
           if (!student) return [];
 
-          if (DEBUG_MODE) {
+          // DEBUG: Specific students
+          const debugStudents = ['stella ghazaryan', 'anahit aslanian', 'sona husikyan'];
+          const isDebugStudent = debugStudents.some(name => 
+            (student.name || '').toLowerCase().includes(name)
+          );
+
+          if (isDebugStudent || DEBUG_MODE) {
             console.log('💳 collectPaymentsForStudentSimple called for:', student.name);
+            console.log('   Student ID:', student.id);
+            console.log('   Student aliases:', student.aliases);
             console.log('   window.paymentsCache exists?', !!window.paymentsCache);
             console.log('   window.paymentsCache length:', (window.paymentsCache || []).length);
             console.log('   creditPaymentsLookup exists?', !!creditPaymentsLookup);
@@ -4855,6 +4863,10 @@
             matchNames.add(studentName);
           }
           getStudentAliasNames(student).forEach(alias => matchNames.add(alias));
+
+          if (isDebugStudent) {
+            console.log('   📝 Match names for', student.name, ':', Array.from(matchNames));
+          }
 
           const idKey = student?.id != null ? String(student.id) : null;
           
@@ -4920,10 +4932,22 @@
             });
           }
 
-          if (DEBUG_MODE) {
+          if (isDebugStudent || DEBUG_MODE) {
             console.log(`   ✅ Matched ${matchedPayments.length} total payments for ${student.name}`);
             if (matchedPayments.length > 0) {
-              console.log('   Payment dates:', matchedPayments.map(p => `${p.dateStr} (${p.source})`));
+              console.log('   Payment dates:', matchedPayments.map(p => `${p.dateStr} $${p.amount} (${p.source})`));
+            } else {
+              console.log('   ❌ NO PAYMENTS MATCHED - checking first 5 payments in cache:');
+              (window.paymentsCache || []).slice(0, 5).forEach(p => {
+                console.log('      Payment:', {
+                  student_id: p.student_id,
+                  linked_student_id: p.linked_student_id,
+                  payer_name: p.payer_name,
+                  resolved_student_name: p.resolved_student_name,
+                  amount: p.amount,
+                  date: normalizePaymentDate(p)
+                });
+              });
             }
           }
           
