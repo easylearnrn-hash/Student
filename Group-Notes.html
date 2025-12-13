@@ -739,13 +739,23 @@
     // ===== EMAIL NOTIFICATION FOR POSTED NOTES =====
     async function sendNotePostedEmail(groupName, noteTitle, noteCategory) {
       try {
-        console.log(`📧 Sending email notification for posted note to Group ${groupName}`);
+        console.log(`📧 Sending email notification for posted note to ${groupName}`);
+        const groupLetter = groupName?.replace('Group ', '').trim();
+        const encodedGroupLetter = encodeURIComponent(groupLetter);
+        const encodedGroupName = encodeURIComponent(groupName);
         
+        if (!groupLetter) {
+          console.warn('⚠️ Unable to determine group letter from', groupName);
+          return;
+        }
+
+        const groupFilter = `group_letter.eq.${encodedGroupLetter},group_name.eq.${encodedGroupLetter},group_name.eq.${encodedGroupName}`;
+
         // Get all students in this specific group
         const { data: students, error: studentsError } = await supabase
           .from('students')
-          .select('email, name, group_name')
-          .eq('group_name', groupName)
+          .select('email, name, group_letter, group_name')
+          .or(groupFilter)
           .eq('show_in_grid', true)
           .not('email', 'is', null);
 
@@ -4096,8 +4106,9 @@
 
         if (error) throw error;
 
-        // Capture count before clearing
-        const count = selectedFilteredNotes.size;
+  // Capture count before clearing
+  const count = selectedFilteredNotes.size;
+  const categoryLabel = currentSystemName || 'Multiple Systems';
         
         // Update permissions array immediately for instant UI feedback
         noteIdsArray.forEach(noteId => {
@@ -4118,7 +4129,21 @@
         // Background refresh to sync badges
         loadData();
         
-        await customAlert('Success', `Posted ${count} note(s) to ${currentGroup}`);
+        // Send email notifications after permissions are saved + UI updated
+        let emailSummary = '';
+        try {
+          const emailResult = await sendNotePostedEmail(currentGroup, `${count} new note(s)`, categoryLabel);
+          if (emailResult) {
+            emailSummary = `\n📧 Email sent to ${emailResult.successCount} student(s)`;
+          } else {
+            emailSummary = `\n📧 Email notifications queued`;
+          }
+        } catch (emailErr) {
+          console.error('❌ Email notification failed:', emailErr);
+          emailSummary = `\n⚠️ Email notifications failed to send`;
+        }
+
+        await customAlert('Success', `Posted ${count} note(s) to ${currentGroup}${emailSummary}`);
 
       } catch (error) {
         console.error('Error posting notes:', error);
