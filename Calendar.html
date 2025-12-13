@@ -5147,11 +5147,68 @@
           const classDate = createDateFromDateStr(dateStr);
           if (!classDate) return null;
 
-          // STRICT MATCHING: Only exact date match counts as paid
-          // A payment made on Dec 5 will ONLY cover a class on Dec 5, not all December classes
+          // Priority 1: Exact date match
           const exactMatch = studentPayments.find(payment => payment.dateStr === dateStr);
+          if (exactMatch) return exactMatch;
+
+          // Priority 2: Grace period - payment made between class date and day before next class (11:59 PM)
+          // Example: Class on Oct 1, next class Oct 5 → payments from Oct 1-4 (until Oct 4 11:59 PM) count for Oct 1
+          const nextClassDate = findNextClassDate(student, dateStr);
+          if (nextClassDate) {
+            // Grace period ends the day BEFORE next class (at 11:59 PM)
+            const gracePeriodEnd = createDateFromDateStr(nextClassDate);
+            if (gracePeriodEnd) {
+              gracePeriodEnd.setDate(gracePeriodEnd.getDate() - 1); // Day before next class
+              const gracePeriodEndStr = formatDateYYYYMMDD(gracePeriodEnd);
+              
+              // Find payment made between classDate (inclusive) and gracePeriodEndStr (inclusive)
+              const gracePayment = studentPayments.find(payment => 
+                payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
+              );
+              
+              if (gracePayment) return gracePayment;
+            }
+          }
           
-          return exactMatch || null;
+          return null;
+        }
+
+        // Helper: Find the next class date for this student after the given date
+        function findNextClassDate(student, currentDateStr) {
+          const studentId = student.id != null ? String(student.id) : null;
+          const allClassDates = [];
+          
+          // Collect all class dates for this student across all groups
+          const groupList = window.groupsCache || [];
+          groupList.forEach(groupRecord => {
+            const occurrences = generateGroupOccurrences(groupRecord);
+            occurrences.forEach(occurrence => {
+              // Check if student is in this group
+              const groupNameRaw = groupRecord.group_name || groupRecord.name;
+              const groupCode = groupRecord.group_code || canonicalizeGroupCode(groupNameRaw);
+              const canonicalKey = groupCode || 'ungrouped';
+              const fallbackKey = normalizeGroupKey(groupNameRaw);
+              
+              const isInGroup = (studentsByGroup[canonicalKey] || studentsByGroup[fallbackKey] || [])
+                .some(s => String(s.id) === studentId || s.name === student.name);
+              
+              if (!isInGroup) return;
+              
+              // Check visibility
+              const studentCreationDateStr = getStudentVisibilityThreshold(student);
+              if (occurrence.dateStr < studentCreationDateStr) return;
+              if (occurrence.dateStr < CALENDAR_START_DATE_STR) return;
+              
+              allClassDates.push(occurrence.dateStr);
+            });
+          });
+          
+          // Remove duplicates and sort
+          const uniqueDates = [...new Set(allClassDates)].sort();
+          
+          // Find the next date after currentDateStr
+          const nextDate = uniqueDates.find(date => date > currentDateStr);
+          return nextDate || null;
         }
 
         /**
