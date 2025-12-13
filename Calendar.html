@@ -5169,31 +5169,59 @@
         }
         
         function findPaymentMatchForClass(student, dateStr, pricePerClass) {
+          // STRICT RULE: ALL dots start RED. Only a matched payment can make it GREEN.
+          
           const studentPayments = collectPaymentsForStudentSimple(student);
           if (!studentPayments.length) return null;
 
-          const todayParts = getTodayLAParts();
-          const todayStr = todayParts ? formatDateYYYYMMDD(createDateFromParts(
-            Number(todayParts.year),
-            Number(todayParts.month) - 1,
-            Number(todayParts.day)
-          )) : formatDateYYYYMMDD(new Date());
+          const validPrice = Number(pricePerClass) || 0;
+          if (validPrice <= 0) return null;
+
+          // HARD CUTOFF: Only classes on or after December 1, 2025 are considered
+          if (dateStr < '2025-12-01') {
+            // Historical data: Use simple 3-day grace period
+            const exactMatch = studentPayments.find(payment => payment.dateStr === dateStr);
+            if (exactMatch) return exactMatch;
+            
+            const classDateObj = createDateFromDateStr(dateStr);
+            const threeDaysAfter = new Date(classDateObj);
+            threeDaysAfter.setDate(threeDaysAfter.getDate() + 3);
+            const gracePeriodEndStr = formatDateYYYYMMDD(threeDaysAfter);
+            
+            const historicalGracePayment = studentPayments.find(payment => 
+              payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
+            );
+            
+            return historicalGracePayment || null;
+          }
+
+          // DECEMBER 1+ STRICT RULES
+          // Extract class month for same-month validation
           const classDate = createDateFromDateStr(dateStr);
           if (!classDate) return null;
+          const classMonth = classDate.getMonth();
+          const classYear = classDate.getFullYear();
 
-          const validPrice = Number(pricePerClass) || 0;
+          // Filter payments: ONLY from the SAME MONTH as the class
+          const sameMonthPayments = studentPayments.filter(payment => {
+            if (!payment.dateStr || payment.dateStr < '2025-12-01') return false;
+            const paymentDate = createDateFromDateStr(payment.dateStr);
+            if (!paymentDate) return false;
+            return paymentDate.getMonth() === classMonth && paymentDate.getFullYear() === classYear;
+          });
 
-          // Priority 1: Exact date match
-          const exactMatch = studentPayments.find(payment => payment.dateStr === dateStr);
+          if (!sameMonthPayments.length) return null;
+
+          // Priority 1: Exact date match (payment made ON class date)
+          const exactMatch = sameMonthPayments.find(payment => payment.dateStr === dateStr);
           if (exactMatch) {
             // Check if this payment can cover multiple classes
             const paymentAmount = Number(exactMatch.amount) || 0;
             if (paymentAmount >= validPrice * 2) {
-              // Large payment - initialize allocation tracking
               if (!paymentAllocationTracker.has(exactMatch.id)) {
                 paymentAllocationTracker.set(exactMatch.id, {
                   total: paymentAmount,
-                  used: validPrice, // Use one class worth for this class
+                  used: validPrice,
                   remaining: paymentAmount - validPrice
                 });
               }
@@ -5201,45 +5229,28 @@
             return exactMatch;
           }
 
-          // Priority 2: Check if a nearby large payment can cover this class
-          // Look for payments in grace period that have remaining balance
-          let gracePeriodPayments = [];
-          
-          if (dateStr >= '2025-12-01') {
-            // December 2025+: Use grace period until day before next class
-            const nextClassDate = findNextClassDate(student, dateStr);
-            if (nextClassDate) {
-              const gracePeriodEnd = createDateFromDateStr(nextClassDate);
-              if (gracePeriodEnd) {
-                gracePeriodEnd.setDate(gracePeriodEnd.getDate() - 1);
-                const gracePeriodEndStr = formatDateYYYYMMDD(gracePeriodEnd);
-                
-                gracePeriodPayments = studentPayments.filter(payment => 
-                  payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
-                );
-              }
-            }
-          } else {
-            // Historical data: 3-day grace period
-            const classDateObj = createDateFromDateStr(dateStr);
-            const threeDaysAfter = new Date(classDateObj);
-            threeDaysAfter.setDate(threeDaysAfter.getDate() + 3);
-            const gracePeriodEndStr = formatDateYYYYMMDD(threeDaysAfter);
-            
-            gracePeriodPayments = studentPayments.filter(payment => 
-              payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
-            );
-          }
+          // Priority 2: GRACE PERIOD - Payment made BEFORE next class starts
+          // Grace period = from class date until 11:59 PM the day BEFORE next class
+          const nextClassDate = findNextClassDate(student, dateStr);
+          if (!nextClassDate) return null; // No next class = no grace period
 
-          // Find a payment with remaining balance that can cover this class
-          for (const payment of gracePeriodPayments) {
+          // Grace period ends the day BEFORE next class at 11:59 PM
+          const gracePeriodEnd = createDateFromDateStr(nextClassDate);
+          gracePeriodEnd.setDate(gracePeriodEnd.getDate() - 1); // Day before next class
+          const gracePeriodEndStr = formatDateYYYYMMDD(gracePeriodEnd);
+
+          // Find payments within grace period that have remaining balance
+          for (const payment of sameMonthPayments) {
+            // Payment must be AFTER class date but BEFORE grace period ends
+            if (payment.dateStr <= dateStr || payment.dateStr > gracePeriodEndStr) continue;
+
             const paymentAmount = Number(payment.amount) || 0;
             
             // Check allocation tracker
             if (paymentAllocationTracker.has(payment.id)) {
               const allocation = paymentAllocationTracker.get(payment.id);
               if (allocation.remaining >= validPrice) {
-                // This payment has enough remaining balance - use it
+                // This payment has enough remaining balance
                 allocation.used += validPrice;
                 allocation.remaining -= validPrice;
                 return payment;
@@ -5247,7 +5258,6 @@
             } else {
               // Payment not yet tracked - check if it can cover this class
               if (paymentAmount >= validPrice) {
-                // Initialize tracking for this payment
                 paymentAllocationTracker.set(payment.id, {
                   total: paymentAmount,
                   used: validPrice,
@@ -5257,7 +5267,8 @@
               }
             }
           }
-          
+
+          // FORBIDDEN: No payment match = RED dot (ALWAYS)
           return null;
         }
 
@@ -5378,7 +5389,7 @@
             };
           }
 
-          // Priority 3: Check for payment match (with payment splitting for large payments)
+          // Priority 3: Check for payment match (STRICT: only matched payments make dots green)
           const paymentMatch = findPaymentMatchForClass(student, dateStr, validPrice);
           if (paymentMatch && paymentMatch.amount > 0) {
             const paidAmount = paymentMatch.amount;
@@ -5398,13 +5409,15 @@
             };
           }
 
-          // Priority 4: Check if paid via credit/balance usage record (fallback if no cash payment)
-          // Check both creditLookup and CreditPaymentManager for real-time updates
+          // Priority 4: MANUAL CREDIT ONLY - Never automatic
+          // STRICT RULE: Credits ONLY if manually applied, never by automation
+          // Check both creditLookup and CreditPaymentManager for MANUALLY applied credits
           const creditInLookup = idKey && creditLookup[idKey] && creditLookup[idKey][dateStr];
           const creditInManager = idKey && window.CreditPaymentManager && window.CreditPaymentManager.getCreditPayment(idKey, dateStr);
           const creditRecord = creditInLookup || creditInManager;
           
-          if (creditRecord) {
+          // ONLY if credit was MANUALLY applied (has a record in the credit system)
+          if (creditRecord && creditRecord.manually_applied !== false) {
             const creditAmount = Number(creditRecord.amount) || pricePerClass;
             return {
               status: 'credit',
