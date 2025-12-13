@@ -4339,7 +4339,7 @@
        RESULT: SUPER FAST, NO LAGGING, NO HEATING, NO BUGS ✨
        ========================================================================== */
 
-    const DEBUG_MODE = true;
+    const DEBUG_MODE = false; // PERFORMANCE: Disabled to reduce CPU usage
     
     // Wrap console methods to respect DEBUG_MODE
     const debugLog = (...args) => DEBUG_MODE && console.log(...args);
@@ -4488,7 +4488,7 @@
     // CUSTOM DIALOG SYSTEM
     // ==========================================================================
     
-    function showLockedNoteDialog(classDate) {
+    function showLockedNoteDialog(classDate, noteItem = null) {
       // Create modal overlay
       const overlay = document.createElement('div');
       overlay.style.cssText = `
@@ -4501,7 +4501,7 @@
         align-items: center;
         justify-content: center;
         z-index: 10000;
-        animation: fadeIn 0.2s ease;
+        animation: fadeIn 0.15s ease;
       `;
       
       // Create dialog
@@ -4516,7 +4516,7 @@
         box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-        animation: slideUp 0.3s ease;
+        animation: slideUp 0.2s ease;
       `;
       
       dialog.innerHTML = `
@@ -4607,10 +4607,19 @@
         showPaymentInfoModal();
       });
       
-      // Close handlers
+      // Close handlers - PERFORMANCE: Instant close + collapse note
       const closeDialog = () => {
-        overlay.style.animation = 'fadeOut 0.2s ease';
-        setTimeout(() => overlay.remove(), 200);
+        // Collapse the note immediately if it was passed in
+        if (noteItem) {
+          noteItem.classList.add('note-collapsed');
+          noteItem.classList.remove('note-expanded');
+          const attachmentsDiv = noteItem.querySelector('.note-attachments');
+          const indicator = noteItem.querySelector('.note-expand-indicator');
+          if (attachmentsDiv) attachmentsDiv.style.display = 'none';
+          if (indicator) indicator.innerHTML = '▼';
+        }
+        // Remove overlay instantly
+        overlay.remove();
       };
       
       document.getElementById('closeDialogBtn').addEventListener('click', closeDialog);
@@ -6102,9 +6111,21 @@
     
     async function markAlertAsRead(alertId) {
       try {
+        // Check if in impersonation mode - don't track opens for admin viewing as student
+        const urlParams = new URLSearchParams(window.location.search);
+        const isImpersonating = urlParams.has('impersonate');
+        
+        if (isImpersonating) {
+          debugLog('🎭 Impersonation mode: Skipping alert read tracking');
+          return; // Don't mark as read during impersonation
+        }
+        
         await supabase
           .from('student_alerts')
-          .update({ is_read: true })
+          .update({ 
+            is_read: true,
+            read_at: new Date().toISOString()
+          })
           .eq('id', alertId);
       } catch (error) {
         console.error('Error marking alert as read:', error);
@@ -6113,6 +6134,16 @@
     
     async function answerAlertQuestion(alertId, answer) {
       try {
+        // Check if in impersonation mode - don't save answers for admin viewing as student
+        const urlParams = new URLSearchParams(window.location.search);
+        const isImpersonating = urlParams.has('impersonate');
+        
+        if (isImpersonating) {
+          debugLog('🎭 Impersonation mode: Skipping alert answer tracking');
+          alert('Impersonation Mode: Answers are not saved when viewing as a student.');
+          return;
+        }
+        
         const { error } = await supabase
           .from('student_alerts')
           .update({ 
@@ -6293,7 +6324,7 @@
      * // Returns: [{ date: Date, status: 'paid', amount: 50, source: 'payment_records', id: 123 }, ...]
      */
     async function loadPaymentHistory(student) {
-      console.log('🚀 LOADING PAYMENT HISTORY FOR:', student.name, 'ID:', student.id);
+      // PERFORMANCE: Removed console.log to reduce CPU usage
       debugDebug('Loading payment history for student:', {
         id: student.id,
         name: student.name,
@@ -6454,9 +6485,9 @@
               };
             });
             allPayments.push(...credits);
-            console.log(`✅ Loaded ${credits.length} credit payments:`, credits.map(c => ({ date: c.date.toISOString().split('T')[0], amount: c.amount, status: c.status })));
+            // PERFORMANCE: Removed console.log
           } else {
-            console.log('ℹ️ No credit payments found in database for this student');
+            // PERFORMANCE: Removed console.log
           }
         }
         
@@ -6512,9 +6543,7 @@
           firstPayment: deduplicatedPayments[0]
         });
         
-        console.log('✅ PAYMENT HISTORY LOADED:', deduplicatedPayments.length, 'total payments');
-        console.log('📊 Breakdown - Manual:', paymentRecords?.length || 0, 'Zelle:', zellePayments?.length || 0, 'Credit:', creditPayments?.length || 0);
-        console.log('💳 First 3 payments:', deduplicatedPayments.slice(0, 3).map(p => ({ date: p.dateString, status: p.status, amount: p.amount })));
+        // PERFORMANCE: Removed console.log statements
         
         // Cache the result
         setCachedData(cacheKey, deduplicatedPayments);
@@ -7231,17 +7260,10 @@
      * @returns {boolean} True if note should be unlocked
      */
     function shouldUnlockNote(note, student, paidDatesSet, scheduleData, allNotesWithDates, paymentRecords) {
-      console.log('🔍 shouldUnlockNote checking:', {
-        title: note.title,
-        requires_payment: note.requires_payment,
-        class_date: note.class_date,
-        updated_at: note.updated_at,
-        created_at: note.created_at
-      });
+      // PERFORMANCE: Removed console.log to reduce CPU usage
       
       // If note doesn't require payment, unlock it
       if (!note.requires_payment) {
-        console.log('✅ Note does not require payment - UNLOCKED');
         return true;
       }
       
@@ -7251,7 +7273,6 @@
         
         // Check 1: Exact date match (student paid on class date)
         if (paidDatesSet.has(noteClassDate)) {
-          console.log(`✅ Note "${note.title}" for ${noteClassDate} - exact payment match - UNLOCKED`);
           return true;
         }
         
@@ -7285,26 +7306,22 @@
           for (const paidDateStr of paidDatesSet) {
             const paidDate = new Date(paidDateStr);
             if (paidDate >= noteDate && paidDate <= gracePeriodEnd) {
-              console.log(`✅ Note "${note.title}" for ${noteClassDate} - paid ${paidDateStr} within grace period (before ${nextClassDate.toISOString().split('T')[0]}) - UNLOCKED`);
               return true;
             }
           }
         }
         
         // NO REVERSE CUMULATIVE - Students must pay for the specific class date
-        console.log(`🔒 Note "${note.title}" for ${noteClassDate} - no exact payment match, no grace period payment - LOCKED`);
         return false;
       }
       
       // For notes without class_date but requires payment:
       // If student has ANY paid dates, unlock (they're a paying student)
       if (paidDatesSet.size > 0) {
-        console.log(`✅ Note "${note.title}" unlocked - student has ${paidDatesSet.size} paid classes`);
         return true;
       }
       
       // No payments found - lock the note
-      console.log(`🔒 Note "${note.title}" locked - no payments found`);
       return false;
     }
 
@@ -7318,8 +7335,6 @@
      */
     function computeNotePaymentStatus(notes, student, paymentRecords, scheduleData) {
       const notePaymentStatus = new Map();
-      
-      console.log('🔍 computeNotePaymentStatus called with:', paymentRecords?.length, 'payment records');
       
       // Build set of paid dates (includes 'paid' and 'credit', excludes 'absent', 'unpaid', 'cancelled')
       // CRITICAL: Students can be marked absent initially, but if they pay later, they get access
@@ -7351,21 +7366,11 @@
           .filter(d => d !== null)
       );
       
-      console.log(`💰 Student has ${paidDatesSet.size} paid dates from ${paymentRecords?.length || 0} payment records`);
-      console.log(`🚫 Student has ${absentDatesSet.size} absence records (doesn't block access if paid later)`);
-      console.log('📅 Sample paid dates:', Array.from(paidDatesSet).sort().slice(0, 10));
-      
       // Check each note - pass all notes for cumulative calculation
       notes.forEach(note => {
         const isPaid = shouldUnlockNote(note, student, paidDatesSet, scheduleData, notes, paymentRecords);
         notePaymentStatus.set(note.id, isPaid);
       });
-      
-      console.log('🔐 Note payment status computed:', notePaymentStatus.size, 'notes');
-      console.log('🔓 Sample note:', notes[0]);
-      const unlocked = Array.from(notePaymentStatus.values()).filter(v => v).length;
-      const locked = notePaymentStatus.size - unlocked;
-      console.log(`📊 Results: ${unlocked} unlocked, ${locked} locked`);
       
       return notePaymentStatus;
     }
@@ -8493,9 +8498,8 @@
       input.parentElement.style.position = 'relative';
       input.parentElement.appendChild(mentionSuggestions);
       
-      input.addEventListener('input', function(e) {
-        const text = this.value;
-        const cursorPos = this.selectionStart;
+      // PERFORMANCE: Debounced @ mention search
+      const debouncedMentionSearch = debounce(function(text, cursorPos) {
         const textBeforeCursor = text.substring(0, cursorPos);
         const atIndex = textBeforeCursor.lastIndexOf('@');
         
@@ -8513,6 +8517,10 @@
         } else {
           mentionSuggestions.style.display = 'none';
         }
+      }, 200);
+      
+      input.addEventListener('input', function(e) {
+        debouncedMentionSearch(this.value, this.selectionStart);
       });
     }
     
@@ -8916,7 +8924,6 @@
         if (DEBUG_MODE) debugLog(`✅ Loaded ${notes?.length || 0} notes`);
         
         // USE THE PASSED PAYMENT DATA (already loaded by loadPaymentHistory)
-        console.log(`� Using passed payment data:`, paymentData.length, 'payments');
         const mergedPaymentRecords = paymentData;
         
         // Create a Set of note IDs that have free access (using data from earlier query)
@@ -10108,13 +10115,17 @@
         padding: 0 4px;
       `;
       
-      // Create all note cards in memory first
+      // PERFORMANCE: Batch DOM operations - create all cards in memory first
+      const cardsFragment = document.createDocumentFragment();
       notes.forEach(note => {
         const card = createNoteCard(note);
-        notesGrid.appendChild(card);
+        cardsFragment.appendChild(card);
       });
       
-      // Single DOM update: Clear and append in one operation
+      // Append all cards at once
+      notesGrid.appendChild(cardsFragment);
+      
+      // Single DOM update: Clear and append grid in one operation
       fragment.appendChild(notesGrid);
       classroomList.innerHTML = '';
       classroomList.appendChild(fragment);
@@ -10207,9 +10218,10 @@
           
           // For PDF attachments from our system, use Protected-PDF-Viewer.html
           // Pass student info in URL since sessionStorage doesn't transfer to new tabs
+          // CRITICAL: Also pass note ID so video_url can be loaded from database
           const cacheBuster = Date.now();
           const clickHandler = attachment.type === 'pdf' 
-            ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&v=${cacheBuster}', '_blank')`
+            ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&note=${note.id}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&v=${cacheBuster}', '_blank')`
             : `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`;
           
           attachmentsHTML += `
@@ -10285,9 +10297,10 @@
       if (!note.isPaid && !note.isTemplateMissing) {
         // Locked notes show payment dialog
         item.style.cursor = 'pointer';
-        item.addEventListener('click', () => {
+        item.addEventListener('click', (e) => {
+          e.stopPropagation(); // PERFORMANCE: Prevent delegation handler from firing
           const formattedDate = note.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-          showLockedNoteDialog(formattedDate);
+          showLockedNoteDialog(formattedDate, item); // Pass the item to collapse after dialog closes
         });
       } else if (note.isPaid && (note.attachments?.length > 0 || note.isTemplateMissing)) {
         // Unlocked notes with attachments get pointer cursor (click handled by delegation)
@@ -10507,10 +10520,6 @@
           return;
         }
         
-        // 🚫 SESSION TRACKING DISABLED - RLS permission issues (403 errors)
-        // Session tracking is optional (admin analytics only) - disabled to prevent console errors
-        // To re-enable: Run fix-session-tracking-rls.sql in Supabase SQL editor
-        /*
         // Start session tracking (skip for impersonation mode)
         const urlParams = new URLSearchParams(window.location.search);
         const isImpersonating = urlParams.get('impersonate');
@@ -10522,7 +10531,6 @@
         } else {
           if (DEBUG_MODE) debugLog('🎭 Skipping session tracking for impersonation mode');
         }
-        */
         
         // PERFORMANCE FIX: Removed duplicate loadPortalData() call
         // It's already called inside checkAuthentication() after auth verification
