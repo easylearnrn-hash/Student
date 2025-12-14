@@ -161,6 +161,7 @@
     ----------------------------------- */
       .input-group {
         margin-bottom: 16px;
+        position: relative;
       }
 
       .input-label {
@@ -184,6 +185,78 @@
       .input-box:focus {
         border-color: var(--neon-cyan);
         box-shadow: 0 0 10px rgba(38, 255, 230, 0.4);
+      }
+
+      /* Password visibility toggle */
+      .password-wrapper {
+        position: relative;
+      }
+
+      .password-wrapper .input-box {
+        padding-right: 45px;
+      }
+
+      .password-toggle {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        cursor: pointer;
+        font-size: 18px;
+        color: var(--text-dim);
+        transition: var(--transition);
+        user-select: none;
+      }
+
+      .password-toggle:hover {
+        color: var(--neon-cyan);
+      }
+
+      /* Remember Me checkbox */
+      .remember-me-container {
+        display: flex;
+        align-items: center;
+        margin-bottom: 16px;
+        gap: 8px;
+      }
+
+      .remember-me-container input[type="checkbox"] {
+        appearance: none;
+        width: 18px;
+        height: 18px;
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.05);
+        cursor: pointer;
+        position: relative;
+        transition: var(--transition);
+      }
+
+      .remember-me-container input[type="checkbox"]:checked {
+        background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
+        border-color: var(--neon-cyan);
+      }
+
+      .remember-me-container input[type="checkbox"]:checked::after {
+        content: '✓';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: #000;
+        font-size: 12px;
+        font-weight: bold;
+      }
+
+      .remember-me-container label {
+        font-size: 14px;
+        color: var(--text-dim);
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .remember-me-container input[type="checkbox"]:hover {
+        border-color: var(--neon-cyan);
       }
 
       /* -----------------------------------
@@ -453,13 +526,21 @@
 
       <div class="input-group" id="passwordGroup">
         <div class="input-label">Password</div>
-        <input
-          type="password"
-          id="passwordInput"
-          class="input-box"
-          placeholder="Enter your password"
-          autocomplete="current-password"
-        />
+        <div class="password-wrapper">
+          <input
+            type="password"
+            id="passwordInput"
+            class="input-box"
+            placeholder="Enter your password"
+            autocomplete="current-password"
+          />
+          <span class="password-toggle" id="passwordToggle">👁️</span>
+        </div>
+      </div>
+
+      <div class="remember-me-container">
+        <input type="checkbox" id="rememberMeCheckbox" />
+        <label for="rememberMeCheckbox">Remember me for 30 days</label>
       </div>
 
       <button class="login-btn" id="loginBtn">Login</button>
@@ -589,13 +670,19 @@
 
         <div class="input-group">
           <div class="input-label">Create Password *</div>
-          <input type="password" id="regPassword" class="input-box" placeholder="Minimum 6 characters" autocomplete="new-password" />
+          <div class="password-wrapper">
+            <input type="password" id="regPassword" class="input-box" placeholder="Minimum 6 characters" autocomplete="new-password" />
+            <span class="password-toggle" onclick="togglePasswordVisibility('regPassword', this)">👁️</span>
+          </div>
           <div class="field-error" id="errorPassword"></div>
         </div>
 
         <div class="input-group">
           <div class="input-label">Confirm Password *</div>
-          <input type="password" id="regPasswordConfirm" class="input-box" placeholder="Re-enter your password" autocomplete="new-password" />
+          <div class="password-wrapper">
+            <input type="password" id="regPasswordConfirm" class="input-box" placeholder="Re-enter your password" autocomplete="new-password" />
+            <span class="password-toggle" onclick="togglePasswordVisibility('regPasswordConfirm', this)">👁️</span>
+          </div>
           <div class="field-error" id="errorPasswordConfirm"></div>
         </div>
 
@@ -616,7 +703,13 @@
       const SUPABASE_ANON_KEY =
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
 
-      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        auth: {
+          autoRefreshToken: true,
+          persistSession: true,
+          detectSessionInUrl: true
+        }
+      });
 
       // ============================================================
       // DOM ELEMENTS
@@ -630,8 +723,35 @@
       const errorMessage = document.getElementById('errorMessage');
       const successMessage = document.getElementById('successMessage');
       const forgotPasswordLink = document.getElementById('forgotPassword');
+      const passwordToggle = document.getElementById('passwordToggle');
+      const rememberMeCheckbox = document.getElementById('rememberMeCheckbox');
 
       let mode = 'student';
+
+      // ============================================================
+      // PASSWORD VISIBILITY TOGGLE
+      // ============================================================
+      passwordToggle.onclick = () => {
+        if (passwordInput.type === 'password') {
+          passwordInput.type = 'text';
+          passwordToggle.textContent = '🙈';
+        } else {
+          passwordInput.type = 'password';
+          passwordToggle.textContent = '👁️';
+        }
+      };
+
+      // Global function for registration password fields
+      window.togglePasswordVisibility = (inputId, toggleElement) => {
+        const input = document.getElementById(inputId);
+        if (input.type === 'password') {
+          input.type = 'text';
+          toggleElement.textContent = '🙈';
+        } else {
+          input.type = 'password';
+          toggleElement.textContent = '👁️';
+        }
+      };
 
       // ============================================================
       // MODE TOGGLE
@@ -704,6 +824,15 @@
       async function handleAdminLogin(email, password) {
         console.log('🔐 Attempting admin login...');
 
+        // Set storage persistence based on Remember Me checkbox
+        const rememberMe = rememberMeCheckbox.checked;
+        
+        // Update storage - if remember me is checked, use local storage (30 days)
+        // If not checked, use session storage (closes when browser closes)
+        if (rememberMe) {
+          await supabase.auth.setSession({ access_token: null, refresh_token: null }); // Clear any session
+        }
+
         const { data, error } = await supabase.auth.signInWithPassword({
           email: email,
           password: password,
@@ -715,6 +844,15 @@
         }
 
         if (data?.user) {
+          // Store remember me preference
+          if (rememberMe) {
+            localStorage.setItem('arnoma:remember-me', 'true');
+            localStorage.setItem('arnoma:session-expiry', Date.now() + (30 * 24 * 60 * 60 * 1000)); // 30 days
+          } else {
+            localStorage.removeItem('arnoma:remember-me');
+            localStorage.removeItem('arnoma:session-expiry');
+          }
+
           // Check if this is the hardcoded admin email
           const ADMIN_EMAIL = 'hrachfilm@gmail.com';
           
@@ -773,6 +911,9 @@
       async function handleStudentLogin(email, password) {
         console.log('👨‍🎓 Attempting student login...');
 
+        // Set storage persistence based on Remember Me checkbox
+        const rememberMe = rememberMeCheckbox.checked;
+
         const { data, error } = await supabase.auth.signInWithPassword({
           email: email,
           password: password,
@@ -784,6 +925,15 @@
         }
 
         if (data?.user) {
+          // Store remember me preference
+          if (rememberMe) {
+            localStorage.setItem('arnoma:remember-me', 'true');
+            localStorage.setItem('arnoma:session-expiry', Date.now() + (30 * 24 * 60 * 60 * 1000)); // 30 days
+          } else {
+            localStorage.removeItem('arnoma:remember-me');
+            localStorage.removeItem('arnoma:session-expiry');
+          }
+
           // Check if user has student role (with auto-link fallback)
           let studentData = null;
           let roleError = null;

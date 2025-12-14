@@ -1106,6 +1106,32 @@
       color: rgba(255,255,255,0.4);
     }
     
+    .attach-file-btn {
+      background: linear-gradient(145deg, rgba(96, 165, 250, 0.15), rgba(59, 130, 246, 0.1));
+      border: 1px solid rgba(96, 165, 250, 0.3);
+      color: white;
+      padding: 14px 18px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 20px;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 50px;
+    }
+    
+    .attach-file-btn:hover {
+      background: linear-gradient(145deg, rgba(96, 165, 250, 0.25), rgba(59, 130, 246, 0.2));
+      border-color: rgba(96, 165, 250, 0.5);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 15px rgba(96, 165, 250, 0.2);
+    }
+    
+    .attach-file-btn:active {
+      transform: translateY(0);
+    }
+    
     .send-message-btn {
       background: linear-gradient(135deg, #3b82f6, #2563eb);
       border: none;
@@ -3965,12 +3991,28 @@
       </div>
       
       <div class="forum-input-area">
-        <textarea 
-          class="forum-input" 
-          id="forumInput" 
-          placeholder="Ask a question or share something with your classmates..." 
-          rows="2"
-          onkeypress="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendForumMessage(); }"></textarea>
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+          <textarea 
+            class="forum-input" 
+            id="forumInput" 
+            placeholder="Ask a question or share something with your classmates..." 
+            rows="2"
+            onkeypress="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendForumMessage(); }"></textarea>
+          
+          <!-- File attachment preview -->
+          <div id="fileAttachmentPreview" style="display: none; padding: 8px 12px; background: rgba(96, 165, 250, 0.1); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 8px; font-size: 13px; color: rgba(255,255,255,0.9); align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">�</span>
+            <span style="flex: 1; font-size: 12px; color: rgba(255,255,255,0.7);">File attached</span>
+            <button onclick="clearFileAttachment()" style="background: linear-gradient(135deg, #3b82f6, #2563eb); border: none; color: white; cursor: pointer; padding: 4px 10px; font-size: 11px; border-radius: 6px; font-weight: 500;" title="Remove file">Remove</button>
+          </div>
+        </div>
+        
+        <!-- Hidden file input -->
+        <input type="file" id="forumFileInput" style="display: none;" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.gif,.txt" onchange="handleFileSelection()" />
+        
+        <button class="attach-file-btn" onclick="document.getElementById('forumFileInput').click()" title="Attach document">
+          📎
+        </button>
         <button class="send-message-btn" onclick="sendForumMessage()">
           Send 💬
         </button>
@@ -8008,6 +8050,75 @@
             </div>
           </div>
           <div class="message-text" id="messageText${msg.id}" style="${isAdminMessage ? 'color: #ef4444;' : ''}" data-original="${escapeHtml(msg.message).replace(/"/g, '&quot;')}">${formatMessageText(msg.message)}</div>
+          
+          ${msg.attachment_url ? `
+            <div style="margin-top: 12px;">
+              ${(() => {
+                const fileName = msg.attachment_name || 'attachment';
+                const fileType = msg.attachment_type || '';
+                const isImage = fileType.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(fileName);
+                const isPDF = fileType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
+                
+                if (isImage) {
+                  // Show image preview
+                  return `
+                    <div style="position: relative; border-radius: 10px; overflow: hidden; max-width: 280px; border: 1px solid rgba(96, 165, 250, 0.3); background: rgba(0,0,0,0.3);">
+                      <img 
+                        src="${msg.attachment_url}" 
+                        alt="Image" 
+                        style="width: 100%; height: auto; max-height: 200px; object-fit: cover; display: block; cursor: pointer;"
+                        onclick="window.open('${msg.attachment_url}', '_blank')"
+                        loading="lazy"
+                      />
+                      <div style="position: absolute; bottom: 6px; right: 6px;">
+                        <a href="${msg.attachment_url}" download style="padding: 6px 10px; background: rgba(59, 130, 246, 0.95); border-radius: 6px; color: white; text-decoration: none; font-size: 14px; font-weight: 500; display: inline-block; box-shadow: 0 2px 8px rgba(0,0,0,0.3); cursor: pointer;" onclick="event.stopPropagation();">⬇️</a>
+                      </div>
+                    </div>
+                  `;
+                } else if (isPDF) {
+                  // Show PDF preview with thumbnail
+                  return `
+                    <div style="padding: 12px; background: rgba(96, 165, 250, 0.1); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 10px;">
+                      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                        <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #ef4444, #dc2626); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: bold; color: white; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);">
+                          PDF
+                        </div>
+                        <div style="flex: 1;">
+                          <div style="font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.9);">${escapeHtml(fileName)}</div>
+                          <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px;">PDF Document</div>
+                        </div>
+                      </div>
+                      <div style="display: flex; gap: 8px;">
+                        <a href="${msg.attachment_url}" target="_blank" style="flex: 1; padding: 8px 16px; background: linear-gradient(135deg, #3b82f6, #2563eb); border-radius: 8px; color: white; text-decoration: none; font-size: 12px; font-weight: 500; text-align: center; transition: transform 0.2s ease;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">👁️ View PDF</a>
+                        <a href="${msg.attachment_url}" download style="padding: 8px 16px; background: rgba(96, 165, 250, 0.2); border: 1px solid rgba(96, 165, 250, 0.4); border-radius: 8px; color: white; text-decoration: none; font-size: 12px; font-weight: 500; transition: transform 0.2s ease; cursor: pointer;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">⬇️</a>
+                      </div>
+                    </div>
+                  `;
+                } else {
+                  // Show generic file preview
+                  const getFileIcon = () => {
+                    if (fileName.match(/\.(doc|docx)$/i)) return '📝';
+                    if (fileName.match(/\.(xls|xlsx)$/i)) return '📊';
+                    if (fileName.match(/\.(txt)$/i)) return '📄';
+                    if (fileName.match(/\.(zip|rar|7z)$/i)) return '🗜️';
+                    return '📎';
+                  };
+                  
+                  return `
+                    <div style="padding: 12px; background: rgba(96, 165, 250, 0.1); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 10px; display: flex; align-items: center; gap: 12px;">
+                      <span style="font-size: 32px;">${getFileIcon()}</span>
+                      <div style="flex: 1;">
+                        <div style="font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.9);">${escapeHtml(fileName)}</div>
+                        <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px;">${fileType || 'File'}</div>
+                      </div>
+                      <a href="${msg.attachment_url}" download style="padding: 8px 16px; background: linear-gradient(135deg, #3b82f6, #2563eb); border-radius: 8px; color: white; text-decoration: none; font-size: 12px; font-weight: 500; transition: transform 0.2s ease; cursor: pointer;" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">Download</a>
+                    </div>
+                  `;
+                }
+              })()}
+            </div>
+          ` : ''}
+          
           <div style="display: flex; gap: 8px; margin-top: 8px;">
             <button class="reply-btn" onclick="toggleReplyInput(${msg.id})">Reply</button>
             ${isAdminMessage && isAdmin ? `
@@ -8056,6 +8167,41 @@
     }
     
     /**
+     * Handles file selection for forum message attachments
+     */
+    function handleFileSelection() {
+      const fileInput = document.getElementById('forumFileInput');
+      const preview = document.getElementById('fileAttachmentPreview');
+      
+      if (fileInput.files && fileInput.files[0]) {
+        const file = fileInput.files[0];
+        const maxSize = 10 * 1024 * 1024; // 10MB limit
+        
+        if (file.size > maxSize) {
+          showCustomAlert('File size must be less than 10MB', 'error');
+          fileInput.value = '';
+          return;
+        }
+        
+        preview.style.display = 'flex';
+      }
+    }
+    
+    /**
+     * Clears the selected file attachment
+     */
+    function clearFileAttachment() {
+      const fileInput = document.getElementById('forumFileInput');
+      const preview = document.getElementById('fileAttachmentPreview');
+      
+      fileInput.value = '';
+      preview.style.display = 'none';
+    }
+
+    // Prevent duplicate sends
+    let isSendingMessage = false;
+
+    /**
      * Sends a new message to the student forum.
      * 
      * @async
@@ -8081,10 +8227,18 @@
      * <textarea id="forumMessageInput" onkeypress="if(event.key==='Enter') sendForumMessage()"></textarea>
      */
     async function sendForumMessage() {
-      const input = document.getElementById('forumInput');
-      let message = input.value.trim();
+      // Prevent duplicate sends
+      if (isSendingMessage) return;
       
-      if (!message) return;
+      const input = document.getElementById('forumInput');
+      const fileInput = document.getElementById('forumFileInput');
+      let message = input.value.trim();
+      let attachmentUrl = null;
+      let attachmentName = null;
+      let attachmentType = null;
+      
+      // Check if there's a message or file attachment
+      if (!message && (!fileInput.files || !fileInput.files[0])) return;
       
       // Allow admin (id: 0) or regular students (id > 0)
       if (!currentStudent || (currentStudent.id === undefined || currentStudent.id === null)) {
@@ -8093,37 +8247,88 @@
       }
       
       // Remove @ symbols from the message before sending
-      message = message.replace(/@/g, '');
+      if (message) {
+        message = message.replace(/@/g, '');
+      }
+      
+      // Set sending flag
+      isSendingMessage = true;
       
       try {
+        // Upload file if present
+        if (fileInput.files && fileInput.files[0]) {
+          const file = fileInput.files[0];
+          const fileExt = file.name.split('.').pop();
+          const fileName = `${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+          const filePath = `chat-attachments/${fileName}`;
+          
+          // Upload to Supabase storage
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('student-notes')
+            .upload(filePath, file, {
+              cacheControl: '3600',
+              upsert: false
+            });
+          
+          if (uploadError) {
+            console.error('Error uploading file:', uploadError);
+            showCustomAlert('Failed to upload file. Please try again.', 'error');
+            return;
+          }
+          
+          // Get public URL
+          const { data: { publicUrl } } = supabase.storage
+            .from('student-notes')
+            .getPublicUrl(filePath);
+          
+          attachmentUrl = publicUrl;
+          attachmentName = file.name;
+          attachmentType = file.type;
+        }
+        
         // Check if admin is posting
         const isAdminPosting = currentStudent.isAdminChatMode || currentStudent.role === 'admin';
         
+        const messageData = {
+          student_id: isAdminPosting ? 0 : currentStudent.id,
+          student_name: isAdminPosting ? 'Administrator' : (currentStudent.name || 'Student'),
+          student_email: currentStudent.email || currentEmail,
+          student_group: isAdminPosting ? null : (currentStudent.group_code || null),
+          student_college: isAdminPosting ? null : (currentStudent.college || null),
+          message: message || '',
+          created_at: new Date().toISOString()
+        };
+        
+        // Add attachment fields if file was uploaded
+        if (attachmentUrl) {
+          messageData.attachment_url = attachmentUrl;
+          messageData.attachment_name = attachmentName;
+          messageData.attachment_type = attachmentType;
+        }
+        
         const { data, error } = await supabase
           .from('forum_messages')
-          .insert([{
-            student_id: isAdminPosting ? 0 : currentStudent.id,
-            student_name: isAdminPosting ? 'Administrator' : (currentStudent.name || 'Student'),
-            student_email: currentStudent.email || currentEmail,
-            student_group: isAdminPosting ? null : (currentStudent.group_code || null),
-            student_college: isAdminPosting ? null : (currentStudent.college || null),
-            message: message,
-            created_at: new Date().toISOString()
-          }])
+          .insert([messageData])
           .select();
         
         if (error) {
           console.error('Error sending message:', error);
           showCustomAlert('Failed to send message. Please try again.', 'error');
+          isSendingMessage = false;
           return;
         }
         
         input.value = '';
+        clearFileAttachment();
         await loadForumMessages();
         
       } catch (error) {
         console.error('Send message error:', error);
         showCustomAlert('Failed to send message. Please try again.', 'error');
+        clearFileAttachment(); // Clear file even on error
+      } finally {
+        // Always reset sending flag
+        isSendingMessage = false;
       }
     }
     

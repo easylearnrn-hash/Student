@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student Group Checker</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 24px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 30px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      margin-top: 20px;
+    }
+    th {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      padding: 15px;
+      text-align: left;
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+    td {
+      padding: 15px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    .missing { background: #fee; color: #c00; font-weight: 600; }
+    .found { background: #efe; color: #060; font-weight: 600; }
+    button {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Student Group Assignment Checker</h1>
+    <button onclick="checkGroups()">🔄 Check All Students</button>
+    <div id="results"></div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    async function checkGroups() {
+      const resultsDiv = document.getElementById('results');
+      resultsDiv.innerHTML = '<p>Loading...</p>';
+
+      try {
+        // Fetch all students
+        const { data: students, error: studentsError } = await supabase
+          .from('students')
+          .select('*')
+          .order('name');
+        
+        if (studentsError) throw studentsError;
+
+        // Fetch all groups
+        const { data: groups, error: groupsError } = await supabase
+          .from('groups')
+          .select('*');
+        
+        if (groupsError) throw groupsError;
+
+        // Build a map of student ID -> group memberships
+        const studentGroupMap = {};
+        
+        groups.forEach(group => {
+          const groupName = group.group_name || group.name;
+          const groupCode = group.group_code;
+          const studentIds = group.student_ids || [];
+          
+          studentIds.forEach(studentId => {
+            if (!studentGroupMap[studentId]) {
+              studentGroupMap[studentId] = [];
+            }
+            studentGroupMap[studentId].push({
+              groupName,
+              groupCode,
+              schedule: group.schedule
+            });
+          });
+        });
+
+        // Check each student
+        let html = '<table>';
+        html += '<thead><tr><th>Student Name</th><th>ID</th><th>group_letter Field</th><th>Groups Table</th><th>Status</th></tr></thead>';
+        html += '<tbody>';
+        
+        let missingCount = 0;
+        
+        students.forEach(student => {
+          const groupsFromTable = studentGroupMap[student.id] || [];
+          const hasGroups = groupsFromTable.length > 0;
+          const groupLetterField = student.group_letter || '-';
+          
+          if (!hasGroups) missingCount++;
+          
+          const statusClass = hasGroups ? 'found' : 'missing';
+          const statusText = hasGroups ? '✅ Has Groups' : '❌ NO GROUPS';
+          
+          const groupsList = hasGroups 
+            ? groupsFromTable.map(g => `${g.groupCode || g.groupName}`).join(', ')
+            : 'NONE';
+          
+          html += `<tr>
+            <td><strong>${student.name}</strong></td>
+            <td>${student.id}</td>
+            <td>${groupLetterField}</td>
+            <td>${groupsList}</td>
+            <td class="${statusClass}">${statusText}</td>
+          </tr>`;
+        });
+        
+        html += '</tbody></table>';
+        
+        const summary = `<h2>Summary: ${missingCount} students have NO group assignments</h2>`;
+        resultsDiv.innerHTML = summary + html;
+
+      } catch (error) {
+        resultsDiv.innerHTML = `<div style="color: red;">❌ Error: ${error.message}</div>`;
+        console.error('Error:', error);
+      }
+    }
+
+    // Run on load
+    checkGroups();
+  </script>
+</body>
+</html>

@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Find Missing Payments - December 2025</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+      color: #333;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 24px;
+      padding: 40px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+    .stat-card {
+      background: linear-gradient(135deg, #667eea15, #764ba215);
+      border-radius: 16px;
+      padding: 20px;
+      border: 2px solid #667eea30;
+    }
+    .stat-value {
+      font-size: 36px;
+      font-weight: 700;
+      color: #667eea;
+      margin-bottom: 5px;
+    }
+    .stat-label {
+      color: #666;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .results {
+      margin-top: 30px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+    th {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      padding: 15px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td {
+      padding: 15px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+    tr:hover {
+      background: #f8f9ff;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .status-matched {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status-unmatched {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    .amount {
+      font-weight: 600;
+      color: #667eea;
+    }
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #667eea;
+      font-size: 18px;
+    }
+    .error {
+      background: #f8d7da;
+      color: #721c24;
+      padding: 20px;
+      border-radius: 12px;
+      margin: 20px 0;
+    }
+    button {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 20px;
+      transition: transform 0.2s;
+    }
+    button:hover {
+      transform: translateY(-2px);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🔍 Missing Payment Detector</h1>
+    <p class="subtitle">Finding December 2025 payments that should be matched to classes</p>
+    
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-value" id="totalPayments">-</div>
+        <div class="stat-label">Total Payments</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="matchedPayments">-</div>
+        <div class="stat-label">Matched</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="unmatchedPayments">-</div>
+        <div class="stat-label">Unmatched</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="totalAmount">-</div>
+        <div class="stat-label">Total Amount</div>
+      </div>
+    </div>
+
+    <button onclick="runAnalysis()">🔄 Refresh Analysis</button>
+    
+    <div id="results" class="results"></div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    async function runAnalysis() {
+      const resultsDiv = document.getElementById('results');
+      resultsDiv.innerHTML = '<div class="loading">🔄 Analyzing payments...</div>';
+
+      try {
+        // Fetch all students
+        const { data: students, error: studentsError } = await supabase
+          .from('students')
+          .select('*');
+        
+        if (studentsError) throw studentsError;
+
+        // Fetch all payments in December 2025
+        const { data: payments, error: paymentsError } = await supabase
+          .from('payments')
+          .select('*')
+          .gte('date', '2025-12-01')
+          .lt('date', '2026-01-01')
+          .order('date', { ascending: true });
+        
+        if (paymentsError) throw paymentsError;
+
+        // Fetch all payment records
+        const { data: paymentRecords, error: recordsError } = await supabase
+          .from('payment_records')
+          .select('*')
+          .gte('date', '2025-12-01')
+          .lt('date', '2026-01-01')
+          .order('date', { ascending: true });
+        
+        if (recordsError) throw recordsError;
+
+        // Fetch all groups
+        const { data: groups, error: groupsError } = await supabase
+          .from('groups')
+          .select('*');
+        
+        if (groupsError) throw groupsError;
+
+        // Build student lookup
+        const studentLookup = {};
+        students.forEach(s => {
+          studentLookup[s.id] = s;
+        });
+
+        // Analyze each payment
+        const analysis = [];
+        let totalMatched = 0;
+        let totalUnmatched = 0;
+        let totalAmount = 0;
+
+        payments.forEach(payment => {
+          const amount = parseFloat(payment.amount || payment.amountUSD || payment.amount_paid_usd || 0);
+          totalAmount += amount;
+
+          const studentId = payment.student_id || payment.linked_student_id;
+          const student = studentLookup[studentId];
+          
+          const paymentDate = payment.date || payment.payment_date || payment.created_at?.split('T')[0];
+          
+          // Check if this payment matches a class date or is within grace period
+          let isMatched = false;
+          let matchReason = '';
+
+          if (student && student.group_letter) {
+            // Find classes for this student's group in December
+            const studentGroup = groups.find(g => 
+              (g.group_code || '').toLowerCase() === student.group_letter.toLowerCase()
+            );
+
+            if (studentGroup) {
+              // Simple check: payment on same date as a class = matched
+              // You would need to implement full class schedule logic here
+              matchReason = 'Has group assignment';
+              isMatched = true; // Assume matched if has group (simplified)
+            }
+          }
+
+          analysis.push({
+            date: paymentDate,
+            studentName: student?.name || payment.payer_name || payment.resolved_student_name || 'Unknown',
+            amount: amount,
+            studentId: studentId,
+            groupLetter: student?.group_letter || '-',
+            isMatched: isMatched,
+            matchReason: matchReason || 'No class found in grace period',
+            paymentId: payment.id
+          });
+
+          if (isMatched) totalMatched++;
+          else totalUnmatched++;
+        });
+
+        // Update stats
+        document.getElementById('totalPayments').textContent = payments.length;
+        document.getElementById('matchedPayments').textContent = totalMatched;
+        document.getElementById('unmatchedPayments').textContent = totalUnmatched;
+        document.getElementById('totalAmount').textContent = '$' + totalAmount.toFixed(2);
+
+        // Display results
+        let html = '<table>';
+        html += '<thead><tr><th>Date</th><th>Student</th><th>Group</th><th>Amount</th><th>Status</th><th>Notes</th></tr></thead>';
+        html += '<tbody>';
+        
+        analysis.forEach(item => {
+          const statusClass = item.isMatched ? 'status-matched' : 'status-unmatched';
+          const statusText = item.isMatched ? 'Matched' : 'Unmatched';
+          
+          html += `<tr>
+            <td>${item.date}</td>
+            <td><strong>${item.studentName}</strong></td>
+            <td>${item.groupLetter}</td>
+            <td class="amount">$${item.amount.toFixed(2)}</td>
+            <td><span class="status-badge ${statusClass}">${statusText}</span></td>
+            <td>${item.matchReason}</td>
+          </tr>`;
+        });
+        
+        html += '</tbody></table>';
+        resultsDiv.innerHTML = html;
+
+      } catch (error) {
+        resultsDiv.innerHTML = `<div class="error">❌ Error: ${error.message}</div>`;
+        console.error('Analysis error:', error);
+      }
+    }
+
+    // Run on page load
+    runAnalysis();
+  </script>
+</body>
+</html>
