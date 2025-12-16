@@ -3719,7 +3719,7 @@
               Friday, Dec 5 — 8:00 AM
             </div>
 
-            <div class="next-class-timer">
+            <div class="next-class-timer" id="nextClassTimer">
               <span class="timer-icon">⏳</span>
               <span class="timer-text">Starts in:</span>
               <span class="timer-value" id="countdownValue">1 day</span>
@@ -3968,8 +3968,8 @@
   </div>
   
   <!-- Alert Modal -->
-  <div id="alertModal" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.9); backdrop-filter: blur(12px); z-index: 10001; align-items: center; justify-content: center;">
-    <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 24px; padding: 32px; max-width: 600px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); position: relative;">
+  <div id="alertModal" onclick="closeCurrentAlert()" style="display: none; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.9); backdrop-filter: blur(12px); z-index: 10001; align-items: center; justify-content: center;">
+    <div onclick="event.stopPropagation()" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 24px; padding: 32px; max-width: 600px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5); border: 1px solid rgba(255, 255, 255, 0.1); position: relative;">
       <button onclick="closeCurrentAlert()" style="position: absolute; top: 16px; right: 16px; background: rgba(255, 255, 255, 0.1); border: none; color: white; font-size: 28px; cursor: pointer; width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">×</button>
       
       <div id="alertContent" style="margin-top: 8px;">
@@ -4175,6 +4175,48 @@
           console.error('❌ Error parsing admin chat token:', e);
           localStorage.removeItem('admin_chat_token');
           sessionStorage.removeItem('admin_chat_token');
+        }
+      }
+      
+      // Check for MASTER ACCESS token (from login page)
+      const masterTokenStr = sessionStorage.getItem('impersonation_token') || localStorage.getItem('impersonation_token');
+      console.log('🔍 Checking for master token:', masterTokenStr ? 'FOUND' : 'NOT FOUND');
+      if (masterTokenStr) {
+        try {
+          const masterToken = JSON.parse(masterTokenStr);
+          console.log('📋 Master token parsed:', masterToken);
+          console.log('🔍 Is master access?', masterToken.isMasterAccess);
+          console.log('🔍 Is expired?', masterToken.expiresAt < Date.now());
+          
+          if (masterToken.isMasterAccess && masterToken.expiresAt > Date.now()) {
+            console.log('🔓 MASTER ACCESS detected for:', masterToken.studentName);
+            
+            // Load student data
+            const { data: student, error } = await supabase
+              .from('students')
+              .select('*')
+              .eq('id', masterToken.studentId)
+              .single();
+            
+            console.log('Student data:', student);
+            console.log('Error:', error);
+            
+            if (student) {
+              console.log('✅ Master access granted for:', student.name);
+              console.log('📊 Setting currentStudent and loading portal data...');
+              currentStudent = student; // SET GLOBAL BEFORE LOADING
+              await loadPortalData();
+              await ensurePaymentsData();
+              console.log('✅ Portal data loaded! paymentHistory:', window.paymentHistory);
+              return student;
+            } else {
+              console.log('❌ Student not found for ID:', masterToken.studentId);
+            }
+          } else {
+            console.log('❌ Master token invalid or expired');
+          }
+        } catch (e) {
+          console.log('❌ Error parsing master token:', e);
         }
       }
       
@@ -4420,6 +4462,8 @@
   let currentGroupScheduleData = null;
   let currentGroupScheduleSummary = null;
     let currentPayments = []; // Store payment history globally
+    window.paymentHistory = null;
+    window.allPayments = [];
     let activeSection = 'overview';
     const sectionLoadedState = {
       overview: false,
@@ -6352,6 +6396,20 @@
     // ==========================================================================
     // PAYMENT FUNCTIONS
     // ==========================================================================
+
+    function buildPaidDatesSet(payments) {
+      return new Set(
+        (payments || [])
+          .filter(payment => payment.status === 'paid' || payment.status === 'credit')
+          .map(payment => {
+            if (payment.dateString) return payment.dateString;
+            if (typeof payment.date === 'string') return payment.date.split('T')[0];
+            if (payment.date instanceof Date) return payment.date.toISOString().split('T')[0];
+            return null;
+          })
+          .filter(date => date !== null)
+      );
+    }
     
     // ---------- Payment History Loader ----------
     /**
@@ -6496,20 +6554,24 @@
           });
           
           const zelle = zellePayments.map(payment => {
-            // Extract just YYYY-MM-DD portion in case Supabase returns timestamptz format
+            // 🔧 CRITICAL FIX: Use for_class (allocated class date) instead of date (receipt date)
+            // This ensures payment matching uses the correct date for note unlocking
+            const forClassStr = payment.for_class ? payment.for_class.substring(0, 10) : null;
             const dateStr = payment.date ? payment.date.substring(0, 10) : null;
-            // Use 'date' field (YYYY-MM-DD string) instead of 'email_date' (timestamp) to avoid timezone issues
-            const paymentDate = dateStr ? new Date(dateStr + 'T00:00:00') : new Date(payment.email_date);
-            debugLog(`  → Converted date "${payment.date}" (extracted: "${dateStr}") to JavaScript Date: ${paymentDate.toLocaleDateString()}`);
+            // Use for_class for payment date if available, otherwise fall back to date
+            const classDateStr = forClassStr || dateStr;
+            const paymentDate = classDateStr ? new Date(classDateStr + 'T00:00:00') : new Date(payment.email_date);
+            debugLog(`  → Using for_class="${payment.for_class}" (extracted: "${forClassStr}") as payment date: ${paymentDate.toLocaleDateString()}`);
             return {
               date: paymentDate,
-              dateString: dateStr, // 🔧 STORE ORIGINAL STRING to avoid timezone issues in comparisons
+              dateString: classDateStr, // 🔧 Use for_class date for matching, not receipt date!
               status: 'paid', // Zelle payments are always paid
               amount: parseFloat(payment.amount) || 0,
               payment_method: 'Zelle',
               notes: payment.payer_name ? `From: ${payment.payer_name}` : payment.memo,
               id: payment.id,
-              source: 'zelle'
+              source: 'zelle',
+              receiptDate: dateStr // Store receipt date for reference
             };
           });
           allPayments.push(...zelle);
@@ -7394,20 +7456,7 @@
       
       // Build set of paid dates (includes 'paid' and 'credit', excludes 'absent', 'unpaid', 'cancelled')
       // CRITICAL: Students can be marked absent initially, but if they pay later, they get access
-      const paidDatesSet = new Set(
-        (paymentRecords || [])
-          .filter(p => p.status === 'paid' || p.status === 'credit')
-          .map(p => {
-            // Payment objects from loadPaymentHistory have:
-            // - date: Date object
-            // - dateString: "YYYY-MM-DD" string
-            if (p.dateString) return p.dateString;
-            if (typeof p.date === 'string') return p.date.split('T')[0];
-            if (p.date instanceof Date) return p.date.toISOString().split('T')[0];
-            return null;
-          })
-          .filter(d => d !== null)
-      );
+      const paidDatesSet = buildPaidDatesSet(paymentRecords);
       
       // Build set of absence dates (for reference, though absences don't block paid access)
       const absentDatesSet = new Set(
@@ -7806,6 +7855,8 @@
       paymentsLoaded = false;
       currentPayments = [];
       paymentsLoadingPromise = null;
+  window.paymentHistory = null;
+  window.allPayments = [];
       const payments = await ensurePaymentsData();
       await updatePaymentUI(payments, currentStudent, currentGroupScheduleData);
       debugLog('💰 Payments refreshed (cache cleared)');
@@ -7822,12 +7873,19 @@
       paymentsLoadingPromise = loadPaymentHistory(currentStudent)
         .then(payments => {
           currentPayments = payments;
+          window.allPayments = payments;
+          window.paymentHistory = {
+            payments,
+            paidDatesSet: buildPaidDatesSet(payments),
+            lastUpdated: Date.now()
+          };
           paymentsLoaded = true;
           paymentsLoadingPromise = null;
           return payments;
         })
         .catch(error => {
           paymentsLoadingPromise = null;
+          window.paymentHistory = null;
           throw error;
         });
       return paymentsLoadingPromise;

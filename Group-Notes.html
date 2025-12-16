@@ -3120,15 +3120,17 @@
 
         if (updateError) console.error('Error updating class_date:', updateError);
 
-        // Create permissions
+        // Create permissions in note_free_access table (CORRECT TABLE!)
+        const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
         const records = noteIds.map(noteId => ({
           note_id: noteId,
-          group_name: currentGroup,
-          granted_by: adminEmail
+          access_type: 'group',
+          group_letter: groupLetter,  // Use group_letter (E, not "Group E")
+          created_by: adminEmail
         }));
 
         const { error } = await supabase
-          .from('student_note_permissions')
+          .from('note_free_access')  // CORRECT TABLE!
           .insert(records);
 
         if (error) throw error;
@@ -3173,14 +3175,16 @@
         const { data: { session } } = await supabase.auth.getSession();
         const adminEmail = session?.user?.email;
 
+        const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
         const records = noteIds.map(noteId => ({
           note_id: noteId,
-          group_name: currentGroup,
-          granted_by: adminEmail
+          access_type: 'group',
+          group_letter: groupLetter,
+          created_by: adminEmail
         }));
 
         const { error } = await supabase
-          .from('student_note_permissions')
+          .from('note_free_access')
           .insert(records)
           .select();
 
@@ -4442,14 +4446,16 @@
           // Continue anyway - permissions are more critical
         }
 
+        const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
         const records = noteIdsArray.map(noteId => ({
           note_id: noteId,
-          group_name: currentGroup,
-          granted_by: adminEmail
+          access_type: 'group',
+          group_letter: groupLetter,
+          created_by: adminEmail
         }));
 
         const { error } = await supabase
-          .from('student_note_permissions')
+          .from('note_free_access')
           .insert(records);
 
         if (error) throw error;
@@ -4458,12 +4464,13 @@
   const count = selectedFilteredNotes.size;
   const categoryLabel = currentSystemName || 'Multiple Systems';
         
-        // Update permissions array immediately for instant UI feedback
+        // Update free access grants array immediately for instant UI feedback
         noteIdsArray.forEach(noteId => {
-          permissions.push({
+          freeAccessGrants.push({
             note_id: noteId,
-            group_name: currentGroup,
-            granted_by: adminEmail
+            access_type: 'group',
+            group_letter: groupLetter,
+            created_by: adminEmail
           });
         });
         
@@ -4564,21 +4571,23 @@
 
       try {
         const noteIds = Array.from(selectedFilteredNotes);
+        const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
 
         const { error } = await supabase
-          .from('student_note_permissions')
+          .from('note_free_access')
           .delete()
           .in('note_id', noteIds)
-          .eq('group_name', currentGroup);
+          .eq('group_letter', groupLetter)
+          .eq('access_type', 'group');
 
         if (error) throw error;
 
         // Capture count before clearing
         const count = selectedFilteredNotes.size;
         
-        // Update permissions array immediately for instant UI feedback
-        permissions = permissions.filter(perm => 
-          !(noteIds.includes(perm.note_id) && perm.group_name === currentGroup)
+        // Update freeAccessGrants array immediately for instant UI feedback
+        freeAccessGrants = freeAccessGrants.filter(grant => 
+          !(noteIds.includes(grant.note_id) && grant.group_letter === groupLetter && grant.access_type === 'group')
         );
         
         // Clear selection

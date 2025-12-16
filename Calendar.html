@@ -49,6 +49,11 @@
         if (DEBUG_MODE) console.log(...args);
       }
       
+      // Targeted debug for specific student (Taguhi Barseghyan)
+      function taguhiLog(...args) {
+        console.log('%c🎯 TAGUHI DEBUG:', 'color: #00ff00; font-weight: bold; font-size: 14px;', ...args);
+      }
+      
       // DOM Cache to eliminate repeated getElementById calls
       const DOMCache = {
         prevBtn: null,
@@ -1988,6 +1993,49 @@
         background: rgba(251, 146, 60, 0.6); /* Orange for skipped */
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
         border: 1px solid rgba(251, 146, 60, 0.8);
+      }
+
+      .dot-fuchsia {
+        background: linear-gradient(135deg, #ff00ff 0%, #ff66ff 100%); /* Fuchsia gradient - Misallocated payment */
+        box-shadow: 0 0 8px rgba(255, 0, 255, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3);
+        border: 1px solid #ff00ff;
+        cursor: pointer;
+        animation: pulseFuchsia 2s ease-in-out infinite;
+      }
+
+      @keyframes pulseFuchsia {
+        0%, 100% {
+          box-shadow: 0 0 8px rgba(255, 0, 255, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+        50% {
+          box-shadow: 0 0 16px rgba(255, 0, 255, 0.9), 0 2px 8px rgba(255, 0, 255, 0.5);
+        }
+      }
+
+      .dot-fuchsia:hover {
+        transform: scale(1.2);
+        box-shadow: 0 0 20px rgba(255, 0, 255, 1), 0 4px 12px rgba(255, 0, 255, 0.6);
+      }
+
+      .fuchsia-row {
+        border-top: 1px solid rgba(255, 0, 255, 0.3);
+        margin-top: 4px;
+        padding-top: 4px;
+      }
+
+      .fuchsia-label {
+        color: #ff00ff !important;
+        font-weight: bold;
+        animation: pulseFuchsiaLabel 2s ease-in-out infinite;
+      }
+
+      @keyframes pulseFuchsiaLabel {
+        0%, 100% {
+          opacity: 0.8;
+        }
+        50% {
+          opacity: 1;
+        }
       }
 
       /* Special Day States */
@@ -4355,13 +4403,13 @@
         }
       }
 
-      function getMonthData(year, month) {
+      async function getMonthData(year, month) {
         const cacheKey = getMonthCacheKey(year, month);
         if (monthCache.has(cacheKey)) {
           return monthCache.get(cacheKey);
         }
 
-        const computed = computeMonthData(year, month);
+        const computed = await computeMonthData(year, month);
         monthCache.set(cacheKey, computed);
         return computed;
       }
@@ -4374,7 +4422,7 @@
         return created || CALENDAR_START_DATE_STR;
       }
 
-      function computeMonthData(year, month) {
+      async function computeMonthData(year, month) {
         // Reset payment allocation tracker for fresh calculation
         resetPaymentAllocation();
         
@@ -4435,6 +4483,7 @@
             payments: [],
             credits: [],
             studentEvents: [],
+            fuchsiaDots: [], // Initialize fuchsia dots array
             stats: {
               classes: 0,
               payments: 0,
@@ -4503,6 +4552,12 @@
         // 🎨 GRAY DOT LOGIC - PURE SCHEDULE ONLY (December 1+)
         // ============================================================
         addScheduledClassDots(groups, aggregates);
+
+        // ============================================================
+        // 🔴 FUCHSIA DOT LOGIC - Misallocated Payments
+        // ============================================================
+        // Show fuchsia dots for payments where for_class doesn't match any scheduled class
+        await addMisallocatedPaymentDots();
 
         const totals = Object.values(dayMap).reduce(
           (acc, entry) => {
@@ -5095,6 +5150,14 @@
 
           const idKey = student?.id != null ? String(student.id) : null;
           
+          // Targeted debug for Taguhi Barseghyan (ID: 41)
+          const isTaguhiBarseghyan = (student.name === 'Taguhi Barseghyan' || idKey === '41');
+          
+          if (isTaguhiBarseghyan) {
+            taguhiLog(`Collecting payments for ${student.name} (ID: ${idKey})`);
+            taguhiLog(`Total payments in cache: ${(window.paymentsCache || []).length}`);
+          }
+          
           // 1. Collect regular payments from payments table
           const matchedPayments = (window.paymentsCache || [])
             .filter(payment => doesPaymentBelongToStudent(payment, idKey, matchNames))
@@ -5118,10 +5181,27 @@
               // Extract payment time from created_at timestamp
               const timeStr = extractPaymentTime(payment);
               
+              // CRITICAL: Extract for_class date (allocated class date)
+              const forClass = payment.for_class ? normalizeDateInput(payment.for_class) : null;
+              
+              // Targeted debug for Taguhi
+              if (isTaguhiBarseghyan) {
+                taguhiLog(`Payment found:`, {
+                  id: paymentId,
+                  amount,
+                  receiptDate: dateStr,
+                  forClass: forClass,
+                  rawForClass: payment.for_class,
+                  student_id: payment.student_id,
+                  linked_student_id: payment.linked_student_id
+                });
+              }
+              
               return {
                 id: paymentId,
                 amount,
-                dateStr,
+                dateStr,  // Receipt date (when payment was received)
+                forClass, // Allocated class date (from for_class column)
                 timeStr,  // Add time string (e.g., "9:13 AM")
                 raw: payment,
                 source: 'payment', // Mark as regular payment
@@ -5153,6 +5233,14 @@
             });
           }
           
+          // Targeted summary for Taguhi
+          if (isTaguhiBarseghyan) {
+            taguhiLog(`TOTAL MATCHED: ${matchedPayments.length} payments`);
+            matchedPayments.forEach((p, i) => {
+              taguhiLog(`  Payment ${i+1}: forClass=${p.forClass}, receiptDate=${p.dateStr}, amount=${p.amount}`);
+            });
+          }
+          
           return matchedPayments;
         }
 
@@ -5160,17 +5248,31 @@
           if (!payment || payment.ignored) return false;
 
           if (idKey) {
+            // CRITICAL: Check linked_student_id FIRST (many payments have student_id=NULL but linked_student_id populated)
             const candidateIds = [
-              payment.student_id,
+              payment.linked_student_id,      // Check this FIRST
+              payment.student_id,              // Then check student_id
               payment.studentid,
               payment.studentId,
-              payment.linked_student_id,
               payment.derived_student_id,
             ]
               .map(value => (value != null ? String(value) : null))
               .filter(Boolean);
             
-            if (candidateIds.includes(idKey)) {
+            const matched = candidateIds.includes(idKey);
+            
+            // COMPREHENSIVE DEBUG: Log ALL payment matching attempts
+            debugLog(`  🔎 Payment Match Check:
+       Payment ID: ${payment.id}
+       Looking for student ID: ${idKey}
+       payment.student_id: ${payment.student_id}
+       payment.linked_student_id: ${payment.linked_student_id}
+       payment.for_class: ${payment.for_class}
+       payment.payer_name: ${payment.payer_name}
+       Candidate IDs: [${candidateIds.join(', ')}]
+       ✅ MATCHED: ${matched}`);
+            
+            if (matched) {
               return true;
             }
           }
@@ -5365,106 +5467,56 @@
         }
         
         function findPaymentMatchForClass(student, dateStr, pricePerClass) {
-          // STRICT RULE: ALL dots start RED. Only a matched payment can make it GREEN.
+          // SIMPLE RULE: Match payments by for_class column ONLY
+          // If payment.for_class === class_date → payment matches (GREEN dot)
+          // If no match → null (RED dot)
           
           const studentPayments = collectPaymentsForStudentSimple(student);
-          if (!studentPayments.length) return null;
-
-          const validPrice = Number(pricePerClass) || 0;
-          if (validPrice <= 0) return null;
-
-          // HARD CUTOFF: Only classes on or after December 1, 2025 are considered
-          if (dateStr < '2025-12-01') {
-            // Historical data: Use simple 3-day grace period
-            const exactMatch = studentPayments.find(payment => payment.dateStr === dateStr);
-            if (exactMatch) return exactMatch;
-            
-            const classDateObj = createDateFromDateStr(dateStr);
-            const threeDaysAfter = new Date(classDateObj);
-            threeDaysAfter.setDate(threeDaysAfter.getDate() + 3);
-            const gracePeriodEndStr = formatDateYYYYMMDD(threeDaysAfter);
-            
-            const historicalGracePayment = studentPayments.find(payment => 
-              payment.dateStr >= dateStr && payment.dateStr <= gracePeriodEndStr
-            );
-            
-            return historicalGracePayment || null;
+          
+          const isTaguhiBarseghyan = (student.name === 'Taguhi Barseghyan' || student.id === 41 || student.id === '41');
+          
+          if (isTaguhiBarseghyan) {
+            taguhiLog(`Checking payment match for ${dateStr}`);
+            taguhiLog(`Student has ${studentPayments.length} payments total`);
           }
 
-          // DECEMBER 1+ STRICT RULES
-          // Extract class month for same-month validation
-          const classDate = createDateFromDateStr(dateStr);
-          if (!classDate) return null;
-          const classMonth = classDate.getMonth();
-          const classYear = classDate.getFullYear();
+          if (!studentPayments.length) {
+            if (isTaguhiBarseghyan) taguhiLog(`❌ No payments found`);
+            return null;
+          }
 
-          // Filter payments: ONLY from the SAME MONTH as the class
-          const sameMonthPayments = studentPayments.filter(payment => {
-            if (!payment.dateStr || payment.dateStr < '2025-12-01') return false;
-            const paymentDate = createDateFromDateStr(payment.dateStr);
-            if (!paymentDate) return false;
-            return paymentDate.getMonth() === classMonth && paymentDate.getFullYear() === classYear;
-          });
+          const validPrice = Number(pricePerClass) || 0;
+          if (validPrice <= 0) {
+            if (isTaguhiBarseghyan) taguhiLog(`❌ Invalid price: ${pricePerClass}`);
+            return null;
+          }
 
-          if (!sameMonthPayments.length) return null;
+          // Log all payments for Taguhi
+          if (isTaguhiBarseghyan) {
+            studentPayments.forEach((payment, index) => {
+              taguhiLog(`  Payment ${index + 1}: forClass=${payment.forClass}, amount=${payment.amount}, receiptDate=${payment.dateStr}`);
+            });
+          }
 
-          // Priority 1: Exact date match (payment made ON class date)
-          const exactMatch = sameMonthPayments.find(payment => payment.dateStr === dateStr);
+          // Find payment where for_class matches this class date
+          const exactMatch = studentPayments.find(payment => payment.forClass === dateStr);
+          
           if (exactMatch) {
-            // Check if this payment can cover multiple classes
-            const paymentAmount = Number(exactMatch.amount) || 0;
-            if (paymentAmount >= validPrice * 2) {
-              if (!paymentAllocationTracker.has(exactMatch.id)) {
-                paymentAllocationTracker.set(exactMatch.id, {
-                  total: paymentAmount,
-                  used: validPrice,
-                  remaining: paymentAmount - validPrice
-                });
-              }
+            if (isTaguhiBarseghyan) {
+              taguhiLog(`✅ MATCH FOUND for ${dateStr}!`, {
+                paymentId: exactMatch.id,
+                amount: exactMatch.amount,
+                receiptDate: exactMatch.dateStr,
+                forClass: exactMatch.forClass
+              });
             }
             return exactMatch;
           }
 
-          // Priority 2: GRACE PERIOD - Payment made BEFORE next class starts
-          // Grace period = from class date until 11:59 PM the day BEFORE next class
-          const nextClassDate = findNextClassDate(student, dateStr);
-          if (!nextClassDate) return null; // No next class = no grace period
-
-          // Grace period ends the day BEFORE next class at 11:59 PM
-          const gracePeriodEnd = createDateFromDateStr(nextClassDate);
-          gracePeriodEnd.setDate(gracePeriodEnd.getDate() - 1); // Day before next class
-          const gracePeriodEndStr = formatDateYYYYMMDD(gracePeriodEnd);
-
-          // Find payments within grace period that have remaining balance
-          for (const payment of sameMonthPayments) {
-            // Payment must be AFTER class date but BEFORE grace period ends
-            if (payment.dateStr <= dateStr || payment.dateStr > gracePeriodEndStr) continue;
-
-            const paymentAmount = Number(payment.amount) || 0;
-            
-            // Check allocation tracker
-            if (paymentAllocationTracker.has(payment.id)) {
-              const allocation = paymentAllocationTracker.get(payment.id);
-              if (allocation.remaining >= validPrice) {
-                // This payment has enough remaining balance
-                allocation.used += validPrice;
-                allocation.remaining -= validPrice;
-                return payment;
-              }
-            } else {
-              // Payment not yet tracked - check if it can cover this class
-              if (paymentAmount >= validPrice) {
-                paymentAllocationTracker.set(payment.id, {
-                  total: paymentAmount,
-                  used: validPrice,
-                  remaining: paymentAmount - validPrice
-                });
-                return payment;
-              }
-            }
+          // No match found
+          if (isTaguhiBarseghyan) {
+            taguhiLog(`❌ No payment with forClass=${dateStr} found`);
           }
-
-          // FORBIDDEN: No payment match = RED dot (ALWAYS)
           return null;
         }
 
@@ -5627,6 +5679,187 @@
             paidAmount: 0,
             owedAmount: validPrice, // Include owed amount for totals calculation
           };
+        }
+
+        // ============================================================
+        // 🔴 FUCHSIA DOT LOGIC - Misallocated Payments
+        // ============================================================
+        async function addMisallocatedPaymentDots() {
+          const studentsData = window.studentsCache || [];
+          const targetMonthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+
+          // Fetch ignored payments
+          let ignoredPaymentIds = new Set();
+          try {
+            const { data: ignoredData, error: ignoredError } = await supabase
+              .from('ignored_fuchsia_payments')
+              .select('payment_id');
+            
+            if (!ignoredError && ignoredData) {
+              ignoredPaymentIds = new Set(ignoredData.map(row => row.payment_id));
+            }
+          } catch (err) {
+            console.warn('Failed to fetch ignored payments:', err);
+          }
+
+          // Build a lookup of scheduled class dates per student from the day map
+          const scheduledDatesByStudent = new Map(); // studentId/name -> Set(dateStr)
+          Object.values(dayMap).forEach(dayEntry => {
+            if (!dayEntry || !dayEntry.groups) return;
+            const { dateStr, groups } = dayEntry;
+            if (!dateStr || !dateStr.startsWith(targetMonthPrefix)) return;
+
+            groups.forEach(groupEntry => {
+              (groupEntry.students || []).forEach(studentEntry => {
+                if (!studentEntry) return;
+                const studentKey = studentEntry.id ? String(studentEntry.id) : studentEntry.name;
+                if (!studentKey) return;
+                if (!scheduledDatesByStudent.has(studentKey)) {
+                  scheduledDatesByStudent.set(studentKey, new Set());
+                }
+                scheduledDatesByStudent.get(studentKey).add(dateStr);
+              });
+            });
+          });
+
+          let totalFuchsiaDots = 0;
+          let totalIgnored = 0;
+          let totalPaymentsChecked = 0;
+
+          // FIRST PASS: Check ALL students for Dec 13 payments (including show_in_grid=false)
+          studentsData.forEach(student => {
+            const studentPayments = collectPaymentsForStudentSimple(student);
+            studentPayments.forEach(payment => {
+              if (payment.forClass === '2025-12-13') {
+                // Dec 13 payment found - silently tracked
+              }
+            });
+          });
+
+          // SECOND PASS: Process only show_in_grid students
+          studentsData.forEach(student => {
+            if (!student.show_in_grid) return;
+
+            const studentPayments = collectPaymentsForStudentSimple(student);
+            if (!studentPayments.length) return;
+
+            const studentKey = student.id != null ? String(student.id) : student.name;
+            const scheduledDates = scheduledDatesByStudent.get(studentKey) || new Set();
+
+            studentPayments.forEach(payment => {
+              if (!payment.forClass) {
+                return;
+              }
+
+              const forClassDate = payment.forClass;
+
+              if (!forClassDate.startsWith(targetMonthPrefix)) {
+                // Payment for different month
+                return;
+              }
+
+              totalPaymentsChecked++;
+
+              // Skip ignored payments
+              if (ignoredPaymentIds.has(payment.id)) {
+                totalIgnored++;
+                return;
+              }
+
+              const isScheduledClass = scheduledDates.has(forClassDate);
+
+              if (!isScheduledClass) {
+                addFuchsiaDot(forClassDate, student, payment);
+                totalFuchsiaDots++;
+              }
+            });
+          });
+        }
+        
+        function isScheduledClassDay(groupRecord, classDate) {
+          // Check if the given date is a scheduled class day for this group
+          if (!groupRecord || !classDate) return false;
+          
+          // Parse the group's schedule
+          const sessions = parseScheduleString(groupRecord.schedule || '');
+          if (!sessions.length) return false;
+          
+          // Get the day of week for the class date
+          const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+          const dayOfWeek = classDate.getDay();
+          const dayName = dayNames[dayOfWeek];
+          
+          // Check if this day is in the group's schedule
+          const hasRegularClass = sessions.some(session => session.day === dayName);
+          if (hasRegularClass) return true;
+          
+          // Check one-time schedules
+          if (Array.isArray(groupRecord.one_time_schedules)) {
+            const dateStr = formatDateYYYYMMDD(classDate);
+            const hasOneTimeClass = groupRecord.one_time_schedules.some(override => {
+              if (!override || !override.date) return false;
+              const normalizedDate = normalizeDateInput(override.date);
+              return normalizedDate === dateStr;
+            });
+            if (hasOneTimeClass) return true;
+          }
+          
+          return false;
+        }
+        
+        function hasScheduledClass(student, dateStr) {
+          // Check if student has a scheduled class on this date
+          const groupName = student.group_name;
+          if (!groupName) return false;
+          
+          // Find the group record
+          const groupRecord = (window.groupsCache || []).find(g => 
+            (g.group_name || g.name) === groupName || 
+            canonicalizeGroupCode(g.group_name || g.name) === canonicalizeGroupCode(groupName)
+          );
+          
+          if (!groupRecord) return false;
+          
+          // Check if date is in the group's schedule
+          const classDate = createDateFromDateStr(dateStr);
+          if (!classDate) return false;
+          
+          return isScheduledClassDay(groupRecord, classDate);
+        }
+        
+        function addFuchsiaDot(dateStr, student, payment) {
+          // Extract day number from YYYY-MM-DD format
+          const dateParts = dateStr.split('-');
+          const day = parseInt(dateParts[2], 10); // Get day as number (1-31)
+          
+          // Get or create day entry using NUMERIC key
+          if (!dayMap[day]) {
+            dayMap[day] = {
+              dateStr,
+              classes: 0,
+              payments: 0,
+              totals: { paid: 0, unpaid: 0 },
+              groups: [],
+              fuchsiaDots: [] // New: track fuchsia dots separately
+            };
+          }
+          
+          // Add fuchsia dot to the day
+          if (!dayMap[day].fuchsiaDots) {
+            dayMap[day].fuchsiaDots = [];
+          }
+          
+          const fuchsiaDotData = {
+            studentId: student.id,
+            studentName: student.name,
+            paymentId: payment.id,
+            paymentAmount: payment.amount,
+            receiptDate: payment.dateStr,
+            forClass: payment.forClass,
+            label: `${student.name} - Payment for non-class day`
+          };
+          
+          dayMap[day].fuchsiaDots.push(fuchsiaDotData);
         }
 
         // ============================================================
@@ -8444,9 +8677,9 @@
       }
 
       // Update Stats (Sidebar)
-      function updateStats() {
+      async function updateStats() {
         const { year, month } = getCurrentViewYearMonth();
-        const monthData = getMonthData(year, month);
+        const monthData = await getMonthData(year, month);
         const aggregates = monthData?.aggregates || {};
 
         document.getElementById('totalClasses').textContent = aggregates.classes || 0;
@@ -8456,10 +8689,10 @@
       }
 
       // Update Calendar Stats (Header)
-      function updateCalendarStats() {
+      async function updateCalendarStats() {
         try {
           const { year, month } = getCurrentViewYearMonth();
-          const monthData = getMonthData(year, month);
+          const monthData = await getMonthData(year, month);
           if (!monthData) {
             console.warn('updateCalendarStats: No monthData');
             return;
@@ -9431,7 +9664,7 @@
         }
       }
 
-      function renderCalendar() {
+      async function renderCalendar() {
         const { year, month } = getCurrentViewYearMonth();
 
         // Reset payment allocation tracker for fresh calculation
@@ -9440,7 +9673,7 @@
         // ⚡ Performance: Check if month data is already cached
         let monthData = DataCache.getMonth(year, month);
         if (!monthData) {
-          monthData = getMonthData(year, month) || {};
+          monthData = await getMonthData(year, month) || {};
           DataCache.setMonth(year, month, monthData);
         }
 
@@ -9454,6 +9687,7 @@
 
         calendarBaseEvents = [...(monthData.eventsFlat || [])];
         currentMonthEventMap = monthData.dayMap || {};
+        window.currentDayMap = currentMonthEventMap; // Make available globally for reassignment modal
         currentMonthEventsFlat = [...(monthData.eventsFlat || [])];
         lastMergedEventsCount = currentMonthEventsFlat.length;
 
@@ -9710,6 +9944,53 @@
             indicatorContainer.appendChild(groupRow);
           }
         });
+
+        // ============================================================
+        // 🔴 RENDER FUCHSIA DOTS (Misallocated Payments)
+        // ============================================================
+        if (dayData.fuchsiaDots && dayData.fuchsiaDots.length > 0) {
+          const fuchsiaRow = document.createElement('div');
+          fuchsiaRow.className = 'group-dots-row fuchsia-row';
+          
+          // Add special label for fuchsia dots
+          const fuchsiaLabel = document.createElement('span');
+          fuchsiaLabel.className = 'group-label fuchsia-label';
+          fuchsiaLabel.textContent = '!';
+          fuchsiaLabel.title = 'Misallocated Payments (Need Reassignment)';
+          fuchsiaLabel.style.color = '#ff00ff';
+          fuchsiaLabel.style.fontWeight = 'bold';
+          fuchsiaRow.appendChild(fuchsiaLabel);
+          
+          // Add fuchsia dots
+          dayData.fuchsiaDots.forEach((fuchsiaDot, index) => {
+            const dot = document.createElement('div');
+            dot.className = 'indicator-dot dot-fuchsia';
+            dot.style.background = 'linear-gradient(135deg, #ff00ff 0%, #ff66ff 100%)';
+            dot.style.cursor = 'pointer';
+            dot.style.width = '8px';
+            dot.style.height = '8px';
+            dot.style.borderRadius = '50%';
+            dot.style.display = 'inline-block';
+            dot.style.margin = '0 2px';
+            
+            dot.setAttribute('data-tooltip', fuchsiaDot.label);
+            dot.setAttribute('data-student-id', fuchsiaDot.studentId);
+            dot.setAttribute('data-student-name', fuchsiaDot.studentName);
+            dot.setAttribute('data-payment-id', fuchsiaDot.paymentId);
+            dot.setAttribute('data-for-class', fuchsiaDot.forClass);
+            dot.setAttribute('data-receipt-date', fuchsiaDot.receiptDate);
+            dot.setAttribute('data-class-date', dayData.dateStr);
+            
+            // Make fuchsia dots clickable for reassignment
+            dot.addEventListener('click', () => {
+              showReassignmentModal(fuchsiaDot);
+            });
+            
+            fuchsiaRow.appendChild(dot);
+          });
+          
+          indicatorContainer.appendChild(fuchsiaRow);
+        }
       }
 
       function applyDayStateClasses(dayEl, dayData) {
@@ -10747,7 +11028,7 @@
       }
 
       // Open Day Modal
-      function openDayModal(dateInput) {
+      async function openDayModal(dateInput) {
         let targetDate = null;
         if (typeof dateInput === 'string') {
           targetDate = createDateFromDateStr(dateInput) || new Date(dateInput);
@@ -10769,7 +11050,7 @@
         document.getElementById('modalDate').textContent = formattedDate;
         document.getElementById('modalDayOfWeek').textContent = dayOfWeek;
 
-        const monthData = getMonthData(targetParts.year, targetParts.month - 1);
+        const monthData = await getMonthData(targetParts.year, targetParts.month - 1);
         const dayEntry = monthData?.dayMap?.[targetParts.day];
         const modalBody = document.getElementById('modalBody');
 
@@ -10882,6 +11163,122 @@
             
             tabPanelsHtml += `<div class="tab-panel" data-tab="${tabId}">${groupContent}</div>`;
           });
+        }
+
+        // Add "Payments Received" tab - shows ALL payments received on this date
+        const paymentsReceivedToday = [];
+        const paymentsCache = window.paymentsCache || [];
+        const studentsData = window.studentsCache || [];
+        
+        console.log('🔍 Payments Received Tab - Checking date:', targetDateStr);
+        console.log('🔍 Total payments in cache:', paymentsCache.length);
+        
+        // Find all payments received on this date
+        paymentsCache.forEach(payment => {
+          // Extract receipt date from payment (email_date or date field)
+          const dateSource = payment.email_date || payment.emailDate || payment.date || payment.payment_date || payment.created_at;
+          if (!dateSource) return;
+          
+          const receiptDate = normalizeDateInput(dateSource);
+          
+          // Log all Dec 13 payments
+          if (receiptDate === '2025-12-13') {
+            console.log('🔍 Found Dec 13 payment:', {
+              id: payment.id,
+              student_id: payment.student_id,
+              linked_student_id: payment.linked_student_id,
+              amount: payment.amount,
+              for_class: payment.for_class,
+              receiptDate
+            });
+          }
+          
+          if (receiptDate === targetDateStr) {
+            // Find the student this payment belongs to
+            // CRITICAL: Check linked_student_id FIRST (this is the resolved student)
+            const studentId = payment.linked_student_id || payment.student_id;
+            const student = studentsData.find(s => String(s.id) === String(studentId));
+            
+            console.log('🔍 Payment matches target date:', {
+              paymentId: payment.id,
+              studentId,
+              studentFound: !!student,
+              studentName: student?.name
+            });
+            
+            if (student && student.show_in_grid) {
+              const allocatedTo = payment.for_class ? normalizeDateInput(payment.for_class) : 'Not allocated';
+              const amount = Number(payment.amount) || Number(payment.amountUSD) || Number(payment.amount_paid_usd) || 0;
+              const paymentId = payment.id || payment.gmail_id;
+              
+              paymentsReceivedToday.push({
+                student,
+                payment: {
+                  id: paymentId,
+                  amount,
+                  dateStr: receiptDate,
+                  forClass: allocatedTo
+                },
+                allocatedTo,
+                isAllocatedElsewhere: allocatedTo && allocatedTo !== targetDateStr && allocatedTo !== 'Not allocated'
+              });
+            }
+          }
+        });
+
+        if (paymentsReceivedToday.length > 0) {
+          const paymentsTabId = 'payments-received';
+          const paymentsCount = paymentsReceivedToday.length;
+          tabsHtml += `<div class="modal-tab" onclick="switchModalTab(event, '${paymentsTabId}')">Payments (${paymentsCount})</div>`;
+          
+          const paymentsHtml = paymentsReceivedToday.map(item => {
+            const { student, payment, allocatedTo, isAllocatedElsewhere } = item;
+            const initials = student.name.split(' ').map(n => n[0]).join('');
+            const statusBadge = isAllocatedElsewhere
+              ? `<span class="badge pending">Allocated to ${allocatedTo}</span>`
+              : `<span class="badge paid">Allocated to this class</span>`;
+            
+            const reassignButton = isAllocatedElsewhere
+              ? `<button class="quick-action-btn primary" onclick='reassignPaymentFromModal(${JSON.stringify(payment.id)}, ${JSON.stringify(student.id)}, ${JSON.stringify(student.name)}, ${JSON.stringify(payment.amount)}, ${JSON.stringify(targetDateStr)}, ${JSON.stringify(allocatedTo)})' style="padding: 6px 12px; font-size: 12px;">↔️ Reassign</button>`
+              : '';
+
+            return `
+              <div class="student-card">
+                <div class="student-info">
+                  <div class="student-avatar">${initials}</div>
+                  <div class="student-details">
+                    <div class="student-name">${student.name}</div>
+                    <div class="student-status">$${payment.amount} • Received ${targetDateStr}</div>
+                  </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  ${reassignButton}
+                  <div class="student-badges">
+                    ${statusBadge}
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          const paymentsContent = `
+            <div class="group-section">
+              <div class="group-header">
+                <div class="group-header-content">
+                  <div class="group-icon">💰</div>
+                  <div class="group-info">
+                    <h3>Payments Received</h3>
+                    <div class="group-time">${paymentsCount} payment${paymentsCount === 1 ? '' : 's'} received on this date</div>
+                  </div>
+                </div>
+              </div>
+              <div class="students-list">
+                ${paymentsHtml}
+              </div>
+            </div>
+          `;
+          
+          tabPanelsHtml += `<div class="tab-panel" data-tab="${paymentsTabId}">${paymentsContent}</div>`;
         }
 
         if (studentEvents.length) {
@@ -11121,6 +11518,420 @@
           modal.classList.add('active');
           document.body.style.overflow = 'hidden';
         }
+      }
+
+      // ============================================================
+      // 🔴 FUCHSIA DOT - Reassignment Modal
+      // ============================================================
+      async function reassignPaymentFromModal(paymentId, studentId, studentName, amount, receiptDate, currentForClass) {
+        // Get student's unpaid classes
+        const student = (window.studentsCache || []).find(s => 
+          String(s.id) === String(studentId) || s.name === studentName
+        );
+
+        if (!student) {
+          await customAlert('Error', 'Student not found');
+          return;
+        }
+
+        const unpaidClasses = await getStudentUnpaidClasses(student);
+
+        // Create custom modal
+        const result = await showReassignmentPickerModal({
+          studentName,
+          currentForClass,
+          receiptDate,
+          paymentAmount: amount,
+          unpaidClasses,
+          paymentId,
+          studentId
+        });
+
+        if (!result) {
+          return; // User canceled
+        }
+
+        // Handle ignore action
+        if (result.action === 'ignore') {
+          await ignorePayment(paymentId, studentId);
+          return;
+        }
+
+        // Handle reassignment
+        const newDate = result.date;
+
+        // Validate date format
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+          await customAlert('Invalid Date', 'Please enter a date in YYYY-MM-DD format (e.g., 2025-12-15)');
+          return;
+        }
+
+        // Update the for_class column in Supabase
+        try {
+          const { error } = await supabase
+            .from('payments')
+            .update({ for_class: newDate })
+            .eq('id', paymentId);
+
+          if (error) {
+            console.error('❌ Error reassigning payment:', error);
+            await customAlert('Error', `Failed to reassign payment: ${error.message}`);
+            return;
+          }
+
+          await customAlert('Success', `✅ Payment reassigned from ${currentForClass} to ${newDate}`);
+
+          // Reload calendar to reflect changes
+          if (typeof renderCalendar === 'function') {
+            await loadPayments(); // Refresh payment data
+            renderCalendar();
+          }
+          
+          // Close the day modal
+          closeDayModal();
+        } catch (err) {
+          console.error('❌ Exception reassigning payment:', err);
+          await customAlert('Error', `Failed to reassign payment: ${err.message}`);
+        }
+      }
+
+      async function ignorePayment(paymentId, studentId) {
+        try {
+          // Get current user email from Supabase session
+          let userEmail = 'admin';
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user?.email) {
+              userEmail = session.user.email;
+            }
+          } catch (err) {
+            console.warn('Could not get user email:', err);
+          }
+
+          const { error } = await supabase
+            .from('ignored_fuchsia_payments')
+            .insert({
+              payment_id: paymentId,
+              student_id: studentId,
+              ignored_by: userEmail
+            });
+
+          if (error) {
+            console.error('❌ Error ignoring payment:', error);
+            await customAlert('Error', `Failed to ignore payment: ${error.message}`);
+            return false;
+          }
+
+          await customAlert('Success', '✅ Payment ignored. Fuchsia dot will no longer appear.');
+          
+          // Reload calendar to reflect changes
+          if (typeof renderCalendar === 'function') {
+            await loadPayments(); // Refresh payment data
+            renderCalendar();
+          }
+          
+          return true;
+        } catch (err) {
+          console.error('❌ Exception ignoring payment:', err);
+          await customAlert('Error', `Failed to ignore payment: ${err.message}`);
+          return false;
+        }
+      }
+
+      // ============================================================
+      async function showReassignmentModal(fuchsiaDot) {
+        const studentName = fuchsiaDot.studentName;
+        const currentForClass = fuchsiaDot.forClass;
+        const receiptDate = fuchsiaDot.receiptDate;
+        const paymentAmount = fuchsiaDot.paymentAmount;
+        const paymentId = fuchsiaDot.paymentId;
+        const studentId = fuchsiaDot.studentId;
+
+        // Find the student object
+        const student = (window.studentsCache || []).find(s => 
+          String(s.id) === String(studentId) || s.name === studentName
+        );
+
+        if (!student) {
+          await customAlert('Error', 'Student not found');
+          return;
+        }
+
+        // Get student's unpaid classes
+        const unpaidClasses = await getStudentUnpaidClasses(student);
+
+        // Create custom modal
+        const result = await showReassignmentPickerModal({
+          studentName,
+          currentForClass,
+          receiptDate,
+          paymentAmount,
+          unpaidClasses,
+          paymentId,
+          studentId
+        });
+
+        if (!result) {
+          return; // User canceled
+        }
+
+        // Handle ignore action
+        if (result.action === 'ignore') {
+          await ignorePayment(paymentId, studentId);
+          return;
+        }
+
+        // Handle reassignment
+        const newDate = result.date;
+
+        // Validate date format
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
+          await customAlert('Invalid Date', 'Please enter a date in YYYY-MM-DD format (e.g., 2025-12-15)');
+          return;
+        }
+
+        // Update the for_class column in Supabase
+        try {
+          const { error } = await supabase
+            .from('payments')
+            .update({ for_class: newDate })
+            .eq('id', paymentId);
+
+          if (error) {
+            console.error('❌ Error reassigning payment:', error);
+            await customAlert('Error', `Failed to reassign payment: ${error.message}`);
+            return;
+          }
+
+          await customAlert('Success', `✅ Payment reassigned from ${currentForClass} to ${newDate}`);
+
+          // Reload calendar to reflect changes
+          if (typeof renderCalendar === 'function') {
+            await loadPayments(); // Refresh payment data
+            renderCalendar();
+          }
+        } catch (err) {
+          console.error('❌ Exception reassigning payment:', err);
+          await customAlert('Error', `Failed to reassign payment: ${err.message}`);
+        }
+      }
+
+      async function getStudentUnpaidClasses(student) {
+        const unpaidClasses = [];
+        const studentId = String(student.id);
+
+        // Get all days from the current dayMap that have classes
+        // dayMap is available from the parent scope where this function is called
+        if (!window.currentDayMap) {
+          console.warn('No dayMap available for unpaid classes lookup');
+          return [];
+        }
+
+        Object.values(window.currentDayMap).forEach(dayEntry => {
+          if (!dayEntry || !dayEntry.groups || !dayEntry.dateStr) return;
+
+          const dateStr = dayEntry.dateStr;
+
+          // Check each group on this day
+          dayEntry.groups.forEach(groupEntry => {
+            if (!groupEntry.students) return;
+
+            // Check if this student is in this class
+            const studentInClass = groupEntry.students.find(s => 
+              String(s.id) === studentId || s.name === student.name
+            );
+
+            if (!studentInClass) return;
+
+            // Check if student is unpaid for this class
+            if (studentInClass.status === 'unpaid') {
+              unpaidClasses.push({
+                dateStr,
+                groupName: groupEntry.groupName,
+                groupDisplay: groupEntry.groupName
+              });
+            }
+          });
+        });
+
+        // Remove duplicates and sort by date (newest first)
+        const uniqueClasses = Array.from(new Map(unpaidClasses.map(cls => [cls.dateStr, cls])).values());
+        return uniqueClasses.sort((a, b) => b.dateStr.localeCompare(a.dateStr));
+      }
+
+      function showReassignmentPickerModal({ studentName, currentForClass, receiptDate, paymentAmount, unpaidClasses, paymentId, studentId }) {
+        return new Promise((resolve) => {
+          // Create modal overlay
+          const overlay = document.createElement('div');
+          overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(8px);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.2s ease;
+          `;
+
+          // Create modal container
+          const modal = document.createElement('div');
+          modal.style.cssText = `
+            background: linear-gradient(135deg, rgba(30, 30, 50, 0.95), rgba(50, 50, 80, 0.95));
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+          `;
+
+          // Build modal content
+          modal.innerHTML = `
+            <h2 style="color: #ff00ff; margin: 0 0 20px 0; font-size: 24px;">Reassign Payment</h2>
+            
+            <div style="background: rgba(255, 0, 255, 0.1); border-left: 4px solid #ff00ff; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="margin: 0 0 10px 0; color: #ff00ff; font-size: 16px;">🔴 Misallocated Payment</h3>
+              <p style="margin: 5px 0; color: #fff;"><strong>Student:</strong> ${studentName}</p>
+              <p style="margin: 5px 0; color: #fff;"><strong>Payment Amount:</strong> $${paymentAmount}</p>
+              <p style="margin: 5px 0; color: #fff;"><strong>Receipt Date:</strong> ${receiptDate}</p>
+              <p style="margin: 5px 0; color: #fff;"><strong>Currently Allocated To:</strong> ${currentForClass}</p>
+              <p style="margin: 10px 0 0 0; color: #ff6b6b;">
+                <strong>Issue:</strong> This payment is allocated to ${currentForClass}, but ${studentName} has NO scheduled class on this date.
+              </p>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+              <label style="display: block; margin-bottom: 10px; color: #fff; font-weight: bold;">Select New Class Date:</label>
+              <input type="date" id="reassignDatePicker" value="${currentForClass}" 
+                style="width: 100%; padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 16px; cursor: pointer;">
+            </div>
+
+            ${unpaidClasses.length > 0 ? `
+              <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 10px; color: #fff; font-weight: bold;">Or Quick Select from Unpaid Classes:</label>
+                <div id="unpaidClassesList" style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto;">
+                  ${unpaidClasses.map(cls => `
+                    <button class="unpaid-class-btn" data-date="${cls.dateStr}" 
+                      style="background: linear-gradient(135deg, rgba(255, 107, 107, 0.2), rgba(255, 107, 107, 0.3)); 
+                      border: 1px solid rgba(255, 107, 107, 0.4); color: #fff; padding: 12px; 
+                      border-radius: 8px; cursor: pointer; text-align: left; transition: all 0.2s; font-size: 14px;">
+                      <div style="font-weight: bold;">${cls.dateStr}</div>
+                      <div style="font-size: 12px; opacity: 0.8;">${cls.groupDisplay} • Unpaid</div>
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            ` : `
+              <div style="padding: 15px; background: rgba(76, 175, 80, 0.1); border-radius: 8px; margin-bottom: 20px;">
+                <p style="margin: 0; color: #4caf50;">✅ No unpaid classes found for ${studentName}</p>
+              </div>
+            `}
+
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+              <button id="ignoreBtn" style="flex: 1; padding: 12px; background: rgba(255, 152, 0, 0.2); 
+                border: 1px solid rgba(255, 152, 0, 0.4); color: #ff9800; border-radius: 8px; 
+                cursor: pointer; font-size: 16px; transition: all 0.2s;">Ignore</button>
+              <button id="cancelBtn" style="flex: 1; padding: 12px; background: rgba(255, 255, 255, 0.1); 
+                border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; border-radius: 8px; 
+                cursor: pointer; font-size: 16px; transition: all 0.2s;">Cancel</button>
+              <button id="okBtn" style="flex: 1; padding: 12px; background: linear-gradient(135deg, #667eea, #764ba2); 
+                border: none; color: #fff; border-radius: 8px; cursor: pointer; font-size: 16px; 
+                font-weight: bold; transition: all 0.2s;">Reassign</button>
+            </div>
+          `;
+
+          overlay.appendChild(modal);
+          document.body.appendChild(overlay);
+
+          const datePicker = modal.querySelector('#reassignDatePicker');
+          const okBtn = modal.querySelector('#okBtn');
+          const cancelBtn = modal.querySelector('#cancelBtn');
+          const ignoreBtn = modal.querySelector('#ignoreBtn');
+          const unpaidBtns = modal.querySelectorAll('.unpaid-class-btn');
+
+          // Unpaid class button click handlers
+          unpaidBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+              const date = btn.getAttribute('data-date');
+              datePicker.value = date;
+              // Highlight selected
+              unpaidBtns.forEach(b => b.style.background = 'linear-gradient(135deg, rgba(255, 107, 107, 0.2), rgba(255, 107, 107, 0.3))');
+              btn.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.4), rgba(118, 75, 162, 0.4))';
+            });
+
+            // Hover effect
+            btn.addEventListener('mouseenter', () => {
+              if (btn.style.background.includes('234')) return; // Skip if selected
+              btn.style.background = 'linear-gradient(135deg, rgba(255, 107, 107, 0.3), rgba(255, 107, 107, 0.4))';
+            });
+            btn.addEventListener('mouseleave', () => {
+              if (btn.style.background.includes('234')) return; // Skip if selected
+              btn.style.background = 'linear-gradient(135deg, rgba(255, 107, 107, 0.2), rgba(255, 107, 107, 0.3))';
+            });
+          });
+
+          // Ignore button hover effect
+          ignoreBtn.addEventListener('mouseenter', () => {
+            ignoreBtn.style.background = 'rgba(255, 152, 0, 0.3)';
+          });
+          ignoreBtn.addEventListener('mouseleave', () => {
+            ignoreBtn.style.background = 'rgba(255, 152, 0, 0.2)';
+          });
+
+          // Button hover effects
+          okBtn.addEventListener('mouseenter', () => {
+            okBtn.style.transform = 'translateY(-2px)';
+            okBtn.style.boxShadow = '0 8px 20px rgba(102, 126, 234, 0.4)';
+          });
+          okBtn.addEventListener('mouseleave', () => {
+            okBtn.style.transform = 'translateY(0)';
+            okBtn.style.boxShadow = 'none';
+          });
+
+          cancelBtn.addEventListener('mouseenter', () => {
+            cancelBtn.style.background = 'rgba(255, 255, 255, 0.15)';
+          });
+          cancelBtn.addEventListener('mouseleave', () => {
+            cancelBtn.style.background = 'rgba(255, 255, 255, 0.1)';
+          });
+
+          // Ignore button handler
+          ignoreBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+            resolve({ action: 'ignore' });
+          });
+
+          // OK button handler (reassign)
+          okBtn.addEventListener('click', () => {
+            const selectedDate = datePicker.value;
+            document.body.removeChild(overlay);
+            resolve({ action: 'reassign', date: selectedDate });
+          });
+
+          // Cancel button handler
+          cancelBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+            resolve(null);
+          });
+
+          // ESC key handler
+          const escHandler = (e) => {
+            if (e.key === 'Escape') {
+              document.body.removeChild(overlay);
+              document.removeEventListener('keydown', escHandler);
+              resolve(null);
+            }
+          };
+          document.addEventListener('keydown', escHandler);
+        });
       }
 
       // Close Day Modal

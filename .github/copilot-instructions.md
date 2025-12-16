@@ -15,12 +15,214 @@ All pages load Supabase via CDN: `https://cdn.jsdelivr.net/npm/@supabase/supabas
 
 ## 🗄️ Data Layer: Supabase Schema & Cross-Module Contracts
 
+### Supabase Connection Details
+**CRITICAL**: All HTML pages must hard-code these credentials:
+```javascript
+const SUPABASE_URL = 'https://ekndrsvdyajpbaghhzol.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVrbmRyc3ZkeWFqcGJhZ2hoem9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzMyNjc4NTEsImV4cCI6MjA0ODg0Mzg1MX0.VCJxi5ECgy4gCzk6UbkAJSaWBpx7_y0kZSZRgD7HkVo';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+```
+
+### Complete Table Schema & Indexes
+All tables with their primary keys, indexes, and unique constraints:
+
+**Key Payment Tables**:
+- `payments` - Automated payment imports (Zelle/Venmo)
+  - PK: `id`
+  - Unique: `gmail_id`, `(student_id, for_class)` where both NOT NULL
+  - Key indexes: `student_id`, `for_class`, `email_date`, `payer_name`, `linked_student_id`
+  - Important: `unique_student_class_payment` prevents duplicate student-date combinations
+
+- `payment_records` - Manual payment entries
+  - PK: `id`
+  - Index: `(student_id, status)` where status='paid'
+
+- `credit_payments` - Credit-based payments
+  - PK: `id`
+  - Unique: `(student_id, class_date)`
+  - Indexes: `student_id`, `class_date`, `applied_class_date`, `(student_id, applied_class_date)`
+
+- `manual_payment_moves` - Payment reassignment history
+  - PK: `id`
+  - Unique: `(student_id, from_date, to_date)`
+  - Indexes: `student_id`, `(from_date, to_date)`
+
+**Student & Group Tables**:
+- `students` - Student records
+  - PK: `id`
+  - Indexes: `auth_user_id`, `show_in_grid`
+  - Fields: `name`, `group_letter`, `price_per_class`, `balance`, `aliases[]`
+
+- `student_absences` - Absence tracking
+  - PK: `id`
+  - Unique: `(student_id, class_date)`
+  - Indexes: `class_date`, `(student_id, class_date)`
+
+- `groups` - Group definitions
+  - PK: `id`
+  - Index: `group_name`
+
+- `skipped_classes` - Group-wide class cancellations
+  - PK: `id`
+  - Unique: `(group_name, class_date)`
+  - Indexes: `group_name`, `class_date`, `skip_type`, `(group_name, class_date)`, `(group_name, class_date, skip_type)`
+
+**Notes & Documents**:
+- `student_notes` - PDF notes system
+  - PK: `id`
+  - Indexes: `created_at`, `(group_name, class_date)`, `requires_payment`, `(group_name, sort_order, created_at)`, `category`, `system_category`
+
+- `note_folders` - Note organization
+  - PK: `id`
+  - Unique: `(folder_name, group_letter)`
+  - Indexes: `group_letter`, `sort_order`
+
+- `note_templates` - Note templates
+  - PK: `id`
+  - Index: `folder_id`
+
+- `note_assignments` - Template-to-group assignments
+  - PK: `id`
+  - Unique: `(template_id, group_id, class_date)`
+  - Indexes: `(group_id, class_date)`, `template_id`, `sort_order`
+
+- `note_purchases` - Note purchase tracking
+  - PK: `id`
+  - Unique: `purchase_code`, `(student_id, note_id)`
+  - Indexes: `student_id`, `note_id`, `payment_id`, `purchase_code`, `status`
+
+- `note_free_access` - Free note access grants
+  - PK: `id`
+  - Unique: `(note_id, group_letter)`, `(note_id, student_id)`
+  - Indexes: `note_id`, `student_id`, `group_letter`
+
+- `student_note_permissions` - Note access permissions
+  - PK: `id`
+  - Unique: `(note_id, student_id, group_name)`
+  - Indexes: `note_id`, `student_id`, `group_name`, `is_accessible`
+
+**Test System**:
+- `tests` - Test containers
+  - PK: `id`
+  - Index: `is_active`
+
+- `test_questions` - Test questions
+  - PK: `id`
+  - Indexes: `test_id`, `category`, `difficulty`, `rationale`
+
+- `question_banks` - Question bank definitions
+  - PK: `id`
+
+- `qbank_questions` - Questions in banks
+  - PK: `id`
+  - Unique: `(qbank_id, question_id)`
+  - Indexes: `qbank_id`, `question_id`
+
+- `test_reactions` - Test UI reactions
+  - PK: `id`
+
+**Email & Communication**:
+- `sent_emails` - Email audit trail
+  - PK: `id`
+  - Indexes: `recipient_email`, `sent_at`, `template_id`
+
+- `email_templates` - Email templates
+  - PK: `id`
+  - Unique: `name`
+  - Indexes: `name`, `(trigger_category, trigger_type)`
+
+- `automations` - Email automations
+  - PK: `id`
+  - Indexes: `active`, `created_at`, `recipient_type`, `template_id`, `(trigger_category, trigger_type)`, `trigger_category`, `trigger_type`
+
+- `auto_reminder_paused` - Paused reminders
+  - PK: `id`
+  - Unique: `student_id`
+  - Index: `student_id`
+
+**Admin & Auth**:
+- `admin_accounts` - Admin whitelist
+  - PK: `auth_user_id`
+  - Unique: `email`
+
+- `user_preferences` - User settings
+  - PK: `id`
+  - Unique: `user_id`
+  - Index: `user_id`
+
+**Session & Activity**:
+- `session_logs` - Session tracking
+  - PK: `id`
+  - Indexes: `student_id`, `session_start`, `is_active`
+
+- `student_sessions` - Active sessions
+  - PK: `id`
+  - Indexes: `student_id`, `last_activity`, `is_active`
+
+**Alerts & Notifications**:
+- `student_alerts` - Student alerts
+  - PK: `id`
+  - Indexes: `student_id`, `created_at`, `is_read`, `read_at`, `has_question`, `student_answer`, `scheduled_for`, `show_on_open`
+
+- `notifications` - System notifications
+  - PK: `id`
+  - Indexes: `timestamp`, `type`, `student_name`, `is_read`, `read`
+
+**Supporting Tables**:
+- `payer_aliases` - Payment name aliases
+  - PK: `id`
+  - Indexes: `student_id`, `payer_name`
+
+- `schedule_changes` - Schedule change log
+  - PK: `id`
+  - Indexes: `group_name`, `created_at`
+
+- `credit_log` - Credit balance history
+  - PK: `id`
+  - Indexes: `student_id`, `created_at`
+
+- `portal_settings` - Portal configuration
+  - PK: `id`
+  - Unique: `setting_key`
+  - Index: `setting_key`
+
+- `student_waiting_list` - Waiting list
+  - PK: `id`
+  - Unique: `email`
+  - Indexes: `email`, `status`, `created_at`
+
+- `gmail_credentials` - Gmail OAuth tokens
+  - PK: `id`
+  - Unique: `user_id`
+  - Indexes: `user_id`, `expires_at`
+
+- `test_email_addresses` - Test email whitelist
+  - PK: `id`
+  - Unique: `email`
+  - Index: `email`
+
+- `pdf_media` - PDF media files
+  - PK: `id`
+  - Indexes: `note_id`, `created_at`
+
+- `forum_messages` - Forum posts
+  - PK: `id`
+  - Indexes: `student_id`, `created_at`, `is_pinned`, `id` (where attachment_url NOT NULL)
+
+- `forum_replies` - Forum replies
+  - PK: `id`
+  - Indexes: `message_id`, `student_id`
+
+- `group_notes` - Group note assignments (legacy?)
+  - PK: `id`
+  - Indexes: `(group_id, class_date)`, `folder_id`, `class_date`
+
 ### Core Tables (shared across all pages)
 | Table | Owner | Readers | Key Fields | Notes |
 |-------|-------|---------|-----------|-------|
 | `students` | `Student-Manager.html` | `Calendar`, `student-portal`, `Payment-Records` | `id`, `name`, `group_letter`, `price_per_class`, `balance`, `show_in_grid`, `aliases[]` | Source of truth for student records |
 | `payment_records` | `Payment-Records.html` | `Calendar`, `student-portal` | `student_id`, `date`, `amount`, `status` (`paid\|unpaid\|pending\|cancelled\|absent`) | Manual payment entries |
-| `payments` | Auto (Zelle/Venmo) | `Payment-Records`, `student-portal` | `linked_student_id`, `student_id`, `resolved_student_name`, `payer_name` | Automated payment imports |
+| `payments` | Auto (Zelle/Venmo) | `Payment-Records`, `student-portal` | `linked_student_id`, `student_id`, `resolved_student_name`, `payer_name`, `for_class` | Automated payment imports with unique constraint on (student_id, for_class) |
 | `student_notes` | `Notes-Manager-NEW.html` | `Group-Notes`, `student-portal`, `Protected-PDF-Viewer` | `pdf_url`, `requires_payment`, `is_system_note`, `system_category` | PDFs in `student-notes` bucket |
 | `tests` | `Test-Manager.html` | `Tests-Library`, `Student-Test` | `test_name`, `system_category`, `is_active` | Test containers |
 | `test_questions` | `Test-Manager.html` | `Student-Test` | `test_id`, `question_text`, `correct_answer` | Questions belong to tests |
@@ -37,6 +239,70 @@ All pages load Supabase via CDN: `https://cdn.jsdelivr.net/npm/@supabase/supabas
 **DANGER ZONE**: Changing a column in `students` or `payment_records` requires updating 4+ HTML pages. Always `grep` before renaming:
 ```bash
 grep -r "price_per_class" *.html
+```
+
+### Row Level Security (RLS) Policies
+Complete RLS policies by table - **NEVER modify these without explicit instruction**:
+
+**Admin Helper Function**:
+- `is_arnoma_admin()` - Checks if user exists in `admin_accounts` table
+
+**Key Policy Patterns**:
+
+1. **Admin-Only Tables** (full access for admins):
+   - `admin_accounts`, `automations`, `email_templates`, `sent_emails`, `test_email_addresses`
+   - `manual_payment_moves`, `notifications`, `schedule_changes`
+   
+2. **Admin Write / Public Read**:
+   - `payments` - Admins manage, anon can read/insert (for automated imports), update with gmail_id
+   - `payment_records` - Admins manage, anon can read
+   - `students` - Admins manage, authenticated can view own record
+   - `tests`, `test_questions`, `question_banks`, `qbank_questions` - Admins manage, public can view active
+
+3. **Student Self-Access**:
+   - `student_alerts` - Students can view/update own alerts, admins full access
+   - `student_sessions` - Students can create/view/update own sessions, admins full access
+   - `session_logs` - Students can create/view/update own logs, admins view all
+   - `forum_messages`, `forum_replies` - Students can create/delete own, view all
+
+4. **Group-Based Access**:
+   - `student_notes` - Students view their group's non-deleted notes, admins full access
+   - `note_assignments` - Students view assigned notes for their group
+   - `group_notes` - Students view their group's notes, admins manage
+   - `skipped_classes` - Students read their group's skipped classes, admins manage
+
+5. **Special Cases**:
+   - `note_purchases` - Public can create/update/view, admins full access
+   - `note_free_access` - Students view free access, anon can read (for impersonation)
+   - `student_note_permissions` - Authenticated users can manage/read
+   - `credit_payments`, `credit_log` - Students view own, admins manage
+   - `portal_settings` - Everyone can read, admins can update
+   - `student_waiting_list` - Anon can insert, authenticated can read/update/delete
+
+**Critical Policy Rules**:
+- **Never weaken payment table policies** - Calendar and Payment-Records depend on admin-only writes
+- **Anon read policies** exist for impersonation mode (admin viewing as student)
+- **Public policies** (`{public}` role) allow both authenticated and anon access
+- **Test suite patterns** - Some policies check for `audit_test_%` prefix in names
+- **Email-based auth** - Many policies use `auth.jwt() ->> 'email'` for matching
+- **UID-based auth** - Admin policies use `auth.uid()` matched against `admin_accounts.auth_user_id`
+
+**Common Policy Checks**:
+```sql
+-- Admin check (UID)
+EXISTS (SELECT 1 FROM admin_accounts WHERE admin_accounts.auth_user_id = auth.uid())
+
+-- Admin check (Email)
+EXISTS (SELECT 1 FROM admin_accounts WHERE admin_accounts.email = (auth.jwt() ->> 'email'))
+
+-- Student self-access (UID)
+student_id IN (SELECT students.id FROM students WHERE students.auth_user_id = auth.uid())
+
+-- Student self-access (Email)
+student_id IN (SELECT students.id FROM students WHERE students.email = auth.email())
+
+-- Helper function
+is_arnoma_admin()
 ```
 
 ---
