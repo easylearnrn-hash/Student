@@ -52,8 +52,10 @@ function initCustomDialogs() {
         border: 1px solid rgba(138, 180, 255, 0.3);
         border-radius: 16px;
         padding: 32px;
-        min-width: 400px;
-        max-width: 500px;
+        min-width: 450px;
+        max-width: 640px;
+        max-height: 85vh;
+        overflow-y: auto;
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
         animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
@@ -72,6 +74,9 @@ function initCustomDialogs() {
         line-height: 1.6;
         margin: 0 0 24px 0;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        max-height: 55vh;
+        overflow-y: auto;
+        padding-right: 8px;
       }
 
       .custom-alert-input {

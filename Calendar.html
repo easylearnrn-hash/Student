@@ -49,11 +49,6 @@
         if (DEBUG_MODE) console.log(...args);
       }
       
-      // Targeted debug for specific student (Taguhi Barseghyan)
-      function taguhiLog(...args) {
-        console.log('%c🎯 TAGUHI DEBUG:', 'color: #00ff00; font-weight: bold; font-size: 14px;', ...args);
-      }
-      
       // DOM Cache to eliminate repeated getElementById calls
       const DOMCache = {
         prevBtn: null,
@@ -3982,6 +3977,9 @@
         return { year: currentDate.getFullYear(), month: currentDate.getMonth() };
       }
 
+      // ⚡ LAZY LOADING: Track loaded date ranges to avoid reloading
+      let loadedPaymentRange = { start: null, end: null };
+
       function shiftCurrentView(deltaMonths) {
         const { year, month } = getCurrentViewYearMonth();
         let newMonth = month + deltaMonths;
@@ -3995,6 +3993,47 @@
           newYear += 1;
         }
         currentDate = createDateFromParts(newYear, newMonth, 1);
+        
+        // ⚡ LAZY LOADING: Check if we need to load more payment data
+        checkAndLoadPaymentsForMonth(newYear, newMonth);
+      }
+      
+      // ⚡ LAZY LOADING: Load payments for month if not already loaded
+      async function checkAndLoadPaymentsForMonth(year, month) {
+        const monthStartStr = new Date(year, month, 1).toISOString().split('T')[0];
+        const monthEndStr = new Date(year, month + 1, 0).toISOString().split('T')[0];
+        
+        // Check if this month is already in our loaded range
+        const isLoaded = loadedPaymentRange.start && loadedPaymentRange.end &&
+          monthStartStr >= loadedPaymentRange.start &&
+          monthEndStr <= loadedPaymentRange.end;
+        
+        if (isLoaded) {
+          debugLog('✅ Payments already loaded for', year, month);
+          return;
+        }
+        
+        // Calculate new range: requested month +/- 2 months
+        const rangeStart = new Date(year, month - 2, 1);
+        const rangeEnd = new Date(year, month + 3, 0);
+        const startDateStr = rangeStart.toISOString().split('T')[0];
+        const endDateStr = rangeEnd.toISOString().split('T')[0];
+        
+        debugLog('📥 Loading additional payments for', year, month, '(range:', startDateStr, 'to', endDateStr, ')');
+        
+        // Load payments for this range
+        await loadPayments({ start: startDateStr, end: endDateStr });
+        
+        // Update loaded range (expand to include new range)
+        if (!loadedPaymentRange.start || startDateStr < loadedPaymentRange.start) {
+          loadedPaymentRange.start = startDateStr;
+        }
+        if (!loadedPaymentRange.end || endDateStr > loadedPaymentRange.end) {
+          loadedPaymentRange.end = endDateStr;
+        }
+        
+        // Clear month cache to force re-computation with new data
+        clearMonthCache();
       }
 
       function ensureAMPMFormatLocal(timeStr) {
@@ -5153,11 +5192,6 @@
           // Targeted debug for Taguhi Barseghyan (ID: 41)
           const isTaguhiBarseghyan = (student.name === 'Taguhi Barseghyan' || idKey === '41');
           
-          if (isTaguhiBarseghyan) {
-            taguhiLog(`Collecting payments for ${student.name} (ID: ${idKey})`);
-            taguhiLog(`Total payments in cache: ${(window.paymentsCache || []).length}`);
-          }
-          
           // 1. Collect regular payments from payments table
           const matchedPayments = (window.paymentsCache || [])
             .filter(payment => doesPaymentBelongToStudent(payment, idKey, matchNames))
@@ -5183,19 +5217,6 @@
               
               // CRITICAL: Extract for_class date (allocated class date)
               const forClass = payment.for_class ? normalizeDateInput(payment.for_class) : null;
-              
-              // Targeted debug for Taguhi
-              if (isTaguhiBarseghyan) {
-                taguhiLog(`Payment found:`, {
-                  id: paymentId,
-                  amount,
-                  receiptDate: dateStr,
-                  forClass: forClass,
-                  rawForClass: payment.for_class,
-                  student_id: payment.student_id,
-                  linked_student_id: payment.linked_student_id
-                });
-              }
               
               return {
                 id: paymentId,
@@ -5235,9 +5256,8 @@
           
           // Targeted summary for Taguhi
           if (isTaguhiBarseghyan) {
-            taguhiLog(`TOTAL MATCHED: ${matchedPayments.length} payments`);
             matchedPayments.forEach((p, i) => {
-              taguhiLog(`  Payment ${i+1}: forClass=${p.forClass}, receiptDate=${p.dateStr}, amount=${p.amount}`);
+              // Debug placeholder - can add logging here if needed
             });
           }
           
@@ -5474,49 +5494,24 @@
           const studentPayments = collectPaymentsForStudentSimple(student);
           
           const isTaguhiBarseghyan = (student.name === 'Taguhi Barseghyan' || student.id === 41 || student.id === '41');
-          
-          if (isTaguhiBarseghyan) {
-            taguhiLog(`Checking payment match for ${dateStr}`);
-            taguhiLog(`Student has ${studentPayments.length} payments total`);
-          }
 
           if (!studentPayments.length) {
-            if (isTaguhiBarseghyan) taguhiLog(`❌ No payments found`);
             return null;
           }
 
           const validPrice = Number(pricePerClass) || 0;
           if (validPrice <= 0) {
-            if (isTaguhiBarseghyan) taguhiLog(`❌ Invalid price: ${pricePerClass}`);
             return null;
-          }
-
-          // Log all payments for Taguhi
-          if (isTaguhiBarseghyan) {
-            studentPayments.forEach((payment, index) => {
-              taguhiLog(`  Payment ${index + 1}: forClass=${payment.forClass}, amount=${payment.amount}, receiptDate=${payment.dateStr}`);
-            });
           }
 
           // Find payment where for_class matches this class date
           const exactMatch = studentPayments.find(payment => payment.forClass === dateStr);
           
           if (exactMatch) {
-            if (isTaguhiBarseghyan) {
-              taguhiLog(`✅ MATCH FOUND for ${dateStr}!`, {
-                paymentId: exactMatch.id,
-                amount: exactMatch.amount,
-                receiptDate: exactMatch.dateStr,
-                forClass: exactMatch.forClass
-              });
-            }
             return exactMatch;
           }
 
           // No match found
-          if (isTaguhiBarseghyan) {
-            taguhiLog(`❌ No payment with forClass=${dateStr} found`);
-          }
           return null;
         }
 
@@ -6660,58 +6655,92 @@
       }
       
       // Load all payments from Supabase - BOTH payment_records (manual) AND payments (Zelle)
-      async function loadPayments() {
+      async function loadPayments(dateRange = null) {
         debugLog('🔄 Loading payments from Supabase...');
         try {
-          // Load automated payments from 'payments' table
-          // This table has: id, student_id, linked_student_id, resolved_student_name, 
-          // payer_name, amount, date, created_at, status
-          const { data: automatedPayments, error: automatedError } = await supabase
-            .from('payments')
-            .select('*')
-            .order('date', { ascending: false });
+          // ⚡ LAZY LOADING: Calculate date range for current month +/- 2 months
+          let startDate = null;
+          let endDate = null;
+          
+          if (dateRange) {
+            startDate = dateRange.start;
+            endDate = dateRange.end;
+            debugLog('📅 Loading payments for date range:', startDate, 'to', endDate);
+          }
+          
+          // ⚡ PERFORMANCE: Run both queries in parallel
+          const [automatedResult, manualResult] = await Promise.all([
+            // Load automated payments from 'payments' table
+            (async () => {
+              let automatedQuery = supabase.from('payments').select('*');
+              
+              if (startDate && endDate) {
+                automatedQuery = automatedQuery
+                  .gte('for_class', startDate)
+                  .lte('for_class', endDate);
+              }
+              
+              return await automatedQuery.order('for_class', { ascending: false });
+            })(),
             
+            // Load manual payment records from 'payment_records' table
+            (async () => {
+              try {
+                let manualQuery = supabase.from('payment_records').select('*');
+                
+                if (startDate && endDate) {
+                  manualQuery = manualQuery
+                    .gte('date', startDate)
+                    .lte('date', endDate);
+                }
+                
+                return await manualQuery.order('date', { ascending: false });
+              } catch (manualException) {
+                debugLog('ℹ️ payment_records table not available:', manualException.message);
+                return { data: [], error: null };
+              }
+            })()
+          ]);
+          
+          const { data: automatedPayments, error: automatedError } = automatedResult;
+          const { data: manualPayments, error: manualError } = manualResult;
+          
           if (automatedError) {
             console.error('❌ Error loading automated payments:', automatedError);
           }
           
-          debugLog('✅ Automated payments loaded:', (automatedPayments || []).length);
-          
-          // Load manual payment records from 'payment_records' table
-          // This table has: id, student_id, date, amount, status, created_at
-          let manualPayments = [];
-          try {
-            const { data, error: manualError } = await supabase
-              .from('payment_records')
-              .select('*')
-              .order('date', { ascending: false });
-              
-            if (manualError) {
-              debugLog('ℹ️ Skipping payment_records table:', manualError.message);
-              manualPayments = [];
-            } else {
-              manualPayments = data || [];
-              debugLog('📋 Loaded manual payment_records:', manualPayments.length);
-            }
-          } catch (manualException) {
-            debugLog('ℹ️ payment_records table not available:', manualException.message);
-            manualPayments = [];
+          if (manualError) {
+            debugLog('ℹ️ Skipping payment_records table:', manualError.message);
           }
+          
+          debugLog('✅ Automated payments loaded:', (automatedPayments || []).length);
+          debugLog('📋 Manual payment_records loaded:', (manualPayments || []).length);
           
           // Combine both sources
           const allPayments = [
             ...(automatedPayments || []),
-            ...manualPayments
+            ...(manualPayments || [])
           ];
           
           debugLog('💰 Loaded payments:', {
             automated: (automatedPayments || []).length,
-            manual: manualPayments.length,
-            total: allPayments.length
+            manual: (manualPayments || []).length,
+            total: allPayments.length,
+            range: dateRange ? `${startDate} to ${endDate}` : 'all'
           });
           
-          window.paymentsCache = allPayments;
-          debugLog('✅ Stored in window.paymentsCache:', window.paymentsCache.length, 'payments');
+          // ⚡ LAZY LOADING: If date range specified, append to cache instead of replacing
+          if (dateRange && window.paymentsCache) {
+            // Merge new payments with existing cache, avoiding duplicates
+            const existingIds = new Set(window.paymentsCache.map(p => p.id));
+            const newPayments = allPayments.filter(p => !existingIds.has(p.id));
+            window.paymentsCache = [...window.paymentsCache, ...newPayments];
+            debugLog('📦 Appended', newPayments.length, 'new payments to cache. Total:', window.paymentsCache.length);
+          } else {
+            window.paymentsCache = allPayments;
+            debugLog('✅ Stored in window.paymentsCache:', window.paymentsCache.length, 'payments');
+          }
+          
           debugLog('📋 Sample payment:', window.paymentsCache[0]);
           return window.paymentsCache;
         } catch (err) {
@@ -8506,6 +8535,7 @@
   creditPaymentsLookup = {};
       
       async function initializeData() {
+        console.time('⏱️ initializeData Total');
         debugLog('🚀 Initializing calendar data...');
         debugLog('🌎 Using timezone:', LA_TIMEZONE);
         
@@ -8514,16 +8544,40 @@
         const laParts = getLAParts(now);
         debugLog('🕒 Current LA time:', laParts ? `${laParts.year}-${laParts.month}-${laParts.day} ${laParts.hour}:${laParts.minute}` : 'Unable to determine');
         
-        // Load all data in parallel
-        const [students, groups, payments, absences, skipped, credits, manualMoves] = await Promise.all([
-          loadStudents(),
-          loadGroups(),
-          loadPayments(),
-          loadAbsences(),
-          loadSkippedClasses(),
-          loadCreditPayments(),
-          loadManualPaymentMovesFromSupabase()
-        ]);
+        // ⚡ LAZY LOADING: Calculate date range for current month +/- 2 months
+        const currentYear = laParts ? Number(laParts.year) : new Date().getFullYear();
+        const currentMonth = laParts ? Number(laParts.month) - 1 : new Date().getMonth();
+        
+        // Start date: 2 months before current month
+        const startDate = new Date(currentYear, currentMonth - 2, 1);
+        const startDateStr = startDate.toISOString().split('T')[0];
+        
+        // End date: 2 months after current month (last day of that month)
+        const endDate = new Date(currentYear, currentMonth + 3, 0);
+        const endDateStr = endDate.toISOString().split('T')[0];
+        
+        const dateRange = { start: startDateStr, end: endDateStr };
+        debugLog('📅 Initial load range:', startDateStr, 'to', endDateStr, '(5 months total)');
+        
+        // ⚡ LAZY LOADING: Track loaded range
+        loadedPaymentRange = { start: startDateStr, end: endDateStr };
+        
+        // Load all data in parallel (students/groups: all, payments: range-limited)
+        console.time('⏱️ Parallel Data Load');
+        
+        // Time each individual load
+        const loadPromises = [
+          (async () => { console.time('  ↳ loadStudents'); const r = await loadStudents(); console.timeEnd('  ↳ loadStudents'); return r; })(),
+          (async () => { console.time('  ↳ loadGroups'); const r = await loadGroups(); console.timeEnd('  ↳ loadGroups'); return r; })(),
+          (async () => { console.time('  ↳ loadPayments'); const r = await loadPayments(dateRange); console.timeEnd('  ↳ loadPayments'); return r; })(),
+          (async () => { console.time('  ↳ loadAbsences'); const r = await loadAbsences(); console.timeEnd('  ↳ loadAbsences'); return r; })(),
+          (async () => { console.time('  ↳ loadSkippedClasses'); const r = await loadSkippedClasses(); console.timeEnd('  ↳ loadSkippedClasses'); return r; })(),
+          (async () => { console.time('  ↳ loadCreditPayments'); const r = await loadCreditPayments(); console.timeEnd('  ↳ loadCreditPayments'); return r; })(),
+          (async () => { console.time('  ↳ loadManualPaymentMoves'); const r = await loadManualPaymentMovesFromSupabase(); console.timeEnd('  ↳ loadManualPaymentMoves'); return r; })()
+        ];
+        
+        const [students, groups, payments, absences, skipped, credits, manualMoves] = await Promise.all(loadPromises);
+        console.timeEnd('⏱️ Parallel Data Load');
         
         absencesData = absences;
         skippedClassesData = skipped;
@@ -8536,10 +8590,16 @@
         lastMergedEventsCount = 0;
         
         // Set up real-time subscriptions for automatic updates
+        console.time('⏱️ Setup Realtime');
         setupRealtimeSubscriptions();
+        console.timeEnd('⏱️ Setup Realtime');
         
-        // Render calendar with real data
+        // ⚡ PROGRESSIVE LOADING: Render calendar with loaded data
+        console.time('⏱️ Progressive Render');
         renderCalendar();
+        console.timeEnd('⏱️ Progressive Render');
+        
+        console.timeEnd('⏱️ initializeData Total');
       }
 
       // ⚡ PERFORMANCE: Debounced render to prevent excessive re-renders
@@ -8662,17 +8722,90 @@
       // Initialize Calendar
       async function initCalendar() {
         try {
+          console.time('⏱️ Total Calendar Init');
+          console.time('⏱️ DOM Cache Init');
+          
           // ⚡ Performance: Initialize DOM cache first
           DOMCache.init();
+          console.timeEnd('⏱️ DOM Cache Init');
           
+          console.time('⏱️ Sync Current Date');
           syncCurrentDateToLAToday();
-          // First load all data from Supabase
-          await initializeData();
+          console.timeEnd('⏱️ Sync Current Date');
           
-          // Then attach event listeners
+          // ⚡ INSTANT OPEN: Render empty calendar immediately
+          console.time('⏱️ Initial Empty Render');
+          renderEmptyCalendar();
+          console.timeEnd('⏱️ Initial Empty Render');
+          
+          // Attach event listeners immediately so UI is interactive
+          console.time('⏱️ Attach Event Listeners');
           attachEventListeners();
+          console.timeEnd('⏱️ Attach Event Listeners');
+          
+          console.timeEnd('⏱️ Total Calendar Init');
+          
+          // ⚡ PROGRESSIVE LOADING: Load data in background, update when ready
+          console.time('⏱️ Background Data Load');
+          initializeData().then(() => {
+            console.timeEnd('⏱️ Background Data Load');
+          });
         } catch (e) {
           console.error('InitCalendar failed:', e);
+        }
+      }
+      
+      // ⚡ INSTANT OPEN: Render calendar shell without data
+      function renderEmptyCalendar() {
+        const { year, month } = getCurrentViewYearMonth();
+        
+        // Update header
+        document.getElementById('currentMonth').textContent = monthNames[month];
+        document.getElementById('currentYear').textContent = year;
+        
+        const firstDay = getLAWeekdayIndex(createDateFromParts(year, month, 1)) ?? 0;
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const daysInPrevMonth = new Date(year, month, 0).getDate();
+        
+        const calendarDays = document.getElementById('calendarDays');
+        calendarDays.innerHTML = '';
+        
+        const todayParts = getTodayLAParts();
+        const isCurrentMonth = todayParts && Number(todayParts.year) === year && Number(todayParts.month) - 1 === month;
+        const todayDate = todayParts ? Number(todayParts.day) : null;
+        
+        // Previous month days (grayed out)
+        for (let i = firstDay - 1; i >= 0; i--) {
+          const prevDay = daysInPrevMonth - i;
+          const dayEl = document.createElement('div');
+          dayEl.className = 'day other-month';
+          dayEl.innerHTML = `<div class="day-number">${prevDay}</div>`;
+          calendarDays.appendChild(dayEl);
+        }
+        
+        // Current month days - show with placeholder dots
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dayEl = document.createElement('div');
+          dayEl.className = 'day';
+          if (isCurrentMonth && day === todayDate) dayEl.classList.add('today');
+          
+          dayEl.innerHTML = `
+            <div class="day-number">${day}</div>
+            <div class="day-indicators">
+              <span class="indicator-dot" style="background: rgba(255,255,255,0.2)"></span>
+            </div>
+          `;
+          calendarDays.appendChild(dayEl);
+        }
+        
+        // Next month days (fill remaining slots)
+        const totalCells = calendarDays.children.length;
+        const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+        for (let i = 1; i <= remainingCells; i++) {
+          const dayEl = document.createElement('div');
+          dayEl.className = 'day other-month';
+          dayEl.innerHTML = `<div class="day-number">${i}</div>`;
+          calendarDays.appendChild(dayEl);
         }
       }
 

@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>💰 Earning Forecast</title>
+  
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      color: white;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      background: transparent !important;
+    }
+
+    html {
+      background: transparent !important;
+    }
+
+    /* Modal Overlay - Completely transparent, clicks pass through */
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: transparent !important;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 0;
+      overflow-y: auto;
+      min-height: 100vh;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+      position: relative;
+    }
+
+    .card {
+      background: linear-gradient(135deg, rgb(15, 23, 42) 0%, rgb(30, 30, 50) 100%);
+      backdrop-filter: blur(24px);
+      border: 2px solid rgba(138, 180, 255, 0.3);
+      border-radius: 20px;
+      padding: 32px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.9);
+      margin-bottom: 24px;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0;
+      background: linear-gradient(135deg, #a3ffda, #22c55e);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-size: 28px;
+      font-weight: 900;
+    }
+
+    .stat-box {
+      padding: 20px;
+      background: rgba(138, 180, 255, 0.1);
+      border: 1px solid rgba(138, 180, 255, 0.3);
+      border-radius: 12px;
+      margin-bottom: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .stat-box:hover {
+      background: rgba(138, 180, 255, 0.2);
+      border-color: rgba(138, 180, 255, 0.5);
+      transform: translateY(-2px);
+    }
+
+    .stat-label {
+      font-size: 12px;
+      font-weight: 700;
+      color: #8ab4ff;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 36px;
+      font-weight: 900;
+      color: white;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .projection-card {
+      padding: 16px;
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 12px;
+    }
+
+    .projection-card.monthly {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.4);
+    }
+
+    .projection-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #22c55e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .projection-value {
+      font-size: 28px;
+      font-weight: 900;
+      color: white;
+    }
+
+    .actual-earnings {
+      padding: 24px;
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(168, 85, 247, 0.15));
+      border: 2px solid rgba(138, 180, 255, 0.4);
+      border-radius: 12px;
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #a3ffda;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+
+    .footer-note {
+      text-align: center;
+      font-size: 11px;
+      color: #94a3b8;
+      font-style: italic;
+      margin-top: 20px;
+    }
+
+    /* Student Breakdown Card */
+    .student-card {
+      padding: 16px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      transition: all 0.2s;
+      margin-bottom: 12px;
+    }
+
+    .student-card:hover {
+      background: rgba(255,255,255,0.06);
+    }
+
+    .student-card.paused {
+      opacity: 0.5;
+      filter: grayscale(0.6);
+    }
+
+    .student-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 4px;
+    }
+
+    .student-details {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-bottom: 12px;
+    }
+
+    .student-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .student-stat {
+      padding: 10px;
+      background: rgba(34,197,94,0.1);
+      border: 1px solid rgba(34,197,94,0.3);
+      border-radius: 8px;
+    }
+
+    .student-stat.monthly {
+      background: rgba(34,197,94,0.15);
+      border-color: rgba(34,197,94,0.4);
+    }
+
+    .student-stat-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #22c55e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+
+    .student-stat-value {
+      font-size: 20px;
+      font-weight: 900;
+      color: white;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #8ab4ff;
+      font-size: 16px;
+    }
+
+    .no-data {
+      text-align: center;
+      padding: 40px;
+      color: #94a3b8;
+      font-style: italic;
+    }
+
+    .status-pill {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      transition: all 0.2s;
+      user-select: none;
+    }
+
+    .status-pill:hover {
+      transform: scale(1.05);
+      filter: brightness(1.2);
+    }
+
+    .status-pill.active {
+      background: rgba(34, 197, 94, 0.2);
+      color: #22c55e;
+      border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .status-pill.paused {
+      background: rgba(251, 191, 36, 0.2);
+      color: #fbbf24;
+      border: 1px solid rgba(251, 191, 36, 0.4);
+    }
+
+    .status-pill.graduated {
+      background: rgba(168, 85, 247, 0.2);
+      color: #a855f7;
+      border: 1px solid rgba(168, 85, 247, 0.4);
+    }
+  </style>
+</head>
+<body>
+  <div class="modal-overlay">
+    <div class="container">
+      
+      <!-- Main Forecast Card -->
+      <div class="card">
+        <div class="header">
+          <h1>💰 Earning Forecast Overview</h1>
+        </div>
+
+        <div style="border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 24px">
+          <!-- Active Students Count - Clickable -->
+          <div class="stat-box" id="activeStudentsBox" onclick="showBreakdown()">
+            <div class="stat-label">
+              Active Students
+              <span style="font-size: 10px; opacity: 0.7">(click for details)</span>
+            </div>
+            <div class="stat-value" id="forecastActiveCount">--</div>
+          </div>
+
+          <!-- Projected Earnings -->
+          <div style="margin-bottom: 20px">
+            <div class="section-title">📊 Projected Earnings</div>
+            <div class="grid-2">
+              <div class="projection-card">
+                <div class="projection-label">Weekly</div>
+                <div class="projection-value" id="forecastWeekly">--</div>
+              </div>
+              <div class="projection-card monthly">
+                <div class="projection-label">Monthly</div>
+                <div class="projection-value" id="forecastMonthly">--</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Actual Earnings -->
+          <div class="actual-earnings">
+            <div class="section-title">💵 Actual Received (This Month)</div>
+            <div class="stat-value" id="forecastActual">--</div>
+          </div>
+
+          <div class="footer-note">
+            Updates automatically as students or payments change
+          </div>
+        </div>
+      </div>
+
+      <!-- Student Breakdown Card (Hidden Initially) -->
+      <div class="card" id="breakdownCard" style="display: none;">
+        <div class="header">
+          <h1>📊 Student Breakdown</h1>
+        </div>
+
+        <div style="border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 24px">
+          <div id="studentBreakdownList" class="loading">
+            Loading student details...
+          </div>
+
+          <!-- Totals -->
+          <div style="margin-top: 24px; padding-top: 20px; border-top: 2px solid rgba(138, 180, 255, 0.3);">
+            <div class="grid-2">
+              <div class="projection-card">
+                <div class="projection-label">Total Weekly</div>
+                <div class="projection-value" id="breakdownTotalWeekly">--</div>
+              </div>
+              <div class="projection-card monthly">
+                <div class="projection-label">Total Monthly</div>
+                <div class="projection-value" id="breakdownTotalMonthly">--</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 20px; text-align: center;">
+            <button onclick="hideBreakdown()" style="
+              padding: 12px 24px;
+              background: rgba(138, 180, 255, 0.2);
+              border: 1px solid rgba(138, 180, 255, 0.4);
+              border-radius: 8px;
+              color: white;
+              font-weight: 700;
+              cursor: pointer;
+              transition: all 0.2s;
+            " onmouseover="this.style.background='rgba(138,180,255,0.3)'" onmouseout="this.style.background='rgba(138,180,255,0.2)'">
+              ← Back to Overview
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Supabase Configuration
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // Data cache
+    let studentsCache = [];
+    let groupsCache = [];
+    let paymentsCache = [];
+
+    // Currency formatter
+    function formatCurrency(value, symbol = '$') {
+      const formatted = Math.round(value).toLocaleString('en-US');
+      return `${formatted} ${symbol}`;
+    }
+
+    // HTML escape
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Load students from Supabase
+    async function loadStudents() {
+      try {
+        const { data, error } = await supabase
+          .from('students')
+          .select('*')
+          .order('name');
+        
+        if (error) throw error;
+        studentsCache = data || [];
+        return studentsCache;
+      } catch (error) {
+        console.error('Error loading students:', error);
+        return [];
+      }
+    }
+
+    // Load groups from Supabase
+    async function loadGroups() {
+      try {
+        const { data, error } = await supabase
+          .from('groups')
+          .select('*')
+          .order('group_name');
+        
+        if (error) throw error;
+        groupsCache = data || [];
+        return groupsCache;
+      } catch (error) {
+        console.error('Error loading groups:', error);
+        return [];
+      }
+    }
+
+    // Load payments from Supabase (current month only)
+    async function loadPayments() {
+      try {
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+        // Load from both tables
+        const [automatedResult, manualResult] = await Promise.all([
+          supabase
+            .from('payments')
+            .select('*')
+            .gte('for_class', startOfMonth)
+            .lte('for_class', endOfMonth),
+          supabase
+            .from('payment_records')
+            .select('*')
+            .gte('date', startOfMonth)
+            .lte('date', endOfMonth)
+            .eq('status', 'paid')
+        ]);
+
+        const automated = automatedResult.data || [];
+        const manual = manualResult.data || [];
+        
+        paymentsCache = [...automated, ...manual];
+        return paymentsCache;
+      } catch (error) {
+        console.error('Error loading payments:', error);
+        return [];
+      }
+    }
+
+    // Count weekly classes for a group
+    function countWeeklyClasses(groupLetter) {
+      if (!groupLetter || !groupLetter.trim()) return 0;
+
+      // Find group by matching group_name (which should be like "Group A", "Group B", etc.)
+      const group = groupsCache.find(g => {
+        const normalizedGroupName = (g.group_name || g.name || '').toLowerCase();
+        const normalizedLetter = groupLetter.toLowerCase().trim();
+        
+        // Match "Group A" with "A" or "group a" with "a"
+        return normalizedGroupName === `group ${normalizedLetter}` || 
+               normalizedGroupName === normalizedLetter;
+      });
+
+      if (!group || !group.schedule) return 0;
+
+      // Parse schedule string (e.g., "Monday 8:00 PM, Wednesday 8:00 PM, Friday 8:00 PM")
+      const scheduleString = group.schedule.trim();
+      if (!scheduleString) return 0;
+
+      // Split by comma and count non-empty slots
+      const slots = scheduleString.split(',').filter(slot => slot.trim() !== '');
+      return slots.length;
+    }
+
+    // Calculate actual monthly earnings
+    function calculateActualMonthlyEarnings() {
+      let total = 0;
+
+      paymentsCache.forEach(payment => {
+        const amount = parseFloat(payment.amount) || 0;
+        total += amount;
+      });
+
+      return total;
+    }
+
+    // Update forecast data
+    function updateForecastData() {
+      // Filter ONLY active students (not paused or graduated)
+      const activeStudents = studentsCache.filter(s => {
+        const status = (s.status || 'active').toLowerCase();
+        return status === 'active' && s.show_in_grid !== false;
+      });
+
+      let totalWeekly = 0;
+      let activeCount = 0;
+
+      activeStudents.forEach(student => {
+        const pricePerClass = parseFloat(student.price_per_class) || 0;
+        if (pricePerClass <= 0) return;
+
+        const groupLetter = student.group_letter || student.group_name || '';
+        if (!groupLetter.trim()) return;
+
+        const weeklyClasses = countWeeklyClasses(groupLetter);
+        if (weeklyClasses <= 0) return;
+
+        const studentWeekly = pricePerClass * weeklyClasses;
+        totalWeekly += studentWeekly;
+        activeCount++;
+      });
+
+      const totalMonthly = totalWeekly * 4;
+      const actualEarnings = calculateActualMonthlyEarnings();
+
+      // Update UI
+      document.getElementById('forecastActiveCount').textContent = activeCount;
+      document.getElementById('forecastWeekly').textContent = formatCurrency(totalWeekly, '$');
+      document.getElementById('forecastMonthly').textContent = formatCurrency(totalMonthly, '$');
+      document.getElementById('forecastActual').textContent = formatCurrency(actualEarnings, '$');
+    }
+
+    // Show breakdown
+    function showBreakdown() {
+      document.getElementById('breakdownCard').style.display = 'block';
+      updateStudentBreakdown();
+    }
+
+    // Hide breakdown
+    function hideBreakdown() {
+      document.getElementById('breakdownCard').style.display = 'none';
+    }
+
+    // Close modal - communicate with parent (Payment-Records)
+    function closeModal() {
+      // Since we're in an iframe, tell parent to close
+      if (window.parent !== window) {
+        window.parent.closeModulePopup();
+      }
+    }
+
+    // ESC key to close
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeModal();
+      }
+    });
+
+    // Click outside cards to close
+    document.addEventListener('click', (e) => {
+      const overlay = document.querySelector('.modal-overlay');
+      // If clicking directly on the overlay (not on any cards)
+      if (e.target === overlay) {
+        closeModal();
+      }
+    });
+
+    // Toggle student status (active <-> paused)
+    async function toggleStudentStatus(studentId, currentStatus) {
+      try {
+        const student = studentsCache.find(s => s.id === studentId);
+        if (!student) {
+          console.error('Student not found:', studentId);
+          return;
+        }
+
+        // Toggle between active and paused
+        const newStatus = currentStatus === 'active' ? 'paused' : 'active';
+
+        // Update in Supabase
+        const { error } = await supabase
+          .from('students')
+          .update({ status: newStatus })
+          .eq('id', studentId);
+
+        if (error) throw error;
+
+        // Update local cache
+        student.status = newStatus;
+
+        // Refresh displays
+        updateForecastData();
+        updateStudentBreakdown();
+
+        console.log(`✅ Student ${student.name} status changed to: ${newStatus}`);
+      } catch (error) {
+        console.error('Error updating student status:', error);
+        alert('Failed to update student status. Please try again.');
+      }
+    }
+
+    // Update student breakdown
+    function updateStudentBreakdown() {
+      const container = document.getElementById('studentBreakdownList');
+
+      // Show both active and paused students
+      const eligibleStudents = studentsCache.filter(s => {
+        if (s.show_in_grid === false) return false;
+        const status = (s.status || 'active').toLowerCase();
+        return status === 'active' || status === 'paused';
+      });
+
+      let totalWeekly = 0;
+      let html = '';
+      const studentData = [];
+
+      eligibleStudents.forEach(student => {
+        const pricePerClass = parseFloat(student.price_per_class) || 0;
+        if (pricePerClass <= 0) return;
+
+        const groupLetter = student.group_letter || student.group_name || '';
+        if (!groupLetter.trim()) return;
+
+        const weeklyClasses = countWeeklyClasses(groupLetter);
+        if (weeklyClasses <= 0) return;
+
+        const studentWeekly = pricePerClass * weeklyClasses;
+        const studentMonthly = studentWeekly * 4;
+        const status = (student.status || 'active').toLowerCase();
+
+        // Only count active students in total
+        if (status === 'active') {
+          totalWeekly += studentWeekly;
+        }
+
+        studentData.push({
+          id: student.id,
+          name: student.name,
+          group: groupLetter,
+          pricePerClass,
+          weeklyClasses,
+          studentWeekly,
+          studentMonthly,
+          status
+        });
+      });
+
+      // Sort by status then name
+      studentData.sort((a, b) => {
+        if (a.status === 'active' && b.status === 'paused') return -1;
+        if (a.status === 'paused' && b.status === 'active') return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      // Generate HTML
+      studentData.forEach(data => {
+        const isPaused = data.status === 'paused';
+        const statusClass = isPaused ? 'paused' : 'active';
+        const statusLabel = isPaused ? 'Paused' : 'Active';
+        const pausedPrefix = isPaused ? '⏸ ' : '';
+        const opacityNote = isPaused ? ' <span style="font-size: 10px; opacity: 0.7;">(not counted in forecast)</span>' : '';
+
+        html += `
+          <div class="student-card ${statusClass}">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                  <div class="student-name">${escapeHtml(data.name)}</div>
+                  <span class="status-pill ${statusClass}" 
+                        onclick="toggleStudentStatus(${data.id}, '${data.status}')" 
+                        title="Click to toggle status">
+                    ${statusLabel}
+                  </span>
+                </div>
+                <div class="student-details">${pausedPrefix}Group ${escapeHtml(data.group)} • ${data.weeklyClasses} classes/week • ${formatCurrency(data.pricePerClass, '$')}/class${opacityNote}</div>
+              </div>
+            </div>
+            <div class="student-grid">
+              <div class="student-stat">
+                <div class="student-stat-label">Weekly</div>
+                <div class="student-stat-value">${formatCurrency(data.studentWeekly, '$')}</div>
+              </div>
+              <div class="student-stat monthly">
+                <div class="student-stat-label">Monthly</div>
+                <div class="student-stat-value">${formatCurrency(data.studentMonthly, '$')}</div>
+              </div>
+            </div>
+          </div>
+        `;
+      });
+
+      if (studentData.length === 0) {
+        html = '<div class="no-data">No active or paused students with pricing and schedules</div>';
+      }
+
+      container.innerHTML = html;
+
+      // Update totals (only active students)
+      const totalMonthly = totalWeekly * 4;
+      document.getElementById('breakdownTotalWeekly').textContent = formatCurrency(totalWeekly, '$');
+      document.getElementById('breakdownTotalMonthly').textContent = formatCurrency(totalMonthly, '$');
+    }
+
+    // Initialize
+    async function init() {
+      console.log('💰 Loading Earning Forecast...');
+      
+      await Promise.all([
+        loadStudents(),
+        loadGroups(),
+        loadPayments()
+      ]);
+
+      console.log('📊 Data loaded:');
+      console.log('  - Students:', studentsCache.length);
+      console.log('  - Groups:', groupsCache.length);
+      console.log('  - Payments (this month):', paymentsCache.length);
+      
+      // Debug: Show sample data
+      if (studentsCache.length > 0) {
+        const sampleStudent = studentsCache[0];
+        console.log('  - Sample student:', {
+          name: sampleStudent.name,
+          group: sampleStudent.group_letter,
+          price: sampleStudent.price_per_class,
+          status: sampleStudent.status
+        });
+      }
+      
+      if (groupsCache.length > 0) {
+        const sampleGroup = groupsCache[0];
+        console.log('  - Sample group:', {
+          name: sampleGroup.group_name,
+          schedule: sampleGroup.schedule
+        });
+      }
+
+      updateForecastData();
+      console.log('✅ Earning Forecast loaded');
+    }
+
+    // Run on load
+    init();
+  </script>
+</body>
+</html>

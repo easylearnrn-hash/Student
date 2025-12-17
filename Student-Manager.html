@@ -320,6 +320,43 @@
           0 0 0 4px rgba(138, 180, 255, 0.15);
       }
 
+      /* Search input wrapper for clear button */
+      .search-input-container {
+        flex: 1;
+        position: relative;
+        display: flex;
+        align-items: center;
+      }
+
+      .search-input-container .search-input {
+        width: 100%;
+        padding-right: 44px;
+      }
+
+      .search-input-container .search-clear-btn {
+        position: absolute;
+        right: 12px;
+        background: none;
+        border: none;
+        color: rgba(255, 255, 255, 0.5);
+        cursor: pointer;
+        padding: 4px 8px;
+        display: none;
+        font-size: 18px;
+        line-height: 1;
+        transition: all 0.2s ease;
+        border-radius: 4px;
+      }
+
+      .search-input-container .search-clear-btn:hover {
+        color: rgba(255, 255, 255, 0.9);
+        background: rgba(255, 255, 255, 0.1);
+      }
+
+      .search-input-container .search-clear-btn.visible {
+        display: block;
+      }
+
       .filter-select {
         padding: 12px 36px 12px 16px;
         background: rgba(255, 255, 255, 0.04);
@@ -1347,7 +1384,7 @@
         padding: 24px 32px;
         background: rgba(0, 0, 0, 0.15);
         display: flex;
-        flex-direction: row;
+        flex-direction: column;
         gap: 16px;
         flex-wrap: nowrap;
       }
@@ -1836,12 +1873,15 @@
         </div>
       </div>
       <div class="header-row-2">
-        <input
-          type="text"
-          id="searchInput"
-          class="search-input"
-          placeholder="Search by name, group, phone, email, notes, aliases, credit, price..."
-        />
+        <div class="search-input-container">
+          <input
+            type="text"
+            id="searchInput"
+            class="search-input"
+            placeholder="Search by name, group, phone, email, notes, aliases, credit, price..."
+          />
+          <button class="search-clear-btn" id="searchClearBtn" onclick="clearSearch()" title="Clear search">✕</button>
+        </div>
         <select id="groupFilter" class="filter-select">
           <option value="">All Groups</option>
           <option value="A">Group A</option>
@@ -2335,6 +2375,10 @@
         if (!value) return '';
         const raw = value.toString().trim();
         if (!raw) return '';
+        
+        // Handle special "No Group" cases
+        if (/^(no\s*group|nogroup)$/i.test(raw)) return '';
+        
         let normalized = raw.replace(/^group\s+/i, '');
         normalized = normalized.replace(/[^a-z0-9]/gi, '');
         return normalized.toUpperCase();
@@ -3031,7 +3075,7 @@
           ? groupValue
           : groupValue?.groupCode || groupValue?.group || '';
         const normalized = canonicalizeGroupCode(source);
-        if (!normalized) return '?';
+        if (!normalized) return ''; // Return empty string instead of '?'
         const trailingLetters = normalized.match(/[A-Z]+$/);
         if (trailingLetters && trailingLetters[0]) {
           return trailingLetters[0];
@@ -3303,12 +3347,38 @@
       // Debounced version of applyFilters (optimized to 150ms for better UX)
       const debouncedApplyFilters = debounce(applyFilters, 150);
       
+      /**
+       * Clears the search input and updates the student grid
+       */
+      function clearSearch() {
+        const searchInput = document.getElementById('searchInput');
+        const clearBtn = document.getElementById('searchClearBtn');
+        
+        if (searchInput) {
+          searchInput.value = '';
+          searchInput.focus();
+        }
+        
+        if (clearBtn) {
+          clearBtn.classList.remove('visible');
+        }
+        
+        applyFilters();
+      }
+      
       function clearAllFilters() {
         document.getElementById('searchInput').value = '';
         document.getElementById('groupFilter').value = '';
         document.getElementById('statusFilter').value = '';
         document.getElementById('paymentFilter').value = '';
         document.getElementById('sortFilter').value = '';
+        
+        // Hide clear button
+        const clearBtn = document.getElementById('searchClearBtn');
+        if (clearBtn) {
+          clearBtn.classList.remove('visible');
+        }
+        
         applyFilters();
       }
 
@@ -3564,6 +3634,319 @@
         if (!confirmed) return;
         
         try {
+          // Check for existing students with same email or name
+          const fullName = `${firstName} ${lastName}`;
+          let existingStudents = [];
+          
+          if (email) {
+            // Check by email
+            const { data: emailMatches, error: emailError } = await supabase
+              .from('students')
+              .select('*')
+              .ilike('email', email.trim());
+            
+            if (!emailError && emailMatches && emailMatches.length > 0) {
+              existingStudents = existingStudents.concat(emailMatches);
+            }
+          }
+          
+          // Check by name (case-insensitive)
+          const { data: nameMatches, error: nameError } = await supabase
+            .from('students')
+            .select('*')
+            .ilike('name', fullName.trim());
+          
+          if (!nameError && nameMatches && nameMatches.length > 0) {
+            // Add name matches that aren't already in the list
+            nameMatches.forEach(match => {
+              if (!existingStudents.find(s => s.id === match.id)) {
+                existingStudents.push(match);
+              }
+            });
+          }
+          
+          // If duplicates found, show warning with options
+          if (existingStudents.length > 0) {
+            const duplicateNames = existingStudents.map(s => s.name).join(', ');
+            const duplicateEmails = existingStudents.map(s => s.email || 'No email').join(', ');
+            
+            // Create custom three-button dialog
+            const choice = await new Promise((resolve) => {
+              // Create overlay - 50% transparency, NO BLUR
+              const overlay = document.createElement('div');
+              overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.5);
+                z-index: 100000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                animation: fadeIn 0.2s ease;
+              `;
+              
+              // Create dialog with shadow
+              const dialog = document.createElement('div');
+              dialog.style.cssText = `
+                background: linear-gradient(135deg, rgba(31, 20, 60, 0.98), rgba(20, 15, 40, 0.98));
+                border: 2px solid rgba(138, 180, 255, 0.3);
+                border-radius: 24px;
+                padding: 32px;
+                max-width: 520px;
+                width: 90%;
+                box-shadow: 
+                  0 30px 80px rgba(0, 0, 0, 0.8),
+                  0 10px 40px rgba(0, 0, 0, 0.6),
+                  0 0 60px rgba(138, 180, 255, 0.25),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                animation: slideUp 0.3s ease;
+              `;
+              
+              dialog.innerHTML = `
+                <div style="text-align: center; margin-bottom: 24px;">
+                  <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                  <h2 style="
+                    font-size: 24px;
+                    font-weight: 800;
+                    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    background-clip: text;
+                    margin: 0 0 16px 0;
+                  ">Possible Duplicate Student Found</h2>
+                  <p style="
+                    color: rgba(255, 255, 255, 0.8);
+                    font-size: 15px;
+                    line-height: 1.6;
+                    margin: 0;
+                  ">
+                    A student with similar information already exists:
+                  </p>
+                </div>
+                
+                <div style="
+                  background: rgba(0, 0, 0, 0.3);
+                  border: 1px solid rgba(138, 180, 255, 0.2);
+                  border-radius: 16px;
+                  padding: 20px;
+                  margin-bottom: 28px;
+                ">
+                  <div style="margin-bottom: 12px;">
+                    <div style="
+                      color: rgba(138, 180, 255, 0.7);
+                      font-size: 11px;
+                      text-transform: uppercase;
+                      letter-spacing: 1px;
+                      margin-bottom: 6px;
+                    ">Name</div>
+                    <div style="
+                      color: white;
+                      font-size: 16px;
+                      font-weight: 600;
+                    ">${duplicateNames}</div>
+                  </div>
+                  <div>
+                    <div style="
+                      color: rgba(138, 180, 255, 0.7);
+                      font-size: 11px;
+                      text-transform: uppercase;
+                      letter-spacing: 1px;
+                      margin-bottom: 6px;
+                    ">Email</div>
+                    <div style="
+                      color: white;
+                      font-size: 16px;
+                      font-weight: 600;
+                    ">${duplicateEmails}</div>
+                  </div>
+                </div>
+                
+                <div style="
+                  display: flex;
+                  flex-direction: column;
+                  gap: 12px;
+                ">
+                  <button class="choice-btn" data-choice="update" style="
+                    background: linear-gradient(135deg, #10b981, #059669);
+                    border: 2px solid rgba(16, 185, 129, 0.4);
+                    color: white;
+                    padding: 16px 24px;
+                    border-radius: 16px;
+                    font-size: 15px;
+                    font-weight: 700;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    box-shadow: 
+                      0 4px 16px rgba(16, 185, 129, 0.3),
+                      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+                    font-family: inherit;
+                  ">
+                    ✅ Update Existing Student
+                    <div style="
+                      font-size: 12px;
+                      font-weight: 500;
+                      opacity: 0.9;
+                      margin-top: 4px;
+                    ">Fill in missing info & mark as active</div>
+                  </button>
+                  
+                  <button class="choice-btn" data-choice="add" style="
+                    background: linear-gradient(135deg, #3b82f6, #2563eb);
+                    border: 2px solid rgba(59, 130, 246, 0.4);
+                    color: white;
+                    padding: 16px 24px;
+                    border-radius: 16px;
+                    font-size: 15px;
+                    font-weight: 700;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    box-shadow: 
+                      0 4px 16px rgba(59, 130, 246, 0.3),
+                      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+                    font-family: inherit;
+                  ">
+                    ➕ Add as New Student
+                    <div style="
+                      font-size: 12px;
+                      font-weight: 500;
+                      opacity: 0.9;
+                      margin-top: 4px;
+                    ">Create separate record anyway</div>
+                  </button>
+                  
+                  <button class="choice-btn" data-choice="cancel" style="
+                    background: rgba(255, 255, 255, 0.08);
+                    border: 2px solid rgba(255, 255, 255, 0.15);
+                    color: rgba(255, 255, 255, 0.9);
+                    padding: 14px 24px;
+                    border-radius: 16px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s;
+                    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                    font-family: inherit;
+                  ">
+                    ✖️ Cancel
+                  </button>
+                </div>
+              `;
+              
+              // Add hover effects
+              const style = document.createElement('style');
+              style.textContent = `
+                .choice-btn:hover {
+                  transform: translateY(-2px);
+                  box-shadow: 
+                    0 6px 24px rgba(0, 0, 0, 0.4),
+                    0 0 20px currentColor;
+                }
+                .choice-btn:active {
+                  transform: translateY(0);
+                }
+              `;
+              document.head.appendChild(style);
+              
+              overlay.appendChild(dialog);
+              document.body.appendChild(overlay);
+              
+              // Add click handlers
+              dialog.querySelectorAll('.choice-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                  const choice = btn.getAttribute('data-choice');
+                  overlay.remove();
+                  style.remove();
+                  resolve(choice);
+                });
+              });
+              
+              // Click outside to cancel
+              overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                  overlay.remove();
+                  style.remove();
+                  resolve('cancel');
+                }
+              });
+            });
+            
+            if (choice === 'cancel') {
+              await customAlert('Cancelled', 'No changes were made.');
+              return;
+            }
+            
+            if (choice === 'update') {
+              // Update existing student
+              const existingStudent = existingStudents[0];
+              
+              // Build update object with new information
+              const updates = {};
+              
+              // Update email if missing or different
+              if (email && (!existingStudent.email || existingStudent.email.trim() === '')) {
+                updates.email = email;
+              }
+              
+              // Update phone if missing or different
+              if (phone && (!existingStudent.phone || existingStudent.phone.trim() === '')) {
+                updates.phone = phone;
+              }
+              
+              // Update notes with registration info
+              const registrationDate = new Date().toLocaleDateString('en-US', {
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric'
+              });
+              
+              const newNote = `\n✅ Updated from waiting list on ${registrationDate}`;
+              updates.notes = (existingStudent.notes || '') + newNote;
+              
+              // Ensure student is active and shown in grid
+              if (existingStudent.status !== 'active') {
+                updates.status = 'active';
+              }
+              if (existingStudent.show_in_grid === false) {
+                updates.show_in_grid = true;
+              }
+              
+              // Perform update
+              const { error: updateError } = await supabase
+                .from('students')
+                .update(updates)
+                .eq('id', existingStudent.id);
+              
+              if (updateError) throw updateError;
+              
+              // Delete from waiting list
+              const { error: deleteError } = await supabase
+                .from('student_waiting_list')
+                .delete()
+                .eq('id', id);
+              
+              if (deleteError) throw deleteError;
+              
+              await customAlert(
+                'Student Updated',
+                `Updated existing student: ${existingStudent.name}\n\n` +
+                `${Object.keys(updates).length > 0 ? 'Updated fields: ' + Object.keys(updates).join(', ') : 'No new information to add'}`
+              );
+              
+              // Reload waiting list
+              await loadWaitingList();
+              
+              // Reload students list
+              await loadStudents();
+              
+              return;
+            }
+            
+            // If choice is 'add', continue with creating new student (code below)
+          }
+          
           // Build notes with registration info
           const registrationDate = new Date().toLocaleDateString('en-US', {
             month: 'long',
@@ -4244,7 +4627,14 @@
         
         // Use cached DOM elements instead of querying again
         if (DOMCache.searchInput) {
-          DOMCache.searchInput.addEventListener('input', debouncedApplyFilters);
+          DOMCache.searchInput.addEventListener('input', (e) => {
+            debouncedApplyFilters();
+            // Show/hide clear button
+            const clearBtn = document.getElementById('searchClearBtn');
+            if (clearBtn) {
+              clearBtn.classList.toggle('visible', e.target.value.length > 0);
+            }
+          });
         }
         
         if (DOMCache.groupFilter) {

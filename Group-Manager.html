@@ -1778,15 +1778,17 @@
         }
 
         try {
+          // CRITICAL FIX: Only save fields that actually exist in the groups table
+          // Based on Calendar.html and other working code, these columns exist:
+          // - id, group_name, schedule, one_time_schedules, color, active, updated_at
+          // These do NOT exist and caused PGRST204 errors:
+          // - price_per_class, student_count, students (removed from insert/update)
           const groupData = {
-            name: group.name,
-            color: group.color.value,
+            group_name: group.name,  // Table uses 'group_name', not 'name'
             schedule: group.schedule || '',
             one_time_schedules: group.one_time_schedules || [],
-            student_count: group.studentCount || 0,
-            price_per_class: group.pricePerClass || 0,
+            color: group.color.value,
             active: group.active !== false,
-            students: group.students || [],
             updated_at: new Date().toISOString()
           };
 
@@ -2803,7 +2805,7 @@
           parts.forEach(part => {
             const match = part.match(/^(\w+)\s+(.+)$/);
             if (match) {
-              const day = match[1];
+              const day = normalizeDayName(match[1]);  // CRITICAL FIX: Normalize day names (Mon→Monday, etc.)
               const time = match[2];
               const time24 = convert12to24(time);
               addScheduleSlot(day, time24, false, '');
@@ -2814,8 +2816,9 @@
         // Add one-time schedules if they exist
         if (group.one_time_schedules && Array.isArray(group.one_time_schedules)) {
           group.one_time_schedules.forEach(override => {
+            const day = normalizeDayName(override.day);  // CRITICAL FIX: Normalize day names
             const time24 = convert12to24(override.time);
-            addScheduleSlot(override.day, time24, true, override.date);
+            addScheduleSlot(day, time24, true, override.date);
           });
         }
 
@@ -2848,6 +2851,178 @@
         document.body.style.overflow = '';
       }
 
+      // ============================================================
+      // EMAIL NOTIFICATION FUNCTIONS
+      // ============================================================
+      async function sendScheduleChangeEmail(groupName, changeType, changeDetails) {
+        try {
+          // Get all students in this group
+          const { data: students, error } = await supabase
+            .from('students')
+            .select('email, name, id')
+            .eq('group_name', groupName)
+            .not('email', 'is', null);
+
+          if (error) {
+            console.error('❌ Error fetching students:', error);
+            return;
+          }
+
+          if (!students || students.length === 0) {
+            debugLog('⚠️ No students found in group', groupName);
+            return;
+          }
+
+          const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+          const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+
+          // Build email HTML based on change type
+          let subject = '';
+          let htmlContent = '';
+          let notificationTitle = '';
+          let notificationDescription = '';
+
+          if (changeType === 'one_time_added') {
+            subject = `📅 One-Time Class Added for Group ${groupName}`;
+            notificationTitle = 'One-Time Class Added';
+            notificationDescription = `Added one-time class for Group ${groupName} on ${changeDetails.date} at ${changeDetails.time}`;
+            htmlContent = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #667eea;">One-Time Class Added</h2>
+                <p>Hello!</p>
+                <p>A <strong>one-time class</strong> has been added to your schedule:</p>
+                <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                  <p style="margin: 5px 0;"><strong>Group:</strong> ${groupName}</p>
+                  <p style="margin: 5px 0;"><strong>Date:</strong> ${changeDetails.date}</p>
+                  <p style="margin: 5px 0;"><strong>Day:</strong> ${changeDetails.day}</p>
+                  <p style="margin: 5px 0;"><strong>Time:</strong> ${changeDetails.time}</p>
+                </div>
+                <p>Please mark this on your calendar. We look forward to seeing you!</p>
+                <p style="margin-top: 30px; color: #6b7280; font-size: 14px;">
+                  If you have any questions, please don't hesitate to reach out.
+                </p>
+              </div>
+            `;
+          } else if (changeType === 'schedule_changed') {
+            subject = `⚠️ Schedule Change for Group ${groupName}`;
+            notificationTitle = 'Schedule Changed';
+            notificationDescription = `Updated regular schedule for Group ${groupName}: ${changeDetails.newSchedule}`;
+            htmlContent = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #f59e0b;">Important: Schedule Change</h2>
+                <p>Hello!</p>
+                <p>Your regular class schedule for <strong>Group ${groupName}</strong> has been updated:</p>
+                <div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #f59e0b;">
+                  <p style="margin: 5px 0;"><strong>New Schedule:</strong></p>
+                  <p style="margin: 5px 0;">${changeDetails.newSchedule}</p>
+                </div>
+                ${changeDetails.oldSchedule ? `<p style="color: #6b7280; font-size: 14px;"><em>Previous schedule: ${changeDetails.oldSchedule}</em></p>` : ''}
+                <p>Please update your calendar accordingly.</p>
+                <p style="margin-top: 30px; color: #6b7280; font-size: 14px;">
+                  If you have any questions about the schedule change, please contact us.
+                </p>
+              </div>
+            `;
+          } else if (changeType === 'class_canceled') {
+            subject = `🚫 Class Canceled for Group ${groupName}`;
+            notificationTitle = 'Class Canceled';
+            notificationDescription = `Canceled class for Group ${groupName} on ${changeDetails.date}`;
+            htmlContent = `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #ef4444;">Class Canceled</h2>
+                <p>Hello!</p>
+                <p>We wanted to inform you that the following class has been <strong>canceled</strong>:</p>
+                <div style="background: #fee2e2; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ef4444;">
+                  <p style="margin: 5px 0;"><strong>Group:</strong> ${groupName}</p>
+                  <p style="margin: 5px 0;"><strong>Date:</strong> ${changeDetails.date}</p>
+                  <p style="margin: 5px 0;"><strong>Reason:</strong> ${changeDetails.reason || 'Not specified'}</p>
+                </div>
+                <p>We apologize for any inconvenience this may cause.</p>
+                <p style="margin-top: 30px; color: #6b7280; font-size: 14px;">
+                  If you have any questions, please feel free to contact us.
+                </p>
+              </div>
+            `;
+          }
+
+          // Send emails to all students and log notifications
+          const emailPromises = students.map(async student => {
+            try {
+              const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({
+                  to: student.email,
+                  subject: subject,
+                  html: htmlContent
+                })
+              });
+
+              if (!response.ok) {
+                throw new Error(`Failed to send to ${student.email}`);
+              }
+
+              const result = await response.json();
+
+              // Log to notifications table for Notification Center
+              try {
+                const notificationRecord = {
+                  type: 'email_sent',
+                  category: 'email',
+                  title: notificationTitle,
+                  description: `Sent to ${student.name} (${student.email}) for Group ${groupName}`,
+                  student_name: student.name,
+                  metadata: {
+                    student_id: student.id,
+                    student_name: student.name,
+                    email: student.email,
+                    group_name: groupName,
+                    change_type: changeType,
+                    change_details: changeDetails,
+                    subject: subject,
+                    html: htmlContent,
+                    resend_id: result.id || result.emailId || null
+                  },
+                  timestamp: new Date().toISOString(),
+                  read: false,
+                  created_at: new Date().toISOString()
+                };
+
+                const { error: notifError } = await supabase
+                  .from('notifications')
+                  .insert([notificationRecord]);
+
+                if (notifError) {
+                  console.error('⚠️ Failed to log notification for', student.name, notifError);
+                }
+              } catch (logErr) {
+                console.error('⚠️ Error logging notification (email still sent):', logErr);
+              }
+
+              return { success: true, email: student.email };
+            } catch (err) {
+              console.error(`❌ Failed to send email to ${student.email}:`, err);
+              return { success: false, email: student.email };
+            }
+          });
+
+          const results = await Promise.all(emailPromises);
+          const successCount = results.filter(r => r.success).length;
+          
+          debugLog(`📧 Sent ${successCount}/${students.length} schedule change emails for Group ${groupName}`);
+          
+          if (successCount > 0) {
+            alert(`✅ Schedule change email sent to ${successCount} student${successCount !== 1 ? 's' : ''} and logged to Notification Center`);
+          }
+
+        } catch (error) {
+          console.error('❌ Error sending schedule change emails:', error);
+        }
+      }
+
       // Save Group
       async function saveGroup() {
         const name = document.getElementById('groupNameInput').value.trim();
@@ -2863,8 +3038,20 @@
         // Build schedule string from regular slots
         const schedule = regular.map(slot => `${slot.day} ${slot.time}`).join(', ');
 
+        // Track changes for email notifications
+        let scheduleChanged = false;
+        let oldSchedule = '';
+        let oneTimeClassesAdded = [];
+
         if (currentGroup) {
-          // Update existing group
+          // Update existing group - detect changes
+          oldSchedule = currentGroup.schedule || '';
+          scheduleChanged = oldSchedule !== schedule;
+          
+          // Detect new one-time classes
+          const oldOneTimeDates = (currentGroup.one_time_schedules || []).map(ot => ot.date);
+          oneTimeClassesAdded = oneTime.filter(ot => !oldOneTimeDates.includes(ot.date));
+          
           currentGroup.name = name;
           currentGroup.schedule = schedule;
           currentGroup.one_time_schedules = oneTime;
@@ -2874,6 +3061,24 @@
           
           // Save to Supabase
           await saveGroupToSupabase(currentGroup);
+          
+          // Send email notifications for changes
+          if (scheduleChanged && schedule) {
+            await sendScheduleChangeEmail(name, 'schedule_changed', {
+              newSchedule: schedule,
+              oldSchedule: oldSchedule
+            });
+          }
+          
+          // Send email for each new one-time class
+          for (const oneTimeClass of oneTimeClassesAdded) {
+            await sendScheduleChangeEmail(name, 'one_time_added', {
+              date: oneTimeClass.date,
+              day: oneTimeClass.day,
+              time: oneTimeClass.time
+            });
+          }
+          
         } else {
           // Add new group
           const newGroup = {

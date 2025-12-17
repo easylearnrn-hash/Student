@@ -730,7 +730,7 @@
     // ===== SUPABASE CONFIGURATION =====
     const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
-  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const BUCKET_NAME = 'student-notes';
     
     // Debug mode
@@ -752,7 +752,7 @@
         const groupFilter = `group_letter.eq.${encodedGroupLetter},group_name.eq.${encodedGroupLetter},group_name.eq.${encodedGroupName}`;
 
         // Get all students in this specific group
-  const { data: students, error: studentsError } = await supabaseClient
+        const { data: students, error: studentsError } = await supabaseClient
           .from('students')
           .select('email, name, group_name')
           .or(groupFilter)
@@ -1229,7 +1229,7 @@
         // PERFORMANCE: Removed console.log
         
         // Query students table for show_in_grid flag to determine active groups
-  const { data: students, error } = await supabaseClient
+        const { data: students, error } = await supabaseClient
           .from('students')
           .select('group_name, show_in_grid')
           .eq('show_in_grid', true);
@@ -1313,22 +1313,30 @@
     })();
 
     // ===== LOAD DATA =====
-    async function loadData(forceRefresh = false) {
+    async function loadData() {
       const container = document.getElementById('systemsContainer');
-      
-      // Only show loading spinner if not a background refresh
-      if (!forceRefresh) {
-        container.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading systems and notes...</div></div>';
-      }
+      container.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading systems and notes...</div></div>';
 
       try {
-        // PERFORMANCE FIX: Disable cache for Group Notes - always fetch fresh data
-        // This ensures tags update instantly when notes are posted/hidden
+        // Check cache first
+        const cachedNotes = getCachedData('notes');
+        const cachedPerms = getCachedData('permissions');
+        const cachedFree = getCachedData('freeAccess');
+        
+        if (cachedNotes && cachedPerms) {
+          if (DEBUG_MODE) console.log('✅ Using cached data');
+          allNotes = cachedNotes;
+          permissions = cachedPerms;
+          freeAccessGrants = cachedFree || [];
+          renderSystems();
+          return;
+        }
+
         if (DEBUG_MODE) console.log('🔄 Fetching fresh data...');
 
         // PERFORMANCE: Add limit to prevent loading thousands of notes
         // Load all notes (no deleted column, just fetch active notes)
-  const { data: notes, error: notesError } = await supabaseClient
+        const { data: notes, error: notesError } = await supabase
           .from('student_notes')
           .select('*')
           .order('class_date', { ascending: false })
@@ -1341,7 +1349,7 @@
 
         // PERFORMANCE: Add limit to permissions query
         // Load all permissions
-  const { data: perms, error: permsError } = await supabaseClient
+        const { data: perms, error: permsError } = await supabase
           .from('student_note_permissions')
           .select('*')
           .limit(1000); // PERFORMANCE: Limit permissions
@@ -1352,7 +1360,7 @@
         if (DEBUG_MODE) console.log('🔑 Loaded permissions:', permissions.length);
 
         // Load free access grants
-  const { data: freeAccess, error: freeError } = await supabaseClient
+        const { data: freeAccess, error: freeError } = await supabase
           .from('note_free_access')
           .select('*');
 
@@ -1363,6 +1371,11 @@
           freeAccessGrants = freeAccess || [];
           if (DEBUG_MODE) console.log('✨ Loaded free access grants:', freeAccessGrants.length);
         }
+
+        // Cache the results
+        setCachedData('notes', allNotes);
+        setCachedData('permissions', permissions);
+        setCachedData('freeAccess', freeAccessGrants);
 
         renderSystems();
 
@@ -1428,7 +1441,7 @@
         // UPDATE DATABASE: Set is_current = TRUE for this folder, FALSE for all others IN THIS GROUP
         try {
           // First, unset all folders' is_current for THIS GROUP ONLY
-          const { error: error1 } = await supabaseClient
+          const { error: error1 } = await supabase
             .from('note_folders')
             .update({ is_current: false })
             .eq('group_letter', groupLetter)
@@ -1442,7 +1455,7 @@
           // PERFORMANCE: Removed console.log
           
           // Check if group-specific folder exists
-          const { data: existingFolder } = await supabaseClient
+          const { data: existingFolder } = await supabase
             .from('note_folders')
             .select('id')
             .eq('folder_name', systemName)
@@ -1451,7 +1464,7 @@
           
           if (existingFolder && existingFolder.length > 0) {
             // Update existing group-specific folder
-            const { error: error2 } = await supabaseClient
+            const { error: error2 } = await supabase
               .from('note_folders')
               .update({ is_current: true })
               .eq('folder_name', systemName)
@@ -1463,7 +1476,7 @@
             }
           } else {
             // Create new group-specific folder record (copy from global if exists)
-            const { data: globalFolder } = await supabaseClient
+            const { data: globalFolder } = await supabase
               .from('note_folders')
               .select('*')
               .eq('folder_name', systemName)
@@ -1488,7 +1501,7 @@
                   group_letter: groupLetter
                 };
             
-            const { error: error2 } = await supabaseClient
+            const { error: error2 } = await supabase
               .from('note_folders')
               .insert(folderData);
             
@@ -1534,7 +1547,7 @@
         
         // UPDATE DATABASE: Unset is_current for this folder IN THIS GROUP ONLY
         try {
-          const { error } = await supabaseClient
+          const { error } = await supabase
             .from('note_folders')
             .update({ is_current: false })
             .eq('folder_name', systemName)
@@ -1572,7 +1585,7 @@
         const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
         
         // Fetch which folder is marked as current from database FOR THIS GROUP
-  const { data: folders, error } = await supabaseClient
+        const { data: folders, error } = await supabase
           .from('note_folders')
           .select('folder_name, is_current')
           .eq('is_current', true)
@@ -1939,7 +1952,7 @@
 
         if (existing) {
           // Update existing
-          const { error } = await supabaseClient
+          const { error } = await supabase
             .from('student_note_permissions')
             .update({ is_accessible: true })
             .eq('id', existing.id);
@@ -1950,7 +1963,7 @@
           existing.is_accessible = true;
         } else {
           // Create new using upsert to handle conflicts
-          const { data, error } = await supabaseClient
+          const { data, error } = await supabase
             .from('student_note_permissions')
             .upsert({
               note_id: noteId,
@@ -1992,7 +2005,7 @@
 
         if (!permission) return;
 
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('student_note_permissions')
           .update({ is_accessible: false })
           .eq('id', permission.id);
@@ -2018,7 +2031,7 @@
       try {
         // PERFORMANCE: Removed console.log
 
-  const { data: note, error: noteError } = await supabaseClient
+        const { data: note, error: noteError } = await supabase
           .from('student_notes')
           .select('pdf_url')
           .eq('id', noteId)
@@ -2036,7 +2049,7 @@
 
         // PERFORMANCE: Removed console.log
 
-  const { data, error } = await supabaseClient.storage
+        const { data, error } = await supabaseClient.storage
           .from(BUCKET_NAME)
           .createSignedUrl(filePath, 3600);
 
@@ -2203,7 +2216,7 @@
 
       try {
         // Delete from database
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('student_notes')
           .delete()
           .eq('id', noteId);
@@ -2284,7 +2297,7 @@
         for (const note of notesToDelete) {
           try {
             // Delete from database
-            const { error } = await supabaseClient
+            const { error } = await supabase
               .from('student_notes')
               .delete()
               .eq('id', note.id);
@@ -2350,7 +2363,7 @@
 
     function logout() {
       if (confirm('Are you sure you want to logout?')) {
-  supabaseClient.auth.signOut();
+        supabaseClient.auth.signOut();
         window.location.href = 'index.html';
       }
     }
@@ -2487,7 +2500,7 @@
         let notFoundCount = 0;
         
         for (const noteId of selectedNoteIds) {
-          const { error } = await supabaseClient
+          const { error } = await supabase
             .from('note_free_access')
             .delete()
             .eq('note_id', noteId)
@@ -2502,7 +2515,7 @@
         }
         
         // Refresh free access grants
-  const { data: updatedGrants } = await supabaseClient
+        const { data: updatedGrants } = await supabase
           .from('note_free_access')
           .select('*');
         
@@ -2510,8 +2523,10 @@
           freeAccessGrants = updatedGrants;
         }
         
-        // PERFORMANCE FIX: Reload fresh data immediately to update FREE tags
-        await loadData(true); // Force refresh - background reload
+        // CRITICAL: Reload all data to ensure UI is fully refreshed
+        clearCache(); // Clear cache to force fresh data
+        await loadData(); // Reload notes from database
+        renderSystems(); // Re-render to show updated FREE badges
         
         await customAlert('Success', `✅ FREE access revoked from Group ${groupLetter} for ${successCount} note(s)`);
         
@@ -2647,13 +2662,13 @@
             );
 
             if (existing) {
-              await supabaseClient
+              await supabase
                 .from('student_note_permissions')
                 .update({ is_accessible: true })
                 .eq('id', existing.id);
               existing.is_accessible = true;
             } else {
-              const { data, error } = await supabaseClient
+              const { data, error } = await supabase
                 .from('student_note_permissions')
                 .insert([{
                   note_id: noteId,
@@ -2673,11 +2688,15 @@
           }
         }
 
+        // PERFORMANCE: Clear cache after batch operation
+        clearCache('permissions');
+
         await customAlert(`✓ ${successCount} note(s) shown${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
         clearSelection();
         
-        // PERFORMANCE FIX: Reload fresh data immediately to update tags
-        await loadData(true); // Force refresh - background reload
+        // CRITICAL: Reload all data to ensure UI is fully refreshed
+        await loadData(); // Reload notes from database
+        renderSystems(); // Re-render UI
       } catch (error) {
         console.error('Batch show error:', error);
         await customAlert('Failed to show notes: ' + error.message);
@@ -2704,13 +2723,13 @@
             );
 
             if (existing) {
-              await supabaseClient
+              await supabase
                 .from('student_note_permissions')
                 .update({ is_accessible: false })
                 .eq('id', existing.id);
               existing.is_accessible = false;
             } else {
-              const { data, error } = await supabaseClient
+              const { data, error } = await supabase
                 .from('student_note_permissions')
                 .insert([{
                   note_id: noteId,
@@ -2730,11 +2749,15 @@
           }
         }
 
+        // PERFORMANCE: Clear cache after batch operation
+        clearCache('permissions');
+
         await customAlert(`✓ ${successCount} note(s) hidden${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
         clearSelection();
         
-        // PERFORMANCE FIX: Reload fresh data immediately to update tags
-        await loadData(true); // Force refresh - background reload
+        // CRITICAL: Reload all data to ensure UI is fully refreshed
+        await loadData(); // Reload notes from database
+        renderSystems(); // Re-render UI
       } catch (error) {
         console.error('Batch hide error:', error);
         await customAlert('Failed to hide notes: ' + error.message);
@@ -2796,13 +2819,13 @@
             }
 
             // Delete permissions
-            await supabaseClient
+            await supabase
               .from('student_note_permissions')
               .delete()
               .eq('note_id', noteId);
 
             // Delete note record
-            const { error: deleteError } = await supabaseClient
+            const { error: deleteError } = await supabase
               .from('student_notes')
               .delete()
               .eq('id', noteId);
@@ -2858,11 +2881,11 @@
       // PERFORMANCE: Removed date picker debug logs
 
       try {
-  const { data: { session } } = await supabaseClient.auth.getSession();
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const adminEmail = session?.user?.email;
 
         // First update the class_date for all selected notes
-  const { error: updateError } = await supabaseClient
+        const { error: updateError } = await supabase
           .from('student_notes')
           .update({ class_date: classDate })
           .in('id', noteIds);
@@ -2878,7 +2901,7 @@
           granted_by: adminEmail
         }));
 
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('student_note_permissions')
           .insert(records)
           .select();
@@ -2954,7 +2977,7 @@
       if (!confirmed) return;
 
       try {
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('student_note_permissions')
           .delete()
           .in('note_id', noteIds)
@@ -3013,13 +3036,13 @@
             }
 
             // Delete permissions
-            await supabaseClient
+            await supabase
               .from('student_note_permissions')
               .delete()
               .eq('note_id', noteId);
 
             // Delete note record
-            const { error: deleteError } = await supabaseClient
+            const { error: deleteError } = await supabase
               .from('student_notes')
               .delete()
               .eq('id', noteId);
@@ -3086,11 +3109,11 @@
       }
 
       try {
-  const { data: { session } } = await supabaseClient.auth.getSession();
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const adminEmail = session?.user?.email;
 
         // Update class_date
-  const { error: updateError } = await supabaseClient
+        const { error: updateError } = await supabase
           .from('student_notes')
           .update({ class_date: postDate })
           .in('id', noteIds);
@@ -3106,7 +3129,7 @@
           created_by: adminEmail
         }));
 
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('note_free_access')  // CORRECT TABLE!
           .insert(records);
 
@@ -3149,7 +3172,7 @@
       if (!confirmed) return;
 
       try {
-  const { data: { session } } = await supabaseClient.auth.getSession();
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const adminEmail = session?.user?.email;
 
         const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
@@ -3160,7 +3183,7 @@
           created_by: adminEmail
         }));
 
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('note_free_access')
           .insert(records)
           .select();
@@ -3194,7 +3217,7 @@
       if (!confirmed) return;
 
       try {
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('student_note_permissions')
           .delete()
           .in('note_id', noteIds)
@@ -3241,7 +3264,7 @@
 
     async function loadStudentsForModal() {
       try {
-  const { data: students, error } = await supabaseClient
+        const { data: students, error } = await supabase
           .from('students')
           .select('*')
           .order('name');
@@ -3254,7 +3277,7 @@
         
         // Get existing individual permissions for this note (only in single-note mode)
         if (currentModalNoteId !== null) {
-          const { data: existingPerms, error: permsError } = await supabaseClient
+          const { data: existingPerms, error: permsError } = await supabase
             .from('student_note_permissions')
             .select('student_id')
             .eq('note_id', currentModalNoteId)
@@ -3406,7 +3429,7 @@
         }
 
         // Upsert permissions (insert or update if exists)
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('student_note_permissions')
           .upsert(permissions, {
             onConflict: 'note_id,student_id,group_name',
@@ -3420,7 +3443,7 @@
         let emailSummary = '';
         try {
           // Get selected students' details
-          const { data: students, error: studentsError } = await supabaseClient
+          const { data: students, error: studentsError } = await supabase
             .from('students')
             .select('email, name, group_name')
             .in('id', Array.from(selectedStudentIds))
@@ -3449,11 +3472,11 @@
         await customAlert('Success', `✓ Access granted to ${studentCount} student(s) for ${noteCount} note(s)${emailSummary}`);
         closeStudentModal();
         
-        // PERFORMANCE FIX: Reload fresh data immediately to update tags
+        // If batch mode, also clear the note selection
         if (isBatchMode) {
           clearSelection();
+          renderSystems();
         }
-        await loadData(true); // Force refresh - background reload
       } catch (error) {
         console.error('Error granting access:', error);
         await customAlert('Failed to grant access: ' + error.message);
@@ -3532,7 +3555,7 @@
 
     async function loadFreeStudents() {
       try {
-  const { data: students, error } = await supabaseClient
+        const { data: students, error } = await supabase
           .from('students')
           .select('*')
           .order('name');
@@ -3637,7 +3660,7 @@
           const adminEmail = session?.user?.email;
           
           // First update the class_date for all selected notes
-          const { error: updateError } = await supabaseClient
+          const { error: updateError } = await supabase
             .from('student_notes')
             .update({ class_date: classDate })
             .in('id', Array.from(selectedNoteIds));
@@ -3652,7 +3675,7 @@
           let duplicateCount = 0;
           
           for (const noteId of selectedNoteIds) {
-            const { data, error } = await supabaseClient
+            const { data, error } = await supabase
               .from('note_free_access')
               .insert({
                 note_id: noteId,
@@ -3679,7 +3702,7 @@
           let emailSummary = '';
           try {
             // Get students in this group
-            const { data: students, error: studentsError } = await supabaseClient
+            const { data: students, error: studentsError } = await supabase
               .from('students')
               .select('email, name, group_name')
               .eq('group_name', groupLetter)
@@ -3732,7 +3755,7 @@
           const adminEmail = session?.user?.email;
           
           // First update the class_date for all selected notes
-          const { error: updateError } = await supabaseClient
+          const { error: updateError } = await supabase
             .from('student_notes')
             .update({ class_date: classDate })
             .in('id', Array.from(selectedNoteIds));
@@ -3760,7 +3783,7 @@
 
           // Insert records one by one to handle duplicates gracefully
           for (const record of records) {
-            const { data, error } = await supabaseClient
+            const { data, error } = await supabase
               .from('note_free_access')
               .insert(record)
               .select();
@@ -3782,7 +3805,7 @@
           let emailSummary = '';
           try {
             // Get selected students' details
-            const { data: students, error: studentsError } = await supabaseClient
+            const { data: students, error: studentsError } = await supabase
               .from('students')
               .select('email, name, group_name')
               .in('id', Array.from(freeSelectedStudents))
@@ -3817,7 +3840,7 @@
         }
 
         // Reload free access grants to update the UI badges
-  const { data: freeAccess, error: freeError } = await supabaseClient
+        const { data: freeAccess, error: freeError } = await supabase
           .from('note_free_access')
           .select('*');
 
@@ -3825,8 +3848,10 @@
           freeAccessGrants = freeAccess;
         }
         
-        // PERFORMANCE FIX: Reload fresh data immediately to update FREE tags
-        await loadData(true); // Force refresh - background reload
+        // CRITICAL: Reload all data to ensure UI is fully refreshed
+        clearCache(); // Clear cache to force fresh data
+        await loadData(); // Reload notes from database
+        renderSystems(); // Re-render to show the new FREE badges
 
         closeFreeAccessModal();
         clearSelection();
@@ -4270,10 +4295,10 @@
 
     async function postSingleNote(noteId) {
       try {
-  const { data: { session } } = await supabaseClient.auth.getSession();
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const adminEmail = session?.user?.email;
 
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('student_note_permissions')
           .insert({
             note_id: noteId,
@@ -4299,7 +4324,7 @@
       if (!confirmed) return;
 
       try {
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('student_note_permissions')
           .delete()
           .eq('note_id', noteId)
@@ -4325,7 +4350,7 @@
       try {
         const groupLetter = currentGroup.replace('Group ', '');
         
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('note_free_access')
           .insert({
             note_id: noteId,
@@ -4353,7 +4378,7 @@
       try {
         const groupLetter = currentGroup.replace('Group ', '');
         
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('note_free_access')
           .delete()
           .eq('note_id', noteId)
@@ -4405,13 +4430,13 @@
       }
 
       try {
-  const { data: { session } } = await supabaseClient.auth.getSession();
+        const { data: { session } } = await supabaseClient.auth.getSession();
         const adminEmail = session?.user?.email;
 
         const noteIdsArray = Array.from(selectedFilteredNotes);
         
         // Update class_date for all selected notes to chosen date
-  const { error: updateError } = await supabaseClient
+        const { error: updateError } = await supabase
           .from('student_notes')
           .update({ class_date: postDate })
           .in('id', noteIdsArray);
@@ -4429,7 +4454,7 @@
           created_by: adminEmail
         }));
 
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('note_free_access')
           .insert(records);
 
@@ -4497,7 +4522,7 @@
         const noteIds = Array.from(selectedFilteredNotes);
         const groupLetter = currentGroup.replace('Group ', '');
 
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('note_free_access')
           .delete()
           .in('note_id', noteIds)
@@ -4548,7 +4573,7 @@
         const noteIds = Array.from(selectedFilteredNotes);
         const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
 
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('note_free_access')
           .delete()
           .in('note_id', noteIds)
@@ -4606,7 +4631,7 @@
           group_letter: groupLetter
         }));
 
-  const { error } = await supabaseClient
+        const { error } = await supabase
           .from('note_free_access')
           .insert(records);
 

@@ -87,6 +87,37 @@
       transform: translateY(-2px);
     }
     
+    /* Chat notification badge */
+    .chat-notification-badge {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+      border-radius: 12px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      min-width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+      animation: badgePulse 2s ease-in-out infinite;
+    }
+    
+    @keyframes badgePulse {
+      0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+      }
+      50% {
+        transform: scale(1.1);
+        box-shadow: 0 4px 12px rgba(239, 68, 68, 0.6);
+      }
+    }
+    
     .tabs {
       display: flex;
       gap: 16px;
@@ -661,19 +692,19 @@
       margin-bottom: 24px;
     }
 
-    .status-dot {
+    .user-status-dot {
       width: 12px;
       height: 12px;
       border-radius: 50%;
       animation: pulse 2s infinite;
     }
 
-    .status-indicator.online .status-dot {
+    .status-indicator.online .user-status-dot {
       background: #10b981;
       box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
     }
 
-    .status-indicator.offline .status-dot {
+    .status-indicator.offline .user-status-dot {
       background: #ef4444;
     }
 
@@ -729,11 +760,9 @@
       font-weight: 700;
     }
     
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-      gap: 16px;
-    }
+    /* Removed duplicate .stats-grid - already defined at line 189 */
+    /* Removed duplicate .stat-value - already defined at line 204 */
+    /* Removed duplicate .stat-label - already defined at line 211 */
     
     .stat-item {
       text-align: center;
@@ -741,21 +770,6 @@
       background: rgba(255,255,255,0.05);
       border-radius: 12px;
       border: 1px solid rgba(255,255,255,0.1);
-    }
-    
-    .stat-value {
-      font-size: 28px;
-      font-weight: 700;
-      color: #667eea;
-      margin-bottom: 8px;
-      text-shadow: 0 0 20px rgba(102,126,234,0.5);
-    }
-    
-    .stat-label {
-      font-size: 12px;
-      color: rgba(255,255,255,0.6);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
     }
 
     .status-history h4 {
@@ -1009,18 +1023,18 @@
       font-size: 13px;
     }
 
-    .status-dot {
+    .note-status-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
     }
 
-    .status-dot.open {
+    .note-status-dot.open {
       background: #10b981;
       box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
     }
 
-    .status-dot.closed {
+    .note-status-dot.closed {
       background: #ef4444;
       box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
     }
@@ -1556,8 +1570,9 @@
         <button class="back-btn" onclick="window.location.href='Test-Manager.html'">
           📝 Test Manager
         </button>
-        <button class="back-btn" onclick="openAdminChat()">
+        <button class="back-btn" onclick="openAdminChat()" style="position: relative;">
           💬 Student Chat
+          <span id="chatBadge" class="chat-notification-badge" style="display: none;">0</span>
         </button>
         <button class="back-btn" onclick="openAlertModal()">
           🔔 Create Alert
@@ -1582,16 +1597,16 @@
     
     <!-- Tabs -->
     <div class="tabs">
-      <div class="tab active" onclick="switchTab('students')">
+      <div class="tab active" onclick="switchTab(event, 'students')">
         <span>👥</span> Students
       </div>
-      <div class="tab" onclick="switchTab('notes')">
+      <div class="tab" onclick="switchTab(event, 'notes')">
         <span>📄</span> PDF Notes
       </div>
       <div class="tab" onclick="openGroupNotesModal()">
         <span>📚</span> Group Notes
       </div>
-      <div class="tab" onclick="switchTab('settings')">
+      <div class="tab" onclick="switchTab(event, 'settings')">
         <span>⚙️</span> Settings
       </div>
     </div>
@@ -1827,9 +1842,10 @@
     const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
     
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // Create Supabase client without shadowing global window.supabase
+  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     if (window.ArnomaAuth?.attachAuthListener) {
-      window.ArnomaAuth.attachAuthListener(supabase);
+      window.ArnomaAuth.attachAuthListener(supabaseClient);
     }
 
     let adminSessionPromise = null;
@@ -1838,8 +1854,8 @@
         adminSessionPromise = (async () => {
           try {
             const session = window.ArnomaAuth
-              ? await window.ArnomaAuth.ensureSession(supabase, { redirectToLogin: true })
-              : (await supabase.auth.getSession()).data.session;
+              ? await window.ArnomaAuth.ensureSession(supabaseClient, { redirectToLogin: true })
+              : (await supabaseClient.auth.getSession()).data.session;
 
             if (!session?.user?.email) {
               throw new Error('Admin session missing email');
@@ -1878,8 +1894,6 @@
     const DATA_CACHE = {
       students: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 }, // 5 min
       notes: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 },
-      payments: { data: null, timestamp: 0, ttl: 3 * 60 * 1000 }, // 3 min
-      forum: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 },
       stats: { data: null, timestamp: 0, ttl: 2 * 60 * 1000 } // 2 min
     };
 
@@ -1929,10 +1943,10 @@
     }
     
     // Tab Switching
-    function switchTab(tab) {
+    function switchTab(e, tab) {
       // Update tabs
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      event.target.closest('.tab').classList.add('active');
+      e.currentTarget.classList.add('active');
       
       // Update content
       document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
@@ -1951,7 +1965,7 @@
       
       try {
         // Fetch current setting from Supabase
-        const { data, error } = await supabase
+  const { data, error } = await supabaseClient
           .from('portal_settings')
           .select('setting_value')
           .eq('setting_key', 'christmas_theme')
@@ -1983,7 +1997,7 @@
       
       try {
         // Update setting in Supabase
-        const { error } = await supabase
+  const { error } = await supabaseClient
           .from('portal_settings')
           .update({ 
             setting_value: { enabled: isEnabled },
@@ -2020,8 +2034,13 @@
       const modal = document.getElementById('groupNotesModal');
       const iframe = document.getElementById('groupNotesIframe');
       
+      // CRITICAL FIX: Check if iframe contains Group-Notes.html, not just if src is empty
+      // Empty src="" defaults to parent URL, which breaks first-click behavior
+      const currentSrc = iframe.src || '';
+      const hasGroupNotes = currentSrc.includes('Group-Notes.html');
+      
       // Load the iframe src when opening (lazy load)
-      if (!iframe.src || iframe.src === '' || iframe.src === window.location.href) {
+      if (!hasGroupNotes) {
         iframe.src = 'Group-Notes.html?v=' + Date.now();
       }
       
@@ -2059,25 +2078,18 @@
     // Load Stats
     async function loadStats() {
       try {
-        // Check cache first
-        const cached = getCachedData('stats');
-        if (cached) {
-          updateStatsUI(cached);
-          return;
-        }
-        
-        // TEMPORARILY SKIP AUTH CHECK - remove this later
-        // await ensureAdminSession();
+        // PERFORMANCE FIX: Disabled caching - always fetch fresh data for real-time updates
+        await ensureAdminSession();
         
         // Total Students
-        const { count: studentCount, error: studentError } = await supabase
+  const { count: studentCount, error: studentError } = await supabaseClient
           .from('students')
           .select('*', { count: 'exact', head: true });
         
         // Total Notes - ONLY count non-deleted notes
         let notesCount = 0;
         try {
-          const { count, error: notesError } = await supabase
+          const { count, error: notesError } = await supabaseClient
             .from('student_notes')
             .select('*', { count: 'exact', head: true })
             .eq('deleted', false);
@@ -2092,8 +2104,6 @@
           notes: notesCount
         };
         
-        // Cache the results
-        setCachedData('stats', stats);
         updateStatsUI(stats);
         
       } catch (error) {
@@ -2200,20 +2210,14 @@
     // Load Students
     async function loadStudents() {
       try {
-        // Check cache first
-        const cached = getCachedData('students');
-        if (cached) {
-          renderStudentsTable(cached);
-          return;
-        }
+        // PERFORMANCE FIX: Disabled caching - always fetch fresh data for real-time updates
         
-        // TEMPORARILY SKIP AUTH CHECK - remove this later
-        // await ensureAdminSession();
+        await ensureAdminSession();
         
         // Fetch students and groups (limit to prevent overload)
         const [studentsResult, groupsResult] = await Promise.all([
-          supabase.from('students').select('*').order('name').limit(500),
-          supabase.from('groups').select('*')
+          supabaseClient.from('students').select('*').order('name').limit(500),
+          supabaseClient.from('groups').select('*')
         ]);
         
         if (studentsResult.error) {
@@ -2231,7 +2235,7 @@
           // FIX: Query student_sessions table (not session_logs)
           // PERFORMANCE: Only fetch sessions updated in last hour to reduce data transfer
           const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-          const sessionsResult = await supabase
+          const sessionsResult = await supabaseClient
             .from('student_sessions')
             .select('student_id, is_active, last_activity')
             .eq('is_active', true)
@@ -2250,7 +2254,7 @@
           }
           
           // Also get all students who have ever logged in (with limit)
-          const allSessionsResult = await supabase
+          const allSessionsResult = await supabaseClient
             .from('student_sessions')
             .select('student_id')
             .limit(500);
@@ -2291,8 +2295,6 @@
           allSessionsMap
         };
         
-        // Cache the data
-        setCachedData('students', data);
         renderStudentsTable(data);
         
       } catch (error) {
@@ -2380,8 +2382,8 @@
     // Load Notes
     async function loadNotes() {
       try {
-        await ensureAdminSession();
-        const { data: notes, error } = await supabase
+  await ensureAdminSession();
+  const { data: notes, error } = await supabaseClient
           .from('student_notes')
           .select('*')
           .eq('deleted', false)
@@ -2447,7 +2449,7 @@
       try {
         if (currentStudentId) {
           // Update existing
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('students')
             .update(studentData)
             .eq('id', currentStudentId);
@@ -2456,7 +2458,7 @@
           alert('Student updated successfully!');
         } else {
           // Create new
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('students')
             .insert([studentData]);
           
@@ -2479,7 +2481,7 @@
     
     async function editStudent(id) {
       try {
-        const { data, error } = await supabase
+  const { data, error } = await supabaseClient
           .from('students')
           .select('*')
           .eq('id', id)
@@ -2537,7 +2539,7 @@
         
         // PERFORMANCE: Defer data fetching to next frame
         requestAnimationFrame(async () => {
-          const { data: sessions, error } = await supabase
+          const { data: sessions, error } = await supabaseClient
             .from('student_sessions')
             .select('*')
             .eq('student_id', numericStudentId)
@@ -2601,7 +2603,7 @@
             
             statusHTML += `
               <div class="status-indicator online">
-                <span class="status-dot"></span>
+                <span class="user-status-dot"></span>
                 <span class="status-text">🟢 Currently Online</span>
               </div>
               <div class="status-details">
@@ -2632,7 +2634,7 @@
             
             statusHTML += `
               <div class="status-indicator offline">
-                <span class="status-dot"></span>
+                <span class="user-status-dot"></span>
                 <span class="status-text">🔴 Offline</span>
               </div>
               <div class="status-details">
@@ -2649,7 +2651,7 @@
           } else {
             statusHTML += `
               <div class="status-indicator offline">
-                <span class="status-dot"></span>
+                <span class="user-status-dot"></span>
                 <span class="status-text">⚪ Never Logged In</span>
               </div>
             `;
@@ -2765,7 +2767,8 @@
           studentName: studentName,
           timestamp: Date.now(),
           expiresAt: Date.now() + (10 * 60 * 1000), // 10 minutes
-          adminEmail: currentEmail || 'admin'
+          adminEmail: currentEmail || 'admin',
+          isMasterAccess: true  // Required for student-portal.html to recognize impersonation
         };
         
         // Store in BOTH sessionStorage AND localStorage for reliability
@@ -2817,11 +2820,60 @@
       loadStudents();
     }
     
+    // Check for new forum messages and update badge
+    async function checkNewMessages() {
+      try {
+        const badge = document.getElementById('chatBadge');
+        if (!badge) return;
+        
+        // Get last viewed timestamp from localStorage
+        const lastViewed = localStorage.getItem('admin_chat_last_viewed') || 0;
+        const lastViewedTime = new Date(parseInt(lastViewed));
+        
+        // Query for messages newer than last viewed
+  const { data: messages, error } = await supabaseClient
+          .from('forum_messages')
+          .select('id, created_at')
+          .gt('created_at', lastViewedTime.toISOString())
+          .order('created_at', { ascending: false });
+        
+        if (error) {
+          console.error('Error checking messages:', error);
+          return;
+        }
+        
+        const newMessageCount = messages?.length || 0;
+        
+        // Update badge
+        if (newMessageCount > 0) {
+          badge.textContent = newMessageCount > 99 ? '99+' : newMessageCount;
+          badge.style.display = 'flex';
+        } else {
+          badge.style.display = 'none';
+        }
+        
+      } catch (error) {
+        console.error('Error in checkNewMessages:', error);
+      }
+    }
+    
     // Open admin chat modal
     async function openAdminChat() {
+      console.log('🎯 openAdminChat() called');
+      
+      // Mark messages as viewed
+      localStorage.setItem('admin_chat_last_viewed', Date.now().toString());
+      
+      // Hide badge immediately
+      const badge = document.getElementById('chatBadge');
+      if (badge) {
+        badge.style.display = 'none';
+      }
+      
       try {
         // Get current admin user
-        const { data: { user } } = await supabase.auth.getUser();
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        console.log('👤 Admin user:', user?.email);
         
         if (!user) {
           alert('Please log in to access the chat');
@@ -2837,6 +2889,8 @@
           mode: 'admin_chat'
         };
         
+        console.log('🎫 Created admin chat token:', adminChatToken);
+        
         // Store token in localStorage so iframe can access it
         localStorage.setItem('admin_chat_token', JSON.stringify(adminChatToken));
         
@@ -2844,17 +2898,25 @@
         const iframe = document.getElementById('impersonationIframe');
         const titleElement = document.getElementById('impersonationStudentName');
         
+        console.log('🔍 Modal elements:', { modal: !!modal, iframe: !!iframe, titleElement: !!titleElement });
+        
         // Update modal title
         titleElement.textContent = 'Student Chat (Admin Mode)';
+        
+        // Wait for iframe to load before showing modal
+        iframe.addEventListener('load', function onIframeLoad() {
+          modal.classList.add('active');
+          console.log('✅ Modal opened successfully');
+          iframe.removeEventListener('load', onIframeLoad);
+        }, { once: true });
         
         // Load student portal with hash to go directly to forum tab
         iframe.src = 'student-portal.html#forum';
         
-        // Show modal
-        modal.classList.add('active');
+        console.log('📱 Loading iframe:', iframe.src);
         
       } catch (error) {
-        console.error('Error opening admin chat:', error);
+        console.error('❌ Error opening admin chat:', error);
         alert('Failed to open chat. Please try again.');
       }
     }
@@ -2863,7 +2925,7 @@
       if (!confirm('Are you sure you want to delete this student?')) return;
       
       try {
-        const { error } = await supabase
+  const { error } = await supabaseClient
           .from('students')
           .delete()
           .eq('id', id);
@@ -2891,7 +2953,7 @@
       if (!confirm('Are you sure you want to delete this note?')) return;
       
       try {
-        const { error } = await supabase
+        const { error } = await supabaseClient
           .from('student_notes')
           .update({ deleted: true })
           .eq('id', id);
@@ -2920,7 +2982,7 @@
       if (!confirm('Are you sure you want to delete this payment record?')) return;
       
       try {
-        const { error } = await supabase
+        const { error } = await supabaseClient
           .from('payment_records')
           .delete()
           .eq('id', id);
@@ -2945,13 +3007,13 @@
       
       try {
         // Delete replies first
-        await supabase
+        await supabaseClient
           .from('nurses_forum')
           .delete()
           .eq('parent_id', id);
         
         // Delete message
-        const { error } = await supabase
+        const { error } = await supabaseClient
           .from('nurses_forum')
           .delete()
           .eq('id', id);
@@ -3065,7 +3127,7 @@
     document.addEventListener('DOMContentLoaded', async () => {
       try {
         // Get current admin email with timeout
-        const sessionPromise = supabase.auth.getSession();
+  const sessionPromise = supabaseClient.auth.getSession();
         const timeoutPromise = new Promise((_, reject) => 
           setTimeout(() => reject(new Error('Session timeout after 5s')), 5000)
         );
@@ -3078,6 +3140,13 @@
         
         loadStats();
         loadStudents();
+        
+        // Check for new messages on load
+        checkNewMessages();
+        
+        // Poll for new messages every 30 seconds
+        setInterval(checkNewMessages, 30000);
+        
       } catch (error) {
         console.error('❌ Initialization error:', error);
         loadStats();
@@ -3111,39 +3180,7 @@
     <div id="statusModalContent" class="status-modal-content"></div>
   </div>
 
-  <!-- Note Modal -->
-  <div id="noteModal" class="modal">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h2 id="noteModalTitle">Add Note</h2>
-        <button class="close-btn" onclick="closeNoteModal()">×</button>
-      </div>
-      <form id="noteForm" onsubmit="saveNote(event)">
-        <input type="hidden" id="noteFolderId">
-        <input type="hidden" id="noteTemplateId">
-        <input type="hidden" id="noteAssignmentId">
-        
-        <div class="form-group">
-          <label class="form-label">Note Title</label>
-          <input type="text" id="noteTitle" required class="form-input" placeholder="e.g., Heart Failure Pathophysiology">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Note Content (Optional)</label>
-          <textarea id="noteContent" class="form-input" rows="6" placeholder="Enter note content or attach a PDF below..."></textarea>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Class Date</label>
-          <input type="date" id="noteClassDate" required class="form-input">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Attach PDF (Optional)</label>
-          <input type="file" id="noteFile" accept=".pdf" class="form-input">
-          <small style="color: rgba(255,255,255,0.6)">Students can access this note if they paid for the class date</small>
-        </div>
-        <button type="submit" class="submit-btn">Save Note</button>
-      </form>
-    </div>
-  </div>
+  <!-- REMOVED: Orphaned Note Modal (notes are managed via Notes-Manager-NEW.html) -->
 
   <!-- Full-Screen Modal for Notes Manager -->
   <div id="notesManagerModal" class="modal-overlay">
@@ -3247,7 +3284,7 @@
       
       try {
         // Load all students (use * to get all columns)
-        const { data: students, error } = await supabase
+        const { data: students, error } = await supabaseClient
           .from('students')
           .select('*')
           .order('name');
@@ -3306,6 +3343,19 @@
       document.getElementById('questionFieldContainer').style.display = 'none';
       document.getElementById('variableSuggestions').style.display = 'none';
       document.getElementById('alertStudentSearch').value = '';
+      const repeatCheckbox = document.getElementById('limitRepeats');
+      if (repeatCheckbox) {
+        repeatCheckbox.checked = false;
+      }
+      const repeatContainer = document.getElementById('repeatLimitContainer');
+      if (repeatContainer) {
+        repeatContainer.style.display = 'none';
+      }
+      const repeatCountInput = document.getElementById('repeatCount');
+      if (repeatCountInput) {
+        repeatCountInput.value = 1;
+        updateRepeatCountPreview(1);
+      }
     }
     
     function showVariableSuggestions(textarea) {
@@ -3394,6 +3444,32 @@
         document.getElementById('questionText').value = '';
       }
     }
+
+    function toggleRepeatLimit() {
+      const limitCheckbox = document.getElementById('limitRepeats');
+      const container = document.getElementById('repeatLimitContainer');
+      if (!limitCheckbox || !container) return;
+      const isEnabled = limitCheckbox.checked;
+      container.style.display = isEnabled ? 'block' : 'none';
+      if (!isEnabled) {
+        const repeatCountInput = document.getElementById('repeatCount');
+        if (repeatCountInput) {
+          repeatCountInput.value = 1;
+        }
+      }
+      const repeatCountInput = document.getElementById('repeatCount');
+      if (repeatCountInput) {
+        updateRepeatCountPreview(repeatCountInput.value);
+      }
+    }
+
+    function updateRepeatCountPreview(value) {
+      const preview = document.getElementById('repeatCountPreview');
+      if (!preview) return;
+      const parsed = parseInt(value, 10);
+      const safeValue = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+      preview.textContent = safeValue;
+    }
     
     function toggleGroup(groupLetter) {
       const checkboxes = document.querySelectorAll('#studentCheckboxGroup input[type="checkbox"]');
@@ -3459,7 +3535,11 @@
         const scheduleTime = document.getElementById('alertSchedule').value;
         const expiration = document.getElementById('alertExpiration').value;
         const isOneTime = document.getElementById('isOneTime').checked;
-        const showOnOpen = document.getElementById('showOnOpen').checked;
+    const showOnOpen = document.getElementById('showOnOpen').checked;
+    const limitRepeats = document.getElementById('limitRepeats').checked;
+    const repeatCountInput = document.getElementById('repeatCount');
+  const parsedRepeatCount = parseInt(repeatCountInput?.value || '1', 10);
+  const repeatCount = Number.isFinite(parsedRepeatCount) ? Math.min(20, Math.max(1, parsedRepeatCount)) : 1;
         const hasQuestion = document.getElementById('hasQuestion').checked;
         const questionText = document.getElementById('questionText').value;
         const answerOption1 = document.getElementById('answerOption1').value || 'Yes';
@@ -3476,6 +3556,11 @@
         // Validate question if checkbox is checked
         if (hasQuestion && !questionText.trim()) {
           alert('Please enter a question or uncheck the "Add Question" option.');
+          return;
+        }
+
+        if (limitRepeats && (!Number.isFinite(parsedRepeatCount) || parsedRepeatCount < 1)) {
+          alert('Please enter how many times the alert should appear (minimum of 1).');
           return;
         }
         
@@ -3516,12 +3601,14 @@
             question_text: personalizedQuestion,
             answer_option_1: answerOption1,
             answer_option_2: answerOption2,
-            created_at: new Date().toISOString()
+            created_at: new Date().toISOString(),
+            max_show_count: limitRepeats ? repeatCount : null,
+            times_shown: 0
           });
         });
         
         // Insert alerts into database
-        const { error } = await supabase
+        const { error } = await supabaseClient
           .from('student_alerts')
           .insert(alerts);
         
@@ -3553,9 +3640,10 @@
               questionText: hasQuestion ? questionText : '',
               answerOption1: hasQuestion ? answerOption1 : '',
               answerOption2: hasQuestion ? answerOption2 : '',
-              showOnOpen: showOnOpen
+              showOnOpen: showOnOpen,
+              limitRepeats: limitRepeats,
+              repeatCount: limitRepeats ? repeatCount : 1
             };
-            
             templates.push(newTemplate);
             saveTemplatesToStorage(templates);
             
@@ -3677,7 +3765,7 @@
         
         if (tab === 'viewed') {
           // First, fetch all students
-          const { data: students, error: studentsError } = await supabase
+          const { data: students, error: studentsError } = await supabaseClient
             .from('students')
             .select('id, name, email, group_name');
           
@@ -3690,9 +3778,9 @@
           });
           
           // Then fetch ALL alerts with read status
-          const { data: alerts, error } = await supabase
+          const { data: alerts, error } = await supabaseClient
             .from('student_alerts')
-            .select('id, message, alert_type, is_read, created_at, student_id, read_at')
+            .select('id, message, alert_type, is_read, created_at, student_id, read_at, max_show_count, times_shown')
             .order('created_at', { ascending: false });
           
           if (error) throw error;
@@ -3728,7 +3816,9 @@
               email: student.email,
               group: student.group_name,
               is_read: alert.is_read,
-              read_at: alert.read_at
+              read_at: alert.read_at,
+              max_show_count: alert.max_show_count,
+              times_shown: alert.times_shown
             });
           });
           
@@ -3790,6 +3880,7 @@
                         <th>Student</th>
                         <th>Group</th>
                         <th>Email</th>
+                        <th>Views</th>
                         <th>Read At</th>
                       </tr>
                     </thead>
@@ -3812,6 +3903,16 @@
                             <span class="badge" style="background: rgba(147,51,234,0.2); color: #c084fc;">${student.group || 'N/A'}</span>
                           </td>
                           <td style="font-size: 13px; color: rgba(255,255,255,0.6);">${student.email}</td>
+                          <td style="font-size: 13px; color: rgba(255,255,255,0.7);">
+                            ${(() => {
+                              const maxViews = Number(student.max_show_count);
+                              const shown = Number(student.times_shown || 0);
+                              if (Number.isFinite(maxViews) && maxViews > 0) {
+                                return `${shown}/${maxViews}`;
+                              }
+                              return shown > 0 ? `${shown}` : '—';
+                            })()}
+                          </td>
                           <td style="font-size: 13px; color: rgba(255,255,255,0.7);">
                             ${student.is_read && student.read_at ? 
                               `<div style="display: flex; align-items: center; gap: 6px;">
@@ -3839,7 +3940,7 @@
           
         } else {
           // Questions tab - original logic
-          const { data: alerts, error } = await supabase
+          const { data: alerts, error } = await supabaseClient
             .from('student_alerts')
             .select(`
               id,
@@ -4207,6 +4308,35 @@
           <label class="form-label" style="display: flex; align-items: center; gap: 10px;">
             <input 
               type="checkbox" 
+              id="limitRepeats" 
+              onchange="toggleRepeatLimit()"
+              style="width: 18px; height: 18px; cursor: pointer;"
+            />
+            <span>Limit how many times this alert appears</span>
+          </label>
+          <div id="repeatLimitContainer" style="display: none; margin-left: 28px; margin-top: 12px;">
+            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+              <input 
+                type="number" 
+                id="repeatCount" 
+                class="form-input" 
+                min="1"
+                max="20"
+                value="1"
+                style="max-width: 130px;"
+                oninput="updateRepeatCountPreview(this.value)"
+              />
+              <span style="font-size: 12px; color: rgba(255,255,255,0.75);">
+                Students will see this alert up to <strong id="repeatCountPreview">1</strong> time(s)
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" style="display: flex; align-items: center; gap: 10px;">
+            <input 
+              type="checkbox" 
               id="hasQuestion" 
               onchange="toggleQuestionField()"
               style="width: 18px; height: 18px; cursor: pointer;"
@@ -4306,7 +4436,18 @@
       const stored = localStorage.getItem(TEMPLATES_STORAGE_KEY);
       if (stored) {
         try {
-          return JSON.parse(stored);
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed)) {
+            return parsed.map(template => {
+              const repeatCount = parseInt(template.repeatCount ?? '1', 10);
+              return {
+                ...template,
+                limitRepeats: Boolean(template.limitRepeats),
+                repeatCount: Number.isFinite(repeatCount) && repeatCount > 0 ? repeatCount : 1
+              };
+            });
+          }
+          return getDefaultTemplates();
         } catch (e) {
           console.error('Error parsing templates:', e);
           return getDefaultTemplates();
@@ -4330,7 +4471,9 @@
           questionText: 'Will you attend the makeup class?',
           answerOption1: 'Yes, I will attend',
           answerOption2: 'No, I cannot attend',
-          showOnOpen: true
+          showOnOpen: true,
+          limitRepeats: false,
+          repeatCount: 1
         },
         {
           id: 'payment-reminder',
@@ -4338,7 +4481,9 @@
           message: 'Dear {student_name},\n\nThis is a friendly reminder about your outstanding balance.\n\nPlease submit your payment at your earliest convenience.\n\nThank you!',
           type: 'warning',
           hasQuestion: false,
-          showOnOpen: false
+          showOnOpen: false,
+          limitRepeats: false,
+          repeatCount: 1
         },
         {
           id: 'test-announcement',
@@ -4346,7 +4491,9 @@
           message: 'Hi {student_name},\n\nWe have an upcoming test on [DATE].\n\nTopic: [TOPIC]\nDuration: [DURATION]\n\nPlease prepare accordingly.\n\nGood luck!',
           type: 'info',
           hasQuestion: false,
-          showOnOpen: true
+          showOnOpen: true,
+          limitRepeats: false,
+          repeatCount: 1
         },
         {
           id: 'urgent-update',
@@ -4354,7 +4501,9 @@
           message: 'URGENT: {student_name},\n\n[YOUR URGENT MESSAGE HERE]\n\nPlease respond immediately if you have any questions.',
           type: 'urgent',
           hasQuestion: false,
-          showOnOpen: true
+          showOnOpen: true,
+          limitRepeats: false,
+          repeatCount: 1
         }
       ];
     }
@@ -4401,6 +4550,7 @@
                     </span>
                     ${template.hasQuestion ? '<span class="badge" style="background: rgba(147,51,234,0.2); color: #c084fc;">❓ Has Question</span>' : ''}
                     ${template.showOnOpen ? '<span class="badge" style="background: rgba(34,197,94,0.2); color: #86efac;">👁️ Show on Open</span>' : ''}
+                    ${template.limitRepeats ? `<span class="badge" style="background: rgba(59,130,246,0.15); color: #93c5fd;">🔁 Up to ${template.repeatCount || 1}×</span>` : ''}
                   </div>
                 </div>
                 <div style="display: flex; gap: 8px;">
@@ -4451,6 +4601,13 @@
       document.getElementById('alertType').value = template.type;
       document.getElementById('showOnOpen').checked = template.showOnOpen;
       document.getElementById('hasQuestion').checked = template.hasQuestion;
+      const limitRepeatsCheckbox = document.getElementById('limitRepeats');
+      const repeatCountInput = document.getElementById('repeatCount');
+      if (limitRepeatsCheckbox && repeatCountInput) {
+        limitRepeatsCheckbox.checked = Boolean(template.limitRepeats);
+        repeatCountInput.value = template.repeatCount || 1;
+        toggleRepeatLimit();
+      }
       
       if (template.hasQuestion) {
         document.getElementById('questionFieldContainer').style.display = 'block';
@@ -4477,7 +4634,9 @@
         message: message,
         type: 'info',
         hasQuestion: false,
-        showOnOpen: false
+        showOnOpen: false,
+        limitRepeats: false,
+        repeatCount: 1
       };
 
       templates.push(newTemplate);

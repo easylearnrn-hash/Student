@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS forum_replies (
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_forum_messages_created_at ON forum_messages(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_forum_messages_author ON forum_messages(author_id);
+CREATE INDEX IF NOT EXISTS idx_forum_messages_student_id ON forum_messages(student_id);
 CREATE INDEX IF NOT EXISTS idx_forum_replies_message_id ON forum_replies(message_id);
 CREATE INDEX IF NOT EXISTS idx_forum_replies_created_at ON forum_replies(created_at DESC);
 
