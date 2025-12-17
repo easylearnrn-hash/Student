@@ -4319,7 +4319,7 @@
           }
 
           const loaderPromise = (async () => {
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
               .from(MANUAL_PAYMENT_MOVES_TABLE)
               .select('id, student_id, from_date, to_date, amount, created_at, created_by')
               .order('created_at', { ascending: true });
@@ -4370,7 +4370,7 @@
           amount: normalizedAmount,
         };
 
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
           .from(MANUAL_PAYMENT_MOVES_TABLE)
           .upsert(payload, { onConflict: 'student_id,from_date,to_date' })
           .select()
@@ -5686,7 +5686,7 @@
           // Fetch ignored payments
           let ignoredPaymentIds = new Set();
           try {
-            const { data: ignoredData, error: ignoredError } = await supabase
+            const { data: ignoredData, error: ignoredError } = await supabaseClient
               .from('ignored_fuchsia_payments')
               .select('payment_id');
             
@@ -6531,7 +6531,7 @@
           const newBalance = balanceInfo.finalBalance + amount;
           
           // Update student balance in database
-          const { error: updateError } = await supabase
+          const { error: updateError } = await supabaseClient
             .from('students')
             .update({ balance: newBalance })
             .eq('id', studentId);
@@ -6551,7 +6551,7 @@
             payer_name: student.name
           };
           
-          const { error: paymentError } = await supabase
+          const { error: paymentError } = await supabaseClient
             .from('payments')
             .insert([paymentRecord]);
           
@@ -6591,7 +6591,7 @@
       // Load all students from Supabase
       async function loadStudents() {
         try {
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('students')
             .select('*')
             .order('name');
@@ -6624,7 +6624,7 @@
       // Load all groups from Supabase
       async function loadGroups() {
         try {
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('groups')
             .select('*')
             .order('group_name');
@@ -6672,7 +6672,7 @@
           const [automatedResult, manualResult] = await Promise.all([
             // Load automated payments from 'payments' table
             (async () => {
-              let automatedQuery = supabase.from('payments').select('*');
+              let automatedQuery = supabaseClient.from('payments').select('*');
               
               if (startDate && endDate) {
                 automatedQuery = automatedQuery
@@ -6686,7 +6686,7 @@
             // Load manual payment records from 'payment_records' table
             (async () => {
               try {
-                let manualQuery = supabase.from('payment_records').select('*');
+                let manualQuery = supabaseClient.from('payment_records').select('*');
                 
                 if (startDate && endDate) {
                   manualQuery = manualQuery
@@ -6762,7 +6762,7 @@
       // Load skipped/canceled classes from Supabase
       async function loadSkippedClasses() {
         try {
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('skipped_classes')
             .select('*');
             
@@ -6940,7 +6940,7 @@
               sent_at: new Date().toISOString()
             };
             
-            const { data: logData, error: logError } = await supabase.from('sent_emails').insert([sentEmailRecord]).select();
+            const { data: logData, error: logError } = await supabaseClient.from('sent_emails').insert([sentEmailRecord]).select();
             
             if (logError) {
               console.error('⚠️ Failed to log to sent_emails:', logError);
@@ -6969,7 +6969,7 @@
               created_at: new Date().toISOString()
             };
             
-            const { data: notifData, error: notifError } = await supabase.from('notifications').insert([notificationRecord]).select();
+            const { data: notifData, error: notifError } = await supabaseClient.from('notifications').insert([notificationRecord]).select();
             
             if (notifError) {
               console.error('⚠️ Failed to log to notifications:', notifError);
@@ -7356,7 +7356,7 @@
             
             debugLog('📝 sentEmailRecord:', sentEmailRecord);
             
-            const { data: logData, error: logError } = await supabase
+            const { data: logData, error: logError } = await supabaseClient
               .from('sent_emails')
               .insert([sentEmailRecord])
               .select();
@@ -7390,7 +7390,7 @@
               created_at: new Date().toISOString()
             };
             
-            const { data: notifData, error: notifError } = await supabase
+            const { data: notifData, error: notifError } = await supabaseClient
               .from('notifications')
               .insert([notificationRecord])
               .select();
@@ -7688,7 +7688,7 @@
         
         try {
           // Try to load Payment Reminder template from Email System (Supabase)
-          const { data: templates, error } = await supabase
+          const { data: templates, error } = await supabaseClient
             .from('email_templates')
             .select('*')
             .eq('name', 'Payment Reminder')
@@ -8063,7 +8063,7 @@
         async function loadAbsences() {
           try {
             debugLog('☁️ Loading absences from Supabase...');
-            const { data, error } = await supabase.from('student_absences').select('*');
+            const { data, error } = await supabaseClient.from('student_absences').select('*');
 
             if (error) {
               console.error('❌ Error loading absences from Supabase:', error);
@@ -8129,7 +8129,7 @@
             }
 
             // Delete all existing records
-            const { error: deleteError } = await supabase.from('student_absences').delete().neq('id', 0);
+            const { error: deleteError } = await supabaseClient.from('student_absences').delete().neq('id', 0);
 
             if (deleteError) {
               console.error('❌ Error deleting absences:', deleteError);
@@ -8139,7 +8139,7 @@
 
             // Insert new records
             if (records.length > 0) {
-              const { error: insertError } = await supabase.from('student_absences').insert(records);
+              const { error: insertError } = await supabaseClient.from('student_absences').insert(records);
 
               if (insertError) {
                 console.error('❌ Error inserting absences:', insertError);
@@ -8212,7 +8212,7 @@
           isInitialized = true;
 
           // Set up real-time subscription for cross-device sync
-          const channel = supabase
+          const channel = supabaseClient
             .channel('student_absences_changes')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'student_absences' }, async payload => {
               // Reload absences from Supabase to stay in sync
@@ -8253,7 +8253,7 @@
             
             // Try to sync to Supabase (will fail silently if RLS blocks it)
             try {
-              const { error } = await supabase
+              const { error } = await supabaseClient
                 .from('student_absences')
                 .upsert({
                   student_id: parseInt(studentId),
@@ -8304,7 +8304,7 @@
             
             // Try to sync to Supabase (will fail silently if RLS blocks it)
             try {
-              const { error } = await supabase
+              const { error } = await supabaseClient
                 .from('student_absences')
                 .delete()
                 .eq('student_id', parseInt(studentId))
@@ -8348,7 +8348,7 @@
         async function loadCreditPayments() {
           try {
             debugLog('☁️ Loading credit payments from Supabase...');
-            const { data, error } = await supabase.from('credit_payments').select('*');
+            const { data, error } = await supabaseClient.from('credit_payments').select('*');
 
             if (error) {
               console.error('❌ Error loading credit payments from Supabase:', error);
@@ -8396,7 +8396,7 @@
             }
 
             // Delete all existing records
-            const { error: deleteError } = await supabase.from('credit_payments').delete().neq('id', 0);
+            const { error: deleteError } = await supabaseClient.from('credit_payments').delete().neq('id', 0);
 
             if (deleteError) {
               console.error('❌ Error deleting credit payments:', deleteError);
@@ -8406,7 +8406,7 @@
 
             // Insert new records
             if (records.length > 0) {
-              const { error: insertError } = await supabase.from('credit_payments').insert(records);
+              const { error: insertError } = await supabaseClient.from('credit_payments').insert(records);
 
               if (insertError) {
                 console.error('❌ Error inserting credit payments:', insertError);
@@ -8623,7 +8623,7 @@
         /* REALTIME UPDATES DISABLED FOR PERFORMANCE
         
         // Subscribe to student changes (group, price, etc.)
-        supabase
+        supabaseClient
           .channel('students_changes')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, async payload => {
             // Reload students and re-render calendar
@@ -8634,7 +8634,7 @@
           .subscribe();
 
         // Subscribe to group changes (schedule, price, etc.)
-        supabase
+        supabaseClient
           .channel('groups_changes')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'groups' }, async payload => {
             // Reload groups and re-render calendar
@@ -8645,7 +8645,7 @@
           .subscribe();
 
         // Subscribe to payment changes
-        supabase
+        supabaseClient
           .channel('payments_changes')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, async payload => {
             // Reload payments and re-render calendar
@@ -8656,7 +8656,7 @@
           .subscribe();
 
         // Subscribe to absences changes
-        supabase
+        supabaseClient
           .channel('absences_changes')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'absences' }, async payload => {
             try {
@@ -8680,7 +8680,7 @@
           .subscribe();
 
         // Subscribe to credit payments changes
-        supabase
+        supabaseClient
           .channel('credit_payments_changes')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'credit_payments' }, async payload => {
             try {
@@ -9677,7 +9677,7 @@
         }));
         
         try {
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('credit_payments')
             .insert(creditRecords);
           
@@ -10587,7 +10587,7 @@
         }
         
         try {
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('students')
             .update({ balance: newBalance })
             .eq('id', studentId);
@@ -10644,7 +10644,7 @@
         
         try {
           // Get student data to update balance
-          const { data: studentData, error: fetchError } = await supabase
+          const { data: studentData, error: fetchError } = await supabaseClient
             .from('students')
             .select('balance')
             .eq('id', studentId)
@@ -10656,7 +10656,7 @@
           const newBalance = currentBalance + creditAmount; // Add credit (positive balance = credit)
           
           // Update student balance
-          const { error: updateError } = await supabase
+          const { error: updateError } = await supabaseClient
             .from('students')
             .update({ balance: newBalance })
             .eq('id', studentId);
@@ -11701,7 +11701,7 @@
 
         // Update the for_class column in Supabase
         try {
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('payments')
             .update({ for_class: newDate })
             .eq('id', paymentId);
@@ -11733,7 +11733,7 @@
           // Get current user email from Supabase session
           let userEmail = 'admin';
           try {
-            const { data: { session } } = await supabase.auth.getSession();
+            const { data: { session } } = await supabaseClient.auth.getSession();
             if (session?.user?.email) {
               userEmail = session.user.email;
             }
@@ -11741,7 +11741,7 @@
             console.warn('Could not get user email:', err);
           }
 
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('ignored_fuchsia_payments')
             .insert({
               payment_id: paymentId,
@@ -11825,7 +11825,7 @@
 
         // Update the for_class column in Supabase
         try {
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('payments')
             .update({ for_class: newDate })
             .eq('id', paymentId);
@@ -12527,7 +12527,7 @@
           };
 
           // Insert into Supabase payments table
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('payments')
             .insert([paymentRecord]);
 
@@ -12575,7 +12575,7 @@
           let currentBalance = 0;
 
           if (!student) {
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
               .from('students')
               .select('*')
               .eq('id', studentId)
@@ -12590,7 +12590,7 @@
             students.push(student);
             currentBalance = parseFloat(data.balance) || 0;
           } else {
-            const { data: latestBalance, error: latestBalanceError } = await supabase
+            const { data: latestBalance, error: latestBalanceError } = await supabaseClient
               .from('students')
               .select('balance')
               .eq('id', studentId)
@@ -12640,7 +12640,7 @@
           student.balance = newBalance;
 
           // 1. Update student balance in Supabase
-          const { error: updateError } = await supabase
+          const { error: updateError } = await supabaseClient
             .from('students')
             .update({ balance: newBalance })
             .eq('id', studentId);
@@ -13127,7 +13127,7 @@
           if (!confirmed) return;
 
           // Save to Supabase
-          const { error: insertError } = await supabase
+          const { error: insertError } = await supabaseClient
             .from('skipped_classes')
             .insert({
               group_name: groupName,
@@ -13192,7 +13192,7 @@
           if (!confirmed) return;
 
           // Delete from Supabase
-          const { error: deleteError } = await supabase
+          const { error: deleteError } = await supabaseClient
             .from('skipped_classes')
             .delete()
             .eq('group_name', groupName)

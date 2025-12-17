@@ -2390,7 +2390,7 @@
       }
 
       async function normalizeStudentGroupNames(fixes = []) {
-        if (!Array.isArray(fixes) || fixes.length === 0 || !supabase) {
+        if (!Array.isArray(fixes) || fixes.length === 0 || !supabaseClient) {
           return;
         }
 
@@ -2398,7 +2398,7 @@
         for (let i = 0; i < fixes.length; i += chunkSize) {
           const chunk = fixes.slice(i, i + chunkSize);
           const updates = chunk.map(async fix => {
-            const { error } = await supabase
+            const { error } = await supabaseClient
               .from('students')
               .update({ group_name: fix.groupCode })
               .eq('id', fix.id);
@@ -2413,7 +2413,7 @@
       }
 
       async function normalizeStudentEmails(fixes = []) {
-        if (!Array.isArray(fixes) || fixes.length === 0 || !supabase) {
+        if (!Array.isArray(fixes) || fixes.length === 0 || !supabaseClient) {
           return;
         }
 
@@ -2421,7 +2421,7 @@
         for (let i = 0; i < fixes.length; i += chunkSize) {
           const chunk = fixes.slice(i, i + chunkSize);
           const updates = chunk.map(async fix => {
-            const { error } = await supabase
+            const { error } = await supabaseClient
               .from('students')
               .update({ email: fix.email })
               .eq('id', fix.id);
@@ -2596,7 +2596,7 @@
         debugLog('✅ Supabase client initialized');
         
         // AUTHENTICATION CHECK - Require login for admin access
-        supabase.auth.getSession().then(async ({ data: { session } }) => {
+        supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
           if (!session) {
             // No session - redirect to login
             debugLog('❌ No active session - redirecting to login');
@@ -2617,7 +2617,7 @@
           }
           
           // Otherwise, check if user has admin role in students table
-          const { data: studentData, error } = await supabase
+          const { data: studentData, error } = await supabaseClient
             .from('students')
             .select('role, name')
             .eq('auth_user_id', session.user.id)
@@ -2835,14 +2835,14 @@
       }
 
       async function loadStudents() {
-        if (!supabase) {
+        if (!supabaseClient) {
           console.error('❌ Supabase not initialized');
           students = [];
           return;
         }
 
         try {
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('students')
             .select('*')
             .order('group_name', { ascending: true })
@@ -2937,7 +2937,7 @@
       // SAVE STUDENT TO SUPABASE
       // ============================================================
       async function saveStudent(student) {
-        if (!supabase) {
+        if (!supabaseClient) {
           console.error('❌ Supabase not initialized');
           return false;
         }
@@ -2990,14 +2990,14 @@
           let result;
           if (student.id) {
             // Update existing student
-            result = await supabase
+            result = await supabaseClient
               .from('students')
               .update(studentData)
               .eq('id', student.id)
               .select();
           } else {
             // Insert new student
-            result = await supabase
+            result = await supabaseClient
               .from('students')
               .insert([studentData])
               .select();
@@ -3012,13 +3012,13 @@
               studentData.aliases = null;
               
               if (student.id) {
-                result = await supabase
+                result = await supabaseClient
                   .from('students')
                   .update(studentData)
                   .eq('id', student.id)
                   .select();
               } else {
-                result = await supabase
+                result = await supabaseClient
                   .from('students')
                   .insert([studentData])
                   .select();
@@ -3045,13 +3045,13 @@
       // DELETE STUDENT FROM SUPABASE
       // ============================================================
       async function deleteStudentFromDB(studentId) {
-        if (!supabase) {
+        if (!supabaseClient) {
           console.error('❌ Supabase not initialized');
           return false;
         }
 
         try {
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('students')
             .delete()
             .eq('id', studentId);
@@ -3499,7 +3499,7 @@
         contentDiv.style.display = 'none';
         
         try {
-          const { data: waitingList, error } = await supabase
+          const { data: waitingList, error } = await supabaseClient
             .from('student_waiting_list')
             .select('*')
             .order('created_at', { ascending: false });
@@ -3640,7 +3640,7 @@
           
           if (email) {
             // Check by email
-            const { data: emailMatches, error: emailError } = await supabase
+            const { data: emailMatches, error: emailError } = await supabaseClient
               .from('students')
               .select('*')
               .ilike('email', email.trim());
@@ -3651,7 +3651,7 @@
           }
           
           // Check by name (case-insensitive)
-          const { data: nameMatches, error: nameError } = await supabase
+          const { data: nameMatches, error: nameError } = await supabaseClient
             .from('students')
             .select('*')
             .ilike('name', fullName.trim());
@@ -3914,7 +3914,7 @@
               }
               
               // Perform update
-              const { error: updateError } = await supabase
+              const { error: updateError } = await supabaseClient
                 .from('students')
                 .update(updates)
                 .eq('id', existingStudent.id);
@@ -3922,7 +3922,7 @@
               if (updateError) throw updateError;
               
               // Delete from waiting list
-              const { error: deleteError } = await supabase
+              const { error: deleteError } = await supabaseClient
                 .from('student_waiting_list')
                 .delete()
                 .eq('id', id);
@@ -3957,7 +3957,7 @@
           const notes = `✅ Registered via waiting list on ${registrationDate}`;
           
           // Create student record with essential contact information
-          const { data: newStudent, error: studentError } = await supabase
+          const { data: newStudent, error: studentError } = await supabaseClient
             .from('students')
             .insert([{
               name: `${firstName} ${lastName}`,
@@ -4055,7 +4055,7 @@
           }
           
           // Delete from waiting list
-          const { error: deleteError } = await supabase
+          const { error: deleteError } = await supabaseClient
             .from('student_waiting_list')
             .delete()
             .eq('id', id);
@@ -4082,7 +4082,7 @@
 
       async function markAsContacted(id) {
         try {
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('student_waiting_list')
             .update({ contacted_at: new Date().toISOString() })
             .eq('id', id);
@@ -4107,7 +4107,7 @@
         if (!confirmed) return;
         
         try {
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('student_waiting_list')
             .delete()
             .eq('id', id);
@@ -4505,7 +4505,7 @@
 
       // Subscribe to real-time changes on student_waiting_list table
       async function subscribeToRegistrations() {
-        if (!supabase) {
+        if (!supabaseClient) {
           console.warn('⚠️ Supabase not initialized, skipping real-time subscription');
           return null;
         }
@@ -4514,7 +4514,7 @@
           debugLog('👂 Subscribing to student_waiting_list real-time updates...');
 
           // Get current count of ALL waiting list students
-          const { data: initialData, error: initialError } = await supabase
+          const { data: initialData, error: initialError } = await supabaseClient
             .from('student_waiting_list')
             .select('id');
 
@@ -4525,7 +4525,7 @@
           }
 
           // Subscribe to INSERT and DELETE events on student_waiting_list
-          const subscription = supabase
+          const subscription = supabaseClient
             .channel('student_registrations')
             .on(
               'postgres_changes',
@@ -4715,7 +4715,7 @@
         try {
           debugLog('🔔 Loading notifications from Supabase...');
 
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('notifications')
             .select('*')
             .order('created_at', { ascending: false })
@@ -4801,7 +4801,7 @@
 
           debugLog(`🔔 Marking ${unreadIds.length} notifications as read`);
 
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('notifications')
             .update({ read: true })
             .in('id', unreadIds);
@@ -4843,7 +4843,7 @@
         try {
           debugLog(`🗑️ Deleting ${allNotifications.length} notifications from database`);
 
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('notifications')
             .delete()
             .neq('id', 0);
@@ -4873,7 +4873,7 @@
       // Add notification to database
       async function addNotification(title, message, category = 'system') {
         try {
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('notifications')
             .insert([
               {
@@ -5156,7 +5156,7 @@
           const fileName = `${selectedNoteGroup}/${classDate}_${Date.now()}.pdf`;
           updateProgress(25, 'Uploading PDF...');
 
-          const { data: fileData, error: uploadError } = await supabase.storage
+          const { data: fileData, error: uploadError } = await supabaseClient.storage
             .from('student-notes')
             .upload(fileName, selectedPDFFile, {
               contentType: 'application/pdf',
@@ -5172,10 +5172,10 @@
           updateProgress(50, 'Saving note record...');
 
           // Get current user email
-          const { data: { user } } = await supabase.auth.getUser();
+          const { data: { user } } = await supabaseClient.auth.getUser();
 
           // Save note metadata to database
-          const { data: noteData, error: dbError } = await supabase
+          const { data: noteData, error: dbError } = await supabaseClient
             .from('student_notes')
             .insert({
               title: title,
@@ -5194,7 +5194,7 @@
           if (dbError) {
             console.error('Database error:', dbError);
             // Try to delete the uploaded file
-            await supabase.storage.from('student-notes').remove([fileName]);
+            await supabaseClient.storage.from('student-notes').remove([fileName]);
             throw new Error('Failed to save note record: ' + dbError.message);
           }
 
