@@ -1587,7 +1587,7 @@
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-value" id="totalStudents">0</div>
-        <div class="stat-label">Total Students</div>
+        <div class="stat-label">Active / Total Students</div>
       </div>
       <div class="stat-card">
         <div class="stat-value" id="totalNotes">0</div>
@@ -2081,10 +2081,13 @@
         // PERFORMANCE FIX: Disabled caching - always fetch fresh data for real-time updates
         await ensureAdminSession();
         
-        // Total Students
-  const { count: studentCount, error: studentError } = await supabaseClient
+        // Total Students & Active Students
+        const { data: allStudents, error: studentError } = await supabaseClient
           .from('students')
-          .select('*', { count: 'exact', head: true });
+          .select('status');
+        
+        const totalStudents = allStudents?.length || 0;
+        const activeStudents = allStudents?.filter(s => s.status === 'Active').length || 0;
         
         // Total Notes - ONLY count non-deleted notes
         let notesCount = 0;
@@ -2100,7 +2103,8 @@
         }
         
         const stats = {
-          students: studentCount || 0,
+          students: totalStudents,
+          activeStudents: activeStudents,
           notes: notesCount
         };
         
@@ -2112,7 +2116,7 @@
     }
     
     function updateStatsUI(stats) {
-      document.getElementById('totalStudents').textContent = stats.students;
+      document.getElementById('totalStudents').textContent = `${stats.activeStudents}/${stats.students}`;
       document.getElementById('totalNotes').textContent = stats.notes;
     }
     

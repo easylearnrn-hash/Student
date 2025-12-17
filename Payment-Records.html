@@ -4845,10 +4845,10 @@ ORDER BY timestamp DESC;</pre>
       const SUPABASE_ANON_KEY =
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
 
-      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
       if (window.ArnomaAuth?.attachAuthListener) {
-        window.ArnomaAuth.attachAuthListener(supabase);
+        window.ArnomaAuth.attachAuthListener(supabaseClient);
       }
 
       const ADMIN_ALLOWED_EMAILS = ['hrachfilm@gmail.com'];
@@ -4860,8 +4860,8 @@ ORDER BY timestamp DESC;</pre>
           adminSessionPromise = (async () => {
             try {
               const session = window.ArnomaAuth
-                ? await window.ArnomaAuth.ensureSession(supabase, { redirectToLogin: true })
-                : (await supabase.auth.getSession()).data.session;
+                ? await window.ArnomaAuth.ensureSession(supabaseClient, { redirectToLogin: true })
+                : (await supabaseClient.auth.getSession()).data.session;
 
               if (!session?.user?.email) {
                 throw new Error('Missing authenticated user email');
@@ -4873,7 +4873,7 @@ ORDER BY timestamp DESC;</pre>
                 !ADMIN_ALLOWED_EMAILS.includes(session.user.email)
               ) {
                 console.error('Access denied for user', session.user.email);
-                await supabase.auth.signOut();
+                await supabaseClient.auth.signOut();
                 window.location.href = 'index.html';
                 throw new Error('ACCESS_DENIED');
               }
@@ -5390,14 +5390,14 @@ ORDER BY timestamp DESC;</pre>
           }
 
           const [studentsRes, groupsRes, creditRes, aliasRes] = await Promise.all([
-            supabase
+            supabaseClient
               .from('students')
               .select('*')
               .order('name', { ascending: true }),
-            supabase
+            supabaseClient
               .from('groups')
               .select('*'),
-            supabase
+            supabaseClient
               .from('credit_payments')
               .select('*')
               .order('class_date', { ascending: false })
@@ -5473,7 +5473,7 @@ ORDER BY timestamp DESC;</pre>
           const tableCandidates = ['payer_aliases', 'aliases'];
           for (const tableName of tableCandidates) {
             try {
-              const { data, error } = await supabase
+              const { data, error } = await supabaseClient
                 .from(tableName)
                 .select('payer_name, student_id, student_name')
                 .limit(1000);
@@ -5507,7 +5507,7 @@ ORDER BY timestamp DESC;</pre>
             const rangeEnd = rangeStart + config.pageSize - 1;
             // console.log(`📥 Fetching range ${rangeStart}-${rangeEnd}...`);
             // ⚡ Optimized query: Uses indexed columns for fastest possible retrieval
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
               .from('payments')
               .select('*')
               .order('email_date', { ascending: false, nullsLast: false })
@@ -6222,7 +6222,7 @@ ORDER BY timestamp DESC;</pre>
           // ⚡ GRAND TOTALS: Fetch true totals from ALL payments in database
           // This is separate from the paginated display data
           try {
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
               .from('payments')
               .select('amount, email_date');
 
@@ -7070,7 +7070,7 @@ ORDER BY timestamp DESC;</pre>
           }
 
           debugLog('⏰ Countdown Timer: Loading groups from Supabase...');
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('groups')
             .select('*')
             .order('id', { ascending: true });
@@ -8019,7 +8019,7 @@ ORDER BY timestamp DESC;</pre>
         }
 
         // Load all students for matching
-        const { data: allStudents, error: studentsError } = await supabase
+        const { data: allStudents, error: studentsError } = await supabaseClient
           .from('students')
           .select('id, name, email, aliases');
         
@@ -8090,7 +8090,7 @@ ORDER BY timestamp DESC;</pre>
           };
         });
 
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
           .from('payments')
           .upsert(supabasePayments, { onConflict: 'id' })
           .select();
@@ -8359,7 +8359,7 @@ ORDER BY timestamp DESC;</pre>
 
         try {
           // TODO: Update Supabase
-          // const { error } = await supabase
+          // const { error } = await supabaseClient
           //   .from('payments')
           //   .update({ created_at: newDate })
           //   .eq('id', currentPaymentData.paymentId);
@@ -8392,7 +8392,7 @@ ORDER BY timestamp DESC;</pre>
 
         try {
           // TODO: Delete from Supabase
-          // const { error } = await supabase
+          // const { error } = await supabaseClient
           //   .from('payments')
           //   .delete()
           //   .eq('id', currentPaymentData.paymentId);
@@ -8417,7 +8417,7 @@ ORDER BY timestamp DESC;</pre>
 
         try {
           // TODO: Update Supabase
-          // const { error } = await supabase
+          // const { error } = await supabaseClient
           //   .from('payments')
           //   .update({ ignored: true })
           //   .eq('id', currentPaymentData.paymentId);
@@ -8450,7 +8450,7 @@ ORDER BY timestamp DESC;</pre>
 
         try {
           // TODO: Update Supabase
-          // const { error } = await supabase
+          // const { error } = await supabaseClient
           //   .from('payments')
           //   .update({ ignored: true })
           //   .eq('payer', currentPaymentData.payer);
@@ -8532,7 +8532,7 @@ ORDER BY timestamp DESC;</pre>
         existingAliases = [...existingAliases, aliasRaw];
         const aliasPayload = joinAliasList(existingAliases, studentRecord?.aliases || '');
 
-        const { data, error } = await supabase
+        const { data, error } = await supabaseClient
           .from('students')
           .update({ aliases: aliasPayload })
           .eq('id', studentId)
@@ -8579,7 +8579,7 @@ ORDER BY timestamp DESC;</pre>
 
         // Update all payments where payer_name matches (exact match)
         const updateAndTrack = async (column) => {
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('payments')
             .update(payload)
             .eq(column, payerName) // Exact match
@@ -8635,7 +8635,7 @@ ORDER BY timestamp DESC;</pre>
 
         // Load students from Supabase
         debugLog('📚 Loading students from Supabase...');
-        const { data: students, error: studentsError } = await supabase
+        const { data: students, error: studentsError } = await supabaseClient
           .from('students')
           .select('id, name, group_name')
           .order('name', { ascending: true });
@@ -10627,7 +10627,7 @@ ORDER BY timestamp DESC;</pre>
         // If there's a student linked, load full student data
         if (payment.studentId) {
           try {
-            const { data: student, error } = await supabase
+            const { data: student, error } = await supabaseClient
               .from('students')
               .select('*')
               .eq('id', payment.studentId)
@@ -10829,7 +10829,7 @@ ORDER BY timestamp DESC;</pre>
               show_in_grid: true // Default to visible
             };
 
-            const { data, error } = await supabase
+            const { data, error } = await supabaseClient
               .from('students')
               .insert([newStudent])
               .select();
@@ -10849,7 +10849,7 @@ ORDER BY timestamp DESC;</pre>
               // If we have a current payment, link it to the new student
               if (currentPaymentRecord) {
                 debugLog('🔗 Linking payment to new student:', createdStudent.id);
-                const { error: linkError } = await supabase
+                const { error: linkError } = await supabaseClient
                   .from('payments')
                   .update({ 
                     student_id: createdStudent.id,
@@ -10931,7 +10931,7 @@ ORDER BY timestamp DESC;</pre>
           debugLog('💾 Saving student updates:', updates);
           debugLog('📋 Student ID:', currentEditingStudent.id);
 
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('students')
             .update(updates)
             .eq('id', currentEditingStudent.id)
@@ -10951,7 +10951,7 @@ ORDER BY timestamp DESC;</pre>
               // Extract just the letter from "Group A" format for derived_student_group
               const groupLetter = updates.group_name.replace('Group ', '').trim();
               
-              const { error: paymentError } = await supabase
+              const { error: paymentError } = await supabaseClient
                 .from('payments')
                 .update({ derived_student_group: groupLetter })
                 .eq('student_id', currentEditingStudent.id);
@@ -11000,7 +11000,7 @@ ORDER BY timestamp DESC;</pre>
 
       async function loadCreditHistory(studentId) {
         try {
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('credit_payments')
             .select('*')
             .eq('student_id', studentId)
@@ -11571,7 +11571,7 @@ ORDER BY timestamp DESC;</pre>
           debugLog('🔔 Loading notifications from Supabase...');
 
           // Check if notifications table exists first
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('notifications')
             .select('*')
             .order('created_at', { ascending: false })
@@ -11759,7 +11759,7 @@ ORDER BY timestamp DESC;</pre>
 
           debugLog(`🔔 Marking ${unreadIds.length} notifications as read`);
 
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('notifications')
             .update({ read: true })
             .in('id', unreadIds);
@@ -11801,7 +11801,7 @@ ORDER BY timestamp DESC;</pre>
         try {
           debugLog(`🗑️ Deleting ${allNotifications.length} notifications from database`);
 
-          const { error } = await supabase
+          const { error } = await supabaseClient
             .from('notifications')
             .delete()
             .neq('id', 0); // Delete all (neq with impossible condition deletes all rows)
@@ -12038,7 +12038,7 @@ ORDER BY timestamp DESC;</pre>
         // Mark as read
         if (!notification.read) {
           try {
-            const { error } = await supabase
+            const { error } = await supabaseClient
               .from('notifications')
               .update({ read: true })
               .eq('id', notificationId);
@@ -12211,7 +12211,7 @@ ORDER BY timestamp DESC;</pre>
         try {
           debugLog('🔔 Creating notification:', { type, title, category });
 
-          const { data, error } = await supabase
+          const { data, error } = await supabaseClient
             .from('notifications')
             .insert([
               {
