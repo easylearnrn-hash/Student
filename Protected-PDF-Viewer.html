@@ -441,7 +441,43 @@
         page-break-after: auto;
       }
       
-      /* Print: Images with burned-in watermarks */
+      /* CRITICAL: Watermark must appear prominently in print */
+      .watermark-overlay {
+        display: flex !important;
+        opacity: 1 !important;
+        z-index: 9999 !important;
+        background: repeating-linear-gradient(
+          45deg,
+          transparent,
+          transparent 200px,
+          rgba(125, 211, 252, 0.03) 200px,
+          rgba(125, 211, 252, 0.03) 400px
+        );
+      }
+      
+      .watermark-content {
+        opacity: 0.35 !important; /* Highly visible in print */
+        transform: rotate(-45deg) translateX(40px) !important;
+      }
+      
+      .watermark-logo {
+        font-size: 200px !important;
+        font-weight: 900 !important;
+        color: #7dd3fc !important;
+        -webkit-text-fill-color: #7dd3fc !important;
+        text-shadow: none !important;
+      }
+      
+      .watermark-text {
+        font-size: 48px !important;
+        font-weight: 700 !important;
+        color: #c084fc !important;
+        -webkit-text-fill-color: #c084fc !important;
+        text-shadow: none !important;
+      }
+      
+      /* 🔒 PRINT PROTECTION: Show high-quality content with prominent watermark */
+      /* Convert canvas to images for Safari compatibility */
       .page-image {
         display: block !important;
         max-width: 100% !important;
@@ -449,18 +485,16 @@
         height: auto !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-      }
-      
-      /* Hide watermark overlay - it's now burned into the image */
-      .watermark-overlay {
-        display: none !important;
+        image-rendering: pixelated !important;
+        filter: contrast(1.03) saturate(0.92);
       }
       
       .page-canvas-screen,
       .page-canvas-print {
-        display: none !important;
+        display: none !important; /* Hide canvas elements in print */
       }
       
+      /* Ensure all images print */
       img {
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
@@ -1085,7 +1119,7 @@
     <div class="pdf-content" id="pdfContent">
       <div class="loading-screen" id="loadingScreen">
         <div class="spinner"></div>
-        <div class="loading-text">Loading protected PDF...</div>
+        <div class="loading-text" id="loadingStatus">Loading protected PDF...</div>
       </div>
     </div>
   </div>
@@ -1195,6 +1229,30 @@
     let currentStudent = null;
     let fallbackStudent = null;
     let noteData = null;
+    let currentLoadingMessage = 'Loading protected PDF...';
+
+    function updateLoadingStatus(message) {
+      currentLoadingMessage = message;
+      const statusEl = document.getElementById('loadingStatus');
+      if (statusEl) {
+        statusEl.textContent = message;
+      }
+    }
+
+    function showLoadingScreen(message = currentLoadingMessage) {
+      updateLoadingStatus(message);
+      const loadingEl = document.getElementById('loadingScreen');
+      if (loadingEl) {
+        loadingEl.style.display = 'flex';
+      }
+    }
+
+    function hideLoadingScreen() {
+      const loadingEl = document.getElementById('loadingScreen');
+      if (loadingEl) {
+        loadingEl.style.display = 'none';
+      }
+    }
 
     const getStudentDisplayName = () => {
       return (currentStudent && currentStudent.name) || (fallbackStudent && fallbackStudent.name) || 'Authorized Student';
@@ -1403,6 +1461,7 @@
           // CRITICAL: Fetch note data from database to verify group access
           if (noteId) {
             try {
+              updateLoadingStatus('Locating note details...');
               const { data: note, error: noteError } = await supabaseClient
                 .from('student_notes')
                 .select('*')
@@ -1428,6 +1487,7 @@
               ).toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
               const normalizedGroupName = studentGroup ? `Group ${studentGroup}` : '';
               
+              updateLoadingStatus('Confirming group permissions...');
               console.log('🔐 Group Access Check:');
               console.log('  Student Group:', studentGroup);
               console.log('  Student ID:', currentStudent.id);
@@ -1466,35 +1526,39 @@
               }
               
               try {
-                // Query 1: Check individual student permissions
-                if (currentStudent.id) {
-                  const { data: individualPerms, error: individualError } = await supabaseClient
-                    .from('student_note_permissions')
-                    .select('id, student_id, group_name, is_accessible')
-                    .eq('note_id', noteId)
-                    .eq('student_id', currentStudent.id)
-                    .eq('is_accessible', true);
-                  
-                  if (!individualError && individualPerms && individualPerms.length > 0) {
-                    permissionGrants = permissionGrants.concat(individualPerms);
-                  }
+                const individualPromise = currentStudent.id
+                  ? supabaseClient
+                      .from('student_note_permissions')
+                      .select('id, student_id, group_name, is_accessible')
+                      .eq('note_id', noteId)
+                      .eq('student_id', currentStudent.id)
+                      .eq('is_accessible', true)
+                  : Promise.resolve({ data: [], error: null });
+                
+                const groupPromise = normalizedGroupName
+                  ? supabaseClient
+                      .from('student_note_permissions')
+                      .select('id, student_id, group_name, is_accessible')
+                      .eq('note_id', noteId)
+                      .is('student_id', null)
+                      .eq('group_name', normalizedGroupName)
+                      .eq('is_accessible', true)
+                  : Promise.resolve({ data: [], error: null });
+                
+                const [individualResult, groupResult] = await Promise.all([individualPromise, groupPromise]);
+                const individualPerms = individualResult?.data || [];
+                const groupPerms = groupResult?.data || [];
+                const permissionErrors = [individualResult?.error, groupResult?.error].filter(Boolean);
+                if (permissionErrors.length > 0) {
+                  throw permissionErrors[0];
                 }
                 
-                // Query 2: Check group permissions (student_id is null AND group_name matches)
-                if (normalizedGroupName) {
-                  const { data: groupPerms, error: groupError } = await supabaseClient
-                    .from('student_note_permissions')
-                    .select('id, student_id, group_name, is_accessible')
-                    .eq('note_id', noteId)
-                    .is('student_id', null)
-                    .eq('group_name', normalizedGroupName)
-                    .eq('is_accessible', true);
-                  
-                  if (!groupError && groupPerms && groupPerms.length > 0) {
-                    permissionGrants = permissionGrants.concat(groupPerms);
-                  }
+                if (individualPerms.length > 0) {
+                  permissionGrants = permissionGrants.concat(individualPerms);
                 }
-                
+                if (groupPerms.length > 0) {
+                  permissionGrants = permissionGrants.concat(groupPerms);
+                }
                 hasPermissionAccess = permissionGrants.length > 0;
               } catch (permissionCheckError) {
                 console.error('❌ Permission verification failed:', permissionCheckError);
@@ -1522,17 +1586,20 @@
                 
                 // Check BOTH payment sources (like student portal does)
                 // 1. Manual payment records
-                const { data: manualPayments } = await supabaseClient
-                  .from('payment_records')
-                  .select('date, status')
-                  .eq('student_id', currentStudent.id)
-                  .eq('status', 'paid');
-                
-                // 2. Automated payments (Zelle/Venmo imports)
-                const { data: autoPayments } = await supabaseClient
-                  .from('payments')
-                  .select('for_class')
-                  .or(`student_id.eq.${currentStudent.id},linked_student_id.eq.${currentStudent.id}`);
+                updateLoadingStatus('Confirming payment status...');
+                const [manualResult, autoResult] = await Promise.all([
+                  supabaseClient
+                    .from('payment_records')
+                    .select('date, status')
+                    .eq('student_id', currentStudent.id)
+                    .eq('status', 'paid'),
+                  supabaseClient
+                    .from('payments')
+                    .select('for_class')
+                    .or(`student_id.eq.${currentStudent.id},linked_student_id.eq.${currentStudent.id}`)
+                ]);
+                const manualPayments = manualResult?.data || [];
+                const autoPayments = autoResult?.data || [];
                 
                 // Merge payment dates
                 const paidDates = new Set();
@@ -1594,9 +1661,11 @@
           // Check if it's a storage path or a full URL
           if (pdfUrl.startsWith('http://') || pdfUrl.startsWith('https://')) {
             // It's already a full URL, use it directly
+            showLoadingScreen('Fetching note...');
             await loadPDFFromURL(pdfUrl);
           } else {
             // It's a storage path, create signed URL from student-notes bucket
+            showLoadingScreen('Fetching note...');
             await loadPDFFromStorage(pdfUrl);
           }
           
@@ -1687,7 +1756,7 @@
     
     async function loadPDFFromURL(pdfUrl) {
       try {
-        document.getElementById('loadingScreen').style.display = 'flex';
+  showLoadingScreen('Connecting to secure PDF...');
         
         console.log('🔗 Loading PDF from URL:', pdfUrl);
         
@@ -1700,8 +1769,8 @@
         totalPages = pdfDoc.numPages;
         
         // Update UI
-        document.getElementById('totalPages').textContent = totalPages;
-        document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('totalPages').textContent = totalPages;
+  hideLoadingScreen();
         document.getElementById('viewerControls').style.display = 'flex';
         showMediaPanelToggle();
         
@@ -1724,7 +1793,7 @@
           throw new Error('Invalid PDF path provided');
         }
         
-        document.getElementById('loadingScreen').style.display = 'flex';
+  showLoadingScreen('Building secure link to storage...');
         
         // Get public URL (bucket is public)
         const { data: publicUrlData, error: urlError } = supabaseClient.storage
@@ -1744,17 +1813,6 @@
         console.log('✅ Created public URL for:', pdfPath);
         console.log('🔗 URL:', pdfUrl);
         
-        // Verify URL is accessible before loading
-        try {
-          const response = await fetch(pdfUrl, { method: 'HEAD' });
-          if (!response.ok) {
-            throw new Error(`PDF file not accessible (HTTP ${response.status}). File may not exist in storage.`);
-          }
-        } catch (fetchError) {
-          console.error('❌ PDF accessibility check failed:', fetchError);
-          throw new Error(`Cannot access PDF file. Please ensure it exists in storage. Error: ${fetchError.message}`);
-        }
-        
         // Load PDF from public URL
         const loadingTask = pdfjsLib.getDocument({
           url: pdfUrl,
@@ -1764,12 +1822,18 @@
           withCredentials: false,
           isEvalSupported: false,
           cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
-          cMapPacked: true
+          cMapPacked: true,
+          rangeChunkSize: 65536,
+          useSystemFonts: true,
+          useWorkerFetch: true,
+          disableAutoFetch: false,
+          disableStream: false
         });
         
         // Handle PDF.js specific loading errors
         loadingTask.onProgress = function(progressData) {
           const percent = Math.round((progressData.loaded / progressData.total) * 100);
+          updateLoadingStatus(`Decrypting and securing note... ${percent}%`);
           console.log(`Loading PDF: ${percent}%`);
         };
         
@@ -1786,8 +1850,8 @@
         }
         
         // Update UI
-        document.getElementById('totalPages').textContent = totalPages;
-        document.getElementById('loadingScreen').style.display = 'none';
+  document.getElementById('totalPages').textContent = totalPages;
+  hideLoadingScreen();
         document.getElementById('viewerControls').style.display = 'flex';
         showMediaPanelToggle();
         
@@ -1920,147 +1984,190 @@
     }
     
     // ============================================================
-    // PRINT FUNCTION - Composite Screenshot Approach
+    // PRINT FUNCTION (WITH WATERMARK) - Safari Compatible
     // ============================================================
     
     async function printNote() {
       try {
+        // Render all pages for printing with watermarks
         const content = document.getElementById('pdfContent');
         content.innerHTML = '<div class="loading-text">Preparing for print...</div>';
         
         const afterPrint = () => {
+          // Restore single page view after print
           renderPage(currentPage);
         };
         
         window.addEventListener('afterprint', afterPrint, { once: true });
         
-        const imagePromises = [];
-        
         for (let i = 1; i <= totalPages; i++) {
           const page = await pdfDoc.getPage(i);
           
-          // Render at high quality
+          // High-quality rendering for printing
           const scale = 2.5;
           const viewport = page.getViewport({ scale: scale });
           
-          // Create canvas for PDF content
-          const pdfCanvas = document.createElement('canvas');
-          const pdfContext = pdfCanvas.getContext('2d');
-          pdfCanvas.width = viewport.width;
-          pdfCanvas.height = viewport.height;
+          // Create canvas
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
           
           await page.render({
-            canvasContext: pdfContext,
+            canvasContext: context,
             viewport: viewport
           }).promise;
-          
-          // Create composite canvas with watermark burned in
-          const compositeCanvas = document.createElement('canvas');
-          compositeCanvas.width = viewport.width;
-          compositeCanvas.height = viewport.height;
-          const compositeContext = compositeCanvas.getContext('2d');
-          
-          // Draw PDF content
-          compositeContext.drawImage(pdfCanvas, 0, 0);
-          
-          // Draw watermark on top
-          compositeContext.save();
-          compositeContext.translate(viewport.width / 2, viewport.height / 2);
-          compositeContext.rotate(-45 * Math.PI / 180);
-          compositeContext.globalAlpha = 0.35;
-          
-          // Draw ARNOMA text
-          compositeContext.font = 'bold 200px -apple-system, BlinkMacSystemFont, sans-serif';
-          compositeContext.fillStyle = '#7dd3fc';
-          compositeContext.textAlign = 'center';
-          compositeContext.fillText('ARNOMA', 0, -80);
-          
-          // Draw student info
-          compositeContext.font = 'bold 48px -apple-system, BlinkMacSystemFont, sans-serif';
-          compositeContext.fillStyle = '#c084fc';
-          compositeContext.fillText(currentStudent.name, 0, 20);
-          compositeContext.fillText(`Group ${currentStudent.group || currentStudent.group_name || 'N/A'}`, 0, 80);
-          
-          compositeContext.font = 'bold 34px -apple-system, BlinkMacSystemFont, sans-serif';
-          compositeContext.globalAlpha = 0.28;
-          compositeContext.fillText('NOT FOR REDISTRIBUTION', 0, 130);
-          
-          compositeContext.restore();
-          
-          // Create two versions: high quality and degraded
-          const highQualityDataUrl = compositeCanvas.toDataURL('image/png', 1.0);
-          
-          // Create tiny degraded version for PDF saves (5x5 pixels)
-          const tinyCanvas = document.createElement('canvas');
-          tinyCanvas.width = 5;
-          tinyCanvas.height = 5;
-          const tinyContext = tinyCanvas.getContext('2d');
-          tinyContext.drawImage(compositeCanvas, 0, 0, 5, 5);
-          const tinyDataUrl = tinyCanvas.toDataURL('image/png', 0.1);
-          
-          // Create image element
+
+          // Convert to a rasterized, obfuscated image before exposing to the print dialog
+          const rasterCanvas = obfuscateCanvasForPrint(canvas);
+          const imageDataUrl = rasterCanvas.toDataURL('image/jpeg', 0.65);
           const img = document.createElement('img');
+          img.decoding = 'async';
+          img.loading = 'lazy';
+          img.src = imageDataUrl;
           img.className = 'page-image';
-          img.setAttribute('data-high-quality', highQualityDataUrl);
-          img.setAttribute('data-tiny', tinyDataUrl);
           img.style.width = (viewport.width / scale) + 'px';
           img.style.height = (viewport.height / scale) + 'px';
           img.style.display = 'block';
           img.style.maxWidth = '100%';
-          
-          const imageLoadPromise = new Promise((resolve) => {
-            img.onload = () => resolve();
-            img.onerror = () => resolve();
-          });
-          imagePromises.push(imageLoadPromise);
-          
-          // Start with high quality
-          img.src = highQualityDataUrl;
+          img.style.imageRendering = 'pixelated';
+          img.alt = 'Rasterized copy-protected note page';
+          img.setAttribute('aria-hidden', 'true');
           
           const pageContainer = document.createElement('div');
           pageContainer.className = 'page-container';
+          
+          // Add prominent watermark
+          const watermark = document.createElement('div');
+          watermark.className = 'watermark-overlay';
+          watermark.innerHTML = `
+            <div class="watermark-content">
+              <div class="watermark-logo">ARNOMA</div>
+              <div class="watermark-text">
+                ${currentStudent.name}<br>
+                Group ${currentStudent.group || currentStudent.group_name || 'N/A'}<br>
+                <span style="font-size: 0.7em; opacity: 0.8;">NOT FOR REDISTRIBUTION</span>
+              </div>
+            </div>
+          `;
+          
           pageContainer.appendChild(img);
+          pageContainer.appendChild(watermark);
           content.appendChild(pageContainer);
         }
-        
-        // Wait for all images to load
-        await Promise.all(imagePromises);
-        
-        // Detect if user is trying to save as PDF
-        let isPDFSave = false;
-        
-        const beforePrint = () => {
-          // Check if destination is PDF (heuristic: Safari's PDF save)
-          // Switch all images to tiny version
-          document.querySelectorAll('.page-image').forEach(img => {
-            img.src = img.getAttribute('data-tiny');
-          });
-          isPDFSave = true;
-        };
-        
-        const afterPrintCheck = () => {
-          // If they actually printed (not saved), restore high quality
-          setTimeout(() => {
-            if (!isPDFSave) {
-              document.querySelectorAll('.page-image').forEach(img => {
-                img.src = img.getAttribute('data-high-quality');
-              });
-            }
-          }, 100);
-        };
-        
-        window.addEventListener('beforeprint', beforePrint, { once: true });
-        window.addEventListener('afterprint', afterPrintCheck, { once: true });
         
         // Trigger print dialog
         setTimeout(() => {
           window.print();
-        }, 1000);
+        }, 500);
         
       } catch (error) {
         console.error('Print error:', error);
         alert('Failed to prepare for printing');
       }
+    }
+
+    function obfuscateCanvasForPrint(sourceCanvas) {
+      try {
+        const pixelationFactor = 2.8; // Higher value => more pixelation
+        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
+        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
+        
+        const pixelatedCanvas = document.createElement('canvas');
+        pixelatedCanvas.width = downscaledWidth;
+        pixelatedCanvas.height = downscaledHeight;
+        const pixelCtx = pixelatedCanvas.getContext('2d');
+        disableImageSmoothing(pixelCtx);
+        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
+        
+        const outputCanvas = document.createElement('canvas');
+        outputCanvas.width = sourceCanvas.width;
+        outputCanvas.height = sourceCanvas.height;
+        const outputCtx = outputCanvas.getContext('2d');
+        disableImageSmoothing(outputCtx);
+        outputCtx.drawImage(
+          pixelatedCanvas,
+          0,
+          0,
+          downscaledWidth,
+          downscaledHeight,
+          0,
+          0,
+          outputCanvas.width,
+          outputCanvas.height
+        );
+
+        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
+        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
+
+        return outputCanvas;
+      } catch (error) {
+        console.warn('Raster obfuscation fallback (canvas locked):', error);
+        return sourceCanvas;
+      }
+    }
+
+    function disableImageSmoothing(ctx) {
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = false;
+      ctx.mozImageSmoothingEnabled = false;
+      ctx.webkitImageSmoothingEnabled = false;
+      ctx.msImageSmoothingEnabled = false;
+    }
+
+    function applyNoiseOverlay(ctx, width, height) {
+      try {
+        const noiseTile = 96;
+        const noiseCanvas = document.createElement('canvas');
+        noiseCanvas.width = noiseTile;
+        noiseCanvas.height = noiseTile;
+        const noiseCtx = noiseCanvas.getContext('2d');
+        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
+        const buffer = imageData.data;
+        
+        for (let i = 0; i < buffer.length; i += 4) {
+          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
+          buffer[i] = shade;
+          buffer[i + 1] = shade;
+          buffer[i + 2] = shade;
+          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
+        }
+        
+        noiseCtx.putImageData(imageData, 0, 0);
+        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
+        if (pattern) {
+          ctx.save();
+          ctx.globalAlpha = 0.18;
+          ctx.fillStyle = pattern;
+          ctx.fillRect(0, 0, width, height);
+          ctx.restore();
+        }
+      } catch (error) {
+        console.warn('Noise overlay skipped:', error);
+      }
+    }
+
+    function drawMicroGrid(ctx, width, height) {
+      ctx.save();
+      ctx.globalAlpha = 0.08;
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
+      ctx.lineWidth = 0.75;
+      const spacing = 12;
+      for (let x = 0; x <= width; x += spacing) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, height);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      for (let y = 0; y <= height; y += spacing) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(width, y + 0.5);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
     
     // ============================================================
