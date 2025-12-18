@@ -1230,7 +1230,8 @@
     let zoomLevel = 1.5; // 150% initial zoom
     let currentStudent = null;
     let fallbackStudent = null;
-    let noteData = null;
+  let noteData = null;
+  const attemptedPdfPaths = new Set();
 
     const getStudentDisplayName = () => {
       return (currentStudent && currentStudent.name) || (fallbackStudent && fallbackStudent.name) || 'Authorized Student';
@@ -1517,13 +1518,15 @@
             try {
               const { data: note, error: noteError } = await supabaseClient
                 .from('student_notes')
-                .select('video_url, title, video_allowed_groups, video_controls, video_title')
+                .select('pdf_url, video_url, title, video_allowed_groups, video_controls, video_title')
                 .eq('id', noteId)
                 .single();
               
               if (note && !noteError) {
                 noteData = {
                   ...noteData,
+                  // Capture the canonical pdf_url from metadata so we can recover if the direct path breaks
+                  pdf_url: note.pdf_url,
                   video_url: note.video_url,
                   video_allowed_groups: note.video_allowed_groups,
                   video_controls: note.video_controls,
@@ -1644,6 +1647,10 @@
         return;
       }
 
+      if (!attemptedPdfPaths.has(pdfPath)) {
+        attemptedPdfPaths.add(pdfPath);
+      }
+
       rememberLastPdfLoader(() => loadPDFFromStorage(pdfPath));
       startLoadingState('Generating secure link...');
 
@@ -1674,9 +1681,28 @@
         await renderPage(1);
       } catch (error) {
         console.error('PDF loading error:', error);
-        showError('Failed to load PDF: ' + error.message, {
+
+        const errorMessage = (error && error.message) ? error.message : 'Unknown storage error';
+        const normalizedMessage = errorMessage.toLowerCase();
+        const storageMissing = normalizedMessage.includes('object not found');
+        const metadataFallbackPath = noteData && noteData.pdf_url && noteData.pdf_url !== pdfPath ? noteData.pdf_url : null;
+        const canAttemptFallback = storageMissing && metadataFallbackPath && !attemptedPdfPaths.has(metadataFallbackPath);
+
+        if (canAttemptFallback) {
+          // Storage says the primary object is missing; try the canonical pdf_url stored in metadata
+          console.warn('Primary PDF path missing. Attempting metadata fallback:', metadataFallbackPath);
+          await loadPDFFromStorage(metadataFallbackPath);
+          return;
+        }
+
+        const details = storageMissing
+          ? 'This secure file could not be found in storage. Please ask your instructor to re-upload it or update the PDF path.'
+          : '';
+
+        showError('Failed to load PDF: ' + errorMessage, {
           retryAction: () => loadPDFFromStorage(pdfPath),
-          retryLabel: 'Retry Secure Load'
+          retryLabel: 'Retry Secure Load',
+          details
         });
       }
     }
