@@ -368,6 +368,78 @@
       opacity: .95;
     }
 
+    .chat-send-admin {
+      width: 46px;
+      height: 42px;
+      border-radius: 14px;
+      border: 1px solid rgba(239,68,68,.30);
+      background:
+        radial-gradient(120% 120% at 20% 20%, rgba(239,68,68,.28), transparent 55%),
+        radial-gradient(120% 120% at 80% 10%, rgba(220,38,38,.22), transparent 60%),
+        rgba(255,255,255,.07);
+      color: var(--txt);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      transition: transform .15s ease, border-color .15s ease, filter .15s ease;
+      margin-left: 4px;
+    }
+
+    .chat-send-admin:hover {
+      transform: translateY(-1px);
+      border-color: rgba(239,68,68,.45);
+      filter: brightness(1.08);
+    }
+
+    .chat-send-admin:active {
+      transform: translateY(0) scale(.98);
+    }
+
+    .chat-send-admin svg {
+      width: 16px;
+      height: 16px;
+      opacity: .95;
+    }
+
+    /* Private chat tooltip */
+    .private-indicator {
+      position: absolute;
+      bottom: 75px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: linear-gradient(135deg, rgba(239,68,68,.95), rgba(220,38,38,.92));
+      color: white;
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .25s ease, transform .25s ease;
+      z-index: 100000;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35), 0 0 20px rgba(239,68,68,.25);
+      border: 1px solid rgba(255,255,255,.20);
+    }
+
+    .private-indicator.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    .private-indicator::before {
+      content: '';
+      position: absolute;
+      bottom: -6px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-top: 8px solid rgba(239,68,68,.95);
+    }
+
     /* Loading State */
     .loading {
       text-align: center;
@@ -402,8 +474,8 @@
     <div class="chat-title">
       <div class="chat-avatar"><span id="chatAvatar">A</span></div>
       <div class="chat-meta">
-        <div class="name" id="chatStudentName">ARNOMA Support</div>
-        <div class="status"><span class="dot"></span><span id="chatStatus">Online • replies fast</span></div>
+        <div class="name" id="chatStudentName">Chat</div>
+        <div class="status"><span class="dot"></span><span id="chatStatus">Group chat with classmates</span></div>
       </div>
     </div>
 
@@ -426,11 +498,18 @@
   </div>
 
   <div class="chat-foot">
+    <div class="private-indicator" id="privateIndicator">🔒 Private Chat - Only you and the administrator can see this</div>
     <div class="chat-compose">
       <textarea class="chat-input" id="chatInput" rows="1" placeholder="Write a message… (Enter to send)"></textarea>
-      <button class="chat-send" id="chatSendBtn" title="Send">
+      <button class="chat-send" id="chatSendBtn" title="Send to everyone">
         <svg viewBox="0 0 24 24" fill="none">
           <path d="M4 12l16-8-6.5 16-2.7-6.2L4 12Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <button class="chat-send-admin" id="chatSendAdminBtn" title="Send to Admin only (Private)">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 15v-3m0 0V9m0 3h3m-3 0H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M4 12l16-8-6.5 16-2.7-6.2L4 12Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
         </svg>
       </button>
     </div>
@@ -452,11 +531,13 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   const chatBody = $("chatBody");
   const chatInput = $("chatInput");
   const chatSendBtn = $("chatSendBtn");
+  const chatSendAdminBtn = $("chatSendAdminBtn");
   const chatTyping = $("chatTyping");
   const chatCloseBtn = $("chatCloseBtn");
   const loadingState = $("loadingState");
   const chatStudentName = $("chatStudentName");
   const chatAvatar = $("chatAvatar");
+  const privateIndicator = $("privateIndicator");
 
   let currentStudentId = null;
   let currentStudentName = "";
@@ -604,8 +685,8 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   }
 
   function addWelcomeMessage() {
-    const welcome = "Hi! 👋 I'm here to help with any questions about your classes, notes, payments, or tests. What can I help you with today?";
-    addMessageToUI(welcome, 'admin', new Date().toISOString());
+    const welcome = "Hi! 👋 Welcome to the group chat! You can message your classmates here, or send a private message to the admin using the red button.";
+    addMessageToUI(welcome, 'admin', new Date().toISOString(), false);
   }
 
   function addDayDivider(text) {
@@ -615,13 +696,24 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     chatBody.insertBefore(div, chatTyping);
   }
 
-  function addMessageToUI(text, sender, timestamp) {
+  function addMessageToUI(text, sender, timestamp, isPrivate = false) {
     const wrap = document.createElement("div");
     wrap.className = "msg" + (sender === "student" ? " me" : " admin");
     
     const bub = document.createElement("div");
     bub.className = "bubble";
-    bub.textContent = text;
+    
+    // Add lock icon for private messages
+    if (isPrivate) {
+      const lockIcon = document.createElement("span");
+      lockIcon.textContent = "🔒 ";
+      lockIcon.style.opacity = "0.7";
+      lockIcon.style.marginRight = "4px";
+      bub.appendChild(lockIcon);
+    }
+    
+    const textNode = document.createTextNode(text);
+    bub.appendChild(textNode);
 
     const meta = document.createElement("div");
     meta.className = "meta-line";
@@ -656,23 +748,29 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     scrollToBottom();
   }
 
-  async function send() {
+  async function send(isPrivateToAdmin = false) {
     const text = (chatInput.value || "").trim();
     if (!text) return;
 
     const timestamp = new Date().toISOString();
 
+    // Show private indicator if sending to admin
+    if (isPrivateToAdmin) {
+      showPrivateIndicator();
+    }
+
     // Add to UI
-    addMessageToUI(text, "student", timestamp);
+    addMessageToUI(text, "student", timestamp, isPrivateToAdmin);
     chatInput.value = "";
     resizeInput();
 
-    // Save to localStorage
+    // Save to localStorage with privacy flag
     const messages = getLocalMessages();
     messages.push({
       text: text,
       sender: "student",
-      timestamp: timestamp
+      timestamp: timestamp,
+      isPrivate: isPrivateToAdmin
     });
     saveLocalMessages(messages);
 
@@ -680,25 +778,36 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     // await supabase.from('chat_messages').insert({
     //   student_id: currentStudentId,
     //   message: text,
-    //   sender: 'student'
+    //   sender: 'student',
+    //   is_private: isPrivateToAdmin
     // });
 
-    // Demo auto-reply (remove in production)
-    showTyping(true);
+    // Demo auto-reply only for private admin messages
+    if (isPrivateToAdmin) {
+      showTyping(true);
+      setTimeout(() => {
+        showTyping(false);
+        const reply = "Thanks for your private message! An admin will respond shortly. 📩";
+        const replyTime = new Date().toISOString();
+        addMessageToUI(reply, "admin", replyTime, true);
+        
+        const messages = getLocalMessages();
+        messages.push({
+          text: reply,
+          sender: "admin",
+          timestamp: replyTime,
+          isPrivate: true
+        });
+        saveLocalMessages(messages);
+      }, 1200);
+    }
+  }
+
+  function showPrivateIndicator() {
+    privateIndicator.classList.add('show');
     setTimeout(() => {
-      showTyping(false);
-      const reply = "Thanks for your message! An admin will respond shortly. 📩";
-      const replyTime = new Date().toISOString();
-      addMessageToUI(reply, "admin", replyTime);
-      
-      const messages = getLocalMessages();
-      messages.push({
-        text: reply,
-        sender: "admin",
-        timestamp: replyTime
-      });
-      saveLocalMessages(messages);
-    }, 1200);
+      privateIndicator.classList.remove('show');
+    }, 3000);
   }
 
   function resizeInput() {
@@ -722,12 +831,14 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   }
 
   // Events
-  chatSendBtn.addEventListener("click", send);
+  chatSendBtn.addEventListener("click", () => send(false));
+  chatSendAdminBtn.addEventListener("click", () => send(true));
+  
   chatInput.addEventListener("input", resizeInput);
   chatInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      send();
+      send(false); // Default to group message on Enter
     }
   });
 
