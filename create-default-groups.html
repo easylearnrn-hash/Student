@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create Default Groups</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+  <h1>Create Default Groups</h1>
+  <button onclick="createGroups()" style="padding: 20px; font-size: 18px; cursor: pointer;">
+    Create Groups A-F with Default Schedule
+  </button>
+  <div id="output" style="margin-top: 20px; font-family: monospace;"></div>
+
+  <script>
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    async function createGroups() {
+      const output = document.getElementById('output');
+      output.innerHTML = '<p>Starting...</p>';
+
+      // Check for session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        output.innerHTML += '<p style="color: red;">❌ Not logged in! Please log in to Student Portal Admin first.</p>';
+        return;
+      }
+
+      const groups = ['A', 'B', 'C', 'D', 'E', 'F'];
+      
+      for (const group of groups) {
+        try {
+          // Check if exists
+          const { data: existing } = await supabase
+            .from('groups')
+            .select('*')
+            .eq('group_name', group);
+
+          if (existing && existing.length > 0) {
+            output.innerHTML += `<p>⏭️  Group ${group} already exists</p>`;
+            continue;
+          }
+
+          // Create group
+          const { data, error } = await supabase
+            .from('groups')
+            .insert([{
+              group_name: group,
+              schedule: 'Friday: 8:00 AM',
+              one_time_schedules: [],
+              active: true,
+              updated_at: new Date().toISOString()
+            }])
+            .select();
+
+          if (error) {
+            output.innerHTML += `<p style="color: red;">❌ Error creating Group ${group}: ${error.message}</p>`;
+          } else {
+            output.innerHTML += `<p style="color: green;">✅ Created Group ${group}</p>`;
+          }
+        } catch (err) {
+          output.innerHTML += `<p style="color: red;">❌ Exception for Group ${group}: ${err.message}</p>`;
+        }
+      }
+
+      output.innerHTML += '<p style="font-weight: bold; margin-top: 20px;">✅ DONE! Refresh Student Portal to see schedules.</p>';
+    }
+  </script>
+</body>
+</html>
