@@ -1510,6 +1510,8 @@
     async function loadPDFFromStorage(pdfPath) {
       try {
         console.log('🔍 Loading PDF from storage path:', pdfPath);
+        console.log('🗂️ Bucket: student-notes');
+        console.log('📍 Full storage reference: student-notes/' + pdfPath);
         document.getElementById('loadingScreen').style.display = 'flex';
         
         // Create a signed URL with 1 hour expiration
@@ -1519,6 +1521,26 @@
         
         if (signedUrlError) {
           console.error('❌ Error creating signed URL:', signedUrlError);
+          console.error('📋 Error details:', JSON.stringify(signedUrlError, null, 2));
+          
+          // Try to list files in the directory to help debug
+          try {
+            const pathParts = pdfPath.split('/');
+            const folder = pathParts[0];
+            console.log('🔍 Attempting to list files in folder:', folder);
+            const { data: files, error: listError } = await supabaseClient.storage
+              .from('student-notes')
+              .list(folder, { limit: 10 });
+            
+            if (!listError && files) {
+              console.log('📁 Files found in folder:', files.map(f => f.name));
+            } else {
+              console.error('❌ Could not list files:', listError);
+            }
+          } catch (debugError) {
+            console.error('Debug listing failed:', debugError);
+          }
+          
           throw new Error(`Could not create signed URL: ${signedUrlError.message}`);
         }
         
