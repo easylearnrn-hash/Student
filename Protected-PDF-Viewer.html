@@ -1683,7 +1683,11 @@
           const storageMissing = normalizedMessage.includes('object not found');
           const metadataFallbackPath = noteData && noteData.pdf_url ? sanitizePath(noteData.pdf_url) : null;
           const hasDifferentFallback = metadataFallbackPath && metadataFallbackPath !== sanitizedPath;
-          const canAttemptFallback = storageMissing && hasDifferentFallback && !attemptedPdfPaths.has(metadataFallbackPath);
+          const canAttemptMetadataFallback = storageMissing && hasDifferentFallback && !attemptedPdfPaths.has(metadataFallbackPath);
+
+          // Derive a basename-only fallback (in case the file lives at bucket root without folder prefix)
+          const basenameFallback = sanitizedPath.includes('/') ? sanitizedPath.split('/').pop() : null;
+          const canAttemptBasenameFallback = storageMissing && basenameFallback && basenameFallback !== sanitizedPath && !attemptedPdfPaths.has(basenameFallback);
 
           // Diagnostics: list available files in the same folder when storage says missing
           if (storageMissing) {
@@ -1702,10 +1706,16 @@
             }
           }
 
-          if (canAttemptFallback) {
+          if (canAttemptMetadataFallback) {
             // Storage says the primary object is missing; try the canonical pdf_url stored in metadata
             console.warn('⚠️ Primary PDF path missing. Attempting metadata fallback:', metadataFallbackPath);
             await loadPDFFromStorage(metadataFallbackPath);
+            return;
+          }
+
+          if (canAttemptBasenameFallback) {
+            console.warn('⚠️ Trying basename fallback (no folder prefix):', basenameFallback);
+            await loadPDFFromStorage(basenameFallback);
             return;
           }
           
