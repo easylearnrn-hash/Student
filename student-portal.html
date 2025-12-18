@@ -5514,6 +5514,7 @@
     // Get group schedule from Supabase (with caching for performance)
     async function getGroupSchedule(groupName) {
       if (!groupName || !supabase) {
+        console.warn('❌ Cannot get schedule - missing groupName or supabase:', { groupName, hasSupabase: !!supabase });
         debugDebug('❌ No groupName or supabase:', { groupName, hasSupabase: !!supabase });
         return null;
       }
@@ -5521,12 +5522,14 @@
       try {
         // Normalize group name for consistent lookup
         const normalizedGroup = canonicalizeGroupCode(groupName);
+        console.log('🔍 Looking up group schedule:', { original: groupName, normalized: normalizedGroup });
         debugDebug('🔍 Looking up group schedule:', { original: groupName, normalized: normalizedGroup });
         
         // Check cache first
         const cacheKey = `group-schedule-${normalizedGroup}`;
         const cached = getCachedData(cacheKey);
         if (cached) {
+          console.log('⚡ Using cached group schedule for:', normalizedGroup);
           debugDebug('⚡ Using cached group schedule:', normalizedGroup);
           return cached;
         }
@@ -5542,9 +5545,18 @@
         }
         
         if (!allGroups || allGroups.length === 0) {
+          console.warn('⚠️ No groups found in database');
           debugDebug('⚠️ No groups found in database');
           return null;
         }
+        
+        console.log('📚 All groups in database:', allGroups.map(g => ({
+          group_code: g.group_code,
+          group_name: g.group_name,
+          name: g.name,
+          active: g.active,
+          schedule: g.schedule
+        })));
         
         // Find matching group (check multiple possible fields)
         const matchingGroup = allGroups.find(g => {
@@ -5553,6 +5565,13 @@
         });
         
         if (!matchingGroup) {
+          console.error('⚠️ No matching group found for:', normalizedGroup);
+          console.log('Available groups:', allGroups.map(g => ({
+            group_code: g.group_code,
+            group_name: g.group_name,
+            name: g.name,
+            normalized: canonicalizeGroupCode(g.group_code || g.group_name || g.name || '')
+          })));
           debugDebug('⚠️ No matching group found for:', normalizedGroup, 'Available groups:', allGroups.map(g => ({
             group_code: g.group_code,
             group_name: g.group_name,
@@ -5561,6 +5580,7 @@
           return null;
         }
         
+        console.log('✅ Found matching group:', matchingGroup);
         debugDebug('✅ Found group schedule:', matchingGroup);
         
         const scheduleData = {
@@ -7703,9 +7723,20 @@
       currentGroupScheduleSummary = null;
       setProfileScheduleText('Loading latest schedule...');
       const groupName = getStudentGroup(student);
+      
+      // COMPREHENSIVE DEBUG: Log all student group fields
+      console.log('🔍 SCHEDULE LOAD DEBUG for student:', student.name);
+      console.log('📋 Student group fields:', {
+        group_name: student.group_name,
+        group_letter: student.group_letter,
+        group: student.group,
+        computed_groupName: groupName
+      });
+      
       debugDebug('📅 About to load schedule for groupName:', groupName);
       
       if (!groupName) {
+        console.warn('⚠️ No group assigned to student:', student.name);
         currentGroupScheduleSummary = 'No group assigned';
         setProfileScheduleText(currentGroupScheduleSummary);
         document.getElementById('groupScheduleDisplay').innerHTML = 
@@ -7719,6 +7750,7 @@
       
       try {
         const scheduleData = await getGroupSchedule(groupName);
+        console.log('📦 getGroupSchedule returned for group', groupName, ':', scheduleData);
         debugDebug('📦 getGroupSchedule returned:', scheduleData);
         
         if (scheduleData) {
