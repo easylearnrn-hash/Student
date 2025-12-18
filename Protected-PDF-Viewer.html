@@ -395,7 +395,7 @@
     }
 
     /* ==========================================================================
-       PRINT STYLES
+       PRINT STYLES - ANTI-PDF-SAVE PROTECTION
        ========================================================================== */
     
     @media print {
@@ -434,6 +434,7 @@
         border: none;
         border-radius: 0;
         background: white;
+        position: relative;
       }
       
       .page-container:last-child {
@@ -454,14 +455,48 @@
       }
       
       .watermark-content {
-        opacity: 0.15 !important; /* Lighter on print but still visible */
+        opacity: 0.2 !important; /* More visible in print */
       }
       
-      /* Ensure canvas renders in print */
-      .page-canvas {
+      /* 🔒 ANTI-PDF-SAVE: Hide high-quality canvas, show degraded version */
+      .page-canvas-screen {
+        display: none !important; /* Hide high-quality version when printing/saving */
+      }
+      
+      .page-canvas-print {
+        display: block !important; /* Show ultra-low quality version */
         max-width: 100%;
         height: auto;
+        
+        /* Additional CSS degradation for PDF saves */
+        filter: blur(12px) contrast(0.2) brightness(2) grayscale(0.5);
+        -webkit-filter: blur(12px) contrast(0.2) brightness(2) grayscale(0.5);
+        opacity: 0.15;
+        
+        /* Make it stretched and pixelated */
+        image-rendering: pixelated;
+        image-rendering: -moz-crisp-edges;
+        image-rendering: crisp-edges;
       }
+      
+      /* Add heavy noise overlay to further degrade saved PDFs */
+      .page-container::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-image: 
+          repeating-linear-gradient(0deg, transparent, transparent 1px, rgba(0,0,0,0.15) 1px, rgba(0,0,0,0.15) 2px),
+          repeating-linear-gradient(90deg, transparent, transparent 1px, rgba(0,0,0,0.15) 1px, rgba(0,0,0,0.15) 2px),
+          repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(255,255,255,0.1) 3px, rgba(255,255,255,0.1) 6px);
+        pointer-events: none;
+        z-index: 999;
+      }
+      
+      /* Physical printers may ignore blur filters, allowing readable prints */
+      /* But PDF saves will capture all CSS filters and degradation */
     }
 
     /* ==========================================================================
@@ -1307,6 +1342,13 @@
         const noteId = urlParams.get('note'); // Legacy support
         const studentName = urlParams.get('studentName'); // Passed from portal
         const studentGroup = urlParams.get('studentGroup'); // Passed from portal
+        const studentIdParam = urlParams.get('studentId');
+        const parsedStudentId = studentIdParam && !Number.isNaN(Number(studentIdParam))
+          ? Number(studentIdParam)
+          : null;
+        const urlGroupLetter = studentGroup
+          ? studentGroup.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '').charAt(0)
+          : null;
         
         if (!pdfUrl && !noteId) {
           showError('No note specified');
@@ -1316,16 +1358,18 @@
         // Check if student info was passed via URL (for impersonation or direct links)
         if (studentName) {
           fallbackStudent = {
+            id: parsedStudentId || undefined,
             name: studentName,
             group_name: studentGroup,
-            group: studentGroup
+            group: studentGroup,
+            group_letter: urlGroupLetter || undefined
           };
           currentStudent = fallbackStudent;
         }
         
         // Check authentication (support both regular auth and impersonation)
         // First check for impersonation token (if student info wasn't passed via URL)
-        if (!currentStudent) {
+        if (!currentStudent || !currentStudent.id) {
           const impersonationToken = sessionStorage.getItem('impersonation_token');
         if (impersonationToken) {
           try {
@@ -1344,7 +1388,7 @@
         }
         
         // If no impersonation, check regular auth session
-        if (!currentStudent) {
+        if (!currentStudent || !currentStudent.id) {
           const { data: { session }, error: authError } = await supabaseClient.auth.getSession();
           
           if (authError || !session) {
@@ -1412,6 +1456,7 @@
                 currentStudent.group || 
                 ''
               ).toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
+              const normalizedGroupName = studentGroup ? `Group ${studentGroup}` : '';
               
               console.log('🔐 Group Access Check:');
               console.log('  Student Group:', studentGroup);
@@ -1441,6 +1486,8 @@
               }
               
               const { data: accessGrants, error: accessError } = await query;
+              let permissionGrants = [];
+              let hasPermissionAccess = false;
               
               if (accessError) {
                 console.error('❌ Error checking note access:', accessError);
@@ -1448,31 +1495,109 @@
                 return;
               }
               
+              try {
+                // Query 1: Check individual student permissions
+                if (currentStudent.id) {
+                  const { data: individualPerms, error: individualError } = await supabaseClient
+                    .from('student_note_permissions')
+                    .select('id, student_id, group_name, is_accessible')
+                    .eq('note_id', noteId)
+                    .eq('student_id', currentStudent.id)
+                    .eq('is_accessible', true);
+                  
+                  if (!individualError && individualPerms && individualPerms.length > 0) {
+                    permissionGrants = permissionGrants.concat(individualPerms);
+                  }
+                }
+                
+                // Query 2: Check group permissions (student_id is null AND group_name matches)
+                if (normalizedGroupName) {
+                  const { data: groupPerms, error: groupError } = await supabaseClient
+                    .from('student_note_permissions')
+                    .select('id, student_id, group_name, is_accessible')
+                    .eq('note_id', noteId)
+                    .is('student_id', null)
+                    .eq('group_name', normalizedGroupName)
+                    .eq('is_accessible', true);
+                  
+                  if (!groupError && groupPerms && groupPerms.length > 0) {
+                    permissionGrants = permissionGrants.concat(groupPerms);
+                  }
+                }
+                
+                hasPermissionAccess = permissionGrants.length > 0;
+              } catch (permissionCheckError) {
+                console.error('❌ Permission verification failed:', permissionCheckError);
+                showError('❌ Error checking note access permissions');
+                return;
+              }
+              
+              const hasFreeAccess = Array.isArray(accessGrants) && accessGrants.length > 0;
+              
               // If no access grants found, deny access
-              if (!accessGrants || accessGrants.length === 0) {
+              if (!hasFreeAccess && !hasPermissionAccess) {
                 console.error('❌ No access granted! Student:', studentGroup, 'Note ID:', noteId);
                 showError(`🚫 Access Denied: You don't have permission to view this note.`);
                 return;
               }
               
-              console.log('✅ Group access verified:', accessGrants.length, 'grant(s) found');
+              console.log('✅ Group access verified:', {
+                freeAccessGrants: accessGrants?.length || 0,
+                permissionGrants: permissionGrants.length
+              });
               
               // Check if note requires payment
               if (note.requires_payment) {
-                console.log('💳 Checking payment requirement...');
-                const { data: payments, error: paymentError } = await supabaseClient
-                  .from('payment_records')
-                  .select('*')
-                  .eq('student_id', currentStudent.id)
-                  .eq('status', 'paid')
-                  .limit(1);
+                console.log('💳 Checking payment requirement for class date:', note.class_date);
                 
-                if (paymentError || !payments || payments.length === 0) {
-                  console.error('❌ Payment required but not found');
+                // Check BOTH payment sources (like student portal does)
+                // 1. Manual payment records
+                const { data: manualPayments } = await supabaseClient
+                  .from('payment_records')
+                  .select('date, status')
+                  .eq('student_id', currentStudent.id)
+                  .eq('status', 'paid');
+                
+                // 2. Automated payments (Zelle/Venmo imports)
+                const { data: autoPayments } = await supabaseClient
+                  .from('payments')
+                  .select('for_class')
+                  .or(`student_id.eq.${currentStudent.id},linked_student_id.eq.${currentStudent.id}`);
+                
+                // Merge payment dates
+                const paidDates = new Set();
+                
+                // Add manual payment dates
+                if (manualPayments) {
+                  manualPayments.forEach(p => {
+                    if (p.date) paidDates.add(p.date.split('T')[0]);
+                  });
+                }
+                
+                // Add automated payment dates
+                if (autoPayments) {
+                  autoPayments.forEach(p => {
+                    if (p.for_class) paidDates.add(p.for_class.split('T')[0]);
+                  });
+                }
+                
+                // Check if student paid for this note's class date
+                const noteDate = note.class_date ? note.class_date.split('T')[0] : null;
+                const hasPaidForThisDate = noteDate && paidDates.has(noteDate);
+                
+                console.log('💰 Payment check:', {
+                  noteDate,
+                  totalPaidDates: paidDates.size,
+                  hasPaidForThisDate,
+                  paidDates: Array.from(paidDates).sort()
+                });
+                
+                if (!hasPaidForThisDate) {
+                  console.error('❌ Payment required but not found for date:', noteDate);
                   showError('🔒 This note is locked. Payment required to access.');
                   return;
                 }
-                console.log('✅ Payment verified');
+                console.log('✅ Payment verified for date:', noteDate);
               }
               
               // Store full note data
@@ -1825,7 +1950,7 @@
     }
     
     // ============================================================
-    // PRINT FUNCTION (WITH WATERMARK)
+    // PRINT FUNCTION (WITH WATERMARK + ANTI-PDF-SAVE PROTECTION)
     // ============================================================
     
     async function printNote() {
@@ -1834,29 +1959,68 @@
         const content = document.getElementById('pdfContent');
         content.innerHTML = '<div class="loading-text">Preparing for print...</div>';
         
+        // Listen for print dialog closure to detect PDF save attempts
+        const beforePrint = () => {
+          // When print dialog opens, degrade all canvases for PDF save
+          document.querySelectorAll('.page-canvas').forEach(canvas => {
+            // Mark canvases as "print mode" for CSS targeting
+            canvas.classList.add('print-active');
+          });
+        };
+        
+        const afterPrint = () => {
+          // Restore single page view after print
+          renderPage(currentPage);
+        };
+        
+        window.addEventListener('beforeprint', beforePrint);
+        window.addEventListener('afterprint', afterPrint);
+        
         for (let i = 1; i <= totalPages; i++) {
           const page = await pdfDoc.getPage(i);
           
-          // High-quality print rendering: 2.5x scale
-          const scale = 2.5;
-          const viewport = page.getViewport({ scale: scale });
+          // Render TWO versions: high quality for screen, low quality for PDF save
           
-          const canvas = document.createElement('canvas');
-          canvas.className = 'page-canvas';
-          const context = canvas.getContext('2d');
+          // 1. SCREEN VERSION (shown in preview): High quality
+          const screenScale = 2.5;
+          const screenViewport = page.getViewport({ scale: screenScale });
           
-          // High-resolution canvas
-          canvas.height = viewport.height;
-          canvas.width = viewport.width;
+          const screenCanvas = document.createElement('canvas');
+          screenCanvas.className = 'page-canvas page-canvas-screen';
+          const screenContext = screenCanvas.getContext('2d');
           
-          // Scale display for print
-          canvas.style.width = (viewport.width / scale) + 'px';
-          canvas.style.height = (viewport.height / scale) + 'px';
+          screenCanvas.height = screenViewport.height;
+          screenCanvas.width = screenViewport.width;
+          screenCanvas.style.width = (screenViewport.width / screenScale) + 'px';
+          screenCanvas.style.height = (screenViewport.height / screenScale) + 'px';
           
           await page.render({
-            canvasContext: context,
-            viewport: viewport
+            canvasContext: screenContext,
+            viewport: screenViewport
           }).promise;
+          
+          // 2. PRINT VERSION (used for PDF save): Ultra-low quality + blur
+          const printScale = 0.1; // 10% quality - nearly unreadable
+          const printViewport = page.getViewport({ scale: printScale });
+          
+          const printCanvas = document.createElement('canvas');
+          printCanvas.className = 'page-canvas page-canvas-print';
+          printCanvas.style.display = 'none'; // Hidden until print
+          const printContext = printCanvas.getContext('2d', { alpha: false });
+          
+          printCanvas.height = printViewport.height;
+          printCanvas.width = printViewport.width;
+          printCanvas.style.width = (screenViewport.width / screenScale) + 'px';
+          printCanvas.style.height = (screenViewport.height / screenScale) + 'px';
+          
+          await page.render({
+            canvasContext: printContext,
+            viewport: printViewport
+          }).promise;
+          
+          // Apply extreme degradation to print canvas
+          printContext.filter = 'blur(5px) contrast(0.2) brightness(2)';
+          printContext.globalAlpha = 0.15;
           
           const pageContainer = document.createElement('div');
           pageContainer.className = 'page-container';
@@ -1868,12 +2032,14 @@
               <div class="watermark-logo">ARNOMA</div>
               <div class="watermark-text">
                 ${currentStudent.name}<br>
-                Group ${currentStudent.group || currentStudent.group_name || 'N/A'}
+                Group ${currentStudent.group || currentStudent.group_name || 'N/A'}<br>
+                <span style="font-size: 0.7em; opacity: 0.8;">NOT FOR REDISTRIBUTION</span>
               </div>
             </div>
           `;
           
-          pageContainer.appendChild(canvas);
+          pageContainer.appendChild(screenCanvas); // High quality for viewing
+          pageContainer.appendChild(printCanvas);   // Low quality for PDF save
           pageContainer.appendChild(watermark);
           content.appendChild(pageContainer);
         }
@@ -1881,13 +2047,13 @@
         // Trigger print dialog
         setTimeout(() => {
           window.print();
-          // Restore single page view after print
-          renderPage(currentPage);
         }, 500);
         
       } catch (error) {
         console.error('Print error:', error);
         alert('Failed to prepare for printing');
+        window.removeEventListener('beforeprint', beforePrint);
+        window.removeEventListener('afterprint', afterPrint);
       }
     }
     
