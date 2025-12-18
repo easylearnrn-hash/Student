@@ -2937,6 +2937,57 @@
       }
 
       // ============================================================
+      // ENSURE GROUP EXISTS IN GROUPS TABLE (AUTO-CREATE)
+      // ============================================================
+      async function ensureGroupExists(groupCode) {
+        if (!groupCode || groupCode.trim() === '') return;
+        
+        try {
+          const normalizedGroup = groupCode.toString().trim().toUpperCase();
+          console.log('🔍 Checking if group exists:', normalizedGroup);
+          
+          // Check if group already exists
+          const { data: existingGroups, error: fetchError } = await supabaseClient
+            .from('groups')
+            .select('*')
+            .eq('group_name', normalizedGroup);
+          
+          if (fetchError) {
+            console.error('❌ Error checking for existing group:', fetchError);
+            return;
+          }
+          
+          if (existingGroups && existingGroups.length > 0) {
+            console.log('✅ Group already exists:', normalizedGroup);
+            return; // Group already exists
+          }
+          
+          // Create the group with default settings
+          console.log('📝 Creating new group in database:', normalizedGroup);
+          const { data: newGroup, error: insertError } = await supabaseClient
+            .from('groups')
+            .insert([{
+              group_name: normalizedGroup,
+              schedule: '', // Empty schedule - admin can set later in Group Manager
+              one_time_schedules: [],
+              active: true, // Active by default
+              color: null,
+              updated_at: new Date().toISOString()
+            }])
+            .select();
+          
+          if (insertError) {
+            console.error('❌ Error creating group:', insertError);
+            return;
+          }
+          
+          console.log('✅ Group created successfully:', newGroup[0]);
+        } catch (err) {
+          console.error('❌ Exception in ensureGroupExists:', err);
+        }
+      }
+
+      // ============================================================
       // SAVE STUDENT TO SUPABASE
       // ============================================================
       async function saveStudent(student) {
@@ -2950,6 +3001,12 @@
           const resolvedGroupName = formatGroupDisplay(resolvedGroupCode);
           student.groupCode = resolvedGroupCode;
           student.group = resolvedGroupName;
+          
+          // ✅ AUTO-CREATE GROUP: Ensure group exists in groups table when assigning to student
+          if (resolvedGroupCode && resolvedGroupCode.trim() !== '') {
+            await ensureGroupExists(resolvedGroupCode);
+          }
+          
           const normalizedEmailList = normalizeEmailList(student.email);
           const primaryEmail = normalizedEmailList[0] || null;
           student.email = primaryEmail;
