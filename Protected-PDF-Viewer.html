@@ -9,7 +9,7 @@
   <title>Protected PDF Viewer - ARNOMA</title>
   
   <!-- Supabase SDK -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
   
   <!-- PDF.js Library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -324,6 +324,37 @@
       backdrop-filter: blur(var(--panel-blur));
       -webkit-backdrop-filter: blur(var(--panel-blur));
       font-weight: 500;
+    }
+
+    .error-message p {
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+
+    .error-actions {
+      margin-top: 12px;
+    }
+
+    .retry-btn {
+      margin-top: 8px;
+      background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+      border: none;
+      border-radius: 12px;
+      padding: 10px 28px;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(125, 211, 252, 0.25);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .retry-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 32px rgba(125, 211, 252, 0.35);
+    }
+
+    .retry-btn:active {
+      transform: translateY(0);
     }
     
     .zoom-controls {
@@ -1161,9 +1192,18 @@
     // SUPABASE CONFIGURATION
     // ============================================================
     
-    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const SUPABASE_URL = 'https://ekndrsvdyajpbaghhzol.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVrbmRyc3ZkeWFqcGJhZ2hoem9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzMyNjc4NTEsImV4cCI6MjA0ODg0Mzg1MX0.VCJxi5ECgy4gCzk6UbkAJSaWBpx7_y0kZSZRgD7HkVo';
+    let supabaseClient = null;
+
+    try {
+      if (!window.supabase || typeof window.supabase.createClient !== 'function') {
+        throw new Error('Supabase SDK failed to load');
+      }
+      supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } catch (supabaseInitError) {
+      console.error('Supabase initialization failed:', supabaseInitError);
+    }
     
     // ============================================================
     // PDF.js CONFIGURATION
@@ -1198,6 +1238,80 @@
     const getStudentDisplayGroup = () => {
       return (currentStudent && (currentStudent.group || currentStudent.group_name)) || (fallbackStudent && (fallbackStudent.group || fallbackStudent.group_name)) || 'N/A';
     };
+
+    const STORAGE_BUCKET = 'student-notes';
+    const LOAD_TIMEOUT_MS = 15000;
+    let loadingTimeoutHandle = null;
+    let pendingRetryAction = null;
+    let lastPdfLoader = null;
+    let pdfHasRendered = false;
+
+    const rememberLastPdfLoader = (loaderFn) => {
+      lastPdfLoader = typeof loaderFn === 'function' ? loaderFn : null;
+    };
+
+    const retryLastPdfRequest = () => {
+      if (typeof lastPdfLoader === 'function') {
+        return lastPdfLoader();
+      }
+      return Promise.resolve();
+    };
+
+    const startLoadingState = (message = 'Loading protected PDF...') => {
+      pdfHasRendered = false;
+      const loadingScreen = document.getElementById('loadingScreen');
+      if (loadingScreen) {
+        loadingScreen.style.display = 'flex';
+        const textEl = loadingScreen.querySelector('.loading-text');
+        if (textEl) {
+          textEl.textContent = message;
+        }
+      }
+      clearTimeout(loadingTimeoutHandle);
+      loadingTimeoutHandle = setTimeout(() => {
+        if (!pdfHasRendered) {
+          showError('This is taking longer than expected. Requesting a new secure link usually fixes it.', {
+            retryAction: () => retryLastPdfRequest(),
+            retryLabel: 'Retry Secure Load'
+          });
+        }
+      }, LOAD_TIMEOUT_MS);
+    };
+
+    const stopLoadingState = () => {
+      clearTimeout(loadingTimeoutHandle);
+      const loadingScreen = document.getElementById('loadingScreen');
+      if (loadingScreen) {
+        loadingScreen.style.display = 'none';
+      }
+    };
+
+    const clearPendingRetryAction = () => {
+      pendingRetryAction = null;
+    };
+
+    const setViewerReadyState = () => {
+      const totalPagesElement = document.getElementById('totalPages');
+      if (totalPagesElement) {
+        totalPagesElement.textContent = totalPages;
+      }
+      const controls = document.getElementById('viewerControls');
+      if (controls) {
+        controls.style.display = 'flex';
+      }
+      showMediaPanelToggle();
+      pdfHasRendered = true;
+      stopLoadingState();
+      clearPendingRetryAction();
+    };
+
+    async function retryPendingAction() {
+      if (typeof pendingRetryAction === 'function') {
+        const action = pendingRetryAction;
+        pendingRetryAction = null;
+        await action();
+      }
+    }
     
     // ============================================================
     // DISABLE COPY/DOWNLOAD PROTECTION - ENHANCED
@@ -1307,6 +1421,14 @@
         const noteId = urlParams.get('note'); // Legacy support
         const studentName = urlParams.get('studentName'); // Passed from portal
         const studentGroup = urlParams.get('studentGroup'); // Passed from portal
+
+        if (!supabaseClient) {
+          showError('Secure storage connection is unavailable. Please refresh the page to try again.', {
+            retryAction: () => window.location.reload(),
+            retryLabel: 'Refresh Page'
+          });
+          return;
+        }
         
         if (!pdfUrl && !noteId) {
           showError('No note specified');
@@ -1330,7 +1452,7 @@
           if (impersonationToken) {
             try {
               const tokenData = JSON.parse(impersonationToken);
-              const { data: student, error: studentError } = await supabase
+              const { data: student, error: studentError } = await supabaseClient
                 .from('students')
                 .select('*')
                 .eq('id', tokenData.studentId)
@@ -1347,7 +1469,7 @@
         
         // If no impersonation, check regular auth session
         if (!currentStudent) {
-          const { data: { session }, error: authError } = await supabase.auth.getSession();
+          const { data: { session }, error: authError } = await supabaseClient.auth.getSession();
           
           if (authError || !session) {
             showError('Please log in to view this note');
@@ -1356,7 +1478,7 @@
           }
           
           // Get current student data by email
-          const { data: student, error: studentError } = await supabase
+          const { data: student, error: studentError } = await supabaseClient
             .from('students')
             .select('*')
             .eq('email', session.user.email)
@@ -1374,7 +1496,7 @@
           showError('Student profile not found');
           return;
         }
-  document.getElementById('studentName').textContent = getStudentDisplayName();
+        document.getElementById('studentName').textContent = getStudentDisplayName();
         document.getElementById('noteTitle').textContent = noteTitle.replace(/\.pdf$/i, '');
         
         // Create mock note data for watermarking
@@ -1386,13 +1508,13 @@
         // If URL provided directly (from new group notes system)
         if (pdfUrl) {
           document.getElementById('viewerControls').style.display = 'flex';
-        showMediaPanelToggle();
+          showMediaPanelToggle();
           
           // Try to fetch note data from database if we can extract an ID
           // This allows us to load video_url even when PDF is passed via URL param
           if (noteId) {
             try {
-              const { data: note, error: noteError } = await supabase
+              const { data: note, error: noteError } = await supabaseClient
                 .from('student_notes')
                 .select('video_url, title, video_allowed_groups, video_controls, video_title')
                 .eq('id', noteId)
@@ -1429,7 +1551,7 @@
         
         // Legacy: Load from student_notes table
         if (noteId) {
-          const { data: note, error: noteError } = await supabase
+          const { data: note, error: noteError } = await supabaseClient
             .from('student_notes')
             .select('*')
             .eq('id', noteId)
@@ -1450,7 +1572,7 @@
           
           // Check if note requires payment
           if (note.requires_payment) {
-            const { data: payments, error: paymentError } = await supabase
+            const { data: payments, error: paymentError } = await supabaseClient
               .from('payment_records')
               .select('*')
               .eq('student_id', currentStudent.id)
@@ -1481,89 +1603,89 @@
     // ============================================================
     
     async function loadPDFFromURL(pdfUrl) {
+      rememberLastPdfLoader(() => loadPDFFromURL(pdfUrl));
+      startLoadingState('Loading protected PDF...');
       try {
-        document.getElementById('loadingScreen').style.display = 'flex';
-        
         console.log('🔗 Loading PDF from URL:', pdfUrl);
-        
-        // Load PDF directly from URL
         const loadingTask = pdfjsLib.getDocument({
           url: pdfUrl,
           withCredentials: false
         });
         pdfDoc = await loadingTask.promise;
         totalPages = pdfDoc.numPages;
-        
-        // Update UI
-        document.getElementById('totalPages').textContent = totalPages;
-        document.getElementById('loadingScreen').style.display = 'none';
-        document.getElementById('viewerControls').style.display = 'flex';
-        showMediaPanelToggle();
-        
-        // Render first page
+        setViewerReadyState();
         await renderPage(1);
-        
       } catch (error) {
         console.error('PDF loading error:', error);
-        showError('Failed to load PDF: ' + error.message);
+        showError('Failed to load PDF: ' + error.message, {
+          retryAction: () => loadPDFFromURL(pdfUrl),
+          retryLabel: 'Retry Secure Load'
+        });
       }
     }
     
     async function loadPDFFromStorage(pdfPath) {
+      if (!pdfPath) {
+        showError('This note is missing its PDF file. Please contact your instructor.');
+        return;
+      }
+
+      if (pdfPath.startsWith('http://') || pdfPath.startsWith('https://')) {
+        await loadPDFFromURL(pdfPath);
+        return;
+      }
+
+      if (!supabaseClient) {
+        showError('Secure storage connection is unavailable. Please refresh the page.', {
+          retryAction: () => window.location.reload(),
+          retryLabel: 'Refresh Page'
+        });
+        return;
+      }
+
+      rememberLastPdfLoader(() => loadPDFFromStorage(pdfPath));
+      startLoadingState('Generating secure link...');
+
       try {
         console.log('🔍 Loading PDF from storage path:', pdfPath);
-        document.getElementById('loadingScreen').style.display = 'flex';
-        
-        // Create a signed URL with 1 hour expiration
-        const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-          .from('student-notes')
-          .createSignedUrl(pdfPath, 3600); // 1 hour
-        
+        const { data: signedUrlData, error: signedUrlError } = await supabaseClient.storage
+          .from(STORAGE_BUCKET)
+          .createSignedUrl(pdfPath, 3600);
+
         if (signedUrlError) {
           console.error('❌ Error creating signed URL:', signedUrlError);
           throw new Error(`Could not create signed URL: ${signedUrlError.message}`);
         }
-        
+
         if (!signedUrlData || !signedUrlData.signedUrl) {
           throw new Error('Signed URL was not generated');
         }
-        
+
         console.log('✅ Created signed URL for:', pdfPath);
-        
-        // Load PDF from signed URL
+
         const loadingTask = pdfjsLib.getDocument({
           url: signedUrlData.signedUrl,
           withCredentials: false
         });
         pdfDoc = await loadingTask.promise;
         totalPages = pdfDoc.numPages;
-        
-        // Update UI
-        document.getElementById('totalPages').textContent = totalPages;
-        document.getElementById('loadingScreen').style.display = 'none';
-        document.getElementById('viewerControls').style.display = 'flex';
-        showMediaPanelToggle();
-        
-        // Render first page
+        setViewerReadyState();
         await renderPage(1);
-        
       } catch (error) {
         console.error('PDF loading error:', error);
-        showError('Failed to load PDF: ' + error.message + '. Please ensure the file exists in storage.');
+        showError('Failed to load PDF: ' + error.message, {
+          retryAction: () => loadPDFFromStorage(pdfPath),
+          retryLabel: 'Retry Secure Load'
+        });
       }
     }
     
     async function loadPDF(pdfPath) {
-      try {
-        console.log('🔍 Loading PDF from storage path (legacy):', pdfPath);
-        
-        // Try signed URL first
-        await loadPDFFromStorage(pdfPath);
-        
-      } catch (error) {
-        console.error('PDF loading error:', error);
-        showError('Failed to load PDF. The file may not exist in storage. Please contact your administrator.');
+      if (!pdfPath) {
+        showError('This note is missing its PDF file. Please contact your instructor.');
+        return;
       }
+      await loadPDFFromStorage(pdfPath);
     }
     
     async function renderPage(pageNum) {
@@ -1625,6 +1747,10 @@
         // Update button states
         document.getElementById('prevPage').disabled = currentPage === 1;
         document.getElementById('nextPage').disabled = currentPage === totalPages;
+        if (!pdfHasRendered) {
+          pdfHasRendered = true;
+          stopLoadingState();
+        }
         
       } catch (error) {
         console.error('Page rendering error:', error);
@@ -1720,9 +1846,25 @@
     // UTILITY FUNCTIONS
     // ============================================================
     
-    function showError(message) {
+    function showError(message, options = {}) {
+      stopLoadingState();
       const content = document.getElementById('pdfContent');
-      content.innerHTML = `<div class="error-message">${message}</div>`;
+      if (!content) return;
+      const { retryAction = null, retryLabel = 'Try Again', details = '' } = options;
+      pendingRetryAction = typeof retryAction === 'function' ? retryAction : null;
+      const detailHtml = details ? `<p>${details}</p>` : '';
+      const actionHtml = pendingRetryAction ? `
+        <div class="error-actions">
+          <button class="retry-btn" onclick="retryPendingAction()">${retryLabel}</button>
+        </div>
+      ` : '';
+      content.innerHTML = `
+        <div class="error-message">
+          <p>${message}</p>
+          ${detailHtml}
+          ${actionHtml}
+        </div>
+      `;
     }
     
     function formatDate(dateStr) {
@@ -2362,7 +2504,10 @@
 
     // Show media panel toggle when PDF is loaded
     function showMediaPanelToggle() {
-      document.getElementById('mediaPanelToggle').style.display = 'flex';
+      const toggle = document.getElementById('mediaPanelToggle');
+      if (toggle) {
+        toggle.style.display = 'flex';
+      }
     }
 
     // Close media panel when clicking outside
