@@ -1413,26 +1413,33 @@
                 ''
               ).toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
               
-              // Normalize note's group (handle group_letter, group_name, group)
-              const noteGroup = (
-                note.group_letter || 
-                note.group_name || 
-                note.group || 
-                ''
-              ).toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
-              
               console.log('🔐 Group Access Check:');
               console.log('  Student Group:', studentGroup);
-              console.log('  Note Group:', noteGroup);
+              console.log('  Student ID:', currentStudent.id);
+              console.log('  Note ID:', noteId);
               
-              // Verify student is in the correct group
-              if (noteGroup && studentGroup !== noteGroup) {
-                console.error('❌ Group mismatch! Student:', studentGroup, 'Note:', noteGroup);
-                showError(`🚫 Access Denied: This note is for Group ${noteGroup}. You are in Group ${studentGroup}.`);
+              // Check if student has access via note_free_access table
+              // (either group access or individual access)
+              const { data: accessGrants, error: accessError } = await supabaseClient
+                .from('note_free_access')
+                .select('*')
+                .eq('note_id', noteId)
+                .or(`group_letter.eq.${studentGroup},student_id.eq.${currentStudent.id}`);
+              
+              if (accessError) {
+                console.error('❌ Error checking note access:', accessError);
+                showError('❌ Error checking note access permissions');
                 return;
               }
               
-              console.log('✅ Group access verified');
+              // If no access grants found, deny access
+              if (!accessGrants || accessGrants.length === 0) {
+                console.error('❌ No access granted! Student:', studentGroup, 'Note ID:', noteId);
+                showError(`🚫 Access Denied: You don't have permission to view this note.`);
+                return;
+              }
+              
+              console.log('✅ Group access verified:', accessGrants.length, 'grant(s) found');
               
               // Check if note requires payment
               if (note.requires_payment) {
