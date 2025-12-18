@@ -1635,14 +1635,21 @@
       }
     }
     
+    const sanitizePath = (path) => {
+      if (!path) return '';
+      return path.trim().replace(/^\/+/, '').replace(/\/+$/, '');
+    };
+
     async function loadPDFFromStorage(pdfPath) {
       if (!pdfPath) {
         showError('This note is missing its PDF file. Please contact your instructor.');
         return;
       }
 
-      if (pdfPath.startsWith('http://') || pdfPath.startsWith('https://')) {
-        await loadPDFFromURL(pdfPath);
+      const sanitizedPath = sanitizePath(pdfPath);
+
+      if (sanitizedPath.startsWith('http://') || sanitizedPath.startsWith('https://')) {
+        await loadPDFFromURL(sanitizedPath);
         return;
       }
 
@@ -1654,18 +1661,18 @@
         return;
       }
 
-      if (!attemptedPdfPaths.has(pdfPath)) {
-        attemptedPdfPaths.add(pdfPath);
+      if (!attemptedPdfPaths.has(sanitizedPath)) {
+        attemptedPdfPaths.add(sanitizedPath);
       }
 
-      rememberLastPdfLoader(() => loadPDFFromStorage(pdfPath));
+      rememberLastPdfLoader(() => loadPDFFromStorage(sanitizedPath));
       startLoadingState('Generating secure link...');
 
       try {
-        console.log('🔍 Loading PDF from storage path:', pdfPath);
+        console.log('🔍 Loading PDF from storage path:', sanitizedPath);
         const { data: signedUrlData, error: signedUrlError } = await supabaseClient.storage
           .from(STORAGE_BUCKET)
-          .createSignedUrl(pdfPath, 3600);
+          .createSignedUrl(sanitizedPath, 3600);
 
         if (signedUrlError) {
           console.error('❌ Error creating signed URL:', signedUrlError);
@@ -1674,13 +1681,14 @@
           const errorMessage = signedUrlError.message || 'Unknown storage error';
           const normalizedMessage = errorMessage.toLowerCase();
           const storageMissing = normalizedMessage.includes('object not found');
-          const metadataFallbackPath = noteData && noteData.pdf_url && noteData.pdf_url !== pdfPath ? noteData.pdf_url : null;
-          const canAttemptFallback = storageMissing && metadataFallbackPath && !attemptedPdfPaths.has(metadataFallbackPath);
+          const metadataFallbackPath = noteData && noteData.pdf_url ? sanitizePath(noteData.pdf_url) : null;
+          const hasDifferentFallback = metadataFallbackPath && metadataFallbackPath !== sanitizedPath;
+          const canAttemptFallback = storageMissing && hasDifferentFallback && !attemptedPdfPaths.has(metadataFallbackPath);
 
           // Diagnostics: list available files in the same folder when storage says missing
           if (storageMissing) {
             try {
-              const folderPrefix = pdfPath.includes('/') ? pdfPath.split('/').slice(0, -1).join('/') : '';
+              const folderPrefix = sanitizedPath.includes('/') ? sanitizedPath.split('/').slice(0, -1).join('/') : '';
               const { data: listData, error: listError } = await supabaseClient.storage
                 .from(STORAGE_BUCKET)
                 .list(folderPrefix || undefined);
@@ -1708,7 +1716,7 @@
           throw new Error('Signed URL was not generated');
         }
 
-        console.log('✅ Created signed URL for:', pdfPath);
+  console.log('✅ Created signed URL for:', sanitizedPath);
 
         const loadingTask = pdfjsLib.getDocument({
           url: signedUrlData.signedUrl,
