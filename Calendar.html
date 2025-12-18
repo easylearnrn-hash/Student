@@ -5073,50 +5073,22 @@
             payment.raw?.date;
           if (!source) return '';
           
-          // ⚡ CRITICAL: Check if timezone offset toggle is enabled
-          // This is set by the admin in Payment-Records and stored in localStorage
-          const offset12 = localStorage.getItem('la-offset-12') === 'true';
-          const offset11 = localStorage.getItem('la-offset-11') === 'true';
-          
-          // If using email_date and offset is enabled, apply timezone adjustment
-          if ((payment.email_date || payment.emailDate) && (offset12 || offset11)) {
-            try {
-              // Parse the timestamp
-              const timestamp = new Date(source);
-              if (!isNaN(timestamp.getTime())) {
-                // Apply offset: -12 hours (winter) or -11 hours (summer DST)
-                const offsetHours = offset12 ? 12 : 11;
-                const adjustedTimestamp = new Date(timestamp.getTime() - (offsetHours * 60 * 60 * 1000));
-                
-                // Extract date components using UTC methods (since we've already applied LA offset)
-                const year = adjustedTimestamp.getUTCFullYear();
-                const month = String(adjustedTimestamp.getUTCMonth() + 1).padStart(2, '0');
-                const day = String(adjustedTimestamp.getUTCDate()).padStart(2, '0');
-                
-                const adjustedDate = `${year}-${month}-${day}`;
-                
-                if (DEBUG_MODE) {
-                  console.log(`📅 Payment date adjusted: ${source} → ${adjustedDate} (offset: -${offsetHours}h)`);
-                }
-                
-                return adjustedDate;
-              }
-            } catch (err) {
-              debugLog('⚠️ Error applying timezone offset to payment date:', err);
-            }
+          try {
+            // Parse the timestamp - email_date is stored in UTC
+            const timestamp = new Date(source);
+            if (isNaN(timestamp.getTime())) return '';
+            
+            // Convert to local date string (YYYY-MM-DD) using local timezone
+            // This ensures the date shown matches the user's timezone
+            const year = timestamp.getFullYear();
+            const month = String(timestamp.getMonth() + 1).padStart(2, '0');
+            const day = String(timestamp.getDate()).padStart(2, '0');
+            
+            return `${year}-${month}-${day}`;
+          } catch (e) {
+            debugLog('⚠️ Error parsing payment date:', e);
+            return '';
           }
-          
-          // 🔧 FIX: Extract date portion from timestamps without timezone conversion
-          // For payments that don't need offset (manual records, etc.)
-          if (typeof source === 'string') {
-            // Extract YYYY-MM-DD from "2025-12-07 00:00:00+00" or "2025-12-07T00:00:00Z"
-            const dateOnlyMatch = source.match(/^(\d{4}-\d{2}-\d{2})/);
-            if (dateOnlyMatch) {
-              return dateOnlyMatch[1];
-            }
-          }
-          
-          return normalizeDateInput(source) || '';
         }
 
         function extractPaymentTime(payment) {
@@ -5137,36 +5109,16 @@
             const date = new Date(source);
             if (isNaN(date.getTime())) return '';
             
-            // 🔧 SPECIAL CASE: email_date is stored in ET (Eastern Time) formatted as UTC
-            // e.g., "2025-12-07 05:13:07+00" actually means 5:13 AM ET (not UTC)
-            // Need to convert ET → LA: Add 3 or 4 hours depending on DST
-            if (payment.email_date || payment.emailDate) {
-              const utcHours = date.getUTCHours();
-              const minutes = date.getUTCMinutes();
-              
-              // Determine ET offset based on date (DST rules)
-              // ET is UTC-5 (winter) or UTC-4 (summer DST)
-              // LA is UTC-8 (winter) or UTC-7 (summer DST)
-              // So ET to LA is always +3 hours during DST, +4 hours in winter
-              const year = date.getUTCFullYear();
-              const month = date.getUTCMonth(); // 0-11
-              
-              // Rough DST check: Mar-Nov is usually DST (more precise would check specific dates)
-              const isDST = month >= 2 && month <= 10; // March through November
-              const hourOffset = isDST ? 3 : 4;
-              
-              const laHours = (utcHours + hourOffset) % 24;
-              
-              // Convert to 12-hour format
-              const period = laHours >= 12 ? 'PM' : 'AM';
-              const displayHours = laHours % 12 || 12;
-              const displayMinutes = minutes.toString().padStart(2, '0');
-              
-              return `${displayHours}:${displayMinutes} ${period}`;
-            }
+            // Use local timezone (user's browser timezone) for time display
+            const hours = date.getHours();
+            const minutes = date.getMinutes();
             
-            // For other fields (created_at, etc.), use proper LA timezone conversion
-            return formatTimeInLA(date);
+            // Convert to 12-hour format
+            const period = hours >= 12 ? 'PM' : 'AM';
+            const displayHours = hours % 12 || 12;
+            const displayMinutes = minutes.toString().padStart(2, '0');
+            
+            return `${displayHours}:${displayMinutes} ${period}`;
           } catch (err) {
             debugLog('⚠️ Error extracting payment time:', err);
             return '';
