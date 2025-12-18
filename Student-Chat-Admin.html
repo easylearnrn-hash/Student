@@ -6,6 +6,9 @@
   <title>Admin Chat - ARNOMA</title>
   <link rel="icon" type="image/png" href="/richyfesta-logo.png">
   
+  <!-- Shared Auth -->
+  <script src="shared-auth.js"></script>
+  
   <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
@@ -542,8 +545,71 @@
     // Initialize
     async function init() {
       debugLog('🚀 Initializing Admin Chat...');
+      
+      // Ensure admin authentication using shared-auth.js
+      if (window.ArnomaAuth) {
+        try {
+          const session = await window.ArnomaAuth.ensureSession(supabase);
+          if (!session) {
+            debugLog('❌ No admin session - redirecting to login');
+            window.top.location.href = 'index.html';
+            return;
+          }
+          debugLog('✅ Admin authenticated:', session.user.email);
+        } catch (error) {
+          debugLog('❌ Auth error:', error);
+          alert('Authentication failed. Please log in again.');
+          window.top.location.href = 'index.html';
+          return;
+        }
+      } else {
+        debugLog('⚠️ ArnomaAuth not loaded, trying manual session check');
+        await ensureAdminAuth();
+      }
+      
       await loadStudents();
       setupEventListeners();
+    }
+
+    // Ensure Admin Authentication (Fallback method)
+    async function ensureAdminAuth() {
+      try {
+        // Check if we have an active session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (session) {
+          debugLog('✅ Existing session found:', session.user.email);
+          return session;
+        }
+        
+        debugLog('⚠️ No session found, checking localStorage...');
+        
+        // Try to restore session from localStorage (from parent window)
+        const storedSession = localStorage.getItem('arnoma:auth:session');
+        if (storedSession) {
+          try {
+            const parsedSession = JSON.parse(storedSession);
+            const { data, error } = await supabase.auth.setSession({
+              access_token: parsedSession.access_token,
+              refresh_token: parsedSession.refresh_token
+            });
+            
+            if (!error && data.session) {
+              debugLog('✅ Session restored from localStorage:', data.session.user.email);
+              return data.session;
+            }
+          } catch (e) {
+            debugLog('❌ Failed to restore session:', e);
+          }
+        }
+        
+        // If no session, show error
+        debugLog('❌ No valid session - admin features may be limited');
+        alert('⚠️ Warning: You may not be authenticated. Delete/Edit functions may not work.\n\nPlease ensure you are logged in as admin in the main window.');
+        
+      } catch (error) {
+        debugLog('❌ Auth error:', error);
+      }
     }
 
     // Load Students
