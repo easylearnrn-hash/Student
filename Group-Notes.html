@@ -4678,7 +4678,7 @@
 
       const confirmed = await customConfirm(
         'Remove Free Access',
-        `Remove free access from ${selectedFilteredNotes.size} note(s)?`
+        `Remove ALL free access (both group and individual) from ${selectedFilteredNotes.size} note(s)?`
       );
       if (!confirmed) return;
 
@@ -4686,22 +4686,60 @@
         const noteIds = Array.from(selectedFilteredNotes);
         const groupLetter = currentGroup.replace('Group ', '');
 
-  const { error } = await supabaseClient
+        // Remove BOTH group AND individual free access for these notes
+        // Option 1: Remove all free access for the current group (group-based access)
+        const { error: groupError } = await supabaseClient
           .from('note_free_access')
           .delete()
           .in('note_id', noteIds)
           .eq('access_type', 'group')
           .eq('group_letter', groupLetter);
 
-        if (error) throw error;
+        if (groupError) throw groupError;
+
+        // Option 2: Remove all individual student free access for these notes (in current group)
+        // First get student IDs in current group
+        const { data: studentsInGroup, error: studentsError } = await supabaseClient
+          .from('students')
+          .select('id')
+          .eq('group_name', groupLetter);
+
+        if (studentsError) {
+          console.error('Error fetching students:', studentsError);
+        }
+
+        if (studentsInGroup && studentsInGroup.length > 0) {
+          const studentIds = studentsInGroup.map(s => s.id);
+
+          const { error: individualError } = await supabaseClient
+            .from('note_free_access')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('access_type', 'individual')
+            .in('student_id', studentIds);
+
+          if (individualError) {
+            console.error('Error removing individual free access:', individualError);
+            // Don't throw - partial success is OK
+          }
+        }
 
         // Capture count before clearing
         const count = selectedFilteredNotes.size;
         
         // Update freeAccessGrants array immediately for instant UI feedback
-        freeAccessGrants = freeAccessGrants.filter(grant => 
-          !(noteIds.includes(grant.note_id) && grant.access_type === 'group' && grant.group_letter === groupLetter)
-        );
+        // Remove both group and individual access
+        const studentIdsInGroup = studentsInGroup?.map(s => s.id) || [];
+        freeAccessGrants = freeAccessGrants.filter(grant => {
+          // Keep grants that don't match our criteria
+          const isGroupMatch = noteIds.includes(grant.note_id) && 
+                               grant.access_type === 'group' && 
+                               grant.group_letter === groupLetter;
+          const isIndividualMatch = noteIds.includes(grant.note_id) && 
+                                    grant.access_type === 'individual' && 
+                                    studentIdsInGroup.includes(grant.student_id);
+          return !(isGroupMatch || isIndividualMatch);
+        });
         
         // Clear selection
         selectedFilteredNotes.clear();
@@ -4713,7 +4751,7 @@
         // Background refresh to sync badges
         loadData();
         
-        await customAlert('Success', `Removed free access from ${count} note(s)`);
+        await customAlert('Success', `Removed ALL free access from ${count} note(s) for Group ${groupLetter}`);
 
       } catch (error) {
         console.error('Error removing free access:', error);
