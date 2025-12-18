@@ -1386,29 +1386,91 @@
           document.getElementById('viewerControls').style.display = 'flex';
         showMediaPanelToggle();
           
-          // Try to fetch note data from database if we can extract an ID
-          // This allows us to load video_url even when PDF is passed via URL param
+          // CRITICAL: Fetch note data from database to verify group access
           if (noteId) {
             try {
               const { data: note, error: noteError } = await supabaseClient
                 .from('student_notes')
-                .select('video_url, title, video_allowed_groups, video_controls, video_title')
+                .select('*')
                 .eq('id', noteId)
                 .single();
               
-              if (note && !noteError) {
-                noteData = {
-                  ...noteData,
-                  video_url: note.video_url,
-                  video_allowed_groups: note.video_allowed_groups,
-                  video_controls: note.video_controls,
-                  video_title: note.video_title,
-                  title: note.title
-                };
+              if (noteError || !note) {
+                console.error('Note not found in database:', noteError);
+                showError('❌ Note not found in database');
+                return;
               }
+              
+              // ============================================================
+              // GROUP ACCESS VALIDATION - CRITICAL SECURITY CHECK
+              // ============================================================
+              
+              // Normalize student's group (handle group_letter, group_name, group)
+              const studentGroup = (
+                currentStudent.group_letter || 
+                currentStudent.group_name || 
+                currentStudent.group || 
+                ''
+              ).toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
+              
+              // Normalize note's group (handle group_letter, group_name, group)
+              const noteGroup = (
+                note.group_letter || 
+                note.group_name || 
+                note.group || 
+                ''
+              ).toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
+              
+              console.log('🔐 Group Access Check:');
+              console.log('  Student Group:', studentGroup);
+              console.log('  Note Group:', noteGroup);
+              
+              // Verify student is in the correct group
+              if (noteGroup && studentGroup !== noteGroup) {
+                console.error('❌ Group mismatch! Student:', studentGroup, 'Note:', noteGroup);
+                showError(`🚫 Access Denied: This note is for Group ${noteGroup}. You are in Group ${studentGroup}.`);
+                return;
+              }
+              
+              console.log('✅ Group access verified');
+              
+              // Check if note requires payment
+              if (note.requires_payment) {
+                console.log('💳 Checking payment requirement...');
+                const { data: payments, error: paymentError } = await supabaseClient
+                  .from('payment_records')
+                  .select('*')
+                  .eq('student_id', currentStudent.id)
+                  .eq('status', 'paid')
+                  .limit(1);
+                
+                if (paymentError || !payments || payments.length === 0) {
+                  console.error('❌ Payment required but not found');
+                  showError('🔒 This note is locked. Payment required to access.');
+                  return;
+                }
+                console.log('✅ Payment verified');
+              }
+              
+              // Store full note data
+              noteData = {
+                ...noteData,
+                ...note,
+                video_url: note.video_url,
+                video_allowed_groups: note.video_allowed_groups,
+                video_controls: note.video_controls,
+                video_title: note.video_title,
+                title: note.title
+              };
+              
             } catch (e) {
-              console.log('Could not load note metadata:', e);
+              console.error('Error validating note access:', e);
+              showError('Failed to validate access to this note');
+              return;
             }
+          } else {
+            // No noteId provided - can't validate group access
+            console.warn('⚠️ No noteId provided - skipping group validation');
           }
           
           // Check if it's a storage path or a full URL
@@ -1440,11 +1502,38 @@
           
           noteData = note;
           
+          // ============================================================
+          // GROUP ACCESS VALIDATION - CRITICAL SECURITY CHECK
+          // ============================================================
+          
+          // Normalize student's group (handle group_letter, group_name, group)
+          const studentGroup = (
+            currentStudent.group_letter || 
+            currentStudent.group_name || 
+            currentStudent.group || 
+            ''
+          ).toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
+          
+          // Normalize note's group (handle group_letter, group_name, group)
+          const noteGroup = (
+            note.group_letter || 
+            note.group_name || 
+            note.group || 
+            ''
+          ).toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
+          
+          console.log('🔐 Group Access Check (Legacy):');
+          console.log('  Student Group:', studentGroup);
+          console.log('  Note Group:', noteGroup);
+          
           // Verify student is in the correct group
-          if (note.group_name !== currentStudent.group_name) {
-            showError('This note is not for your group');
+          if (noteGroup && studentGroup !== noteGroup) {
+            console.error('❌ Group mismatch! Student:', studentGroup, 'Note:', noteGroup);
+            showError(`🚫 Access Denied: This note is for Group ${noteGroup}. You are in Group ${studentGroup}.`);
             return;
           }
+          
+          console.log('✅ Group access verified (legacy path)');
           
           // Check if note requires payment
           if (note.requires_payment) {
