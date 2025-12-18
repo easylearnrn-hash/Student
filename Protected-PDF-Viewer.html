@@ -477,26 +477,25 @@
       }
       
       /* 🔒 PRINT PROTECTION: Show high-quality content with prominent watermark */
-      /* This allows physical printing while ensuring attribution via watermark */
-      .page-canvas-screen {
-        display: block !important; /* Show high-quality version for printing */
+      /* Convert canvas to images for Safari compatibility */
+      .page-image {
+        display: block !important;
         max-width: 100% !important;
         width: 100% !important;
         height: auto !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-        color-adjust: exact !important;
       }
       
+      .page-canvas-screen,
       .page-canvas-print {
-        display: none !important; /* Hide the degraded version - not needed */
+        display: none !important; /* Hide canvas elements in print */
       }
       
-      /* Ensure all canvas elements print */
-      canvas {
+      /* Ensure all images print */
+      img {
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-        color-adjust: exact !important;
       }
       
       /* Watermark ensures attribution even if saved as PDF */
@@ -1953,7 +1952,7 @@
     }
     
     // ============================================================
-    // PRINT FUNCTION (WITH WATERMARK)
+    // PRINT FUNCTION (WITH WATERMARK) - Safari Compatible
     // ============================================================
     
     async function printNote() {
@@ -1976,19 +1975,27 @@
           const scale = 2.5;
           const viewport = page.getViewport({ scale: scale });
           
+          // Create canvas
           const canvas = document.createElement('canvas');
-          canvas.className = 'page-canvas page-canvas-screen';
           const context = canvas.getContext('2d');
           
           canvas.height = viewport.height;
           canvas.width = viewport.width;
-          canvas.style.width = (viewport.width / scale) + 'px';
-          canvas.style.height = (viewport.height / scale) + 'px';
           
           await page.render({
             canvasContext: context,
             viewport: viewport
           }).promise;
+          
+          // Convert canvas to image for reliable Safari printing
+          const imageDataUrl = canvas.toDataURL('image/png', 1.0);
+          const img = document.createElement('img');
+          img.src = imageDataUrl;
+          img.className = 'page-image';
+          img.style.width = (viewport.width / scale) + 'px';
+          img.style.height = (viewport.height / scale) + 'px';
+          img.style.display = 'block';
+          img.style.maxWidth = '100%';
           
           const pageContainer = document.createElement('div');
           pageContainer.className = 'page-container';
@@ -2007,7 +2014,7 @@
             </div>
           `;
           
-          pageContainer.appendChild(canvas);
+          pageContainer.appendChild(img);
           pageContainer.appendChild(watermark);
           content.appendChild(pageContainer);
         }
