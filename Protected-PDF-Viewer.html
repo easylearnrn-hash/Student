@@ -476,45 +476,19 @@
         text-shadow: none !important;
       }
       
-      /* 🔒 ANTI-PDF-SAVE: Hide high-quality canvas, show degraded version */
+      /* 🔒 PRINT PROTECTION: Show high-quality content with prominent watermark */
+      /* This allows physical printing while ensuring attribution via watermark */
       .page-canvas-screen {
-        display: none !important; /* Hide high-quality version when printing/saving */
+        display: block !important; /* Show high-quality version for printing */
+        max-width: 100%;
+        height: auto;
       }
       
       .page-canvas-print {
-        display: block !important; /* Show ultra-low quality version */
-        max-width: 100%;
-        height: auto;
-        
-        /* Additional CSS degradation for PDF saves */
-        filter: blur(12px) contrast(0.2) brightness(2) grayscale(0.5);
-        -webkit-filter: blur(12px) contrast(0.2) brightness(2) grayscale(0.5);
-        opacity: 0.15;
-        
-        /* Make it stretched and pixelated */
-        image-rendering: pixelated;
-        image-rendering: -moz-crisp-edges;
-        image-rendering: crisp-edges;
+        display: none !important; /* Hide the degraded version - not needed */
       }
       
-      /* Add heavy noise overlay to further degrade saved PDFs */
-      .page-container::after {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-image: 
-          repeating-linear-gradient(0deg, transparent, transparent 1px, rgba(0,0,0,0.15) 1px, rgba(0,0,0,0.15) 2px),
-          repeating-linear-gradient(90deg, transparent, transparent 1px, rgba(0,0,0,0.15) 1px, rgba(0,0,0,0.15) 2px),
-          repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(255,255,255,0.1) 3px, rgba(255,255,255,0.1) 6px);
-        pointer-events: none;
-        z-index: 999;
-      }
-      
-      /* Physical printers may ignore blur filters, allowing readable prints */
-      /* But PDF saves will capture all CSS filters and degradation */
+      /* Watermark ensures attribution even if saved as PDF */
     }
 
     /* ==========================================================================
@@ -1968,81 +1942,47 @@
     }
     
     // ============================================================
-    // PRINT FUNCTION (WITH WATERMARK + ANTI-PDF-SAVE PROTECTION)
+    // PRINT FUNCTION (WITH WATERMARK)
     // ============================================================
     
     async function printNote() {
       try {
-        // Render all pages for printing
+        // Render all pages for printing with watermarks
         const content = document.getElementById('pdfContent');
         content.innerHTML = '<div class="loading-text">Preparing for print...</div>';
-        
-        // Listen for print dialog closure to detect PDF save attempts
-        const beforePrint = () => {
-          // When print dialog opens, degrade all canvases for PDF save
-          document.querySelectorAll('.page-canvas').forEach(canvas => {
-            // Mark canvases as "print mode" for CSS targeting
-            canvas.classList.add('print-active');
-          });
-        };
         
         const afterPrint = () => {
           // Restore single page view after print
           renderPage(currentPage);
         };
         
-        window.addEventListener('beforeprint', beforePrint);
-        window.addEventListener('afterprint', afterPrint);
+        window.addEventListener('afterprint', afterPrint, { once: true });
         
         for (let i = 1; i <= totalPages; i++) {
           const page = await pdfDoc.getPage(i);
           
-          // Render TWO versions: high quality for screen, low quality for PDF save
+          // High-quality rendering for printing
+          const scale = 2.5;
+          const viewport = page.getViewport({ scale: scale });
           
-          // 1. SCREEN VERSION (shown in preview): High quality
-          const screenScale = 2.5;
-          const screenViewport = page.getViewport({ scale: screenScale });
+          const canvas = document.createElement('canvas');
+          canvas.className = 'page-canvas page-canvas-screen';
+          const context = canvas.getContext('2d');
           
-          const screenCanvas = document.createElement('canvas');
-          screenCanvas.className = 'page-canvas page-canvas-screen';
-          const screenContext = screenCanvas.getContext('2d');
-          
-          screenCanvas.height = screenViewport.height;
-          screenCanvas.width = screenViewport.width;
-          screenCanvas.style.width = (screenViewport.width / screenScale) + 'px';
-          screenCanvas.style.height = (screenViewport.height / screenScale) + 'px';
+          canvas.height = viewport.height;
+          canvas.width = viewport.width;
+          canvas.style.width = (viewport.width / scale) + 'px';
+          canvas.style.height = (viewport.height / scale) + 'px';
           
           await page.render({
-            canvasContext: screenContext,
-            viewport: screenViewport
+            canvasContext: context,
+            viewport: viewport
           }).promise;
-          
-          // 2. PRINT VERSION (used for PDF save): Ultra-low quality + blur
-          const printScale = 0.1; // 10% quality - nearly unreadable
-          const printViewport = page.getViewport({ scale: printScale });
-          
-          const printCanvas = document.createElement('canvas');
-          printCanvas.className = 'page-canvas page-canvas-print';
-          printCanvas.style.display = 'none'; // Hidden until print
-          const printContext = printCanvas.getContext('2d', { alpha: false });
-          
-          printCanvas.height = printViewport.height;
-          printCanvas.width = printViewport.width;
-          printCanvas.style.width = (screenViewport.width / screenScale) + 'px';
-          printCanvas.style.height = (screenViewport.height / screenScale) + 'px';
-          
-          await page.render({
-            canvasContext: printContext,
-            viewport: printViewport
-          }).promise;
-          
-          // Apply extreme degradation to print canvas
-          printContext.filter = 'blur(5px) contrast(0.2) brightness(2)';
-          printContext.globalAlpha = 0.15;
           
           const pageContainer = document.createElement('div');
           pageContainer.className = 'page-container';
           
+          // Add prominent watermark
           const watermark = document.createElement('div');
           watermark.className = 'watermark-overlay';
           watermark.innerHTML = `
@@ -2056,8 +1996,7 @@
             </div>
           `;
           
-          pageContainer.appendChild(screenCanvas); // High quality for viewing
-          pageContainer.appendChild(printCanvas);   // Low quality for PDF save
+          pageContainer.appendChild(canvas);
           pageContainer.appendChild(watermark);
           content.appendChild(pageContainer);
         }
@@ -2070,8 +2009,6 @@
       } catch (error) {
         console.error('Print error:', error);
         alert('Failed to prepare for printing');
-        window.removeEventListener('beforeprint', beforePrint);
-        window.removeEventListener('afterprint', afterPrint);
       }
     }
     
