@@ -1512,17 +1512,20 @@
           document.getElementById('viewerControls').style.display = 'flex';
           showMediaPanelToggle();
           
-          // Try to fetch note data from database if we can extract an ID
-          // This allows us to load video_url even when PDF is passed via URL param
+          // CRITICAL: Fetch note metadata FIRST so we have pdf_url for fallback
           if (noteId) {
             try {
+              console.log('📋 Fetching metadata for note ID:', noteId);
               const { data: note, error: noteError } = await supabaseClient
                 .from('student_notes')
                 .select('pdf_url, video_url, title, video_allowed_groups, video_controls, video_title')
                 .eq('id', noteId)
                 .single();
               
-              if (note && !noteError) {
+              if (noteError) {
+                console.error('❌ Error loading note metadata:', noteError);
+              } else if (note) {
+                console.log('✅ Loaded metadata. Canonical pdf_url:', note.pdf_url);
                 noteData = {
                   ...noteData,
                   // Capture the canonical pdf_url from metadata so we can recover if the direct path breaks
@@ -1533,10 +1536,14 @@
                   video_title: note.video_title,
                   title: note.title
                 };
+              } else {
+                console.warn('⚠️ No note metadata found for ID:', noteId);
               }
             } catch (e) {
-              console.log('Could not load note metadata:', e);
+              console.error('❌ Exception loading note metadata:', e);
             }
+          } else {
+            console.warn('⚠️ No noteId provided - fallback recovery will not be available');
           }
           
           // Check if it's a storage path or a full URL
