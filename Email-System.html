@@ -2138,7 +2138,7 @@
       const SUPABASE_ANON_KEY =
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
 
-      let supabase = null;
+      let supabaseClient = null;
       
       // ============================================================
       // ⚡ PERFORMANCE UTILITIES
@@ -2193,11 +2193,16 @@
 
       // Initialize Supabase client
       if (window.supabase && window.supabase.createClient) {
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         debugLog('✅ Supabase client initialized');
         
+        // Create global alias for backward compatibility (but don't shadow window.supabase)
+        if (typeof supabase === 'undefined') {
+          window.supabase_client = supabaseClient;
+        }
+        
         // Verify session on load
-        supabase.auth.getSession().then(({ data: { session } }) => {
+        supabaseClient.auth.getSession().then(({ data: { session } }) => {
           if (session) {
             debugLog('✅ User session active:', session.user.email);
           } else {
@@ -2207,6 +2212,9 @@
       } else {
         console.error('❌ Supabase library not loaded');
       }
+      
+      // Create a local reference that doesn't shadow the global
+      const supabase = supabaseClient;
 
       // ============================================================
       // TEST EMAIL ADDRESS MANAGER (PERSISTENT STORAGE)
@@ -6926,6 +6934,17 @@
         debugLog('🌍 Automation engine exposed globally as window.arnoma_automationEngine');
         debugLog('🌍 Template manager exposed globally as window.arnoma_templateManager');
         debugLog('🌍 Test email manager exposed globally as window.arnoma_testEmailManager');
+
+        // Make modal control functions globally accessible
+        window.openSentEmails = openSentEmails;
+        window.closeSentEmails = closeSentEmails;
+        window.openEditor = openEditor;
+        window.openAutomations = openAutomations;
+        window.closeAutomations = closeAutomations;
+        window.openPreview = openPreview;
+        window.closePreview = closePreview;
+        window.openTestEmail = openTestEmail;
+        debugLog('🌍 Modal control functions exposed globally');
 
         // Initialize tooltip engine
         TooltipEngine.init();

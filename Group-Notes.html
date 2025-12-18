@@ -736,6 +736,36 @@
     // Debug mode
     const DEBUG_MODE = false;
 
+    // ===== NOTIFICATION SYSTEM =====
+    async function createNotification(type, title, message, category, payload = {}) {
+      try {
+        const { error } = await supabaseClient.from('notifications').insert({
+          type: type,
+          title: title,
+          message: message,
+          category: category,
+          payload: payload,
+          read: false,
+          is_read: false,
+          timestamp: new Date().toISOString(),
+          created_at: new Date().toISOString()
+        });
+        
+        if (error) {
+          console.error('❌ Error creating notification:', error);
+          return null;
+        }
+        
+        return true;
+      } catch (err) {
+        console.error('❌ Exception creating notification:', err);
+        return null;
+      }
+    }
+
+    // Make globally available
+    window.createNotification = createNotification;
+
     // ===== EMAIL NOTIFICATION FOR POSTED NOTES =====
     async function sendNotePostedEmail(groupName, noteTitle, noteCategory) {
       try {
@@ -1937,6 +1967,11 @@
           p.note_id === noteId && p.group_name === currentGroup
         );
 
+        // Get note details to check if it requires payment
+        const note = allNotes.find(n => n.id === noteId);
+        const requiresPayment = note?.requires_payment || false;
+        const accessType = requiresPayment ? 'PAID' : 'FREE';
+
         if (existing) {
           // Update existing
           const { error } = await supabaseClient
@@ -1972,6 +2007,23 @@
           }
         }
 
+        // ✅ CREATE NOTIFICATION
+        await createNotification(
+          'note_access_granted',
+          'Note Access Granted',
+          `Opened '${title}' for ${currentGroup} (${accessType} access)`,
+          'note',
+          {
+            note_id: noteId,
+            note_title: title,
+            group_name: currentGroup,
+            access_type: accessType,
+            requires_payment: requiresPayment,
+            granted_at: new Date().toISOString(),
+            action: 'grant_group_access'
+          }
+        );
+
         // PERFORMANCE: Clear permissions cache after mutation
         clearCache('permissions');
 
@@ -2001,6 +2053,21 @@
 
         // Update local state
         permission.is_accessible = false;
+
+        // ✅ CREATE NOTIFICATION
+        await createNotification(
+          'note_access_revoked',
+          'Note Access Revoked',
+          `Revoked access to '${title}' for ${currentGroup}`,
+          'note',
+          {
+            note_id: noteId,
+            note_title: title,
+            group_name: currentGroup,
+            revoked_at: new Date().toISOString(),
+            action: 'revoke_group_access'
+          }
+        );
 
         // PERFORMANCE: Clear permissions cache after mutation
         clearCache('permissions');
@@ -3415,6 +3482,33 @@
 
         if (error) throw error;
 
+        // ✅ CREATE NOTIFICATION for individual access
+        for (const noteId of noteIds) {
+          const note = allNotes.find(n => n.id === noteId);
+          const noteTitle = note?.title || 'Unknown Note';
+          const studentNames = Array.from(selectedStudentIds).map(sid => {
+            const student = allStudents.find(s => s.id === sid);
+            return student?.name || student?.email || 'Unknown Student';
+          }).join(', ');
+
+          await createNotification(
+            'note_individual_access_granted',
+            'Individual Note Access Granted',
+            `Granted FREE access to '${noteTitle}' for ${studentCount} student(s)`,
+            'note',
+            {
+              note_id: noteId,
+              note_title: noteTitle,
+              student_count: studentCount,
+              student_ids: Array.from(selectedStudentIds),
+              student_names: studentNames,
+              access_type: 'FREE',
+              granted_at: new Date().toISOString(),
+              action: 'grant_individual_access'
+            }
+          );
+        }
+
         // Send email notifications to selected students
         console.log('📧 Starting individual student access email notification process...');
         let emailSummary = '';
@@ -3710,6 +3804,33 @@
           const message = duplicateCount > 0 
             ? `✅ FREE access granted to Group ${groupLetter}!\n${successCount} new grants, ${duplicateCount} already existed${emailSummary}`
             : `✅ FREE access granted to Group ${groupLetter} for ${selectedNoteIds.size} note(s)${emailSummary}`;
+          
+          // ✅ CREATE NOTIFICATION for group free access
+          const noteTitles = Array.from(selectedNoteIds).map(noteId => {
+            const note = allNotes.find(n => n.id === noteId);
+            return note?.title || 'Unknown Note';
+          }).join(', ');
+
+          await createNotification(
+            'note_free_access_group',
+            'FREE Access Granted (Group)',
+            `Granted FREE access to ${selectedNoteIds.size} note(s) for Group ${groupLetter} (Class date: ${classDate})`,
+            'note',
+            {
+              note_ids: Array.from(selectedNoteIds),
+              note_titles: noteTitles,
+              group_letter: groupLetter,
+              class_date: classDate,
+              access_type: 'FREE',
+              grant_type: 'group',
+              success_count: successCount,
+              duplicate_count: duplicateCount,
+              created_by: adminEmail,
+              granted_at: new Date().toISOString(),
+              action: 'grant_free_access_group'
+            }
+          );
+
           await customAlert('Success', message);
           
         } else {
@@ -3812,6 +3933,38 @@
           const message = duplicateCount > 0 
             ? `✅ FREE access granted to ${freeSelectedStudents.size} student(s)!\n${successCount} new grants, ${duplicateCount} already existed${emailSummary}`
             : `✅ FREE access granted to ${freeSelectedStudents.size} student(s) for ${selectedNoteIds.size} note(s)${emailSummary}`;
+
+          // ✅ CREATE NOTIFICATION for individual free access
+          const noteTitles = Array.from(selectedNoteIds).map(noteId => {
+            const note = allNotes.find(n => n.id === noteId);
+            return note?.title || 'Unknown Note';
+          }).join(', ');
+
+          const studentNames = Array.from(freeSelectedStudents).map(sid => {
+            const student = allStudents.find(s => s.id === sid);
+            return student?.name || student?.email || 'Unknown Student';
+          }).join(', ');
+
+          await createNotification(
+            'note_free_access_individual',
+            'FREE Access Granted (Individual Students)',
+            `Granted FREE access to ${selectedNoteIds.size} note(s) for ${freeSelectedStudents.size} student(s) (Class date: ${classDate})`,
+            'note',
+            {
+              note_ids: Array.from(selectedNoteIds),
+              note_titles: noteTitles,
+              student_ids: Array.from(freeSelectedStudents),
+              student_names: studentNames,
+              class_date: classDate,
+              access_type: 'FREE',
+              grant_type: 'individual',
+              success_count: successCount,
+              duplicate_count: duplicateCount,
+              created_by: adminEmail,
+              granted_at: new Date().toISOString(),
+              action: 'grant_free_access_individual'
+            }
+          );
 
           await customAlert('Success', message);
         }
@@ -4324,6 +4477,8 @@
 
       try {
         const groupLetter = currentGroup.replace('Group ', '');
+        const note = allNotes.find(n => n.id === noteId);
+        const noteTitle = note?.title || 'Unknown Note';
         
   const { error } = await supabaseClient
           .from('note_free_access')
@@ -4334,6 +4489,23 @@
           });
 
         if (error) throw error;
+
+        // ✅ CREATE NOTIFICATION
+        await createNotification(
+          'note_made_free',
+          'Note Made FREE',
+          `Made '${noteTitle}' permanently FREE for Group ${groupLetter}`,
+          'note',
+          {
+            note_id: noteId,
+            note_title: noteTitle,
+            group_letter: groupLetter,
+            access_type: 'FREE',
+            grant_type: 'group',
+            made_free_at: new Date().toISOString(),
+            action: 'make_note_free'
+          }
+        );
 
         // Refresh data first (updates badges), then reopen modal with fresh data
         await loadData(); // This updates the badge counts and allNotes array
@@ -4352,6 +4524,8 @@
 
       try {
         const groupLetter = currentGroup.replace('Group ', '');
+        const note = allNotes.find(n => n.id === noteId);
+        const noteTitle = note?.title || 'Unknown Note';
         
   const { error } = await supabaseClient
           .from('note_free_access')
@@ -4361,6 +4535,21 @@
           .eq('group_letter', groupLetter);
 
         if (error) throw error;
+
+        // ✅ CREATE NOTIFICATION
+        await createNotification(
+          'note_free_access_removed',
+          'FREE Access Removed',
+          `Removed FREE access for '${noteTitle}' from Group ${groupLetter}`,
+          'note',
+          {
+            note_id: noteId,
+            note_title: noteTitle,
+            group_letter: groupLetter,
+            removed_at: new Date().toISOString(),
+            action: 'remove_free_access'
+          }
+        );
 
         // Refresh data first (updates badges), then reopen modal with fresh data
         await loadData(); // This updates the badge counts and allNotes array

@@ -1,0 +1,1646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔔 Notifications</title>
+  
+  <!-- Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1/dist/umd/supabase.min.js"></script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      color: white;
+      margin: 0;
+      padding: 0;
+      overflow-y: auto;
+      background: transparent !important;
+    }
+
+    html {
+      background: transparent !important;
+    }
+
+    /* Modal Overlay - Completely transparent, clicks pass through */
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: transparent !important;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      overflow-y: auto;
+      min-height: 100vh;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 700px;
+      margin: auto;
+      padding: 0;
+      position: relative;
+    }
+
+    /* Notification Center Panel */
+    #notificationCenterPanel {
+      background: linear-gradient(135deg, rgb(15, 23, 42) 0%, rgb(30, 30, 50) 100%);
+      backdrop-filter: blur(24px);
+      border: 2px solid rgba(138, 180, 255, 0.3);
+      border-radius: 20px;
+      padding: 0;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      max-height: 80vh;
+    }
+
+    /* Header */
+    .notification-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 24px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      flex-shrink: 0;
+    }
+
+    .notification-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .notification-header-left span.emoji {
+      font-size: 20px;
+    }
+
+    .notification-header-left h2 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    #notificationCount {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.6);
+      font-weight: 500;
+    }
+
+    .notification-header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .header-btn {
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid;
+    }
+
+    .header-btn.clear-all {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.3);
+      color: #22c55e;
+    }
+
+    .header-btn.clear-all:hover {
+      background: rgba(34, 197, 94, 0.25);
+    }
+
+    .header-btn.mark-read {
+      background: rgba(138, 180, 255, 0.15);
+      border-color: rgba(138, 180, 255, 0.3);
+      color: #8ab4ff;
+    }
+
+    .header-btn.mark-read:hover {
+      background: rgba(138, 180, 255, 0.25);
+    }
+
+    .header-btn.close {
+      width: 32px;
+      height: 32px;
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .header-btn.close:hover {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #ef4444;
+    }
+
+    .header-btn.settings {
+      width: 32px;
+      height: 32px;
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: rgba(255, 255, 255, 0.6);
+      font-size: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .header-btn.settings:hover {
+      background: rgba(138, 180, 255, 0.15);
+      border-color: rgba(138, 180, 255, 0.3);
+      color: #8ab4ff;
+    }
+
+    /* Settings Modal */
+    .settings-modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+    }
+
+    .settings-modal-overlay.active {
+      display: flex;
+    }
+
+    .settings-modal {
+      background: linear-gradient(135deg, rgb(15, 23, 42) 0%, rgb(30, 30, 50) 100%);
+      border: 2px solid rgba(138, 180, 255, 0.3);
+      border-radius: 16px;
+      padding: 24px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 85vh;
+      overflow-y: auto;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.9);
+    }
+
+    /* Custom scrollbar for settings modal */
+    .settings-modal::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .settings-modal::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+    }
+
+    .settings-modal::-webkit-scrollbar-thumb {
+      background: rgba(138, 180, 255, 0.3);
+      border-radius: 4px;
+    }
+
+    .settings-modal::-webkit-scrollbar-thumb:hover {
+      background: rgba(138, 180, 255, 0.5);
+    }
+
+    .settings-modal h3 {
+      margin: 0 0 20px 0;
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .filter-option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .filter-option:last-child {
+      border-bottom: none;
+    }
+
+    .filter-section-header {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.9);
+      margin-top: 24px;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    .filter-section-header:first-of-type {
+      margin-top: 16px;
+    }
+
+    .filter-option-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .filter-option-label .emoji {
+      font-size: 18px;
+    }
+
+    /* Custom Toggle Switch */
+    .toggle-switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .toggle-switch.active {
+      background: rgba(34, 197, 94, 0.3);
+      border-color: rgba(34, 197, 94, 0.5);
+    }
+
+    .toggle-switch::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      background: white;
+      border-radius: 50%;
+      transition: all 0.3s;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .toggle-switch.active::after {
+      left: 22px;
+      background: #22c55e;
+    }
+
+    .settings-modal-footer {
+      margin-top: 20px;
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    .settings-modal-footer button {
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid;
+    }
+
+    .settings-modal-footer button.close-btn {
+      background: rgba(138, 180, 255, 0.15);
+      border-color: rgba(138, 180, 255, 0.3);
+      color: #8ab4ff;
+    }
+
+    .settings-modal-footer button.close-btn:hover {
+      background: rgba(138, 180, 255, 0.25);
+    }
+
+    /* Notifications List */
+    #notificationsList {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 24px;
+    }
+
+    /* Date Section Headers */
+    .date-section {
+      font-size: 12px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin: 20px 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .date-section:first-child {
+      margin-top: 0;
+    }
+
+    /* Notification Item */
+    .notification-item {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+
+    .notification-item:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(138, 180, 255, 0.3);
+      transform: translateX(4px);
+    }
+
+    .notification-item.unread {
+      background: rgba(138, 180, 255, 0.08);
+      border-color: rgba(138, 180, 255, 0.2);
+    }
+
+    .notification-item.unread::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 4px;
+      height: 60%;
+      background: #8ab4ff;
+      border-radius: 0 4px 4px 0;
+    }
+
+    /* Notification Meta (icon, category, time) */
+    .notification-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .notification-meta .emoji {
+      font-size: 16px;
+    }
+
+    .notification-meta .category {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .notification-meta .category.email {
+      color: #3b82f6;
+    }
+
+    .notification-meta .category.notification {
+      color: #94a3b8;
+    }
+
+    .notification-meta .category.payment {
+      color: #22c55e;
+    }
+
+    .notification-meta .category.student {
+      color: #f59e0b;
+    }
+
+    .notification-meta .spacer {
+      flex: 1;
+    }
+
+    .notification-meta .time {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    /* Notification Title */
+    .notification-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+
+    /* Notification Description */
+    .notification-description {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.7);
+      line-height: 1.5;
+    }
+
+    /* Notification Footer */
+    .notification-footer {
+      margin-top: 8px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Quick Actions */
+    .quick-actions {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .quick-action-btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: 1px solid;
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .quick-action-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    .quick-action-btn.primary {
+      background: rgba(138, 180, 255, 0.15);
+      border-color: rgba(138, 180, 255, 0.3);
+      color: #8ab4ff;
+    }
+
+    .quick-action-btn.primary:hover {
+      background: rgba(138, 180, 255, 0.25);
+    }
+
+    .quick-action-btn.success {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.3);
+      color: #22c55e;
+    }
+
+    .quick-action-btn.success:hover {
+      background: rgba(34, 197, 94, 0.25);
+    }
+
+    .quick-action-btn.danger {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: #ef4444;
+    }
+
+    .quick-action-btn.danger:hover {
+      background: rgba(239, 68, 68, 0.25);
+    }
+
+    .quick-action-btn.warning {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: rgba(245, 158, 11, 0.3);
+      color: #f59e0b;
+    }
+
+    .quick-action-btn.warning:hover {
+      background: rgba(245, 158, 11, 0.25);
+    }
+
+    /* Notification Footer (student name, etc.) */
+    .notification-footer {
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 8px;
+    }
+
+    /* Empty State */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 20px;
+      text-align: center;
+    }
+
+    .empty-state .emoji {
+      font-size: 48px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .empty-state h3 {
+      font-size: 18px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 8px;
+    }
+
+    .empty-state p {
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    /* Scrollbar */
+    #notificationsList::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #notificationsList::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 4px;
+    }
+
+    #notificationsList::-webkit-scrollbar-thumb {
+      background: rgba(138, 180, 255, 0.3);
+      border-radius: 4px;
+    }
+
+    #notificationsList::-webkit-scrollbar-thumb:hover {
+      background: rgba(138, 180, 255, 0.5);
+    }
+  </style>
+</head>
+<body>
+  <div class="modal-overlay">
+    <div class="container">
+      <div id="notificationCenterPanel">
+        <!-- Header -->
+        <div class="notification-header">
+          <div class="notification-header-left">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 8px;">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+            </svg>
+        <h2>Notifications</h2>
+        <span id="notificationCount">Loading...</span>
+      </div>
+      <div class="notification-header-right">
+        <button class="header-btn settings" onclick="openSettingsModal()" title="Filter notifications">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 1v6m0 6v6m5.66-13.66l-4.25 4.24m-2.82 2.84l-4.25 4.24M23 12h-6m-6 0H1m17.66 5.66l-4.25-4.24m-2.82-2.84l-4.25-4.24"></path>
+          </svg>
+        </button>
+        <button class="header-btn clear-all" onclick="clearAllNotifications()">Clear All</button>
+        <button class="header-btn mark-read" onclick="markAllNotificationsAsRead()">Mark All Read</button>
+        <button class="header-btn close" onclick="closeNotificationCenter()">×</button>
+      </div>
+    </div>
+
+    <!-- Notifications List -->
+    <div id="notificationsList">
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.5; margin-bottom: 16px;">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+        </svg>
+        <h3>Loading notifications...</h3>
+        <p>Please wait</p>
+      </div>
+    </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="settings-modal-overlay" id="settingsModalOverlay">
+    <div class="settings-modal">
+      <h3>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M12 1v6m0 6v6m5.66-13.66l-4.25 4.24m-2.82 2.84l-4.25 4.24M23 12h-6m-6 0H1m17.66 5.66l-4.25-4.24m-2.82-2.84l-4.25-4.24"></path>
+        </svg>
+        Notification Filters
+      </h3>
+      
+      <!-- Payment Filters -->
+      <div class="filter-section-header">💰 Payment Notifications</div>
+      
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">✅</span>
+          <span>Payment Received</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('payment_received')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">�</span>
+          <span>Payment Reassigned</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('payment_reassigned')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">📅</span>
+          <span>Payment Moved</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('payment_moved')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">🚫</span>
+          <span>Payment Ignored</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('payment_ignored')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">❌</span>
+          <span>No Payments Found (Sync)</span>
+        </div>
+        <div class="toggle-switch" onclick="toggleFilter('payment_empty')"></div>
+      </div>
+
+      <!-- Email Filters -->
+      <div class="filter-section-header">📧 Email Notifications</div>
+      
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">📨</span>
+          <span>Email Sent</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('email_sent')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">📬</span>
+          <span>Bulk Email Sent</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('email_bulk')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">❌</span>
+          <span>Email Failed</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('email_failed')"></div>
+      </div>
+
+      <!-- Student & Absence Filters -->
+      <div class="filter-section-header">👤 Student Notifications</div>
+      
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">➕</span>
+          <span>Student Added</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('student_added')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">✏️</span>
+          <span>Student Updated</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('student_updated')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">💳</span>
+          <span>Credit Added/Used</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('student_credit')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">📝</span>
+          <span>Waiting List Signup</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('waiting_list')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">⚠️</span>
+          <span>Student Marked Absent</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('absence_marked')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">✅</span>
+          <span>Student Un-Absented</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('absence_unmarked')"></div>
+      </div>
+
+      <!-- Group & Note Filters -->
+      <div class="filter-section-header">👥 Group & Note Notifications</div>
+      
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">🔓</span>
+          <span>Note Opened (FREE)</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('note_free')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">💵</span>
+          <span>Note Opened (PAID)</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('note_paid')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">�</span>
+          <span>Note Access Revoked</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('note_revoked')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">📅</span>
+          <span>Group Schedule Changed</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('group_schedule')"></div>
+      </div>
+
+      <!-- Other Filters -->
+      <div class="filter-section-header">⚙️ Other Notifications</div>
+      
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">🎥</span>
+          <span>Video Notifications</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('video')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">📝</span>
+          <span>Test Notifications</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('test')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">🚨</span>
+          <span>Alert Notifications</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('alert')"></div>
+      </div>
+
+      <div class="filter-option">
+        <div class="filter-option-label">
+          <span class="emoji">🔧</span>
+          <span>Admin/System Notifications</span>
+        </div>
+        <div class="toggle-switch active" onclick="toggleFilter('admin')"></div>
+      </div>
+
+      <div class="settings-modal-footer">
+        <button class="close-btn" onclick="closeSettingsModal()">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ============================================================
+    // SUPABASE CONFIGURATION
+    // ============================================================
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let notifications = [];
+    let realtimeChannel = null;
+
+    // ============================================================
+    // NOTIFICATION FILTER STATE
+    // ============================================================
+    const notificationFilters = {
+      // Payment-specific filters
+      payment_received: true,
+      payment_reassigned: true,
+      payment_moved: true,
+      payment_ignored: true,
+      payment_empty: false,  // Default OFF - "No payments found"
+      
+      // Email-specific filters
+      email_sent: true,
+      email_bulk: true,
+      email_failed: true,
+      
+      // Student-specific filters
+      student_added: true,
+      student_updated: true,
+      student_credit: true,
+      waiting_list: true,  // NEW: Waiting list signups
+      
+      // Absence filters
+      absence_marked: true,
+      absence_unmarked: true,
+      
+      // Note filters
+      note_free: true,
+      note_paid: true,
+      note_revoked: true,
+      
+      // Group filters
+      group_schedule: true,
+      
+      // Generic filters
+      video: true,
+      test: true,
+      alert: true,
+      admin: true
+    };
+
+    // Load saved filters from localStorage
+    const savedFilters = localStorage.getItem('arnoma-notification-filters');
+    if (savedFilters) {
+      try {
+        const parsed = JSON.parse(savedFilters);
+        Object.assign(notificationFilters, parsed);
+      } catch (e) {
+        console.warn('Failed to load saved notification filters:', e);
+      }
+    }
+
+    // ============================================================
+    // SETTINGS MODAL FUNCTIONS
+    // ============================================================
+    function openSettingsModal() {
+      const modal = document.getElementById('settingsModalOverlay');
+      modal.classList.add('active');
+      
+      // Update toggle switches to reflect current filter state
+      updateToggleSwitches();
+    }
+
+    function closeSettingsModal() {
+      const modal = document.getElementById('settingsModalOverlay');
+      modal.classList.remove('active');
+    }
+
+    function toggleFilter(filterType) {
+      // Toggle the filter state
+      notificationFilters[filterType] = !notificationFilters[filterType];
+      
+      // Save to localStorage
+      localStorage.setItem('arnoma-notification-filters', JSON.stringify(notificationFilters));
+      
+      // Update the toggle switch visually
+      updateToggleSwitches();
+      
+      // Re-render notifications with new filter
+      renderNotifications();
+    }
+
+    function updateToggleSwitches() {
+      const modal = document.getElementById('settingsModalOverlay');
+      const switches = modal.querySelectorAll('.toggle-switch');
+      
+      switches.forEach(toggle => {
+        const onclick = toggle.getAttribute('onclick');
+        const filterType = onclick.match(/toggleFilter\('(\w+)'\)/)[1];
+        
+        if (notificationFilters[filterType]) {
+          toggle.classList.add('active');
+        } else {
+          toggle.classList.remove('active');
+        }
+      });
+    }
+
+    // Close settings modal when clicking outside
+    document.addEventListener('click', (e) => {
+      const modal = document.getElementById('settingsModalOverlay');
+      if (e.target === modal) {
+        closeSettingsModal();
+      }
+    });
+
+    // ============================================================
+    // INITIALIZATION
+    // ============================================================
+    async function init() {
+      // Load notifications immediately (no auth check needed in iframe)
+      await loadNotifications();
+
+      // Set up real-time subscription
+      setupRealtimeSubscription();
+    }
+
+    // ============================================================
+    // LOAD NOTIFICATIONS
+    // ============================================================
+    async function loadNotifications() {
+      try {
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('*')
+          .order('timestamp', { ascending: false })
+          .limit(100);
+
+        if (error) throw error;
+
+        notifications = data || [];
+        renderNotifications();
+      } catch (err) {
+        console.error('❌ Error loading notifications:', err);
+        showEmptyState('Error loading notifications', 'Please refresh the page');
+      }
+    }
+
+    // ============================================================
+    // RENDER NOTIFICATIONS
+    // ============================================================
+    function renderNotifications() {
+      const container = document.getElementById('notificationsList');
+      
+      if (notifications.length === 0) {
+        showEmptyState('All caught up', 'No notifications');
+        updateNotificationCount();
+        return;
+      }
+
+      // Apply filters to notifications
+      const filteredNotifications = notifications.filter(notif => {
+        const title = (notif.title || '').toLowerCase();
+        const description = (notif.description || '').toLowerCase();
+        const category = (notif.category || notif.type || '').toLowerCase();
+        
+        // Payment filters
+        if (category.includes('payment')) {
+          // Check if this is an "empty sync" notification
+          if ((title.includes('no payment') || title.includes('no new payment') || 
+               description.includes('no payment') || description.includes('no new payment')) &&
+              !notificationFilters.payment_empty) {
+            return false;
+          }
+          
+          // Check specific payment types
+          if ((title.includes('received') || description.includes('received')) && 
+              !notificationFilters.payment_received) return false;
+          
+          if ((title.includes('reassign') || description.includes('reassign')) && 
+              !notificationFilters.payment_reassigned) return false;
+          
+          if ((title.includes('moved') || description.includes('moved')) && 
+              !notificationFilters.payment_moved) return false;
+          
+          if ((title.includes('ignored') || description.includes('ignored')) && 
+              !notificationFilters.payment_ignored) return false;
+        }
+        
+        // Email filters
+        if (category.includes('email')) {
+          if ((title.includes('failed') || description.includes('failed')) && 
+              !notificationFilters.email_failed) return false;
+          
+          if ((title.includes('bulk') || description.includes('bulk')) && 
+              !notificationFilters.email_bulk) return false;
+          
+          if ((title.includes('sent') || description.includes('sent')) && 
+              !notificationFilters.email_sent) return false;
+        }
+        
+        // Student filters
+        if (category.includes('student')) {
+          if ((title.includes('added') || description.includes('added')) && 
+              !notificationFilters.student_added) return false;
+          
+          if ((title.includes('updated') || description.includes('updated')) && 
+              !notificationFilters.student_updated) return false;
+          
+          if ((title.includes('credit') || description.includes('credit')) && 
+              !notificationFilters.student_credit) return false;
+        }
+        
+        // Waiting list filter
+        if ((category.includes('waiting') || title.includes('waiting list') || 
+             description.includes('waiting list')) && !notificationFilters.waiting_list) {
+          return false;
+        }
+        
+        // Absence filters
+        if (category.includes('absence')) {
+          if ((title.includes('marked') || description.includes('marked')) && 
+              !notificationFilters.absence_marked) return false;
+          
+          if ((title.includes('unmarked') || title.includes('removed') || 
+               description.includes('unmarked') || description.includes('removed')) && 
+              !notificationFilters.absence_unmarked) return false;
+        }
+        
+        // Note filters
+        if (category.includes('note')) {
+          if ((title.includes('free') || description.includes('free access')) && 
+              !notificationFilters.note_free) return false;
+          
+          if ((title.includes('paid') || title.includes('purchased') || 
+               description.includes('paid') || description.includes('purchased')) && 
+              !notificationFilters.note_paid) return false;
+          
+          if ((title.includes('revoked') || description.includes('revoked')) && 
+              !notificationFilters.note_revoked) return false;
+        }
+        
+        // Group filters
+        if ((category.includes('group') || title.includes('schedule') || 
+             description.includes('schedule')) && !notificationFilters.group_schedule) {
+          return false;
+        }
+        
+        // Generic filters
+        if (category.includes('video') && !notificationFilters.video) return false;
+        if (category.includes('test') && !notificationFilters.test) return false;
+        if (category.includes('alert') && !notificationFilters.alert) return false;
+        if (category.includes('admin') && !notificationFilters.admin) return false;
+        
+        return true; // Show notification if it passes all filters
+      });
+
+      if (filteredNotifications.length === 0) {
+        showEmptyState('No matching notifications', 'Try adjusting your filters');
+        updateNotificationCount();
+        return;
+      }
+
+      // Group notifications by date
+      const grouped = groupNotificationsByDate(filteredNotifications);
+      
+      let html = '';
+      
+      for (const [dateLabel, items] of Object.entries(grouped)) {
+        html += `<div class="date-section">${dateLabel}</div>`;
+        
+        items.forEach(notif => {
+          const isUnread = !notif.read && !notif.is_read;
+          const categoryClass = getCategoryClass(notif.category || notif.type);
+          const icon = getCategoryIcon(notif.category || notif.type);
+          const timeAgo = formatTimeAgo(notif.timestamp || notif.created_at);
+          
+          // Generate quick actions based on notification type/payload
+          const quickActions = generateQuickActions(notif);
+          
+          html += `
+            <div class="notification-item ${isUnread ? 'unread' : ''}" onclick="handleNotificationClick('${notif.id}', event)">
+              <div class="notification-meta">
+                <span class="emoji">${icon}</span>
+                <span class="category ${categoryClass}">${(notif.category || notif.type || 'notification').toUpperCase()}</span>
+                <span class="spacer"></span>
+                <span class="time">${timeAgo}</span>
+              </div>
+              <div class="notification-title">${escapeHtml(notif.title || 'Notification')}</div>
+              <div class="notification-description">${escapeHtml(notif.description || '')}</div>
+              ${notif.student_name ? `<div class="notification-footer">👤 ${escapeHtml(notif.student_name)}</div>` : ''}
+              ${quickActions}
+            </div>
+          `;
+        });
+      }
+      
+      container.innerHTML = html;
+      updateNotificationCount();
+    }
+
+    // ============================================================
+    // GROUP NOTIFICATIONS BY DATE
+    // ============================================================
+    function groupNotificationsByDate(notifs) {
+      const groups = {};
+      const now = new Date();
+      
+      notifs.forEach(notif => {
+        const notifDate = new Date(notif.timestamp || notif.created_at);
+        const dateLabel = getDateLabel(notifDate, now);
+        
+        if (!groups[dateLabel]) {
+          groups[dateLabel] = [];
+        }
+        groups[dateLabel].push(notif);
+      });
+      
+      return groups;
+    }
+
+    // ============================================================
+    // GET DATE LABEL (Yesterday, Today, etc.)
+    // ============================================================
+    function getDateLabel(date, now) {
+      const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+      
+      if (diffDays === 0) return 'Today';
+      if (diffDays === 1) return 'Yesterday';
+      if (diffDays < 7) return `${diffDays}d ago`;
+      
+      // Format as "Monday, December 15"
+      return date.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+    }
+
+    // ============================================================
+    // FORMAT TIME AGO
+    // ============================================================
+    function formatTimeAgo(timestamp) {
+      const now = new Date();
+      const date = new Date(timestamp);
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / (1000 * 60));
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffHours < 24) return `${diffHours}h ago`;
+      if (diffDays === 1) return '1d ago';
+      if (diffDays < 7) return `${diffDays}d ago`;
+      
+      // Format as "Dec 15"
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    // ============================================================
+    // GET CATEGORY CLASS
+    // ============================================================
+    function getCategoryClass(category) {
+      const categoryLower = (category || '').toLowerCase();
+      
+      if (categoryLower.includes('email')) return 'email';
+      if (categoryLower.includes('payment')) return 'payment';
+      if (categoryLower.includes('student')) return 'student';
+      
+      return 'notification';
+    }
+
+    // ============================================================
+    // GET CATEGORY ICON
+    // ============================================================
+    function getCategoryIcon(category) {
+      const categoryLower = (category || '').toLowerCase();
+      
+      if (categoryLower.includes('email')) return '📧';
+      if (categoryLower.includes('payment')) return '💰';
+      if (categoryLower.includes('student')) return '👤';
+      if (categoryLower.includes('absence')) return '⚠️';
+      if (categoryLower.includes('group')) return '👥';
+      if (categoryLower.includes('note')) return '📝';
+      if (categoryLower.includes('video')) return '🎥';
+      if (categoryLower.includes('test')) return '📝';
+      if (categoryLower.includes('alert')) return '🚨';
+      if (categoryLower.includes('admin')) return '⚙️';
+      
+      return '🔔';
+    }
+
+    // ============================================================
+    // GENERATE QUICK ACTIONS
+    // ============================================================
+    function generateQuickActions(notif) {
+      const category = (notif.category || notif.type || '').toLowerCase();
+      const title = (notif.title || '').toLowerCase();
+      const description = (notif.description || '').toLowerCase();
+      const payload = notif.payload || {};
+      
+      let actions = '';
+      
+      // Waiting List Actions
+      if (category.includes('waiting') || title.includes('waiting list') || description.includes('waiting list')) {
+        const email = payload.email || '';
+        const name = payload.name || notif.student_name || '';
+        
+        actions = `
+          <div class="quick-actions">
+            <button class="quick-action-btn success" onclick="approveWaitingList(event, '${notif.id}', '${escapeHtml(email)}', '${escapeHtml(name)}')">
+              ✅ Approve & Add Student
+            </button>
+            <button class="quick-action-btn primary" onclick="emailWaitingList(event, '${notif.id}', '${escapeHtml(email)}')">
+              📧 Send Email
+            </button>
+            <button class="quick-action-btn danger" onclick="removeFromWaitingList(event, '${notif.id}', '${escapeHtml(email)}')">
+              ❌ Remove
+            </button>
+          </div>
+        `;
+      }
+      
+      // Payment Reassignment Actions
+      else if (category.includes('payment') && (title.includes('reassign') || description.includes('reassign'))) {
+        const paymentId = payload.payment_id || '';
+        
+        actions = `
+          <div class="quick-actions">
+            <button class="quick-action-btn primary" onclick="viewPayment(event, '${paymentId}')">
+              👁️ View Payment
+            </button>
+          </div>
+        `;
+      }
+      
+      // Absence Actions
+      else if (category.includes('absence') && (title.includes('marked') || description.includes('marked'))) {
+        const studentId = payload.student_id || '';
+        const date = payload.class_date || '';
+        
+        actions = `
+          <div class="quick-actions">
+            <button class="quick-action-btn warning" onclick="unmarkAbsence(event, '${studentId}', '${date}')">
+              ↩️ Un-Absent
+            </button>
+          </div>
+        `;
+      }
+      
+      // Email Failed Actions
+      else if (category.includes('email') && (title.includes('failed') || description.includes('failed'))) {
+        const email = payload.email || '';
+        
+        actions = `
+          <div class="quick-actions">
+            <button class="quick-action-btn warning" onclick="retryEmail(event, '${notif.id}', '${escapeHtml(email)}')">
+              🔄 Retry Send
+            </button>
+          </div>
+        `;
+      }
+      
+      // Student Update Actions
+      else if (category.includes('student') && (title.includes('added') || title.includes('updated'))) {
+        const studentId = payload.student_id || '';
+        
+        actions = `
+          <div class="quick-actions">
+            <button class="quick-action-btn primary" onclick="viewStudent(event, '${studentId}')">
+              👁️ View Student
+            </button>
+          </div>
+        `;
+      }
+      
+      return actions;
+    }
+
+    // ============================================================
+    // UPDATE NOTIFICATION COUNT
+    // ============================================================
+    function updateNotificationCount() {
+      const unreadCount = notifications.filter(n => !n.read && !n.is_read).length;
+      const countEl = document.getElementById('notificationCount');
+      
+      if (unreadCount === 0) {
+        countEl.textContent = 'All caught up';
+      } else {
+        countEl.textContent = `${unreadCount} unread`;
+      }
+    }
+
+    // ============================================================
+    // HANDLE NOTIFICATION CLICK
+    // ============================================================
+    async function handleNotificationClick(notifId, event) {
+      // Don't mark as read if clicking a quick action button
+      if (event && event.target.classList.contains('quick-action-btn')) {
+        return;
+      }
+      
+      try {
+        // Mark as read
+        const { error } = await supabase
+          .from('notifications')
+          .update({ read: true, is_read: true })
+          .eq('id', notifId);
+
+        if (error) throw error;
+
+        // Update local state
+        const notif = notifications.find(n => n.id === notifId);
+        if (notif) {
+          notif.read = true;
+          notif.is_read = true;
+        }
+
+        renderNotifications();
+      } catch (err) {
+        console.error('❌ Error marking notification as read:', err);
+      }
+    }
+
+    // ============================================================
+    // MARK ALL AS READ
+    // ============================================================
+    async function markAllNotificationsAsRead() {
+      try {
+        const unreadIds = notifications.filter(n => !n.read && !n.is_read).map(n => n.id);
+        
+        if (unreadIds.length === 0) {
+          alert('All notifications are already marked as read');
+          return;
+        }
+
+        const { error } = await supabase
+          .from('notifications')
+          .update({ read: true, is_read: true })
+          .in('id', unreadIds);
+
+        if (error) throw error;
+
+        // Update local state
+        notifications.forEach(n => {
+          n.read = true;
+          n.is_read = true;
+        });
+
+        renderNotifications();
+      } catch (err) {
+        console.error('❌ Error marking all as read:', err);
+        alert('Error marking all as read');
+      }
+    }
+
+    // ============================================================
+    // CLEAR ALL NOTIFICATIONS
+    // ============================================================
+    async function clearAllNotifications() {
+      if (!confirm('Are you sure you want to clear all notifications?')) return;
+
+      try {
+        const { error } = await supabase
+          .from('notifications')
+          .delete()
+          .neq('id', 0);
+
+        if (error) throw error;
+
+        notifications = [];
+        renderNotifications();
+      } catch (err) {
+        console.error('❌ Error clearing notifications:', err);
+        alert('Error clearing notifications');
+      }
+    }
+
+    // ============================================================
+    // CLOSE NOTIFICATION CENTER
+    // ============================================================
+    function closeNotificationCenter() {
+      if (window.parent && window.parent.closeModulePopup) {
+        window.parent.closeModulePopup();
+      } else {
+        window.close();
+      }
+    }
+
+    // ============================================================
+    // SHOW EMPTY STATE
+    // ============================================================
+    function showEmptyState(title, message) {
+      const container = document.getElementById('notificationsList');
+      container.innerHTML = `
+        <div class="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.5; margin-bottom: 16px;">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+          </svg>
+          <h3>${escapeHtml(title)}</h3>
+          <p>${escapeHtml(message)}</p>
+        </div>
+      `;
+    }
+
+    // ============================================================
+    // ESCAPE HTML
+    // ============================================================
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // ============================================================
+    // REAL-TIME SUBSCRIPTION
+    // ============================================================
+    function setupRealtimeSubscription() {
+      realtimeChannel = supabase
+        .channel('notifications_changes')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'notifications'
+        }, async (payload) => {
+          console.log('🔔 Notification change:', payload);
+          await loadNotifications();
+        })
+        .subscribe();
+    }
+
+    // ============================================================
+    // INITIALIZE ON LOAD
+    // ============================================================
+    init();
+
+    // ============================================================
+    // QUICK ACTION HANDLERS
+    // ============================================================
+    
+    // Approve waiting list signup and add as student
+    async function approveWaitingList(event, notifId, email, name) {
+      event.stopPropagation();
+      
+      if (!confirm(`Add ${name || email} as a new student?`)) return;
+      
+      try {
+        // Open Student Manager with pre-filled data
+        const params = new URLSearchParams({
+          action: 'add_student',
+          name: name || '',
+          email: email || ''
+        });
+        
+        window.parent.postMessage({
+          type: 'OPEN_STUDENT_MANAGER',
+          params: params.toString()
+        }, '*');
+        
+        // Mark waiting list entry as approved
+        await supabase
+          .from('student_waiting_list')
+          .update({ status: 'approved' })
+          .eq('email', email);
+        
+        // Mark notification as read
+        await supabase
+          .from('notifications')
+          .update({ read: true, is_read: true })
+          .eq('id', notifId);
+        
+        alert('✅ Opening Student Manager to add student');
+        await loadNotifications();
+      } catch (error) {
+        console.error('Error approving waiting list:', error);
+        alert('❌ Failed to approve. Please try again.');
+      }
+    }
+    
+    // Send email to waiting list person
+    function emailWaitingList(event, notifId, email) {
+      event.stopPropagation();
+      
+      if (!email) {
+        alert('No email address found');
+        return;
+      }
+      
+      // Open Email System with pre-filled recipient
+      window.parent.postMessage({
+        type: 'OPEN_EMAIL_SYSTEM',
+        params: `recipient=${encodeURIComponent(email)}`
+      }, '*');
+    }
+    
+    // Remove from waiting list
+    async function removeFromWaitingList(event, notifId, email) {
+      event.stopPropagation();
+      
+      if (!confirm(`Remove ${email} from waiting list?`)) return;
+      
+      try {
+        await supabase
+          .from('student_waiting_list')
+          .update({ status: 'rejected' })
+          .eq('email', email);
+        
+        await supabase
+          .from('notifications')
+          .update({ read: true, is_read: true })
+          .eq('id', notifId);
+        
+        alert('✅ Removed from waiting list');
+        await loadNotifications();
+      } catch (error) {
+        console.error('Error removing from waiting list:', error);
+        alert('❌ Failed to remove. Please try again.');
+      }
+    }
+    
+    // View payment details
+    function viewPayment(event, paymentId) {
+      event.stopPropagation();
+      
+      if (!paymentId) {
+        alert('Payment ID not found');
+        return;
+      }
+      
+      window.parent.postMessage({
+        type: 'OPEN_PAYMENT_RECORDS',
+        params: `payment_id=${paymentId}`
+      }, '*');
+    }
+    
+    // Un-mark student absence
+    async function unmarkAbsence(event, studentId, date) {
+      event.stopPropagation();
+      
+      if (!confirm('Remove this absence?')) return;
+      
+      try {
+        await supabase
+          .from('student_absences')
+          .delete()
+          .eq('student_id', studentId)
+          .eq('class_date', date);
+        
+        alert('✅ Absence removed');
+        await loadNotifications();
+      } catch (error) {
+        console.error('Error removing absence:', error);
+        alert('❌ Failed to remove absence. Please try again.');
+      }
+    }
+    
+    // Retry sending failed email
+    function retryEmail(event, notifId, email) {
+      event.stopPropagation();
+      
+      if (!email) {
+        alert('No email address found');
+        return;
+      }
+      
+      window.parent.postMessage({
+        type: 'OPEN_EMAIL_SYSTEM',
+        params: `recipient=${encodeURIComponent(email)}&retry=true`
+      }, '*');
+    }
+    
+    // View student details
+    function viewStudent(event, studentId) {
+      event.stopPropagation();
+      
+      if (!studentId) {
+        alert('Student ID not found');
+        return;
+      }
+      
+      window.parent.postMessage({
+        type: 'OPEN_STUDENT_MANAGER',
+        params: `student_id=${studentId}`
+      }, '*');
+    }
+
+    // ============================================================
+    // CLOSE HANDLERS (ESC key and click outside)
+    // ============================================================
+    
+    // ESC key to close
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeNotificationCenter();
+      }
+    });
+
+    // Click outside panel to close
+    document.addEventListener('click', (e) => {
+      const overlay = document.querySelector('.modal-overlay');
+      // If clicking directly on the overlay (not on the panel)
+      if (e.target === overlay) {
+        closeNotificationCenter();
+      }
+    });
+  </script>
+</body>
+</html>

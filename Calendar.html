@@ -14,6 +14,47 @@
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
       const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       
+      // ============================================================
+      // NOTIFICATION SYSTEM
+      // ============================================================
+      async function createNotification(type, title, message, category, payload = {}) {
+        try {
+          console.log('🔔 Creating notification:', { type, title, category });
+
+          const { data, error} = await supabaseClient
+            .from('notifications')
+            .insert([
+              {
+                type: type,
+                title: title,
+                message: message,
+                category: category,
+                payload: payload,
+                read: false,
+                is_read: false,
+                timestamp: new Date().toISOString(),
+                created_at: new Date().toISOString()
+              }
+            ])
+            .select();
+
+          if (error) {
+            console.error('❌ Error creating notification:', error);
+            return null;
+          }
+
+          console.log('✅ Notification created:', data[0]);
+          return data[0];
+
+        } catch (err) {
+          console.error('❌ Exception creating notification:', err);
+          return null;
+        }
+      }
+
+      // Make globally available
+      window.createNotification = createNotification;
+      
       // Global data caches
       window.studentsCache = [];
       window.groupsCache = [];
@@ -11686,7 +11727,7 @@
 
         // Handle ignore action
         if (result.action === 'ignore') {
-          await ignorePayment(paymentId, studentId);
+          await ignorePayment(paymentId, studentId, studentName, amount, currentForClass);
           return;
         }
 
@@ -11712,6 +11753,23 @@
             return;
           }
 
+          // ✅ CREATE NOTIFICATION
+          await createNotification(
+            'payment_reassignment',
+            'Payment Reassigned',
+            `Reassigned $${amount} payment for ${studentName} from ${currentForClass} to ${newDate}`,
+            'payment',
+            {
+              student_name: studentName,
+              student_id: studentId,
+              amount: amount,
+              from_date: currentForClass,
+              to_date: newDate,
+              payment_id: paymentId,
+              action: 'reassign'
+            }
+          );
+
           await customAlert('Success', `✅ Payment reassigned from ${currentForClass} to ${newDate}`);
 
           // Reload calendar to reflect changes
@@ -11728,7 +11786,7 @@
         }
       }
 
-      async function ignorePayment(paymentId, studentId) {
+      async function ignorePayment(paymentId, studentId, studentName = 'Unknown', amount = 0, forClass = 'Unknown') {
         try {
           // Get current user email from Supabase session
           let userEmail = 'admin';
@@ -11754,6 +11812,23 @@
             await customAlert('Error', `Failed to ignore payment: ${error.message}`);
             return false;
           }
+
+          // ✅ CREATE NOTIFICATION
+          await createNotification(
+            'payment_ignored',
+            'Payment Ignored',
+            `Ignored $${amount} fuchsia payment for ${studentName} (${forClass})`,
+            'payment',
+            {
+              student_name: studentName,
+              student_id: studentId,
+              amount: amount,
+              for_class: forClass,
+              payment_id: paymentId,
+              ignored_by: userEmail,
+              action: 'ignore'
+            }
+          );
 
           await customAlert('Success', '✅ Payment ignored. Fuchsia dot will no longer appear.');
           
@@ -11810,7 +11885,7 @@
 
         // Handle ignore action
         if (result.action === 'ignore') {
-          await ignorePayment(paymentId, studentId);
+          await ignorePayment(paymentId, studentId, studentName, paymentAmount, currentForClass);
           return;
         }
 
@@ -12829,6 +12904,23 @@
           await loadManualPaymentMovesFromSupabase(true);
           clearMonthCache();
           renderCalendar();
+
+          // ✅ CREATE NOTIFICATION
+          await createNotification(
+            'payment_moved',
+            'Payment Moved',
+            `Moved $${amount} payment for ${studentName} from ${fromDate} to ${toDate}`,
+            'payment',
+            {
+              student_name: studentName,
+              student_id: studentId,
+              amount: amount,
+              from_date: fromDate,
+              to_date: toDate,
+              action: 'move'
+            }
+          );
+
           showSuccessToast(`✅ Moved payment from ${fromDate} → ${toDate} for ${studentName}`);
           setTimeout(() => {
             const targetDot = document.querySelector(

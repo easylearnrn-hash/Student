@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>📅 Group Schedules - Quick View</title>
+  
+  <!-- Supabase Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      --success-gradient: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: transparent;
+      min-height: 100vh;
+      color: white;
+      overflow-x: hidden;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    body::before {
+      display: none;
+    }
+
+    .container {
+      width: 95%;
+      max-width: 1200px;
+      max-height: 95vh;
+      display: flex;
+      flex-direction: column;
+      background: rgba(15, 23, 42, 0.5);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 16px;
+      box-shadow: 
+        0 24px 48px rgba(0, 0, 0, 0.6),
+        0 12px 24px rgba(0, 0, 0, 0.4),
+        0 0 80px rgba(102, 126, 234, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      overflow: hidden;
+    }
+
+    .header {
+      background: rgba(255, 255, 255, 0.08);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 16px 20px;
+      flex-shrink: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header h1 {
+      margin: 0;
+      background: linear-gradient(135deg, #10b981, #059669);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-size: 22px;
+      font-weight: 900;
+    }
+
+    .download-btn {
+      padding: 10px;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 8px;
+      color: white;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 40px;
+      height: 40px;
+      justify-content: center;
+    }
+
+    .download-btn svg {
+      width: 20px;
+      height: 20px;
+      stroke: white;
+    }
+
+    .download-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+    }
+
+    .download-btn:active {
+      transform: translateY(0);
+    }
+
+    .tabs {
+      background: rgba(255, 255, 255, 0.05);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 12px 20px;
+      display: flex;
+      gap: 10px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      padding: 8px 16px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      color: rgba(255, 255, 255, 0.7);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: none;
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      transform: translateY(-1px);
+    }
+
+    .tab-btn.active {
+      background: linear-gradient(135deg, rgb(138, 180, 255), rgb(168, 85, 247));
+      border: none;
+      color: white;
+      font-weight: 700;
+      box-shadow: rgba(138, 180, 255, 0.3) 0px 4px 12px;
+    }
+
+    .content {
+      padding: 20px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .schedule-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .day-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      padding: 14px;
+      transition: all 0.3s;
+    }
+
+    .day-card.today {
+      border: 2px solid rgba(16, 185, 129, 0.5);
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
+      background: rgba(16, 185, 129, 0.05);
+    }
+
+    .day-title {
+      font-size: 19px;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .sessions-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .session-badge {
+      padding: 8px 14px;
+      background: rgba(138, 180, 255, 0.15);
+      border: 1px solid rgba(138, 180, 255, 0.3);
+      border-radius: 6px;
+      font-size: 13px;
+      color: #8ab4ff;
+      display: inline-flex;
+      flex-direction: column;
+      gap: 3px;
+      min-width: 170px;
+      transition: all 0.2s;
+    }
+
+    .session-badge:hover {
+      background: rgba(138, 180, 255, 0.25);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(138, 180, 255, 0.3);
+    }
+
+    .session-time {
+      opacity: 0.7;
+      font-size: 10px;
+    }
+
+    .no-sessions {
+      color: rgba(255, 255, 255, 0.4);
+      font-style: italic;
+      font-size: 12px;
+    }
+
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 200px;
+      font-size: 16px;
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .spinner {
+      display: inline-block;
+      margin-right: 10px;
+      animation: spin 1s linear infinite;
+    }
+
+    /* Group card view */
+    .group-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .group-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 18px;
+      transition: all 0.2s;
+    }
+
+    .group-card:hover {
+      border-color: rgba(138, 180, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(138, 180, 255, 0.2);
+    }
+
+    .group-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: white;
+      margin-bottom: 8px;
+    }
+
+    .group-schedule {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0;
+    }
+  </style>
+</head>
+<body onclick="handleBackgroundClick(event)">
+  <div class="container" onclick="event.stopPropagation()">
+    <!-- Header -->
+    <div class="header">
+      <h1>📅 Quick View — Group Schedules</h1>
+      <button class="download-btn" onclick="downloadCurrentTab()" title="Download current tab">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" id="tabByGroup" onclick="switchTab('byGroup')">By Group</button>
+      <button class="tab-btn" id="tabByWeekday" onclick="switchTab('byWeekday')">By Weekday (LA)</button>
+      <button class="tab-btn" id="tabByWeekdayYerevan" onclick="switchTab('byWeekdayYerevan')">By Weekday (Yerevan)</button>
+    </div>
+
+    <!-- Content -->
+    <div class="content" id="content">
+      <div class="loading">
+        <span class="spinner">⏳</span>
+        Loading schedules...
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Supabase Configuration
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    
+    let supabaseClient = null;
+    let currentTab = 'byGroup';
+    let groupsData = [];
+
+    // Handle click outside container to close
+    function handleBackgroundClick(event) {
+      console.log('🖱️ Background clicked - closing modal');
+      // Close the modal by calling parent's closeModulePopup
+      if (window.parent && window.parent.closeModulePopup) {
+        window.parent.closeModulePopup();
+      }
+    }
+
+    // Download current tab as PNG image
+    async function downloadCurrentTab() {
+      const today = new Date().toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles' }).replace(/\//g, '-');
+      let filename = '';
+      
+      if (currentTab === 'byGroup') {
+        filename = `Group_Schedules_${today}.png`;
+      } else if (currentTab === 'byWeekday') {
+        filename = `Weekly_Schedule_LA_${today}.png`;
+      } else if (currentTab === 'byWeekdayYerevan') {
+        filename = `Weekly_Schedule_Yerevan_${today}.png`;
+      }
+      
+      try {
+        // Load html2canvas library if not already loaded
+        if (!window.html2canvas) {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+          document.head.appendChild(script);
+          
+          await new Promise((resolve, reject) => {
+            script.onload = resolve;
+            script.onerror = reject;
+          });
+        }
+        
+        // Get the content div and save its scroll position
+        const contentDiv = document.getElementById('content');
+        const originalScrollTop = contentDiv.scrollTop;
+        
+        // Temporarily remove scroll and expand to full height
+        const originalOverflow = contentDiv.style.overflow;
+        const originalHeight = contentDiv.style.height;
+        const originalMaxHeight = contentDiv.style.maxHeight;
+        
+        contentDiv.style.overflow = 'visible';
+        contentDiv.style.height = 'auto';
+        contentDiv.style.maxHeight = 'none';
+        contentDiv.scrollTop = 0;
+        
+        // Find and hide "Today" indicators
+        const todayCards = contentDiv.querySelectorAll('.day-card.today');
+        const todayTitles = [];
+        todayCards.forEach(card => {
+          card.classList.remove('today');
+          const title = card.querySelector('.day-title');
+          if (title) {
+            todayTitles.push({
+              element: title,
+              originalHTML: title.innerHTML
+            });
+            // Remove star emoji and "(Today)" text
+            title.innerHTML = title.innerHTML
+              .replace(/⭐\s*/g, '')
+              .replace(/\s*\(Today\)/g, '');
+          }
+        });
+        
+        // Capture the full content
+        const canvas = await html2canvas(contentDiv, {
+          backgroundColor: '#0f172a',
+          scale: 2, // Higher quality
+          logging: false,
+          windowWidth: contentDiv.scrollWidth,
+          windowHeight: contentDiv.scrollHeight
+        });
+        
+        // Restore "Today" indicators
+        todayCards.forEach(card => card.classList.add('today'));
+        todayTitles.forEach(item => {
+          item.element.innerHTML = item.originalHTML;
+        });
+        
+        // Restore original styles
+        contentDiv.style.overflow = originalOverflow;
+        contentDiv.style.height = originalHeight;
+        contentDiv.style.maxHeight = originalMaxHeight;
+        contentDiv.scrollTop = originalScrollTop;
+        
+        // Convert to blob and download
+        canvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          
+          console.log(`📥 Downloaded PNG: ${filename}`);
+        }, 'image/png');
+        
+      } catch (error) {
+        console.error('❌ Error generating PNG:', error);
+        alert('Failed to generate image. Please try again.');
+      }
+    }
+
+    // Initialize
+    if (window.supabase && window.supabase.createClient) {
+      supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      console.log('✅ Supabase client initialized');
+      loadData();
+    } else {
+      console.error('❌ Supabase library not loaded');
+      document.getElementById('content').innerHTML = '<div class="loading">❌ Failed to load Supabase library</div>';
+    }
+
+    async function loadData() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('groups')
+          .select('*')
+          .order('group_name');
+
+        if (error) {
+          console.error('❌ Supabase error:', error);
+          throw error;
+        }
+
+        groupsData = data || [];
+        console.log('✅ Loaded groups:', groupsData.length);
+        console.log('📊 Full groups data:', JSON.stringify(groupsData, null, 2));
+        
+        // Debug each group's schedule
+        groupsData.forEach((group, index) => {
+          console.log(`Group ${index + 1}: ${group.group_name}`);
+          console.log(`   - ID: ${group.id}`);
+          console.log(`   - Schedule field: "${group.schedule}"`);
+          console.log(`   - Schedule type: ${typeof group.schedule}`);
+          console.log(`   - All fields:`, Object.keys(group));
+        });
+        
+        renderView();
+      } catch (err) {
+        console.error('❌ Error loading groups:', err);
+        document.getElementById('content').innerHTML = `<div class="loading">❌ Error loading schedules<br><small>${err.message || 'Unknown error'}</small></div>`;
+      }
+    }
+
+    function switchTab(tab) {
+      currentTab = tab;
+      
+      // Update tab buttons
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+      
+      renderView();
+    }
+
+    function renderView() {
+      const content = document.getElementById('content');
+      
+      if (currentTab === 'byGroup') {
+        content.innerHTML = renderByGroup();
+      } else if (currentTab === 'byWeekday') {
+        content.innerHTML = renderByWeekday('LA');
+      } else if (currentTab === 'byWeekdayYerevan') {
+        content.innerHTML = renderByWeekday('Yerevan');
+      }
+    }
+
+    function renderByGroup() {
+      // Filter to only show groups with schedules
+      const groupsWithSchedules = groupsData.filter(group => {
+        const schedule = group.schedule || '';
+        return schedule.trim() !== '';
+      });
+
+      if (groupsWithSchedules.length === 0) {
+        return '<div class="loading">No groups with schedules found</div>';
+      }
+
+      console.log('📚 Rendering by group, groups with schedules:', groupsWithSchedules.length);
+
+      const html = groupsWithSchedules.map(group => {
+        const scheduleItems = parseSchedule(group.schedule || '');
+        
+        console.log(`   Group ${group.group_name}:`, {
+          raw_schedule: group.schedule,
+          parsed_items: scheduleItems
+        });
+        
+        // Convert abbreviated days to full names
+        const fullScheduleItems = scheduleItems.map(item => {
+          return item
+            .replace(/^Mon\s+/, 'Monday ')
+            .replace(/^Tue\s+/, 'Tuesday ')
+            .replace(/^Wed\s+/, 'Wednesday ')
+            .replace(/^Thu\s+/, 'Thursday ')
+            .replace(/^Fri\s+/, 'Friday ')
+            .replace(/^Sat\s+/, 'Saturday ')
+            .replace(/^Sun\s+/, 'Sunday ');
+        });
+        
+        return `
+          <div class="group-card">
+            <div class="group-name">Group ${group.group_name}</div>
+            <div style="font-size: 14px; color: rgba(255,255,255,0.5); margin-bottom: 8px; font-weight: 600;">Schedule:</div>
+            <div class="group-schedule">
+              ${fullScheduleItems.length > 0 
+                ? fullScheduleItems.map(item => `
+                  <span style="display: inline-block; padding: 6px 12px; margin: 4px; background: rgba(138,180,255,0.15); border: 1px solid rgba(138,180,255,0.3); border-radius: 8px; font-size: 13px; color: #8ab4ff; white-space: nowrap;">${item}</span>
+                `).join('') 
+                : '<div class="no-sessions">No schedule set</div>'}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `<div class="group-grid">${html}</div>`;
+    }
+
+    function renderByWeekday(timezone) {
+      const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      
+      // Get today based on the timezone being viewed
+      const today = timezone === 'Yerevan' 
+        ? new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'Asia/Yerevan' })
+        : new Date().toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/Los_Angeles' });
+      
+      console.log(`🔍 Rendering by weekday (${timezone}), Today is: ${today}`);
+      
+      const scheduleByDay = {};
+      weekdays.forEach(day => scheduleByDay[day] = []);
+
+      console.log(`🔍 Rendering by weekday (${timezone})`);
+
+      // Map abbreviated day names to full names
+      const dayMap = {
+        'Mon': 'Monday',
+        'Monday': 'Monday',
+        'Tue': 'Tuesday',
+        'Tuesday': 'Tuesday',
+        'Wed': 'Wednesday',
+        'Wednesday': 'Wednesday',
+        'Thu': 'Thursday',
+        'Thursday': 'Thursday',
+        'Fri': 'Friday',
+        'Friday': 'Friday',
+        'Sat': 'Saturday',
+        'Saturday': 'Saturday',
+        'Sun': 'Sunday',
+        'Sunday': 'Sunday'
+      };
+
+      // Parse all group schedules - format: "Mon 8:00 PM, Fri 8:00 AM" or "Monday 8:00 PM"
+      groupsData.forEach(group => {
+        const scheduleStr = group.schedule || '';
+        if (!scheduleStr) {
+          console.log(`⚠️ Group ${group.group_name} has no schedule`);
+          return;
+        }
+        
+        console.log(`📅 Processing Group ${group.group_name}: "${scheduleStr}"`);
+        
+        // Split by comma and process each entry
+        const entries = scheduleStr.split(',').map(s => s.trim()).filter(s => s);
+        console.log(`   Entries:`, entries);
+        
+        entries.forEach(entry => {
+          // Match pattern: "Mon 8:00 PM" or "Monday 8:00 PM" 
+          // Supports abbreviated (Mon, Tue, Wed, etc.) and full names
+          const match = entry.match(/^(Mon|Monday|Tue|Tuesday|Wed|Wednesday|Thu|Thursday|Fri|Friday|Sat|Saturday|Sun|Sunday)\s+(.+)$/i);
+          if (match) {
+            const dayAbbr = match[1];
+            const time = match[2];
+            
+            console.log(`   ✓ Matched: ${dayAbbr} at ${time}`);
+            
+            // Convert abbreviated day to full name
+            let fullDayName = dayMap[dayAbbr.charAt(0).toUpperCase() + dayAbbr.slice(1).toLowerCase()];
+            
+            // For Yerevan view, check if time conversion crosses midnight
+            if (timezone === 'Yerevan') {
+              const conversion = convertToYerevanWithDay(time);
+              if (conversion.dayShift !== 0) {
+                // Get the next day
+                const currentDayIndex = weekdays.indexOf(fullDayName);
+                const newDayIndex = (currentDayIndex + conversion.dayShift + 7) % 7;
+                fullDayName = weekdays[newDayIndex];
+                console.log(`   ⏰ Time crosses midnight! ${dayAbbr} ${time} → ${fullDayName} ${conversion.time}`);
+              }
+            }
+            
+            if (fullDayName && scheduleByDay[fullDayName]) {
+              scheduleByDay[fullDayName].push({ group: group.group_name, time: time });
+              console.log(`   ✓ Added to ${fullDayName}`);
+            } else {
+              console.log(`   ✗ No matching day found for "${dayAbbr}" (mapped to: ${fullDayName})`);
+            }
+          } else {
+            console.log(`   ✗ No match for entry: "${entry}"`);
+          }
+        });
+      });
+
+      console.log('📊 Final schedule by day:', scheduleByDay);
+
+      const html = weekdays.map(day => {
+        let sessions = scheduleByDay[day];
+        const isToday = day === today;
+
+        // Sort sessions for Yerevan view: AM first, then PM
+        if (timezone === 'Yerevan' && sessions.length > 0) {
+          sessions = sessions.sort((a, b) => {
+            const timeA = convertToYerevan(a.time);
+            const timeB = convertToYerevan(b.time);
+            
+            // Extract AM/PM from converted times
+            const isPM_A = timeA.toUpperCase().includes('PM');
+            const isPM_B = timeB.toUpperCase().includes('PM');
+            
+            // AM comes before PM
+            if (!isPM_A && isPM_B) return -1;
+            if (isPM_A && !isPM_B) return 1;
+            
+            // If both are same period, sort by hour
+            const hourA = parseInt(timeA.match(/(\d+):/)[1]);
+            const hourB = parseInt(timeB.match(/(\d+):/)[1]);
+            return hourA - hourB;
+          });
+        }
+
+        return `
+          <div class="day-card ${isToday ? 'today' : ''}">
+            <div class="day-title">
+              ${isToday ? '⭐ ' : ''}${day}${isToday ? ' (Today)' : ''}
+            </div>
+            <div class="sessions-container">
+              ${sessions.length > 0 
+                ? sessions.map(s => renderSessionBadge(s, timezone)).join('') 
+                : '<span class="no-sessions">No sessions scheduled</span>'}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `<div class="schedule-grid">${html}</div>`;
+    }
+
+    function renderSessionBadge(session, timezone) {
+      const convertedTime = timezone === 'Yerevan' ? convertToYerevan(session.time) : session.time;
+      const otherTime = timezone === 'Yerevan' ? session.time : convertToYerevan(session.time);
+      
+      return `
+        <span class="session-badge">
+          <span><strong>Group ${session.group}</strong> — ${convertedTime} (${timezone})</span>
+          <span class="session-time">(${otherTime} ${timezone === 'Yerevan' ? 'Los Angeles' : 'Yerevan'} Time)</span>
+        </span>
+      `;
+    }
+
+    function parseSchedule(scheduleStr) {
+      if (!scheduleStr) return [];
+      return scheduleStr.split(',').map(s => s.trim()).filter(s => s);
+    }
+
+    function convertToYerevanWithDay(laTime) {
+      // Returns { time: "12:02 AM", dayShift: 1 } where dayShift is 0 (same day) or 1 (next day)
+      const match = laTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
+      if (!match) {
+        return { time: laTime, dayShift: 0 };
+      }
+      
+      let [, hours, minutes, period] = match;
+      hours = parseInt(hours);
+      
+      // Convert to 24-hour
+      if (period.toUpperCase() === 'PM' && hours !== 12) hours += 12;
+      if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
+      
+      // Determine offset
+      const now = new Date();
+      const month = now.getMonth();
+      const isPST = month >= 10 || month <= 1;
+      const offset = isPST ? 12 : 11;
+      
+      // Add offset
+      let yerevanHours = hours + offset;
+      let dayShift = 0;
+      
+      // Handle day overflow
+      if (yerevanHours >= 24) {
+        yerevanHours -= 24;
+        dayShift = 1; // Next day
+      }
+      
+      // Convert back to 12-hour
+      const newPeriod = yerevanHours >= 12 ? 'PM' : 'AM';
+      const displayHours = yerevanHours === 0 ? 12 : yerevanHours > 12 ? yerevanHours - 12 : yerevanHours;
+      
+      return {
+        time: `${displayHours}:${minutes} ${newPeriod}`,
+        dayShift: dayShift
+      };
+    }
+
+    function convertToYerevan(laTime) {
+      // LA to Yerevan timezone conversion
+      // Winter (PST): LA is UTC-8, Yerevan is UTC+4 = +12 hours
+      // Summer (PDT): LA is UTC-7, Yerevan is UTC+4 = +11 hours
+      // December is winter, so using +12 hours
+      
+      const match = laTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
+      if (!match) {
+        console.warn('⚠️ Could not parse time:', laTime);
+        return laTime;
+      }
+      
+      let [, hours, minutes, period] = match;
+      hours = parseInt(hours);
+      
+      console.log(`🕐 Converting LA time: ${hours}:${minutes} ${period}`);
+      
+      // Convert to 24-hour
+      if (period.toUpperCase() === 'PM' && hours !== 12) hours += 12;
+      if (period.toUpperCase() === 'AM' && hours === 12) hours = 0;
+      
+      console.log(`   24-hour LA: ${hours}:${minutes}`);
+      
+      // Determine offset based on current date
+      const now = new Date();
+      const month = now.getMonth(); // 0-11 (0=Jan, 11=Dec)
+      
+      // PST months (Nov-Feb roughly): +12 hours
+      // PDT months (Mar-Oct roughly): +11 hours
+      // Simplified: Nov(10), Dec(11), Jan(0), Feb(1) = +12, else +11
+      const isPST = month >= 10 || month <= 1;
+      const offset = isPST ? 12 : 11;
+      
+      console.log(`   Current month: ${month}, using ${isPST ? 'PST' : 'PDT'} offset: +${offset}hr`);
+      
+      // Add offset for Yerevan
+      let yerevanHours = (hours + offset) % 24;
+      
+      console.log(`   24-hour Yerevan (+${offset}hr): ${yerevanHours}:${minutes}`);
+      
+      // Convert back to 12-hour
+      const newPeriod = yerevanHours >= 12 ? 'PM' : 'AM';
+      const displayHours = yerevanHours === 0 ? 12 : yerevanHours > 12 ? yerevanHours - 12 : yerevanHours;
+      
+      const result = `${displayHours}:${minutes} ${newPeriod}`;
+      console.log(`   ✓ Yerevan time: ${result}`);
+      
+      return result;
+    }
+  </script>
+</body>
+</html>
