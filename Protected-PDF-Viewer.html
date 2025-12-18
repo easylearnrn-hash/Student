@@ -1420,11 +1420,27 @@
               
               // Check if student has access via note_free_access table
               // (either group access or individual access)
-              const { data: accessGrants, error: accessError } = await supabaseClient
+              // Build query based on available data
+              let query = supabaseClient
                 .from('note_free_access')
                 .select('*')
-                .eq('note_id', noteId)
-                .or(`group_letter.eq.${studentGroup},student_id.eq.${currentStudent.id}`);
+                .eq('note_id', noteId);
+              
+              // Build OR condition: check group OR individual access
+              const orConditions = [];
+              if (studentGroup) {
+                orConditions.push(`group_letter.eq.${studentGroup}`);
+              }
+              if (currentStudent.id) {
+                orConditions.push(`student_id.eq.${currentStudent.id}`);
+              }
+              
+              // Apply OR filter if we have conditions
+              if (orConditions.length > 0) {
+                query = query.or(orConditions.join(','));
+              }
+              
+              const { data: accessGrants, error: accessError } = await query;
               
               if (accessError) {
                 console.error('❌ Error checking note access:', accessError);
