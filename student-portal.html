@@ -3173,75 +3173,44 @@
     }
     
     /* Impersonation Banner */
-    .impersonation-banner {
+    .impersonation-circle {
       position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
+      top: 20px;
+      right: 20px;
+      width: 50px;
+      height: 50px;
       background: linear-gradient(135deg, #ef4444, #dc2626);
       color: white;
-      padding: 12px 20px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: center;
       z-index: 10000;
+      border-radius: 50%;
       box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
-      border-bottom: 2px solid rgba(255, 255, 255, 0.2);
-      animation: slideDown 0.3s ease-out;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      animation: pulseGlow 2s infinite;
     }
     
-    @keyframes slideDown {
-      from {
-        transform: translateY(-100%);
-        opacity: 0;
-      }
-      to {
-        transform: translateY(0);
-        opacity: 1;
-      }
+    .impersonation-circle:hover {
+      transform: scale(1.1);
+      box-shadow: 0 6px 30px rgba(239, 68, 68, 0.6);
     }
     
-    .impersonation-banner-text {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-weight: 600;
-      font-size: 14px;
+    @keyframes pulseGlow {
+      0%, 100% {
+        box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
+      }
+      50% {
+        box-shadow: 0 4px 30px rgba(239, 68, 68, 0.7);
+      }
     }
     
     .impersonation-icon {
-      font-size: 20px;
-      /* Pulse animation removed for performance */
+      font-size: 24px;
     }
     
-    /* Pulse animation removed for performance */
-    
-    .exit-impersonation-btn {
-      background: rgba(255, 255, 255, 0.2);
-      border: 1px solid rgba(255, 255, 255, 0.4);
-      color: white;
-      padding: 8px 20px;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-      font-size: 13px;
-    }
-    
-    .exit-impersonation-btn:hover {
-      background: rgba(255, 255, 255, 0.3);
-      transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-    }
-    
-    /* Adjust body padding when impersonation banner is active */
-    body.impersonating {
-      padding-top: 70px;
-    }
-    
-    body.impersonating .container {
-      margin-top: 0;
-    }
+    /* Remove body padding adjustment - no longer needed */
     
     /* Schedule Card Styles */
     .schedule-updated-badge {
@@ -3723,18 +3692,11 @@
   <!-- Background animations removed for performance -->
   
   <!-- ==========================================================================
-       ADMIN IMPERSONATION BANNER
+       ADMIN IMPERSONATION INDICATOR
        ========================================================================== -->
-  <!-- Impersonation Banner (hidden by default) -->
-  <div id="impersonationBanner" class="impersonation-banner" style="display: none;">
-    <div class="impersonation-banner-text">
-      <span class="impersonation-icon">👁️</span>
-      <span>You are viewing as: <strong id="impersonatedStudentName">Student Name</strong></span>
-      <span style="opacity: 0.8; font-size: 12px;" id="impersonationTimer">Expires in 10:00</span>
-    </div>
-    <button class="exit-impersonation-btn" onclick="exitImpersonation()">
-      ← Exit Impersonation Mode
-    </button>
+  <!-- Impersonation Circle Indicator (hidden by default) -->
+  <div id="impersonationBanner" class="impersonation-circle" style="display: none;" onclick="exitImpersonation()" title="Exit Impersonation Mode">
+    <span class="impersonation-icon">👁️</span>
   </div>
   
   <!-- Main Portal Content -->
@@ -11075,27 +11037,25 @@
     // IMPERSONATION MODE FUNCTIONS
     // ==========================================================================
     
-    // Show impersonation banner
+    // Show impersonation circle indicator
     function showImpersonationBanner(token) {
-      const banner = document.getElementById('impersonationBanner');
-      const studentNameEl = document.getElementById('impersonatedStudentName');
-      const timerEl = document.getElementById('impersonationTimer');
+      const circle = document.getElementById('impersonationBanner');
       
-      if (banner && studentNameEl) {
-        studentNameEl.textContent = token.studentName;
-        banner.style.display = 'flex';
+      if (circle) {
+        // Update tooltip with student name and expiration
+        const minutes = Math.floor((token.expiresAt - Date.now()) / 1000 / 60);
+        circle.title = `Viewing as: ${token.studentName} (Expires in ${minutes} min) - Click to exit`;
+        circle.style.display = 'flex';
         
         // PERFORMANCE FIX: Update timer every 10 seconds instead of 1 second
-        // Still shows countdown but with 90% less CPU usage
-        updateImpersonationTimer(token, timerEl);
         intervalManager.set('impersonation', () => {
-          updateImpersonationTimer(token, timerEl);
+          updateImpersonationTimer(token, circle);
         }, 10000); // 10 seconds instead of 1 second
       }
     }
     
-    // Update impersonation timer display
-    function updateImpersonationTimer(token, timerEl) {
+    // Update impersonation timer in tooltip
+    function updateImpersonationTimer(token, circle) {
       const remainingMs = token.expiresAt - Date.now();
       
       if (remainingMs <= 0) {
@@ -11109,14 +11069,8 @@
       const minutes = Math.floor(remainingMs / 1000 / 60);
       const seconds = Math.floor((remainingMs / 1000) % 60);
       
-      if (timerEl) {
-        timerEl.textContent = `Expires in ${minutes}:${seconds.toString().padStart(2, '0')}`;
-        
-        // Warning when less than 1 minute remaining
-        if (minutes === 0 && seconds <= 60) {
-          timerEl.style.color = '#fbbf24';
-          timerEl.style.fontWeight = '700';
-        }
+      if (circle) {
+        circle.title = `Viewing as: ${token.studentName} (Expires in ${minutes}:${seconds.toString().padStart(2, '0')}) - Click to exit`;
       }
     }
     
