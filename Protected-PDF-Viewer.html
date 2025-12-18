@@ -1968,6 +1968,8 @@
         
         window.addEventListener('afterprint', afterPrint, { once: true });
         
+        const imagePromises = [];
+        
         for (let i = 1; i <= totalPages; i++) {
           const page = await pdfDoc.getPage(i);
           
@@ -1990,12 +1992,20 @@
           // Convert canvas to image for reliable Safari printing
           const imageDataUrl = canvas.toDataURL('image/png', 1.0);
           const img = document.createElement('img');
-          img.src = imageDataUrl;
           img.className = 'page-image';
           img.style.width = (viewport.width / scale) + 'px';
           img.style.height = (viewport.height / scale) + 'px';
           img.style.display = 'block';
           img.style.maxWidth = '100%';
+          
+          // Create a promise that resolves when image loads
+          const imageLoadPromise = new Promise((resolve) => {
+            img.onload = () => resolve();
+            img.onerror = () => resolve(); // Continue even if error
+          });
+          imagePromises.push(imageLoadPromise);
+          
+          img.src = imageDataUrl;
           
           const pageContainer = document.createElement('div');
           pageContainer.className = 'page-container';
@@ -2019,10 +2029,13 @@
           content.appendChild(pageContainer);
         }
         
-        // Trigger print dialog
+        // Wait for ALL images to load before triggering print
+        await Promise.all(imagePromises);
+        
+        // Add extra delay to ensure Safari has rendered everything
         setTimeout(() => {
           window.print();
-        }, 500);
+        }, 1000);
         
       } catch (error) {
         console.error('Print error:', error);
