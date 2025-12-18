@@ -243,13 +243,62 @@
       box-shadow: 0 12px 30px rgba(0,0,0,.28), 0 0 20px rgba(239,68,68,.15);
     }
 
+    /* Private messages - gray style */
+    .msg.private .bubble {
+      background:
+        linear-gradient(135deg, rgba(148,163,184,.18), rgba(100,116,139,.14)),
+        rgba(255,255,255,.06);
+      border-color: rgba(148,163,184,.25);
+      box-shadow: 0 12px 30px rgba(0,0,0,.28), 0 0 18px rgba(148,163,184,.10);
+    }
+
+    /* System message style */
+    .system-msg {
+      text-align: center;
+      margin: 14px 0;
+      font-size: 12px;
+      color: rgba(255,255,255,.50);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .system-msg::before,
+    .system-msg::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: linear-gradient(to right, transparent, rgba(255,255,255,.15), transparent);
+      max-width: 60px;
+    }
+
+    .system-msg-text {
+      background: rgba(148,163,184,.12);
+      border: 1px solid rgba(148,163,184,.18);
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 11px;
+      letter-spacing: .3px;
+    }
+
     .meta-line {
       margin-top: 6px;
       font-size: 11px;
       color: rgba(255,255,255,.55);
       display: flex;
-      justify-content: space-between;
-      gap: 10px;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .sender-info {
+      font-weight: 600;
+      font-size: 11px;
+    }
+
+    .college-info {
+      font-size: 10px;
+      opacity: 0.75;
     }
 
     /* Typing */
@@ -403,41 +452,7 @@
 
     /* Private chat tooltip */
     .private-indicator {
-      position: absolute;
-      bottom: 75px;
-      left: 50%;
-      transform: translateX(-50%) translateY(8px);
-      background: linear-gradient(135deg, rgba(239,68,68,.95), rgba(220,38,38,.92));
-      color: white;
-      padding: 10px 16px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 600;
-      white-space: nowrap;
-      pointer-events: none;
-      opacity: 0;
-      transition: opacity .25s ease, transform .25s ease;
-      z-index: 100000;
-      box-shadow: 0 10px 30px rgba(0,0,0,.35), 0 0 20px rgba(239,68,68,.25);
-      border: 1px solid rgba(255,255,255,.20);
-    }
-
-    .private-indicator.show {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
-    }
-
-    .private-indicator::before {
-      content: '';
-      position: absolute;
-      bottom: -6px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 0;
-      height: 0;
-      border-left: 8px solid transparent;
-      border-right: 8px solid transparent;
-      border-top: 8px solid rgba(239,68,68,.95);
+      display: none; /* Hidden - we use system message instead */
     }
 
     /* Loading State */
@@ -541,7 +556,9 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
 
   let currentStudentId = null;
   let currentStudentName = "";
+  let currentStudentCollege = "";
   let messagesSubscription = null;
+  let messagePollingInterval = null;
 
   // Check if we're in an iframe
   const isInIframe = window.self !== window.top;
@@ -582,8 +599,11 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
       currentStudentId = studentData.id;
       currentStudentName = studentData.name;
 
+      // Fetch student's college from database
+      await fetchStudentCollege();
+
       // Update header
-      chatStudentName.textContent = `Chat with Admin`;
+      chatStudentName.textContent = `Chat`;
       chatAvatar.textContent = studentData.name.charAt(0).toUpperCase();
 
       // Load existing messages
@@ -591,6 +611,9 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
 
       // Subscribe to new messages
       subscribeToMessages();
+
+      // Start polling for new messages (every 2 seconds)
+      startMessagePolling();
 
       // Hide loading
       loadingState.style.display = 'none';
@@ -640,23 +663,69 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     return null;
   }
 
+  async function fetchStudentCollege() {
+    try {
+      const { data, error } = await supabase
+        .from('students')
+        .select('college')
+        .eq('id', currentStudentId)
+        .single();
+      
+      if (!error && data) {
+        currentStudentCollege = data.college || '';
+      }
+    } catch (error) {
+      console.error('Error fetching college:', error);
+    }
+  }
+
   async function loadMessages() {
     try {
-      // NOTE: This requires a 'chat_messages' table in Supabase
-      // For now, we'll use localStorage as a demo
-      const messages = getLocalMessages();
+      // Fetch messages from Supabase
+      // Group messages: is_private = false (visible to all)
+      // Private messages: is_private = true AND student_id = currentStudentId
+      const { data: groupMessages, error: groupError } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('is_private', false)
+        .order('created_at', { ascending: true });
+
+      const { data: privateMessages, error: privateError } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('is_private', true)
+        .eq('student_id', currentStudentId)
+        .order('created_at', { ascending: true });
+
+      if (groupError) {
+        console.error('Error loading group messages:', groupError);
+      }
+      if (privateError) {
+        console.error('Error loading private messages:', privateError);
+      }
+
+      // Combine and sort all messages
+      const allMessages = [...(groupMessages || []), ...(privateMessages || [])];
+      allMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
       
       // Clear chat body except typing indicator
       chatBody.innerHTML = '';
       chatBody.appendChild(chatTyping);
 
-      if (messages.length === 0) {
+      if (allMessages.length === 0) {
         addDayDivider('Today');
         addWelcomeMessage();
       } else {
         addDayDivider('Today');
-        messages.forEach(msg => {
-          addMessageToUI(msg.text, msg.sender, msg.timestamp);
+        allMessages.forEach(msg => {
+          addMessageToUI(
+            msg.message, 
+            msg.sender_type, 
+            msg.created_at, 
+            msg.is_private,
+            msg.sender_name,
+            msg.sender_college
+          );
         });
       }
 
@@ -667,6 +736,8 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   }
 
   function getLocalMessages() {
+    // DEPRECATED: Kept for backward compatibility
+    // New messages are stored in Supabase
     const key = `arnoma:chat:${currentStudentId}`;
     const stored = localStorage.getItem(key);
     if (stored) {
@@ -680,13 +751,15 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   }
 
   function saveLocalMessages(messages) {
+    // DEPRECATED: Kept for backward compatibility
+    // New messages are saved to Supabase
     const key = `arnoma:chat:${currentStudentId}`;
     localStorage.setItem(key, JSON.stringify(messages));
   }
 
   function addWelcomeMessage() {
     const welcome = "Hi! 👋 Welcome to the group chat! You can message your classmates here, or send a private message to the admin using the red button.";
-    addMessageToUI(welcome, 'admin', new Date().toISOString(), false);
+    addMessageToUI(welcome, 'admin', new Date().toISOString(), false, 'Admin', '');
   }
 
   function addDayDivider(text) {
@@ -696,21 +769,29 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     chatBody.insertBefore(div, chatTyping);
   }
 
-  function addMessageToUI(text, sender, timestamp, isPrivate = false) {
+  function addSystemMessage(text) {
+    const div = document.createElement('div');
+    div.className = 'system-msg';
+    div.innerHTML = `<span class="system-msg-text">🔒 ${text}</span>`;
+    chatBody.insertBefore(div, chatTyping);
+    scrollToBottom();
+  }
+
+  function addMessageToUI(text, sender, timestamp, isPrivate = false, senderName = '', senderCollege = '') {
     const wrap = document.createElement("div");
-    wrap.className = "msg" + (sender === "student" ? " me" : " admin");
+    
+    // Determine message type
+    const isMe = sender === "student";
+    const isAdmin = sender === "admin";
+    
+    if (isPrivate) {
+      wrap.className = "msg private" + (isMe ? " me" : "");
+    } else {
+      wrap.className = "msg" + (isMe ? " me" : (isAdmin ? " admin" : ""));
+    }
     
     const bub = document.createElement("div");
     bub.className = "bubble";
-    
-    // Add lock icon for private messages
-    if (isPrivate) {
-      const lockIcon = document.createElement("span");
-      lockIcon.textContent = "🔒 ";
-      lockIcon.style.opacity = "0.7";
-      lockIcon.style.marginRight = "4px";
-      bub.appendChild(lockIcon);
-    }
     
     const textNode = document.createTextNode(text);
     bub.appendChild(textNode);
@@ -718,13 +799,40 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     const meta = document.createElement("div");
     meta.className = "meta-line";
     
-    const left = document.createElement("span");
-    left.textContent = sender === "student" ? "You" : "Admin";
+    // Build sender info
+    const senderInfo = document.createElement("div");
+    senderInfo.className = "sender-info";
     
-    const right = document.createElement("span");
-    right.textContent = formatTime(timestamp);
+    let displayName = '';
+    if (isMe) {
+      displayName = senderName || currentStudentName || "You";
+    } else if (isAdmin) {
+      displayName = "Admin";
+    } else {
+      displayName = senderName || "Student";
+    }
     
-    meta.append(left, right);
+    senderInfo.textContent = displayName;
+    
+    // Add college if available
+    if (senderCollege && senderCollege.trim()) {
+      const collegeInfo = document.createElement("div");
+      collegeInfo.className = "college-info";
+      collegeInfo.textContent = senderCollege;
+      meta.appendChild(senderInfo);
+      meta.appendChild(collegeInfo);
+    } else {
+      meta.appendChild(senderInfo);
+    }
+    
+    // Add timestamp
+    const timeSpan = document.createElement("div");
+    timeSpan.style.fontSize = "10px";
+    timeSpan.style.opacity = "0.6";
+    timeSpan.style.marginTop = "2px";
+    timeSpan.textContent = formatTime(timestamp);
+    meta.appendChild(timeSpan);
+    
     bub.appendChild(meta);
     wrap.appendChild(bub);
 
@@ -754,60 +862,91 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
 
     const timestamp = new Date().toISOString();
 
-    // Show private indicator if sending to admin
+    // Show system message if sending private to admin
     if (isPrivateToAdmin) {
-      showPrivateIndicator();
+      addSystemMessage("Private Chat - Only you and the administrator can see this");
     }
 
-    // Add to UI
-    addMessageToUI(text, "student", timestamp, isPrivateToAdmin);
+    // Add to UI immediately (optimistic update)
+    addMessageToUI(text, "student", timestamp, isPrivateToAdmin, currentStudentName, currentStudentCollege);
     chatInput.value = "";
     resizeInput();
 
-    // Save to localStorage with privacy flag
-    const messages = getLocalMessages();
-    messages.push({
-      text: text,
-      sender: "student",
-      timestamp: timestamp,
-      isPrivate: isPrivateToAdmin
-    });
-    saveLocalMessages(messages);
+    try {
+      // Save to Supabase
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .insert({
+          student_id: currentStudentId,
+          message: text,
+          sender_type: 'student',
+          sender_name: currentStudentName,
+          sender_college: currentStudentCollege,
+          is_private: isPrivateToAdmin
+        })
+        .select()
+        .single();
 
-    // TODO: Send to Supabase table when ready
-    // await supabase.from('chat_messages').insert({
-    //   student_id: currentStudentId,
-    //   message: text,
-    //   sender: 'student',
-    //   is_private: isPrivateToAdmin
-    // });
+      if (error) {
+        console.error('Error sending message:', error);
+        // Optionally show error to user
+        addSystemMessage("⚠️ Message failed to send. Please try again.");
+        return;
+      }
 
-    // Demo auto-reply only for private admin messages
-    if (isPrivateToAdmin) {
-      showTyping(true);
-      setTimeout(() => {
-        showTyping(false);
-        const reply = "Thanks for your private message! An admin will respond shortly. 📩";
-        const replyTime = new Date().toISOString();
-        addMessageToUI(reply, "admin", replyTime, true);
-        
-        const messages = getLocalMessages();
-        messages.push({
-          text: reply,
-          sender: "admin",
-          timestamp: replyTime,
-          isPrivate: true
-        });
-        saveLocalMessages(messages);
-      }, 1200);
+      debugLog('✅ Message sent:', data);
+
+      // Save to localStorage as backup (deprecated but kept for compatibility)
+      const messages = getLocalMessages();
+      messages.push({
+        text: text,
+        sender: "student",
+        timestamp: timestamp,
+        isPrivate: isPrivateToAdmin,
+        senderName: currentStudentName,
+        senderCollege: currentStudentCollege
+      });
+      saveLocalMessages(messages);
+
+    } catch (error) {
+      console.error('Send error:', error);
+      addSystemMessage("⚠️ Network error. Please check your connection.");
     }
   }
 
-  function showPrivateIndicator() {
-    privateIndicator.classList.add('show');
-    setTimeout(() => {
-      privateIndicator.classList.remove('show');
-    }, 3000);
+  function startMessagePolling() {
+    // Poll for new messages every 2 seconds
+    messagePollingInterval = setInterval(async () => {
+      await checkForNewMessages();
+    }, 2000);
+  }
+
+  async function checkForNewMessages() {
+    try {
+      // Get current message count in UI
+      const currentMessageCount = chatBody.querySelectorAll('.msg').length;
+      
+      // Fetch latest message count from database
+      const { data: groupMessages } = await supabase
+        .from('chat_messages')
+        .select('id', { count: 'exact', head: false })
+        .eq('is_private', false);
+
+      const { data: privateMessages } = await supabase
+        .from('chat_messages')
+        .select('id', { count: 'exact', head: false })
+        .eq('is_private', true)
+        .eq('student_id', currentStudentId);
+
+      const totalMessages = (groupMessages?.length || 0) + (privateMessages?.length || 0);
+
+      if (totalMessages > currentMessageCount) {
+        // New message detected, reload messages
+        await loadMessages();
+      }
+    } catch (error) {
+      debugLog('Polling error:', error);
+    }
   }
 
   function resizeInput() {
@@ -816,18 +955,42 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   }
 
   function subscribeToMessages() {
-    // TODO: Real-time subscription when Supabase table is ready
-    // messagesSubscription = supabase
-    //   .channel('chat_messages')
-    //   .on('postgres_changes', 
-    //     { event: 'INSERT', schema: 'public', table: 'chat_messages' },
-    //     (payload) => {
-    //       if (payload.new.student_id === currentStudentId && payload.new.sender === 'admin') {
-    //         addMessageToUI(payload.new.message, 'admin', payload.new.created_at);
-    //       }
-    //     }
-    //   )
-    //   .subscribe();
+    // Real-time subscription for instant message updates
+    messagesSubscription = supabase
+      .channel('chat_messages_channel')
+      .on(
+        'postgres_changes',
+        { 
+          event: 'INSERT', 
+          schema: 'public', 
+          table: 'chat_messages' 
+        },
+        async (payload) => {
+          debugLog('📨 New message received:', payload.new);
+          
+          // Check if this message is relevant to current student
+          const newMsg = payload.new;
+          const isRelevant = 
+            !newMsg.is_private || // Group message (visible to all)
+            newMsg.student_id === currentStudentId; // Private message for this student
+
+          if (isRelevant && newMsg.student_id !== currentStudentId) {
+            // Only add if it's not our own message (we already added it optimistically)
+            // or if it's from someone else
+            addMessageToUI(
+              newMsg.message,
+              newMsg.sender_type,
+              newMsg.created_at,
+              newMsg.is_private,
+              newMsg.sender_name,
+              newMsg.sender_college
+            );
+          }
+        }
+      )
+      .subscribe((status) => {
+        debugLog('📡 Subscription status:', status);
+      });
   }
 
   // Events
@@ -846,6 +1009,9 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   window.addEventListener('beforeunload', () => {
     if (messagesSubscription) {
       supabase.removeChannel(messagesSubscription);
+    }
+    if (messagePollingInterval) {
+      clearInterval(messagePollingInterval);
     }
   });
 
