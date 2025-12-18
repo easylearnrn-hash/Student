@@ -1677,6 +1677,23 @@
           const metadataFallbackPath = noteData && noteData.pdf_url && noteData.pdf_url !== pdfPath ? noteData.pdf_url : null;
           const canAttemptFallback = storageMissing && metadataFallbackPath && !attemptedPdfPaths.has(metadataFallbackPath);
 
+          // Diagnostics: list available files in the same folder when storage says missing
+          if (storageMissing) {
+            try {
+              const folderPrefix = pdfPath.includes('/') ? pdfPath.split('/').slice(0, -1).join('/') : '';
+              const { data: listData, error: listError } = await supabaseClient.storage
+                .from(STORAGE_BUCKET)
+                .list(folderPrefix || undefined);
+              if (listError) {
+                console.warn('⚠️ Could not list storage folder for diagnostics:', listError.message);
+              } else {
+                console.warn(`📂 Storage contents for prefix "${folderPrefix || '[root]'}":`, listData?.map(item => item.name));
+              }
+            } catch (listEx) {
+              console.warn('⚠️ Storage list diagnostic failed:', listEx);
+            }
+          }
+
           if (canAttemptFallback) {
             // Storage says the primary object is missing; try the canonical pdf_url stored in metadata
             console.warn('⚠️ Primary PDF path missing. Attempting metadata fallback:', metadataFallbackPath);
