@@ -1253,48 +1253,94 @@
     const debouncedFilterAndRenderNotes = debounce(filterAndRenderNotes, 300);
 
     // ===== LOAD ACTIVE GROUPS FROM STUDENT MANAGER =====
+    // UPDATED: Now respects Schedule Manager - only shows groups with BOTH:
+    // 1. Active students (show_in_grid=true)
+    // 2. Defined schedules (from groups table)
     let activeGroups = ['Group A', 'Group B', 'Group C', 'Group D', 'Group E', 'Group F']; // Default all groups
     async function loadActiveGroups() {
       try {
-        // PERFORMANCE: Removed console.log
+        console.log('🔍 Loading active groups (checking schedules and students)...');
         
-        // Query students table for show_in_grid flag to determine active groups
-  const { data: students, error } = await supabaseClient
+        // Step 1: Get groups with schedules from groups table
+        const { data: scheduledGroups, error: groupsError } = await supabaseClient
+          .from('groups')
+          .select('group_name, schedule, one_time_schedules, active');
+        
+        if (groupsError) {
+          console.error('❌ Error loading groups:', groupsError);
+          return; // Keep default groups if error
+        }
+        
+        // Step 2: Query students table for show_in_grid flag to determine active groups
+        const { data: students, error: studentsError } = await supabaseClient
           .from('students')
           .select('group_name, show_in_grid')
           .eq('show_in_grid', true);
         
-        if (error) {
-          console.error('❌ Error loading active groups:', error);
-          return; // Keep all groups if error
+        if (studentsError) {
+          console.error('❌ Error loading active groups:', studentsError);
+          return; // Keep default groups if error
         }
         
-        // PERFORMANCE: Removed console.log
-        
-        // Extract unique groups that are active
-        const uniqueGroups = new Set();
+        // Step 3: Extract unique groups that have active students
+        const groupsWithStudents = new Set();
         students?.forEach(student => {
           let groupName = student.group_name;
-          // Normalize to "Group X" format
-          if (groupName && !groupName.toLowerCase().startsWith('group')) {
-            groupName = `Group ${groupName}`;
-          }
           if (groupName) {
-            uniqueGroups.add(groupName);
+            // Normalize to just the letter (A, B, C, etc.)
+            groupName = groupName.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
+            groupsWithStudents.add(groupName);
           }
         });
         
-        activeGroups = Array.from(uniqueGroups).sort();
+        console.log('📊 Groups with active students:', Array.from(groupsWithStudents));
         
-        // PERFORMANCE: Removed console.log
+        // Step 4: Filter groups that have BOTH students AND schedules
+        const groupsWithSchedules = new Set();
+        scheduledGroups?.forEach(group => {
+          // Check if group has a schedule defined
+          const hasSchedule = (group.schedule && group.schedule.trim() !== '') || 
+                             (group.one_time_schedules && group.one_time_schedules.length > 0);
+          
+          // Check if group is active
+          const isActive = group.active !== false;
+          
+          if (hasSchedule && isActive) {
+            // Normalize group name to just the letter
+            let groupLetter = group.group_name?.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
+            if (groupLetter) {
+              groupsWithSchedules.add(groupLetter);
+            }
+          }
+        });
         
-        // Update group tabs visibility
+        console.log('📅 Groups with schedules:', Array.from(groupsWithSchedules));
+        
+        // Step 5: Intersect the two sets - groups must have BOTH students AND schedules
+        const validGroups = new Set();
+        groupsWithStudents.forEach(groupLetter => {
+          if (groupsWithSchedules.has(groupLetter)) {
+            validGroups.add(groupLetter);
+          } else {
+            console.log(`⚠️ Group ${groupLetter} has students but NO SCHEDULE - hiding from Group Notes`);
+          }
+        });
+        
+        // Step 6: Format as "Group X" for display
+        activeGroups = Array.from(validGroups)
+          .map(letter => `Group ${letter}`)
+          .sort();
+        
+        console.log('✅ Final active groups (with students AND schedules):', activeGroups);
+        
+        // Step 7: Update group tabs visibility
         document.querySelectorAll('.group-tab').forEach(tab => {
           const groupName = tab.dataset.group;
           if (activeGroups.includes(groupName)) {
             tab.style.display = 'inline-block';
           } else {
             tab.style.display = 'none';
+            console.log(`🚫 Hiding tab for ${groupName} - no schedule or no students`);
           }
         });
         
@@ -1305,6 +1351,8 @@
             tab.classList.toggle('active', tab.dataset.group === currentGroup);
           });
         }
+        
+        console.log('✅ Group tabs updated based on Schedule Manager settings');
         
       } catch (error) {
         console.error('❌ Error in loadActiveGroups:', error);
