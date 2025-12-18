@@ -456,6 +456,17 @@
         <button class="filter-btn" data-group="F">F</button>
       </div>
       
+      <div style="margin: 16px 0;">
+        <button id="fullChatBtn" class="student-item" style="background: linear-gradient(135deg, rgba(156,220,254,0.15), rgba(199,146,234,0.15)); border: 2px solid var(--accent-purple); cursor: pointer; text-align: center;">
+          <div class="student-name" style="font-size: 15px;">
+            💬 Full Chat (All Students)
+          </div>
+          <div class="student-group" style="font-size: 11px; opacity: 0.8;">
+            View all messages together
+          </div>
+        </button>
+      </div>
+      
       <div id="studentsList">
         <!-- Students will be loaded here -->
       </div>
@@ -530,6 +541,7 @@
     let allStudents = [];
     let currentFilter = 'all';
     let editingMessageId = null;
+    let isFullChatMode = false; // Track if viewing all messages
 
     // DOM Elements
     const studentsList = document.getElementById('studentsList');
@@ -541,6 +553,7 @@
     const inputArea = document.getElementById('inputArea');
     const refreshBtn = document.getElementById('refreshBtn');
     const deleteAllBtn = document.getElementById('deleteAllBtn');
+    const fullChatBtn = document.getElementById('fullChatBtn');
 
     // Initialize
     async function init() {
@@ -683,10 +696,12 @@
 
     // Select Student
     async function selectStudent(studentId, studentName) {
+      isFullChatMode = false; // Exit full chat mode
       currentStudentId = studentId;
       currentStudentName = studentName;
 
       // Update UI
+      fullChatBtn.classList.remove('active'); // Remove full chat highlight
       renderStudents();
       chatTitle.innerHTML = `
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -707,9 +722,95 @@
       subscribeToMessages();
     }
 
+    // Load Full Chat (All Students)
+    async function loadFullChat() {
+      try {
+        isFullChatMode = true;
+        currentStudentId = null;
+        currentStudentName = null;
+
+        // Update UI
+        document.querySelectorAll('.student-item').forEach(item => item.classList.remove('active'));
+        fullChatBtn.classList.add('active');
+        
+        chatTitle.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          💬 Full Chat - All Students
+        `;
+        inputArea.style.display = 'none'; // Hide input in full chat mode
+        deleteAllBtn.style.display = 'none';
+
+        // Load ALL messages
+        const { data, error } = await supabaseClient
+          .from('chat_messages')
+          .select('*, students(name)')
+          .order('created_at', { ascending: true })
+          .limit(500); // Limit for performance
+
+        if (error) throw error;
+
+        renderFullChatMessages(data || []);
+      } catch (error) {
+        debugLog('❌ Error loading full chat:', error);
+        alert('Failed to load full chat: ' + error.message);
+      }
+    }
+
+    // Render Full Chat Messages
+    function renderFullChatMessages(messages) {
+      if (messages.length === 0) {
+        messagesContainer.innerHTML = `
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <p>No messages yet across all students.</p>
+          </div>
+        `;
+        return;
+      }
+
+      messagesContainer.innerHTML = messages.map(msg => {
+        const isAdmin = msg.sender_type === 'admin';
+        const time = new Date(msg.created_at).toLocaleString();
+        const studentName = msg.students?.name || msg.sender_name || 'Unknown';
+        
+        return `
+          <div class="message ${msg.sender_type} ${msg.is_private ? 'private' : ''}" data-id="${msg.id}">
+            <div class="message-header">
+              <span class="message-sender">
+                ${isAdmin ? '👨‍💼 Admin' : `👤 ${studentName}`}
+                ${msg.is_private ? ' 🔒 Private' : ' 🌍 Group'}
+                ${!isAdmin ? ` → ${msg.sender_college || 'No College'}` : ''}
+              </span>
+              <span class="message-time">${time}</span>
+            </div>
+            <div class="message-text" id="text-${msg.id}">${msg.message}</div>
+            ${isAdmin ? `
+              <div class="message-actions">
+                <button class="msg-action-btn" onclick="editMessage('${msg.id}', \`${msg.message.replace(/`/g, '\\`')}\`)">
+                  ✏️ Edit
+                </button>
+                <button class="msg-action-btn delete" onclick="deleteMessage('${msg.id}')">
+                  🗑️ Delete
+                </button>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+
+      // Scroll to bottom
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
     // Load Messages
     async function loadMessages() {
       if (!currentStudentId) return;
+
+      isFullChatMode = false; // Exit full chat mode
 
       try {
         const { data, error } = await supabaseClient
@@ -996,6 +1097,9 @@
 
       // Delete All
       deleteAllBtn.addEventListener('click', deleteAllMessages);
+
+      // Full Chat Button
+      fullChatBtn.addEventListener('click', loadFullChat);
     }
 
     // Make functions global for onclick handlers
