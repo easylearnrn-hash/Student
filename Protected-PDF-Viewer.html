@@ -1512,28 +1512,71 @@
         console.log('🔍 Loading PDF from storage path:', pdfPath);
         console.log('🗂️ Bucket: student-notes');
         console.log('📍 Full storage reference: student-notes/' + pdfPath);
+        
+        if (!pdfPath || typeof pdfPath !== 'string' || pdfPath.trim() === '') {
+          throw new Error('Invalid PDF path provided');
+        }
+        
         document.getElementById('loadingScreen').style.display = 'flex';
         
         // Get public URL (bucket is public)
-        const { data: publicUrlData } = supabaseClient.storage
+        const { data: publicUrlData, error: urlError } = supabaseClient.storage
           .from('student-notes')
           .getPublicUrl(pdfPath);
         
+        if (urlError) {
+          console.error('❌ Error generating public URL:', urlError);
+          throw new Error(`Failed to generate URL: ${urlError.message || 'Unknown error'}`);
+        }
+        
         if (!publicUrlData || !publicUrlData.publicUrl) {
-          throw new Error('Could not generate public URL');
+          throw new Error('Public URL was not generated');
         }
         
         const pdfUrl = publicUrlData.publicUrl;
         console.log('✅ Created public URL for:', pdfPath);
         console.log('🔗 URL:', pdfUrl);
         
+        // Verify URL is accessible before loading
+        try {
+          const response = await fetch(pdfUrl, { method: 'HEAD' });
+          if (!response.ok) {
+            throw new Error(`PDF file not accessible (HTTP ${response.status}). File may not exist in storage.`);
+          }
+        } catch (fetchError) {
+          console.error('❌ PDF accessibility check failed:', fetchError);
+          throw new Error(`Cannot access PDF file. Please ensure it exists in storage. Error: ${fetchError.message}`);
+        }
+        
         // Load PDF from public URL
         const loadingTask = pdfjsLib.getDocument({
           url: pdfUrl,
-          withCredentials: false
+          withCredentials: false,
+          // Add error handling for PDF.js loading
+          httpHeaders: {},
+          withCredentials: false,
+          isEvalSupported: false,
+          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+          cMapPacked: true
         });
+        
+        // Handle PDF.js specific loading errors
+        loadingTask.onProgress = function(progressData) {
+          const percent = Math.round((progressData.loaded / progressData.total) * 100);
+          console.log(`Loading PDF: ${percent}%`);
+        };
+        
         pdfDoc = await loadingTask.promise;
+        
+        if (!pdfDoc) {
+          throw new Error('PDF document failed to load');
+        }
+        
         totalPages = pdfDoc.numPages;
+        
+        if (!totalPages || totalPages < 1) {
+          throw new Error('Invalid PDF: No pages found');
+        }
         
         // Update UI
         document.getElementById('totalPages').textContent = totalPages;
@@ -1565,16 +1608,37 @@
     
     async function renderPage(pageNum) {
       try {
+        // Validate inputs
+        if (!pdfDoc) {
+          throw new Error('PDF document not loaded');
+        }
+        
+        if (!pageNum || pageNum < 1 || pageNum > totalPages) {
+          throw new Error(`Invalid page number: ${pageNum}. Valid range: 1-${totalPages}`);
+        }
+        
         const page = await pdfDoc.getPage(pageNum);
+        
+        if (!page) {
+          throw new Error(`Failed to load page ${pageNum}`);
+        }
         
         // High-quality rendering: 3x scale for retina displays
         const scale = zoomLevel * 3.0;
         const viewport = page.getViewport({ scale: scale });
         
+        if (!viewport) {
+          throw new Error('Failed to create viewport');
+        }
+        
         // Create canvas for this page
         const canvas = document.createElement('canvas');
         canvas.className = 'page-canvas';
         const context = canvas.getContext('2d');
+        
+        if (!context) {
+          throw new Error('Failed to get canvas context');
+        }
         
         // Set high-resolution canvas dimensions
         canvas.height = viewport.height;
@@ -1585,10 +1649,12 @@
         canvas.style.height = (viewport.height / 3) + 'px';
         
         // Render PDF page with high quality
-        await page.render({
+        const renderTask = page.render({
           canvasContext: context,
           viewport: viewport
-        }).promise;
+        });
+        
+        await renderTask.promise;
         
         // Create page container with watermark
         const pageContainer = document.createElement('div');
@@ -2374,6 +2440,47 @@
         }
       }
     });
+
+    // ============================================================
+    // GLOBAL ERROR HANDLERS - ROBUSTNESS
+    // ============================================================
+    
+    // Catch all unhandled promise rejections
+    window.addEventListener('unhandledrejection', function(event) {
+      console.error('❌ Unhandled Promise Rejection:', event.reason);
+      showError('An unexpected error occurred: ' + (event.reason?.message || event.reason || 'Unknown error'));
+      event.preventDefault();
+    });
+    
+    // Catch all uncaught errors
+    window.addEventListener('error', function(event) {
+      console.error('❌ Uncaught Error:', event.error);
+      
+      // Don't show error for script loading failures (CDN issues)
+      if (event.message && event.message.includes('Script error')) {
+        console.warn('Script loading error detected, but PDF viewer may still work');
+        return;
+      }
+      
+      showError('An unexpected error occurred. Please refresh the page.');
+      event.preventDefault();
+    });
+    
+    // Monitor PDF.js worker errors
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    
+    // Verify critical dependencies on load
+    if (typeof window.supabase === 'undefined') {
+      showError('❌ CRITICAL: Supabase SDK failed to load. Please check your internet connection and refresh.');
+    }
+    
+    if (typeof pdfjsLib === 'undefined') {
+      showError('❌ CRITICAL: PDF.js library failed to load. Please check your internet connection and refresh.');
+    }
+    
+    console.log('✅ Protected PDF Viewer initialized with robust error handling');
   </script>
 </body>
 </html>
