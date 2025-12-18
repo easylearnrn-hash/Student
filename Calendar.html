@@ -3918,23 +3918,11 @@
       function getLAParts(dateInput) {
         const date = dateInput instanceof Date ? dateInput : new Date(dateInput);
         if (isNaN(date.getTime())) return null;
-        
-        // Use local timezone instead of LA timezone to match browser's display
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hour = String(date.getHours()).padStart(2, '0');
-        const minute = String(date.getMinutes()).padStart(2, '0');
-        const second = String(date.getSeconds()).padStart(2, '0');
-        
-        return {
-          year,
-          month,
-          day,
-          hour,
-          minute,
-          second
-        };
+        const parts = {};
+        laDateTimeFormatter.formatToParts(date).forEach(part => {
+          parts[part.type] = part.value;
+        });
+        return parts;
       }
 
       function getLAWeekdayName(dateInput) {
@@ -5086,17 +5074,15 @@
           if (!source) return '';
           
           try {
-            // Parse the timestamp - email_date is stored in UTC
-            const timestamp = new Date(source);
-            if (isNaN(timestamp.getTime())) return '';
+            // Parse the timestamp and convert to LA timezone
+            const date = new Date(source);
+            if (isNaN(date.getTime())) return '';
             
-            // Convert to local date string (YYYY-MM-DD) using local timezone
-            // This ensures the date shown matches the user's timezone
-            const year = timestamp.getFullYear();
-            const month = String(timestamp.getMonth() + 1).padStart(2, '0');
-            const day = String(timestamp.getDate()).padStart(2, '0');
+            // Use LA timezone formatter to get the correct date
+            const parts = getLAParts(date);
+            if (!parts) return '';
             
-            return `${year}-${month}-${day}`;
+            return `${parts.year}-${parts.month}-${parts.day}`;
           } catch (e) {
             debugLog('⚠️ Error parsing payment date:', e);
             return '';
@@ -5116,21 +5102,13 @@
           
           if (!source) return '';
           
-          // Convert to Date object
+          // Convert to Date object and format in LA timezone
           try {
             const date = new Date(source);
             if (isNaN(date.getTime())) return '';
             
-            // Use local timezone (user's browser timezone) for time display
-            const hours = date.getHours();
-            const minutes = date.getMinutes();
-            
-            // Convert to 12-hour format
-            const period = hours >= 12 ? 'PM' : 'AM';
-            const displayHours = hours % 12 || 12;
-            const displayMinutes = minutes.toString().padStart(2, '0');
-            
-            return `${displayHours}:${displayMinutes} ${period}`;
+            // Use LA timezone formatter for time display
+            return formatTimeInLA(date);
           } catch (err) {
             debugLog('⚠️ Error extracting payment time:', err);
             return '';
