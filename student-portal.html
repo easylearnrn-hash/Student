@@ -11719,6 +11719,31 @@
       display: flex;
     }
 
+    /* Admin message badge - red with blink */
+    .chat-badge.admin-message {
+      background: linear-gradient(135deg, rgba(239,68,68,.95), rgba(220,38,38,.95));
+      color: white;
+      animation: badgeBlink 1.5s ease-in-out infinite;
+    }
+
+    /* Mentioned badge - blue with blink */
+    .chat-badge.mentioned {
+      background: linear-gradient(135deg, rgba(59,130,246,.95), rgba(37,99,235,.95));
+      color: white;
+      animation: badgeBlink 1.5s ease-in-out infinite;
+    }
+
+    /* Student message badge - static blue */
+    .chat-badge.student-message {
+      background: linear-gradient(135deg, rgba(59,130,246,.95), rgba(37,99,235,.95));
+      color: white;
+    }
+
+    @keyframes badgeBlink {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.95); }
+    }
+
     /* Mobile adjustments */
     @media (max-width: 768px) {
       .chat-fab {
@@ -11744,12 +11769,12 @@
   <iframe id="chatIframe"
     title="Student Chat"
     style="position: fixed; 
-           right: 4px; 
-           bottom: 4px; 
+           right: 20px; 
+           bottom: 20px; 
            width: 400px; 
            height: 650px; 
-           max-width: calc(100vw - 8px);
-           max-height: calc(100vh - 8px);
+           max-width: calc(100vw - 40px);
+           max-height: calc(100vh - 40px);
            border: none; 
            pointer-events: none; 
            z-index: 99998; 
@@ -11796,34 +11821,114 @@
         }
       });
       
-      // Check if there are unread admin messages (from localStorage demo)
-      function checkUnreadMessages() {
+      // Check if there are unread admin messages and handle auto-open
+      async function checkUnreadMessages() {
         try {
-          const studentData = localStorage.getItem('arnoma:student:session');
-          if (!studentData) return;
+          if (!window.currentStudent || !window.supabase) return;
           
-          const student = JSON.parse(studentData);
-          const messageKey = `arnoma:chat:${student.id}`;
-          const messages = localStorage.getItem(messageKey);
+          const studentId = window.currentStudent.id;
+          const studentName = window.currentStudent.name.toLowerCase();
           
-          if (messages) {
-            const parsedMessages = JSON.parse(messages);
-            const unreadCount = parsedMessages.filter(m => 
-              m.sender === 'admin' && !m.read
-            ).length;
-            
-            if (unreadCount > 0) {
-              chatBadge.textContent = unreadCount > 9 ? '9+' : unreadCount.toString();
-              chatBadge.classList.add('show');
-            }
+          // Get the last time the student opened chat
+          const lastOpenKey = `arnoma:chat:lastOpen:${studentId}`;
+          const lastOpenTime = localStorage.getItem(lastOpenKey) || new Date(0).toISOString();
+          
+          // Query for new messages since last open
+          const { data: messages, error } = await window.supabase
+            .from('chat_messages')
+            .select('*')
+            .gt('created_at', lastOpenTime)
+            .order('created_at', { ascending: false });
+          
+          if (error) {
+            console.error('Error checking chat messages:', error);
+            return;
           }
+          
+          if (!messages || messages.length === 0) {
+            chatBadge.classList.remove('show', 'admin-message', 'mentioned', 'student-message');
+            return;
+          }
+          
+          // Check for admin messages (highest priority - auto-open)
+          const adminMessages = messages.filter(m => 
+            m.sender_type === 'admin' && (m.is_private === false || m.student_id === studentId)
+          );
+          
+          if (adminMessages.length > 0) {
+            chatBadge.textContent = adminMessages.length > 9 ? '9+' : adminMessages.length.toString();
+            chatBadge.classList.remove('mentioned', 'student-message');
+            chatBadge.classList.add('show', 'admin-message');
+            
+            // Auto-open chat if admin messaged
+            if (!chatOpen) {
+              setTimeout(() => {
+                chatFab.click();
+              }, 500);
+            }
+            return;
+          }
+          
+          // Check for mentions (name in message text)
+          const mentionMessages = messages.filter(m => 
+            m.sender_type === 'student' && 
+            m.student_id !== studentId &&
+            m.is_private === false &&
+            m.message && m.message.toLowerCase().includes(studentName)
+          );
+          
+          if (mentionMessages.length > 0) {
+            chatBadge.textContent = mentionMessages.length > 9 ? '9+' : mentionMessages.length.toString();
+            chatBadge.classList.remove('admin-message', 'student-message');
+            chatBadge.classList.add('show', 'mentioned');
+            return;
+          }
+          
+          // Check for other student messages (lowest priority)
+          const studentMessages = messages.filter(m => 
+            m.sender_type === 'student' && 
+            m.student_id !== studentId &&
+            m.is_private === false
+          );
+          
+          if (studentMessages.length > 0) {
+            chatBadge.textContent = studentMessages.length > 9 ? '9+' : studentMessages.length.toString();
+            chatBadge.classList.remove('admin-message', 'mentioned');
+            chatBadge.classList.add('show', 'student-message');
+            return;
+          }
+          
+          // No new messages
+          chatBadge.classList.remove('show', 'admin-message', 'mentioned', 'student-message');
+          
         } catch (e) {
           console.error('Chat badge error:', e);
         }
       }
       
-      // Check on load
-      checkUnreadMessages();
+      // Update last open time when chat opens
+      chatFab.addEventListener('click', () => {
+        if (window.currentStudent) {
+          const lastOpenKey = `arnoma:chat:lastOpen:${window.currentStudent.id}`;
+          localStorage.setItem(lastOpenKey, new Date().toISOString());
+          chatBadge.classList.remove('show', 'admin-message', 'mentioned', 'student-message');
+        }
+      });
+      
+      // Listen for chat iframe to signal it's ready, then check messages
+      window.addEventListener('message', (event) => {
+        if (event.data === 'chatReady') {
+          checkUnreadMessages();
+        }
+      });
+      
+      // Check on load (wait for currentStudent to be available)
+      const checkInterval = setInterval(() => {
+        if (window.currentStudent && window.supabase) {
+          clearInterval(checkInterval);
+          checkUnreadMessages();
+        }
+      }, 100);
       
       // Check periodically (every 30 seconds)
       setInterval(checkUnreadMessages, 30000);

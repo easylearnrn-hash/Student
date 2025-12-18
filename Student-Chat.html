@@ -5,6 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ARNOMA Student Chat</title>
   
+  <!-- 
+    PERFORMANCE OPTIMIZATIONS APPLIED:
+    1. Incremental message loading with timestamp-based queries (load only new messages)
+    2. Single OR query instead of multiple separate queries (reduce network calls)
+    3. Message deduplication cache to prevent rendering duplicates
+    4. DocumentFragment batching for efficient DOM updates
+    5. requestAnimationFrame for scroll batching
+    6. CSS containment (contain: layout style) for message isolation
+    7. GPU acceleration (transform: translateZ(0)) for smooth rendering
+    8. Intelligent polling: only when real-time subscription fails (5s interval)
+    9. Non-blocking college fetch - load messages first, fetch metadata async
+    10. HTML string concatenation instead of createElement() chains
+    11. Debounced scroll requests to prevent layout thrashing
+    12. will-change hints for browser optimization
+  -->
+  
   <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1/dist/umd/supabase.min.js"></script>
   
@@ -41,12 +57,12 @@
     /* Chat Container (Floating Popup - Bottom Right) */
     .chat-container {
       position: fixed;
-      right: 4px;
-      bottom: 4px;
+      right: 0;
+      bottom: 0;
       width: 400px;
-      max-width: calc(100vw - 8px);
+      max-width: 100vw;
       height: 650px;
-      max-height: calc(100vh - 8px);
+      max-height: 100vh;
       border-radius: 22px;
       border: 1px solid var(--stroke);
       background:
@@ -84,6 +100,13 @@
       padding: 14px 14px 12px;
       border-bottom: 1px solid rgba(255,255,255,.12);
       background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s ease;
+    }
+    
+    .chat-head:hover {
+      background: linear-gradient(180deg, rgba(255,255,255,.12), rgba(255,255,255,.06));
     }
 
     .chat-title {
@@ -185,6 +208,10 @@
       overflow: auto;
       scrollbar-width: thin;
       scrollbar-color: rgba(255,255,255,.20) transparent;
+      /* Performance optimizations */
+      will-change: scroll-position;
+      contain: layout style paint;
+      -webkit-overflow-scrolling: touch;
     }
 
     .chat-body::-webkit-scrollbar {
@@ -211,6 +238,8 @@
       gap: 10px;
       margin: 10px 0;
       align-items: flex-end;
+      /* Performance: contain layout changes */
+      contain: layout style;
     }
 
     .msg.me {
@@ -228,6 +257,21 @@
       line-height: 1.35;
       font-size: 13px;
       word-wrap: break-word;
+      /* Performance: enable GPU acceleration for transforms */
+      transform: translateZ(0);
+      will-change: transform;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    
+    .bubble:hover {
+      border-color: rgba(167,139,250,.35);
+      background: rgba(255,255,255,.10);
+      box-shadow: 0 14px 32px rgba(0,0,0,.30);
+    }
+    
+    .bubble:active {
+      transform: translateZ(0) scale(0.98);
     }
 
     .msg.me .bubble {
@@ -517,6 +561,74 @@
       display: none;
     }
 
+    /* Reply Preview */
+    .reply-preview {
+      display: none;
+      padding: 10px 12px;
+      margin: 8px 0 0;
+      background: rgba(167,139,250,.08);
+      border-left: 3px solid rgba(167,139,250,.65);
+      border-radius: 8px;
+      position: relative;
+    }
+
+    .reply-preview.show {
+      display: block;
+    }
+
+    .reply-preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .reply-preview-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(167,139,250,.95);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .reply-preview-close {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,.60);
+      cursor: pointer;
+      padding: 2px;
+      display: grid;
+      place-items: center;
+      border-radius: 4px;
+      transition: all 0.15s ease;
+    }
+
+    .reply-preview-close:hover {
+      background: rgba(255,255,255,.10);
+      color: rgba(255,255,255,.92);
+    }
+
+    .reply-preview-close svg {
+      width: 14px;
+      height: 14px;
+    }
+
+    .reply-preview-sender {
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(255,255,255,.85);
+      margin-bottom: 2px;
+    }
+
+    .reply-preview-text {
+      font-size: 12px;
+      color: rgba(255,255,255,.60);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 300px;
+    }
+
     /* File Preview */
     .file-preview {
       display: none;
@@ -678,18 +790,18 @@
     /* Mobile */
     @media (max-width: 420px) {
       .chat-container {
-        width: calc(100vw - 36px);
-        height: calc(100vh - 140px);
-        right: 18px;
-        bottom: 86px;
+        width: 100vw;
+        height: calc(100vh - 60px);
+        right: 0;
+        bottom: 0;
       }
     }
     
     @media (max-width: 768px) {
       .chat-container {
-        right: 14px;
-        bottom: 80px;
-        width: calc(100vw - 28px);
+        right: 0;
+        bottom: 0;
+        width: 100vw;
       }
     }
   </style>
@@ -726,6 +838,21 @@
 
   <div class="chat-foot">
     <div class="private-indicator" id="privateIndicator">🔒 Private Chat - Only you and the administrator can see this</div>
+    
+    <!-- Reply Preview -->
+    <div class="reply-preview" id="replyPreview">
+      <div class="reply-preview-header">
+        <span class="reply-preview-label">Replying to</span>
+        <button class="reply-preview-close" id="replyPreviewClose" title="Cancel reply">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="reply-preview-sender" id="replyPreviewSender">Student Name</div>
+      <div class="reply-preview-text" id="replyPreviewText">Original message text...</div>
+    </div>
     
     <!-- File Preview -->
     <div class="file-preview" id="filePreview">
@@ -792,6 +919,7 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   const chatSendAdminBtn = $("chatSendAdminBtn");
   const chatTyping = $("chatTyping");
   const chatCloseBtn = $("chatCloseBtn");
+  const chatHead = document.querySelector(".chat-head");
   const loadingState = $("loadingState");
   const chatStudentName = $("chatStudentName");
   const chatAvatar = $("chatAvatar");
@@ -801,6 +929,10 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   const fileName = $("fileName");
   const fileSize = $("fileSize");
   const fileRemoveBtn = $("fileRemoveBtn");
+  const replyPreview = $("replyPreview");
+  const replyPreviewSender = $("replyPreviewSender");
+  const replyPreviewText = $("replyPreviewText");
+  const replyPreviewClose = $("replyPreviewClose");
 
   let currentStudentId = null;
   let currentStudentName = "";
@@ -808,29 +940,45 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   let messagesSubscription = null;
   let messagePollingInterval = null;
   let selectedFile = null;
+  
+  // Performance optimizations
+  let lastMessageTimestamp = null;
+  let messageCache = new Map();
+  let isLoadingMessages = false;
+  let pendingScrollRequest = false;
+  
+  // Reply functionality
+  let replyingTo = null;
 
   // Check if we're in an iframe
   const isInIframe = window.self !== window.top;
 
-  // Close button - send message to parent if in iframe, otherwise go back
+  // Function to close chat
+  const closeChat = () => {
+    if (isInIframe) {
+      window.parent.postMessage('closeChat', '*');
+    } else {
+      window.history.back();
+    }
+  };
+
+  // Close button
   if (chatCloseBtn) {
-    chatCloseBtn.addEventListener('click', () => {
-      if (isInIframe) {
-        window.parent.postMessage('closeChat', '*');
-      } else {
-        window.history.back();
-      }
+    chatCloseBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent header click from firing
+      closeChat();
     });
+  }
+
+  // Header click to close
+  if (chatHead) {
+    chatHead.addEventListener('click', closeChat);
   }
 
   // ESC to close
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (isInIframe) {
-        window.parent.postMessage('closeChat', '*');
-      } else {
-        window.history.back();
-      }
+      closeChat();
     }
   });
 
@@ -865,6 +1013,23 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     selectedFile = null;
     fileInput.value = '';
     filePreview.classList.remove('active');
+  }
+
+  // Reply Functions
+  function setReplyTo(senderName, messageText) {
+    replyingTo = {
+      sender: senderName,
+      text: messageText
+    };
+    replyPreviewSender.textContent = senderName;
+    replyPreviewText.textContent = messageText || '(attachment)';
+    replyPreview.classList.add('show');
+    chatInput.focus();
+  }
+
+  function clearReply() {
+    replyingTo = null;
+    replyPreview.classList.remove('show');
   }
 
   async function uploadFileToStorage(file) {
@@ -914,21 +1079,20 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
       currentStudentId = studentData.id;
       currentStudentName = studentData.name;
 
-      // Fetch student's college from database
-      await fetchStudentCollege();
+      // Fetch student's college from database (async, non-blocking)
+      fetchStudentCollege(); // Don't await - load messages first
 
-      // Update header
+      // Update header immediately
       chatStudentName.textContent = `Chat`;
       chatAvatar.textContent = studentData.name.charAt(0).toUpperCase();
 
-      // Load existing messages
+      // Load existing messages (priority)
       await loadMessages();
 
-      // Subscribe to new messages
+      // Subscribe to new messages for real-time updates
       subscribeToMessages();
 
-      // Start polling for new messages (every 2 seconds)
-      startMessagePolling();
+      // Polling handled automatically by subscribeToMessages based on connection status
 
       // Hide loading
       loadingState.style.display = 'none';
@@ -995,51 +1159,61 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   }
 
   async function loadMessages() {
+    if (isLoadingMessages) return; // Prevent concurrent loads
+    isLoadingMessages = true;
+    
     try {
-      // Fetch messages from Supabase
-      // Group messages: is_private = false (visible to all)
-      // Private messages: is_private = true AND student_id = currentStudentId
-      const { data: groupMessages, error: groupError } = await supabaseClient
+      // Use timestamp-based incremental loading instead of fetching all messages
+      const query = supabaseClient
         .from('chat_messages')
         .select('*')
-        .eq('is_private', false)
-        .order('created_at', { ascending: true });
-
-      const { data: privateMessages, error: privateError } = await supabaseClient
-        .from('chat_messages')
-        .select('*')
-        .eq('is_private', true)
-        .eq('student_id', currentStudentId)
-        .order('created_at', { ascending: true });
-
-      if (groupError) {
-        console.error('Error loading group messages:', groupError);
-      }
-      if (privateError) {
-        console.error('Error loading private messages:', privateError);
-      }
-
-      // Combine and sort all messages
-      const allMessages = [...(groupMessages || []), ...(privateMessages || [])];
-      allMessages.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        .order('created_at', { ascending: true })
+        .limit(100); // Limit initial load
       
-      // Clear chat body except typing indicator
-      chatBody.innerHTML = '';
-      chatBody.appendChild(chatTyping);
+      if (lastMessageTimestamp) {
+        query.gt('created_at', lastMessageTimestamp);
+      }
+      
+      // Single query with OR condition for better performance
+      const { data: messages, error } = await query.or(`is_private.eq.false,and(is_private.eq.true,student_id.eq.${currentStudentId})`);
 
-      if (allMessages.length === 0) {
-        addDayDivider('Today');
-        addWelcomeMessage();
-      } else {
-        addDayDivider('Today');
-        allMessages.forEach(msg => {
+      if (error) {
+        console.error('Error loading messages:', error);
+        return;
+      }
+
+      // If this is the first load, clear and show welcome
+      if (!lastMessageTimestamp) {
+        chatBody.innerHTML = '';
+        chatBody.appendChild(chatTyping);
+        
+        if (!messages || messages.length === 0) {
+          addDayDivider('Today');
+          addWelcomeMessage();
+        } else {
+          addDayDivider('Today');
+        }
+      }
+      
+      // Batch DOM updates using DocumentFragment for better performance
+      if (messages && messages.length > 0) {
+        const fragment = document.createDocumentFragment();
+        
+        messages.forEach(msg => {
+          // Check cache to avoid duplicates
+          const msgKey = `${msg.id}-${msg.created_at}`;
+          if (messageCache.has(msgKey)) return;
+          
+          messageCache.set(msgKey, true);
+          lastMessageTimestamp = msg.created_at;
+          
           const attachment = msg.attachment_url ? {
             url: msg.attachment_url,
             name: msg.attachment_name,
             size: msg.attachment_size
           } : null;
           
-          addMessageToUI(
+          const msgElement = createMessageElement(
             msg.message, 
             msg.sender_type, 
             msg.created_at, 
@@ -1049,12 +1223,18 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
             msg.is_announcement || false,
             attachment
           );
+          
+          fragment.appendChild(msgElement);
         });
+        
+        chatBody.insertBefore(fragment, chatTyping);
       }
 
-      scrollToBottom();
+      requestScrollToBottom();
     } catch (error) {
       console.error('Load messages error:', error);
+    } finally {
+      isLoadingMessages = false;
     }
   }
 
@@ -1097,132 +1277,106 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     div.className = 'system-msg';
     div.innerHTML = `<span class="system-msg-text">🔒 ${text}</span>`;
     chatBody.insertBefore(div, chatTyping);
-    scrollToBottom();
+    requestScrollToBottom();
   }
 
-  function addMessageToUI(text, sender, timestamp, isPrivate = false, senderName = '', senderCollege = '', isAnnouncement = false, attachment = null) {
+  // Optimized: Create message element without immediate DOM insertion
+  function createMessageElement(text, sender, timestamp, isPrivate = false, senderName = '', senderCollege = '', isAnnouncement = false, attachment = null) {
     const wrap = document.createElement("div");
     
     // Determine message type
     const isMe = sender === "student";
     const isAdmin = sender === "admin";
-    const isOtherStudent = !isMe && !isAdmin;
     
-    // Add has-attachment class if there's an attachment
-    if (attachment) {
-      if (isAnnouncement) {
-        wrap.className = "msg announcement has-attachment";
-      } else if (isPrivate) {
-        wrap.className = "msg private has-attachment" + (isMe ? " me" : "");
-      } else {
-        wrap.className = "msg has-attachment" + (isMe ? " me" : (isAdmin ? " admin" : " other-student"));
-      }
-    } else {
-      if (isAnnouncement) {
-        wrap.className = "msg announcement";
-      } else if (isPrivate) {
-        wrap.className = "msg private" + (isMe ? " me" : "");
-      } else {
-        wrap.className = "msg" + (isMe ? " me" : (isAdmin ? " admin" : " other-student"));
-      }
-    }
+    // Build class string once
+    let className = "msg";
+    if (isAnnouncement) className += " announcement";
+    if (isPrivate) className += " private";
+    if (attachment) className += " has-attachment";
+    if (isMe) className += " me";
+    else if (isAdmin) className += " admin";
+    else if (!isAnnouncement) className += " other-student";
+    
+    wrap.className = className;
     
     const bub = document.createElement("div");
     bub.className = "bubble";
     
-    // Add text if present
+    // Build inner HTML more efficiently
+    let bubbleHTML = '';
+    
     if (text) {
-      const textNode = document.createTextNode(text);
-      bub.appendChild(textNode);
+      bubbleHTML += `<div class="msg-text">${escapeHtml(text)}</div>`;
     }
 
-    // Add attachment if present
     if (attachment) {
-      const attachDiv = document.createElement("div");
-      attachDiv.className = "msg-attachment";
+      const fileName = attachment.name || attachment.attachmentName || 'File';
+      const fileSize = formatFileSize(attachment.size || attachment.attachmentSize || 0);
+      const fileUrl = attachment.url || attachment.attachmentUrl || '#';
       
-      const iconDiv = document.createElement("div");
-      iconDiv.className = "msg-attachment-icon";
-      iconDiv.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
-        <polyline points="13 2 13 9 20 9"></polyline>
-      </svg>`;
-      
-      const infoDiv = document.createElement("div");
-      infoDiv.className = "msg-attachment-info";
-      
-      const nameDiv = document.createElement("div");
-      nameDiv.className = "msg-attachment-name";
-      nameDiv.textContent = attachment.name || attachment.attachmentName || 'File';
-      
-      const sizeDiv = document.createElement("div");
-      sizeDiv.className = "msg-attachment-size";
-      sizeDiv.textContent = formatFileSize(attachment.size || attachment.attachmentSize || 0);
-      
-      infoDiv.appendChild(nameDiv);
-      infoDiv.appendChild(sizeDiv);
-      
-      const downloadBtn = document.createElement("a");
-      downloadBtn.className = "msg-attachment-download";
-      downloadBtn.href = attachment.url || attachment.attachmentUrl || '#';
-      downloadBtn.target = "_blank";
-      downloadBtn.download = attachment.name || attachment.attachmentName || 'file';
-      downloadBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="7 10 12 15 17 10"></polyline>
-        <line x1="12" y1="15" x2="12" y2="3"></line>
-      </svg>`;
-      
-      attachDiv.appendChild(iconDiv);
-      attachDiv.appendChild(infoDiv);
-      attachDiv.appendChild(downloadBtn);
-      bub.appendChild(attachDiv);
+      bubbleHTML += `
+        <div class="msg-attachment">
+          <div class="msg-attachment-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path>
+              <polyline points="13 2 13 9 20 9"></polyline>
+            </svg>
+          </div>
+          <div class="msg-attachment-info">
+            <div class="msg-attachment-name">${escapeHtml(fileName)}</div>
+            <div class="msg-attachment-size">${fileSize}</div>
+          </div>
+          <a class="msg-attachment-download" href="${fileUrl}" target="_blank" download="${escapeHtml(fileName)}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </a>
+        </div>
+      `;
     }
-
-    const meta = document.createElement("div");
-    meta.className = "meta-line";
     
-    // Build sender info
-    const senderInfo = document.createElement("div");
-    senderInfo.className = "sender-info";
-    
+    // Build meta info
     let displayName = '';
-    if (isAnnouncement) {
-      displayName = "📢 Admin Announcement";
-    } else if (isMe) {
-      displayName = senderName || currentStudentName || "You";
-    } else if (isAdmin) {
-      displayName = "Admin";
-    } else {
-      displayName = senderName || "Student";
-    }
+    if (isAnnouncement) displayName = "📢 Admin Announcement";
+    else if (isMe) displayName = senderName || currentStudentName || "You";
+    else if (isAdmin) displayName = "Admin";
+    else displayName = senderName || "Student";
     
-    senderInfo.textContent = displayName;
-    
-    // Add college if available
+    bubbleHTML += '<div class="meta-line">';
+    bubbleHTML += `<div class="sender-info">${escapeHtml(displayName)}</div>`;
     if (senderCollege && senderCollege.trim()) {
-      const collegeInfo = document.createElement("div");
-      collegeInfo.className = "college-info";
-      collegeInfo.textContent = senderCollege;
-      meta.appendChild(senderInfo);
-      meta.appendChild(collegeInfo);
-    } else {
-      meta.appendChild(senderInfo);
+      bubbleHTML += `<div class="college-info">${escapeHtml(senderCollege)}</div>`;
+    }
+    bubbleHTML += `<div style="font-size:10px;opacity:0.6;margin-top:2px">${formatTime(timestamp)}</div>`;
+    bubbleHTML += '</div>';
+    
+    bub.innerHTML = bubbleHTML;
+    
+    // Add click handler for reply functionality (don't allow replying to yourself or announcements)
+    if (!isMe && !isAnnouncement) {
+      bub.addEventListener('click', () => {
+        setReplyTo(displayName, text || '(attachment)');
+      });
     }
     
-    // Add timestamp
-    const timeSpan = document.createElement("div");
-    timeSpan.style.fontSize = "10px";
-    timeSpan.style.opacity = "0.6";
-    timeSpan.style.marginTop = "2px";
-    timeSpan.textContent = formatTime(timestamp);
-    meta.appendChild(timeSpan);
-    
-    bub.appendChild(meta);
     wrap.appendChild(bub);
+    
+    return wrap;
+  }
 
-    chatBody.insertBefore(wrap, chatTyping);
-    scrollToBottom();
+  // Helper to escape HTML for security
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function addMessageToUI(text, sender, timestamp, isPrivate = false, senderName = '', senderCollege = '', isAnnouncement = false, attachment = null) {
+    const msgElement = createMessageElement(text, sender, timestamp, isPrivate, senderName, senderCollege, isAnnouncement, attachment);
+    chatBody.insertBefore(msgElement, chatTyping);
+    requestScrollToBottom();
   }
 
   function formatTime(timestamp) {
@@ -1232,13 +1386,24 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     return `${h}:${m}`;
   }
 
+  // Optimized scrolling with requestAnimationFrame batching
+  function requestScrollToBottom() {
+    if (!pendingScrollRequest) {
+      pendingScrollRequest = true;
+      requestAnimationFrame(() => {
+        chatBody.scrollTop = chatBody.scrollHeight;
+        pendingScrollRequest = false;
+      });
+    }
+  }
+
   function scrollToBottom() {
     chatBody.scrollTop = chatBody.scrollHeight;
   }
 
   function showTyping(on) {
     chatTyping.classList.toggle("show", !!on);
-    scrollToBottom();
+    requestScrollToBottom();
   }
 
   async function send(isPrivateToAdmin = false) {
@@ -1247,6 +1412,12 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
 
     const timestamp = new Date().toISOString();
     let attachmentData = null;
+    
+    // Prepare message text with reply context if replying
+    let fullMessage = text;
+    if (replyingTo && text) {
+      fullMessage = `↩️ Replying to ${replyingTo.sender}: "${replyingTo.text.substring(0, 50)}${replyingTo.text.length > 50 ? '...' : ''}"\n\n${text}`;
+    }
 
     // Upload file if selected
     if (selectedFile) {
@@ -1268,7 +1439,7 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
 
     // Add to UI immediately (optimistic update)
     addMessageToUI(
-      text || (attachmentData ? '📎 File attached' : ''), 
+      fullMessage || (attachmentData ? '📎 File attached' : ''), 
       "student", 
       timestamp, 
       isPrivateToAdmin, 
@@ -1280,6 +1451,7 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     
     chatInput.value = "";
     removeFile();
+    clearReply(); // Clear reply preview
     resizeInput();
 
     try {
@@ -1288,7 +1460,7 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
         .from('chat_messages')
         .insert({
           student_id: currentStudentId,
-          message: text || (attachmentData ? '📎 File attached' : ''),
+          message: fullMessage || (attachmentData ? '📎 File attached' : ''),
           sender_type: 'student',
           sender_name: currentStudentName,
           sender_college: currentStudentCollege,
@@ -1311,7 +1483,7 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
       // Save to localStorage as backup (deprecated but kept for compatibility)
       const messages = getLocalMessages();
       messages.push({
-        text: text || (attachmentData ? '📎 File attached' : ''),
+        text: fullMessage || (attachmentData ? '📎 File attached' : ''),
         sender: "student",
         timestamp: timestamp,
         isPrivate: isPrivateToAdmin,
@@ -1330,33 +1502,27 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
   }
 
   function startMessagePolling() {
-    // Poll for new messages every 2 seconds
+    // Optimized: Poll only if real-time subscription fails, use longer interval
     messagePollingInterval = setInterval(async () => {
       await checkForNewMessages();
-    }, 2000);
+    }, 5000); // Reduced frequency from 2s to 5s
   }
 
   async function checkForNewMessages() {
+    if (isLoadingMessages) return; // Skip if already loading
+    
     try {
-      // Get current message count in UI
-      const currentMessageCount = chatBody.querySelectorAll('.msg').length;
+      // Only fetch count to check for new messages (more efficient)
+      if (!lastMessageTimestamp) return;
       
-      // Fetch latest message count from database
-      const { data: groupMessages } = await supabaseClient
+      const { count, error } = await supabaseClient
         .from('chat_messages')
-        .select('id', { count: 'exact', head: false })
-        .eq('is_private', false);
+        .select('*', { count: 'exact', head: true })
+        .or(`is_private.eq.false,and(is_private.eq.true,student_id.eq.${currentStudentId})`)
+        .gt('created_at', lastMessageTimestamp);
 
-      const { data: privateMessages } = await supabaseClient
-        .from('chat_messages')
-        .select('id', { count: 'exact', head: false })
-        .eq('is_private', true)
-        .eq('student_id', currentStudentId);
-
-      const totalMessages = (groupMessages?.length || 0) + (privateMessages?.length || 0);
-
-      if (totalMessages > currentMessageCount) {
-        // New message detected, reload messages
+      if (!error && count > 0) {
+        // New messages detected, load incrementally
         await loadMessages();
       }
     } catch (error) {
@@ -1380,7 +1546,7 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
           schema: 'public', 
           table: 'chat_messages' 
         },
-        async (payload) => {
+        (payload) => {
           debugLog('📨 New message received:', payload.new);
           
           // Check if this message is relevant to current student
@@ -1391,7 +1557,12 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
 
           if (isRelevant && newMsg.student_id !== currentStudentId) {
             // Only add if it's not our own message (we already added it optimistically)
-            // or if it's from someone else
+            const msgKey = `${newMsg.id}-${newMsg.created_at}`;
+            if (messageCache.has(msgKey)) return; // Prevent duplicates
+            
+            messageCache.set(msgKey, true);
+            lastMessageTimestamp = newMsg.created_at;
+            
             const attachment = newMsg.attachment_url ? {
               url: newMsg.attachment_url,
               name: newMsg.attachment_name,
@@ -1413,12 +1584,27 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
       )
       .subscribe((status) => {
         debugLog('📡 Subscription status:', status);
+        if (status === 'SUBSCRIBED') {
+          // Stop polling when real-time connection is active
+          if (messagePollingInterval) {
+            clearInterval(messagePollingInterval);
+            messagePollingInterval = null;
+            debugLog('✅ Real-time active, polling stopped');
+          }
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          // Restart polling if subscription fails
+          if (!messagePollingInterval) {
+            startMessagePolling();
+            debugLog('⚠️ Subscription failed, polling restarted');
+          }
+        }
       });
   }
 
   // Events
   chatSendBtn.addEventListener("click", () => send(false));
   chatSendAdminBtn.addEventListener("click", () => send(true));
+  replyPreviewClose.addEventListener("click", clearReply);
   
   chatInput.addEventListener("input", resizeInput);
   chatInput.addEventListener("keydown", (e) => {
