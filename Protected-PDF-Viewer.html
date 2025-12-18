@@ -1514,45 +1514,22 @@
         console.log('📍 Full storage reference: student-notes/' + pdfPath);
         document.getElementById('loadingScreen').style.display = 'flex';
         
-        // Create a signed URL with 1 hour expiration
-        const { data: signedUrlData, error: signedUrlError } = await supabaseClient.storage
+        // Get public URL (bucket is public)
+        const { data: publicUrlData } = supabaseClient.storage
           .from('student-notes')
-          .createSignedUrl(pdfPath, 3600); // 1 hour
+          .getPublicUrl(pdfPath);
         
-        if (signedUrlError) {
-          console.error('❌ Error creating signed URL:', signedUrlError);
-          console.error('📋 Error details:', JSON.stringify(signedUrlError, null, 2));
-          
-          // Try to list files in the directory to help debug
-          try {
-            const pathParts = pdfPath.split('/');
-            const folder = pathParts[0];
-            console.log('🔍 Attempting to list files in folder:', folder);
-            const { data: files, error: listError } = await supabaseClient.storage
-              .from('student-notes')
-              .list(folder, { limit: 10 });
-            
-            if (!listError && files) {
-              console.log('📁 Files found in folder:', files.map(f => f.name));
-            } else {
-              console.error('❌ Could not list files:', listError);
-            }
-          } catch (debugError) {
-            console.error('Debug listing failed:', debugError);
-          }
-          
-          throw new Error(`Could not create signed URL: ${signedUrlError.message}`);
+        if (!publicUrlData || !publicUrlData.publicUrl) {
+          throw new Error('Could not generate public URL');
         }
         
-        if (!signedUrlData || !signedUrlData.signedUrl) {
-          throw new Error('Signed URL was not generated');
-        }
+        const pdfUrl = publicUrlData.publicUrl;
+        console.log('✅ Created public URL for:', pdfPath);
+        console.log('🔗 URL:', pdfUrl);
         
-        console.log('✅ Created signed URL for:', pdfPath);
-        
-        // Load PDF from signed URL
+        // Load PDF from public URL
         const loadingTask = pdfjsLib.getDocument({
-          url: signedUrlData.signedUrl,
+          url: pdfUrl,
           withCredentials: false
         });
         pdfDoc = await loadingTask.promise;
