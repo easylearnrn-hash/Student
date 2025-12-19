@@ -624,6 +624,37 @@
     </div>
   </div>
 
+  <!-- Email Preview Modal -->
+  <div id="emailPreviewModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 10000; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px);">
+    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 90%; max-width: 900px; max-height: 90vh; background: linear-gradient(135deg, #1e293b 0%, #334155 100%); border: 2px solid rgba(165,180,252,0.4); border-radius: 20px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 25px 50px rgba(0,0,0,0.5);">
+      
+      <!-- Modal Header -->
+      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px 24px; border-bottom: 2px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="font-size: 24px;">📧</span>
+          <h2 style="margin: 0; color: #fff; font-size: 20px; font-weight: 700;" id="emailPreviewTitle">Email Preview</h2>
+        </div>
+        <button onclick="closeEmailPreview()" style="background: rgba(255,255,255,0.1); border: none; color: #fff; font-size: 28px; line-height: 1; cursor: pointer; padding: 4px 12px; border-radius: 8px; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.2)'" onmouseout="this.style.background='rgba(255,255,255,0.1)'">×</button>
+      </div>
+      
+      <!-- Email Info Bar -->
+      <div id="emailInfoBar" style="padding: 16px 24px; background: rgba(165,180,252,0.1); border-bottom: 1px solid rgba(165,180,252,0.2); display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 12px; font-size: 13px;">
+          <span style="color: rgba(255,255,255,0.6); font-weight: 600;">To:</span>
+          <span id="emailRecipient" style="color: rgba(255,255,255,0.9); font-weight: 500;"></span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; font-size: 13px;">
+          <span style="color: rgba(255,255,255,0.6); font-weight: 600;">Subject:</span>
+          <span id="emailSubject" style="color: rgba(255,255,255,0.9); font-weight: 500;"></span>
+        </div>
+      </div>
+      
+      <!-- Email Body (iframe) -->
+      <iframe id="emailPreviewFrame" style="flex: 1; width: 100%; border: none; background: white;"></iframe>
+      
+    </div>
+  </div>
+
   <!-- Settings Modal -->
   <div class="settings-modal-overlay" id="settingsModalOverlay">
     <div class="settings-modal">
@@ -1338,8 +1369,78 @@
         return;
       }
       
+      // Find the notification
+      const notif = notifications.find(n => n.id === notifId);
+      
+      // Check if this is an email notification with HTML content
+      if (notif && notif.metadata && notif.metadata.html) {
+        // Show email preview instead of just marking as read
+        showEmailPreview(notif);
+        return;
+      }
+      
       try {
         // Mark as read
+        const { error } = await supabase
+          .from('notifications')
+          .update({ read: true, is_read: true })
+          .eq('id', notifId);
+
+        if (error) throw error;
+
+        // Update local state
+        if (notif) {
+          notif.read = true;
+          notif.is_read = true;
+        }
+
+        renderNotifications();
+      } catch (err) {
+        console.error('❌ Error marking notification as read:', err);
+      }
+    }
+
+    // ============================================================
+    // SHOW EMAIL PREVIEW
+    // ============================================================
+    function showEmailPreview(notif) {
+      const modal = document.getElementById('emailPreviewModal');
+      const iframe = document.getElementById('emailPreviewFrame');
+      const title = document.getElementById('emailPreviewTitle');
+      const recipient = document.getElementById('emailRecipient');
+      const subject = document.getElementById('emailSubject');
+      
+      // Set email info
+      title.textContent = notif.title || 'Email Preview';
+      recipient.textContent = notif.metadata.email || notif.metadata.recipientEmail || 'Unknown';
+      subject.textContent = notif.metadata.subject || 'No Subject';
+      
+      // Load email HTML into iframe
+      iframe.srcdoc = notif.metadata.html;
+      
+      // Show modal
+      modal.style.display = 'flex';
+      
+      // Mark as read in background
+      markNotificationAsRead(notif.id);
+    }
+
+    // ============================================================
+    // CLOSE EMAIL PREVIEW
+    // ============================================================
+    function closeEmailPreview() {
+      const modal = document.getElementById('emailPreviewModal');
+      const iframe = document.getElementById('emailPreviewFrame');
+      
+      modal.style.display = 'none';
+      iframe.srcdoc = '';
+    }
+
+    // ============================================================
+    // MARK NOTIFICATION AS READ (Background)
+    // ============================================================
+    async function markNotificationAsRead(notifId) {
+      try {
         const { error } = await supabase
           .from('notifications')
           .update({ read: true, is_read: true })
