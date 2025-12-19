@@ -7559,113 +7559,112 @@
       if (!paymentList) return;
       paymentList.innerHTML = '';
       
-      // 🔴 NEW: Add unpaid class entries first (if any)
+      // � COMBINE ALL ENTRIES: unpaid, absent, and paid into single array
+      const allEntries = [];
+      
+      // Add unpaid class entries
       if (unpaidClasses && unpaidClasses.length > 0) {
-        debugDebug(`📋 Displaying ${unpaidClasses.length} unpaid class dates`);
         unpaidClasses.forEach(unpaidClass => {
-          // 🔧 FIX: Parse date in timezone-safe way (avoid UTC shift)
           const dateOnlyStr = unpaidClass.date ? unpaidClass.date.substring(0, 10) : unpaidClass.date;
           const parts = dateOnlyStr.split('-');
           const classDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          const dateStr = `${monthNames[classDate.getMonth()]} ${classDate.getDate()}, ${classDate.getFullYear()}`;
           
-          const item = document.createElement('div');
-          item.className = 'payment-item unpaid';
-          
-          item.innerHTML = `
-            <div class="payment-date">${dateStr}</div>
-            <div class="payment-status">
-              <span class="status-badge unpaid">Not Paid</span>
-              <span class="payment-amount">$${unpaidClass.amount.toFixed(0)}</span>
-            </div>
-          `;
-          
-          paymentList.appendChild(item);
+          allEntries.push({
+            date: classDate,
+            type: 'unpaid',
+            amount: unpaidClass.amount,
+            statusText: 'Not Paid',
+            statusClass: 'unpaid'
+          });
         });
       }
       
-      // ⚪ NEW: Add absent class entries (if any)
+      // Add absent class entries
       if (absentClasses && absentClasses.length > 0) {
-        debugDebug(`📋 Displaying ${absentClasses.length} absent class dates`);
         absentClasses.forEach(absentClass => {
-          // 🔧 FIX: Parse date in timezone-safe way (avoid UTC shift)
           const dateOnlyStr = absentClass.date ? absentClass.date.substring(0, 10) : absentClass.date;
           const parts = dateOnlyStr.split('-');
           const classDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          const dateStr = `${monthNames[classDate.getMonth()]} ${classDate.getDate()}, ${classDate.getFullYear()}`;
           
-          const item = document.createElement('div');
-          item.className = 'payment-item absent';
-          
-          item.innerHTML = `
-            <div class="payment-date">${dateStr}</div>
-            <div class="payment-status">
-              <span class="status-badge absent">Absent</span>
-              <span class="payment-amount">-</span>
-            </div>
-          `;
-          
-          paymentList.appendChild(item);
+          allEntries.push({
+            date: classDate,
+            type: 'absent',
+            amount: 0,
+            statusText: 'Absent',
+            statusClass: 'absent'
+          });
         });
       }
       
-      if (!payments.length && (!unpaidClasses || unpaidClasses.length === 0) && (!absentClasses || absentClasses.length === 0)) {
+      // Add paid payment entries
+      if (payments && payments.length > 0) {
+        payments.forEach(payment => {
+          const isCreditPayment = payment.source === 'credit';
+          let statusText = 'Unknown';
+          let statusClass = payment.status || 'unknown';
+          
+          if (isCreditPayment) {
+            statusText = 'Paid from Credit';
+            statusClass = 'credit';
+          } else {
+            switch (payment.status) {
+              case 'paid':
+                statusText = 'Paid';
+                break;
+              case 'unpaid':
+                statusText = 'Not Paid';
+                break;
+              case 'pending':
+                statusText = 'Pending';
+                statusClass = 'unpaid';
+                break;
+              case 'absent':
+                statusText = 'Absent';
+                break;
+              case 'cancelled':
+                statusText = 'Cancelled';
+                break;
+              default:
+                statusText = payment.status || 'Unknown';
+            }
+          }
+          
+          allEntries.push({
+            date: payment.date,
+            type: isCreditPayment ? 'credit' : payment.status,
+            amount: parseFloat(payment.amount) || 0,
+            statusText: statusText,
+            statusClass: statusClass,
+            paymentMethod: payment.payment_method && !isCreditPayment ? ` (${payment.payment_method})` : ''
+          });
+        });
+      }
+      
+      // Check if we have any entries
+      if (allEntries.length === 0) {
         paymentList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 40px;">No payment records found.</div>';
         return;
       }
       
-      payments.forEach(payment => {
+      // 🔄 SORT ALL ENTRIES BY DATE (NEWEST FIRST)
+      allEntries.sort((a, b) => b.date - a.date);
+      
+      debugDebug(`📋 Displaying ${allEntries.length} total payment entries sorted by date (newest first)`);
+      
+      // Render all entries in chronological order
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      
+      allEntries.forEach(entry => {
         const item = document.createElement('div');
+        item.className = `payment-item ${entry.statusClass}`;
         
-        // 🟠 Check if payment is from credit balance
-        const isCreditPayment = payment.source === 'credit';
-        const itemClass = isCreditPayment ? 'credit' : payment.status;
-        
-        item.className = `payment-item ${itemClass}`;
-        
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const dateStr = `${monthNames[payment.date.getMonth()]} ${payment.date.getDate()}, ${payment.date.getFullYear()}`;
-        
-        let statusText = 'Unknown';
-        let statusClass = payment.status || 'unknown';
-        
-        // 🟠 Override for credit payments - show orange badge
-        if (isCreditPayment) {
-          statusText = 'Paid from Credit';
-          statusClass = 'credit';
-        } else {
-          switch (payment.status) {
-            case 'paid':
-              statusText = 'Paid';
-              break;
-            case 'unpaid':
-              statusText = 'Not Paid';
-              break;
-            case 'pending':
-              statusText = 'Pending';
-              statusClass = 'unpaid';
-              break;
-            case 'absent':
-              statusText = 'Absent';
-              break;
-            case 'cancelled':
-              statusText = 'Cancelled';
-              break;
-            default:
-              statusText = payment.status || 'Unknown';
-          }
-        }
-        
-        const amount = parseFloat(payment.amount) || 0;
-        const paymentMethod = payment.payment_method && !isCreditPayment ? ` (${payment.payment_method})` : '';
+        const dateStr = `${monthNames[entry.date.getMonth()]} ${entry.date.getDate()}, ${entry.date.getFullYear()}`;
         
         item.innerHTML = `
           <div class="payment-date">${dateStr}</div>
           <div class="payment-status">
-            <span class="status-badge ${statusClass}">${statusText}${paymentMethod}</span>
-            ${amount > 0 ? `<span class="payment-amount">$${amount.toFixed(0)}</span>` : ''}
+            <span class="status-badge ${entry.statusClass}">${entry.statusText}${entry.paymentMethod || ''}</span>
+            ${entry.amount > 0 ? `<span class="payment-amount">$${entry.amount.toFixed(0)}</span>` : (entry.type === 'absent' ? '<span class="payment-amount">-</span>' : '')}
           </div>
         `;
         
