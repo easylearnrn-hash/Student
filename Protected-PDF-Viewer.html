@@ -1584,10 +1584,12 @@
               if (note.requires_payment) {
                 console.log('💳 Checking payment requirement for class date:', note.class_date);
                 
-                // Check BOTH payment sources (like student portal does)
+                // Check ALL THREE payment sources (like student portal does)
                 // 1. Manual payment records
+                // 2. Automated payments (Zelle/Venmo)
+                // 3. Credit payments (paid from student balance)
                 updateLoadingStatus('Confirming payment status...');
-                const [manualResult, autoResult] = await Promise.all([
+                const [manualResult, autoResult, creditResult] = await Promise.all([
                   supabaseClient
                     .from('payment_records')
                     .select('date, status')
@@ -1596,12 +1598,23 @@
                   supabaseClient
                     .from('payments')
                     .select('for_class')
-                    .or(`student_id.eq.${currentStudent.id},linked_student_id.eq.${currentStudent.id}`)
+                    .or(`student_id.eq.${currentStudent.id},linked_student_id.eq.${currentStudent.id}`),
+                  supabaseClient
+                    .from('credit_payments')
+                    .select('class_date')
+                    .eq('student_id', currentStudent.id)
                 ]);
                 const manualPayments = manualResult?.data || [];
                 const autoPayments = autoResult?.data || [];
+                const creditPayments = creditResult?.data || [];
                 
-                // Merge payment dates
+                console.log('💰 Payment sources loaded:', {
+                  manual: manualPayments.length,
+                  auto: autoPayments.length,
+                  credit: creditPayments.length
+                });
+                
+                // Merge payment dates from ALL sources
                 const paidDates = new Set();
                 
                 // Add manual payment dates
@@ -1611,10 +1624,21 @@
                   });
                 }
                 
-                // Add automated payment dates
+                // Add automated payment dates (using for_class field)
                 if (autoPayments) {
                   autoPayments.forEach(p => {
                     if (p.for_class) paidDates.add(p.for_class.split('T')[0]);
+                  });
+                }
+                
+                // Add credit payment dates
+                if (creditPayments) {
+                  creditPayments.forEach(p => {
+                    if (p.class_date) {
+                      const dateStr = p.class_date.split('T')[0];
+                      paidDates.add(dateStr);
+                      console.log('  ✅ Added credit payment for:', dateStr);
+                    }
                   });
                 }
                 
