@@ -1466,10 +1466,10 @@
           if (DEBUG_MODE) console.log('✨ Loaded free access grants:', freeAccessGrants.length);
         }
 
-        // Load all students for filtering
+        // Load all students for filtering (need group_name to filter notes by student's group)
         const { data: students, error: studentsError } = await supabaseClient
           .from('students')
-          .select('id, name')
+          .select('id, name, group_name')
           .order('name');
 
         if (studentsError) {
@@ -1740,13 +1740,15 @@
 
       // Find matching students if student search is active
       let filteredStudentIds = [];
+      let filteredStudentGroups = []; // Track group names of matching students
       if (studentSearchInput) {
         const matchingStudents = allStudentsGlobal.filter(student => 
           student.name.toLowerCase().includes(studentSearchInput)
         );
         filteredStudentIds = matchingStudents.map(s => s.id);
+        filteredStudentGroups = [...new Set(matchingStudents.map(s => s.group_name).filter(Boolean))]; // Unique groups
         
-        if (DEBUG_MODE) console.log('🔍 Student search:', studentSearchInput, '→', matchingStudents.length, 'students');
+        if (DEBUG_MODE) console.log('🔍 Student search:', studentSearchInput, '→', matchingStudents.length, 'students', 'Groups:', filteredStudentGroups);
       }
 
       // Get ongoing system for current group
@@ -1800,10 +1802,16 @@
         }
 
         // Apply student-based filter
-        if (studentSearchInput && filteredStudentIds.length > 0) {
+        if (studentSearchInput && (filteredStudentIds.length > 0 || filteredStudentGroups.length > 0)) {
           systemNotes = systemNotes.filter(note => {
-            // Check if ANY of the filtered students have access to this note
-            // Via permissions (opened) or free access grants
+            // Check if ANY of the filtered students have access to this note via:
+            // 1. Their group matches the currently selected tab (currentGroup)
+            // 2. Explicit permissions (opened notes)
+            // 3. Free access grants
+            
+            // Check if note belongs to the student's group(s)
+            const noteIsForStudentGroup = filteredStudentGroups.includes(currentGroup);
+            
             const hasPermission = permissions.some(perm => 
               filteredStudentIds.includes(perm.student_id) && 
               perm.note_id === note.id &&
@@ -1815,7 +1823,7 @@
               grant.note_id === note.id
             );
 
-            return hasPermission || hasFreeAccess;
+            return noteIsForStudentGroup || hasPermission || hasFreeAccess;
           });
         }
         
