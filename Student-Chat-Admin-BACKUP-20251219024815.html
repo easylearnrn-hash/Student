@@ -1,0 +1,1196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Chat - ARNOMA</title>
+  <link rel="icon" type="image/png" href="/richyfesta-logo.png">
+  
+  <!-- Shared Auth -->
+  <script src="shared-auth.js"></script>
+  
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      /* Liquid Glass Theme */
+      --bg-gradient: linear-gradient(135deg, #0a1628 0%, #1a2942 100%);
+      --panel-glass: rgba(79, 134, 180, 0.15);
+      --glass-border: rgba(156, 220, 254, 0.3);
+      --accent-blue: #9cdcfe;
+      --accent-purple: #c792ea;
+      --text-white: #ffffff;
+      --text-muted: rgba(255, 255, 255, 0.7);
+      --danger-red: #ff6b6b;
+      --success-green: #51cf66;
+      --warning-yellow: #ffd43b;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg-gradient);
+      color: var(--text-white);
+      min-height: 100vh;
+      padding: 20px;
+      position: relative;
+    }
+
+    /* Close Button */
+    .close-modal-btn {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      width: 48px;
+      height: 48px;
+      background: rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(156, 220, 254, 0.3);
+      border-radius: 12px;
+      color: var(--text-white);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+      z-index: 10000;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .close-modal-btn:hover {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.5);
+      transform: scale(1.05);
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+    }
+
+    .close-modal-btn svg {
+      transition: transform 0.3s ease;
+    }
+
+    .close-modal-btn:hover svg {
+      transform: rotate(90deg);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 20px;
+      height: calc(100vh - 40px);
+    }
+
+    /* Student List Sidebar */
+    .student-list {
+      background: var(--panel-glass);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .student-list h2 {
+      font-size: 18px;
+      margin-bottom: 16px;
+      color: var(--accent-blue);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .student-item {
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      position: relative;
+    }
+
+    .student-item:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--accent-blue);
+      transform: translateX(4px);
+    }
+
+    .student-item.active {
+      background: rgba(156, 220, 254, 0.2);
+      border-color: var(--accent-blue);
+    }
+
+    .student-name {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+
+    .student-group {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .unread-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: var(--danger-red);
+      color: white;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      font-weight: 700;
+    }
+
+    /* Chat Panel */
+    .chat-panel {
+      background: var(--panel-glass);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .chat-header {
+      padding: 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .chat-header h3 {
+      font-size: 20px;
+      color: var(--accent-blue);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .chat-controls {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      background: rgba(156, 220, 254, 0.1);
+      border: 1px solid var(--accent-blue);
+      border-radius: 8px;
+      color: var(--accent-blue);
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn:hover {
+      background: rgba(156, 220, 254, 0.2);
+      transform: translateY(-2px);
+    }
+
+    .btn-danger {
+      border-color: var(--danger-red);
+      color: var(--danger-red);
+    }
+
+    .btn-danger:hover {
+      background: rgba(255, 107, 107, 0.2);
+    }
+
+    /* Messages Area */
+    .messages-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .message {
+      max-width: 70%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      position: relative;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message.student {
+      align-self: flex-start;
+      background: rgba(156, 220, 254, 0.15);
+      border: 1px solid rgba(156, 220, 254, 0.3);
+    }
+
+    .message.admin {
+      align-self: flex-end;
+      background: rgba(199, 146, 234, 0.15);
+      border: 1px solid rgba(199, 146, 234, 0.3);
+    }
+
+    .message.announcement {
+      align-self: center;
+      max-width: 85%;
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+      text-align: center;
+    }
+
+    .message.announcement .message-sender {
+      color: var(--danger-red);
+    }
+
+    .message.private {
+      background: rgba(148, 163, 184, 0.15);
+      border: 1px solid rgba(148, 163, 184, 0.3);
+    }
+
+    .message-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .message-sender {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--accent-blue);
+    }
+
+    .message-time {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .message-text {
+      font-size: 14px;
+      line-height: 1.5;
+      word-wrap: break-word;
+    }
+
+    .message-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .msg-action-btn {
+      font-size: 11px;
+      padding: 4px 8px;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: var(--text-muted);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .msg-action-btn:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-white);
+    }
+
+    .msg-action-btn.delete:hover {
+      border-color: var(--danger-red);
+      color: var(--danger-red);
+    }
+
+    /* Input Area */
+    .input-area {
+      padding: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      gap: 12px;
+    }
+
+    .input-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .input-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+
+    .checkbox-label input {
+      cursor: pointer;
+    }
+
+    textarea {
+      width: 100%;
+      padding: 12px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      color: var(--text-white);
+      font-size: 14px;
+      resize: none;
+      font-family: inherit;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 2px rgba(156, 220, 254, 0.2);
+    }
+
+    .send-btn {
+      padding: 12px 24px;
+      background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+      border: none;
+      border-radius: 8px;
+      color: white;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      align-self: flex-end;
+    }
+
+    .send-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(156, 220, 254, 0.4);
+    }
+
+    .send-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Empty State */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      font-size: 16px;
+    }
+
+    .empty-state svg {
+      width: 80px;
+      height: 80px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    /* Filters */
+    .filters {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .filter-btn {
+      padding: 6px 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+
+    .filter-btn.active {
+      background: rgba(156, 220, 254, 0.2);
+      border-color: var(--accent-blue);
+      color: var(--accent-blue);
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: rgba(156, 220, 254, 0.3);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(156, 220, 254, 0.5);
+    }
+
+    /* Edit Mode */
+    .message.editing {
+      border-color: var(--warning-yellow);
+      background: rgba(255, 212, 59, 0.1);
+    }
+
+    .edit-input {
+      width: 100%;
+      padding: 8px;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--warning-yellow);
+      border-radius: 6px;
+      color: var(--text-white);
+      font-size: 14px;
+      font-family: inherit;
+      margin-bottom: 8px;
+    }
+
+    .edit-actions {
+      display: flex;
+      gap: 8px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Close Button -->
+  <button id="closeBtn" class="close-modal-btn" onclick="window.parent.postMessage('closeAdminChat', '*')" title="Close (ESC)">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>
+  </button>
+
+  <div class="container">
+    <!-- Student List Sidebar -->
+    <div class="student-list">
+      <h2>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>
+        Students
+      </h2>
+      
+      <div class="filters" id="groupFilters">
+        <!-- Group filter buttons will be dynamically generated based on active students -->
+      </div>
+      
+      <div style="margin: 16px 0;">
+        <button id="fullChatBtn" class="student-item" style="background: linear-gradient(135deg, rgba(156,220,254,0.15), rgba(199,146,234,0.15)); border: 2px solid var(--accent-purple); cursor: pointer; text-align: center;">
+          <div class="student-name" style="font-size: 15px;">
+            💬 Full Chat (All Students)
+          </div>
+          <div class="student-group" style="font-size: 11px; opacity: 0.8;">
+            View all messages together
+          </div>
+        </button>
+      </div>
+      
+      <div id="studentsList">
+        <!-- Students will be loaded here -->
+      </div>
+    </div>
+
+    <!-- Chat Panel -->
+    <div class="chat-panel">
+      <div class="chat-header">
+        <h3 id="chatTitle">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          Select a student
+        </h3>
+        <div class="chat-controls">
+          <button class="btn" id="refreshBtn" title="Refresh Messages">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+            Refresh
+          </button>
+          <button class="btn btn-danger" id="deleteAllBtn" title="Delete All Messages" style="display: none;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            Clear All
+          </button>
+        </div>
+      </div>
+
+      <div class="messages-container" id="messagesContainer">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <p>Select a student to view chat</p>
+        </div>
+      </div>
+
+      <div class="input-area" id="inputArea" style="display: none;">
+        <div class="input-wrapper">
+          <textarea 
+            id="messageInput" 
+            placeholder="Type your message..." 
+            rows="2"></textarea>
+          <div class="input-controls">
+            <label class="checkbox-label">
+              <input type="checkbox" id="privateCheckbox">
+              <span>🔒 Private (only this student)</span>
+            </label>
+            <label class="checkbox-label" style="color: var(--danger-red);">
+              <input type="checkbox" id="announcementCheckbox">
+              <span>📢 Announcement (red bubble)</span>
+            </label>
+          </div>
+        </div>
+        <button class="send-btn" id="sendBtn">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const DEBUG_MODE = true;
+    const debugLog = (...args) => DEBUG_MODE && console.log(...args);
+
+    // Supabase Config
+    const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let currentStudentId = null;
+    let currentStudentName = null;
+    let messagesSubscription = null;
+    let allStudents = [];
+    let currentFilter = 'all';
+    let editingMessageId = null;
+    let isFullChatMode = false; // Track if viewing all messages
+
+    // DOM Elements
+    const studentsList = document.getElementById('studentsList');
+    const messagesContainer = document.getElementById('messagesContainer');
+    const chatTitle = document.getElementById('chatTitle');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const privateCheckbox = document.getElementById('privateCheckbox');
+    const announcementCheckbox = document.getElementById('announcementCheckbox');
+    const inputArea = document.getElementById('inputArea');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const deleteAllBtn = document.getElementById('deleteAllBtn');
+    const fullChatBtn = document.getElementById('fullChatBtn');
+
+    // Initialize
+    async function init() {
+      debugLog('🚀 Initializing Admin Chat...');
+      
+      // Ensure admin authentication using shared-auth.js
+      if (window.ArnomaAuth) {
+        try {
+          const session = await window.ArnomaAuth.ensureSession(supabaseClient);
+          if (!session) {
+            debugLog('❌ No admin session - redirecting to login');
+            window.top.location.href = 'index.html';
+            return;
+          }
+          debugLog('✅ Admin authenticated:', session.user.email);
+        } catch (error) {
+          debugLog('❌ Auth error:', error);
+          alert('Authentication failed. Please log in again.');
+          window.top.location.href = 'index.html';
+          return;
+        }
+      } else {
+        debugLog('⚠️ ArnomaAuth not loaded, trying manual session check');
+        await ensureAdminAuth();
+      }
+      
+      await loadStudents();
+      setupEventListeners();
+    }
+
+    // Ensure Admin Authentication (Fallback method)
+    async function ensureAdminAuth() {
+      try {
+        // Check if we have an active session
+        const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+        
+        if (session) {
+          debugLog('✅ Existing session found:', session.user.email);
+          return session;
+        }
+        
+        debugLog('⚠️ No session found, checking localStorage...');
+        
+        // Try to restore session from localStorage (from parent window)
+        const storedSession = localStorage.getItem('arnoma:auth:session');
+        if (storedSession) {
+          try {
+            const parsedSession = JSON.parse(storedSession);
+            const { data, error } = await supabaseClient.auth.setSession({
+              access_token: parsedSession.access_token,
+              refresh_token: parsedSession.refresh_token
+            });
+            
+            if (!error && data.session) {
+              debugLog('✅ Session restored from localStorage:', data.session.user.email);
+              return data.session;
+            }
+          } catch (e) {
+            debugLog('❌ Failed to restore session:', e);
+          }
+        }
+        
+        // If no session, show error
+        debugLog('❌ No valid session - admin features may be limited');
+        alert('⚠️ Warning: You may not be authenticated. Delete/Edit functions may not work.\n\nPlease ensure you are logged in as admin in the main window.');
+        
+      } catch (error) {
+        debugLog('❌ Auth error:', error);
+      }
+    }
+
+    // Load Students
+    async function loadStudents() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('students')
+          .select('id, name, group_name, show_in_grid')
+          .eq('show_in_grid', true) // Only load active students
+          .order('name');
+
+        if (error) throw error;
+
+        allStudents = data || [];
+        debugLog('📚 Loaded active students:', allStudents.length);
+        
+        // Build group filters based on active students
+        buildGroupFilters();
+        renderStudents();
+      } catch (error) {
+        debugLog('❌ Error loading students:', error);
+        alert('Failed to load students: ' + error.message);
+      }
+    }
+
+    // Build dynamic group filters
+    function buildGroupFilters() {
+      // Get unique groups from active students
+      const activeGroups = [...new Set(allStudents.map(s => s.group_name))].sort();
+      
+      // Build filter buttons HTML
+      let filtersHTML = '<button class="filter-btn active" data-group="all">All</button>';
+      activeGroups.forEach(group => {
+        if (group) { // Skip null/empty groups
+          filtersHTML += `<button class="filter-btn" data-group="${group}">${group}</button>`;
+        }
+      });
+      
+      const groupFiltersEl = document.getElementById('groupFilters');
+      groupFiltersEl.innerHTML = filtersHTML;
+      
+      // Re-attach event listeners
+      groupFiltersEl.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          currentFilter = btn.dataset.group;
+          groupFiltersEl.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          renderStudents();
+        });
+      });
+    }
+
+    // Render Students
+    function renderStudents() {
+      const filtered = currentFilter === 'all' 
+        ? allStudents 
+        : allStudents.filter(s => s.group_name === currentFilter);
+
+      studentsList.innerHTML = filtered.map(student => `
+        <div class="student-item ${student.id === currentStudentId ? 'active' : ''}" 
+             data-id="${student.id}" 
+             data-name="${student.name}">
+          <div class="student-name">${student.name}</div>
+          <div class="student-group">Group ${student.group_name || 'N/A'}</div>
+          <span class="unread-badge" id="badge-${student.id}" style="display: none;">0</span>
+        </div>
+      `).join('');
+
+      // Update unread counts
+      updateUnreadCounts();
+    }
+
+    // Update Unread Counts
+    async function updateUnreadCounts() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('chat_messages')
+          .select('student_id, is_read')
+          .eq('sender_type', 'student')
+          .eq('is_read', false);
+
+        if (error) throw error;
+
+        // Count unread per student
+        const counts = {};
+        data.forEach(msg => {
+          counts[msg.student_id] = (counts[msg.student_id] || 0) + 1;
+        });
+
+        // Update badges
+        Object.entries(counts).forEach(([studentId, count]) => {
+          const badge = document.getElementById(`badge-${studentId}`);
+          if (badge) {
+            badge.textContent = count > 9 ? '9+' : count;
+            badge.style.display = count > 0 ? 'block' : 'none';
+          }
+        });
+      } catch (error) {
+        debugLog('❌ Error updating unread counts:', error);
+      }
+    }
+
+    // Select Student
+    async function selectStudent(studentId, studentName) {
+      isFullChatMode = false; // Exit full chat mode
+      currentStudentId = studentId;
+      currentStudentName = studentName;
+
+      // Update UI
+      fullChatBtn.classList.remove('active'); // Remove full chat highlight
+      renderStudents();
+      chatTitle.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+        </svg>
+        ${studentName}
+      `;
+      inputArea.style.display = 'flex';
+      deleteAllBtn.style.display = 'block';
+
+      // Load messages
+      await loadMessages();
+      
+      // Mark student messages as read
+      await markMessagesAsRead(studentId);
+
+      // Subscribe to new messages
+      subscribeToMessages();
+    }
+
+    // Load Full Chat (All Students)
+    async function loadFullChat() {
+      try {
+        isFullChatMode = true;
+        currentStudentId = null;
+        currentStudentName = null;
+
+        // Update UI
+        document.querySelectorAll('.student-item').forEach(item => item.classList.remove('active'));
+        fullChatBtn.classList.add('active');
+        
+        chatTitle.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          💬 Full Chat - All Students
+        `;
+        inputArea.style.display = 'none'; // Hide input in full chat mode
+        deleteAllBtn.style.display = 'none';
+
+        // Load ALL messages
+        const { data, error } = await supabaseClient
+          .from('chat_messages')
+          .select('*, students(name)')
+          .order('created_at', { ascending: true })
+          .limit(500); // Limit for performance
+
+        if (error) throw error;
+
+        renderFullChatMessages(data || []);
+      } catch (error) {
+        debugLog('❌ Error loading full chat:', error);
+        alert('Failed to load full chat: ' + error.message);
+      }
+    }
+
+    // Render Full Chat Messages
+    function renderFullChatMessages(messages) {
+      if (messages.length === 0) {
+        messagesContainer.innerHTML = `
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <p>No messages yet across all students.</p>
+          </div>
+        `;
+        return;
+      }
+
+      messagesContainer.innerHTML = messages.map(msg => {
+        const isAdmin = msg.sender_type === 'admin';
+        const time = new Date(msg.created_at).toLocaleString();
+        const studentName = msg.students?.name || msg.sender_name || 'Unknown';
+        
+        return `
+          <div class="message ${msg.sender_type} ${msg.is_private ? 'private' : ''}" data-id="${msg.id}">
+            <div class="message-header">
+              <span class="message-sender">
+                ${isAdmin ? '👨‍💼 Admin' : `👤 ${studentName}`}
+                ${msg.is_private ? ' 🔒 Private' : ' 🌍 Group'}
+                ${!isAdmin ? ` → ${msg.sender_college || 'No College'}` : ''}
+              </span>
+              <span class="message-time">${time}</span>
+            </div>
+            <div class="message-text" id="text-${msg.id}">${msg.message}</div>
+            ${isAdmin ? `
+              <div class="message-actions">
+                <button class="msg-action-btn" onclick="editMessage('${msg.id}', \`${msg.message.replace(/`/g, '\\`')}\`)">
+                  ✏️ Edit
+                </button>
+                <button class="msg-action-btn delete" onclick="deleteMessage('${msg.id}')">
+                  🗑️ Delete
+                </button>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+
+      // Scroll to bottom
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // Load Messages
+    async function loadMessages() {
+      if (!currentStudentId) return;
+
+      isFullChatMode = false; // Exit full chat mode
+
+      try {
+        const { data, error } = await supabaseClient
+          .from('chat_messages')
+          .select('*')
+          .eq('student_id', currentStudentId)
+          .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        renderMessages(data || []);
+      } catch (error) {
+        debugLog('❌ Error loading messages:', error);
+        alert('Failed to load messages: ' + error.message);
+      }
+    }
+
+    // Render Messages
+    function renderMessages(messages) {
+      if (messages.length === 0) {
+        messagesContainer.innerHTML = `
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <p>No messages yet. Send the first message!</p>
+          </div>
+        `;
+        return;
+      }
+
+      messagesContainer.innerHTML = messages.map(msg => {
+        const isAdmin = msg.sender_type === 'admin';
+        const time = new Date(msg.created_at).toLocaleString();
+        const isAnnouncement = msg.is_announcement === true;
+        
+        return `
+          <div class="message ${msg.sender_type} ${msg.is_private ? 'private' : ''} ${isAnnouncement ? 'announcement' : ''}" data-id="${msg.id}">
+            <div class="message-header">
+              <span class="message-sender">
+                ${isAdmin ? (isAnnouncement ? '📢 Admin Announcement' : '👨‍💼 Admin') : msg.sender_name}
+                ${msg.is_private ? ' 🔒' : ''}
+              </span>
+              <span class="message-time">${time}</span>
+            </div>
+            <div class="message-text" id="text-${msg.id}">${msg.message}</div>
+            ${isAdmin ? `
+              <div class="message-actions">
+                <button class="msg-action-btn" onclick="editMessage('${msg.id}', '${msg.message.replace(/'/g, "\\'")}')">
+                  ✏️ Edit
+                </button>
+                <button class="msg-action-btn delete" onclick="deleteMessage('${msg.id}')">
+                  🗑️ Delete
+                </button>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+
+      // Scroll to bottom
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // Send Message
+    async function sendMessage() {
+      const message = messageInput.value.trim();
+      if (!message || !currentStudentId) return;
+
+      try {
+        const { error } = await supabaseClient
+          .from('chat_messages')
+          .insert({
+            student_id: currentStudentId,
+            sender_name: 'Admin',
+            sender_college: null,
+            message: message,
+            sender_type: 'admin',
+            is_private: privateCheckbox.checked,
+            is_announcement: announcementCheckbox.checked,
+            is_read: true // Admin messages start as read
+          });
+
+        if (error) throw error;
+
+        messageInput.value = '';
+        privateCheckbox.checked = false;
+        announcementCheckbox.checked = false;
+        debugLog('✅ Message sent');
+      } catch (error) {
+        debugLog('❌ Error sending message:', error);
+        alert('Failed to send message: ' + error.message);
+      }
+    }
+
+    // Edit Message
+    async function editMessage(messageId, currentText) {
+      if (editingMessageId) {
+        alert('Please finish editing the current message first');
+        return;
+      }
+
+      const messageEl = document.querySelector(`[data-id="${messageId}"]`);
+      const textEl = document.getElementById(`text-${messageId}`);
+      
+      editingMessageId = messageId;
+      messageEl.classList.add('editing');
+
+      textEl.innerHTML = `
+        <input type="text" class="edit-input" id="edit-input-${messageId}" value="${currentText}">
+        <div class="edit-actions">
+          <button class="msg-action-btn" onclick="saveEdit('${messageId}')">✓ Save</button>
+          <button class="msg-action-btn delete" onclick="cancelEdit('${messageId}', '${currentText.replace(/'/g, "\\'")}')">✗ Cancel</button>
+        </div>
+      `;
+
+      document.getElementById(`edit-input-${messageId}`).focus();
+    }
+
+    // Save Edit
+    async function saveEdit(messageId) {
+      const input = document.getElementById(`edit-input-${messageId}`);
+      const newText = input.value.trim();
+
+      if (!newText) {
+        alert('Message cannot be empty');
+        return;
+      }
+
+      try {
+        const { error } = await supabaseClient
+          .from('chat_messages')
+          .update({ 
+            message: newText,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', messageId);
+
+        if (error) throw error;
+
+        editingMessageId = null;
+        await loadMessages();
+        debugLog('✅ Message updated');
+      } catch (error) {
+        debugLog('❌ Error updating message:', error);
+        alert('Failed to update message: ' + error.message);
+      }
+    }
+
+    // Cancel Edit
+    function cancelEdit(messageId, originalText) {
+      const messageEl = document.querySelector(`[data-id="${messageId}"]`);
+      const textEl = document.getElementById(`text-${messageId}`);
+      
+      messageEl.classList.remove('editing');
+      textEl.textContent = originalText;
+      editingMessageId = null;
+    }
+
+    // Delete Message
+    async function deleteMessage(messageId) {
+      if (!confirm('Delete this message?')) return;
+
+      try {
+        const { error } = await supabaseClient
+          .from('chat_messages')
+          .delete()
+          .eq('id', messageId);
+
+        if (error) throw error;
+
+        debugLog('✅ Message deleted');
+      } catch (error) {
+        debugLog('❌ Error deleting message:', error);
+        alert('Failed to delete message: ' + error.message);
+      }
+    }
+
+    // Delete All Messages
+    async function deleteAllMessages() {
+      if (!currentStudentId) return;
+      if (!confirm(`Delete ALL messages with ${currentStudentName}? This cannot be undone!`)) return;
+
+      try {
+        const { error } = await supabaseClient
+          .from('chat_messages')
+          .delete()
+          .eq('student_id', currentStudentId);
+
+        if (error) throw error;
+
+        debugLog('✅ All messages deleted');
+        await loadMessages();
+      } catch (error) {
+        debugLog('❌ Error deleting messages:', error);
+        alert('Failed to delete messages: ' + error.message);
+      }
+    }
+
+    // Mark Messages as Read
+    async function markMessagesAsRead(studentId) {
+      try {
+        const { error } = await supabaseClient
+          .from('chat_messages')
+          .update({ is_read: true })
+          .eq('student_id', studentId)
+          .eq('sender_type', 'student')
+          .eq('is_read', false);
+
+        if (error) throw error;
+
+        updateUnreadCounts();
+      } catch (error) {
+        debugLog('❌ Error marking messages as read:', error);
+      }
+    }
+
+    // Subscribe to Messages
+    function subscribeToMessages() {
+      if (messagesSubscription) {
+        messagesSubscription.unsubscribe();
+      }
+
+      if (!currentStudentId) return;
+
+      messagesSubscription = supabase
+        .channel(`admin_chat_${currentStudentId}`)
+        .on('postgres_changes', 
+          { 
+            event: '*', 
+            schema: 'public', 
+            table: 'chat_messages',
+            filter: `student_id=eq.${currentStudentId}`
+          },
+          async (payload) => {
+            debugLog('📨 Real-time update:', payload);
+            
+            if (payload.eventType === 'INSERT') {
+              // Mark new student messages as read
+              if (payload.new.sender_type === 'student') {
+                await markMessagesAsRead(currentStudentId);
+              }
+            }
+            
+            await loadMessages();
+            updateUnreadCounts();
+          }
+        )
+        .subscribe((status) => {
+          debugLog('📡 Subscription status:', status);
+        });
+    }
+
+    // Setup Event Listeners
+    function setupEventListeners() {
+      // Student Selection
+      studentsList.addEventListener('click', (e) => {
+        const item = e.target.closest('.student-item');
+        if (item) {
+          const id = item.dataset.id;
+          const name = item.dataset.name;
+          selectStudent(id, name);
+        }
+      });
+
+      // Send Message
+      sendBtn.addEventListener('click', sendMessage);
+      messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      // Refresh
+      refreshBtn.addEventListener('click', loadMessages);
+
+      // Delete All
+      deleteAllBtn.addEventListener('click', deleteAllMessages);
+
+      // Full Chat Button
+      fullChatBtn.addEventListener('click', loadFullChat);
+    }
+
+    // Make functions global for onclick handlers
+    window.editMessage = editMessage;
+    window.saveEdit = saveEdit;
+    window.cancelEdit = cancelEdit;
+    window.deleteMessage = deleteMessage;
+
+    // Start
+    init();
+  </script>
+</body>
+</html>
