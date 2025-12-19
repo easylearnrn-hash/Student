@@ -5061,6 +5061,7 @@
           
           // CRITICAL: Use email_date for automated payments (contains actual payment timestamp)
           // This is the Gmail email delivery time which reflects when payment was sent
+          // NOTE: for_class is ONLY for manual payment reassignment, NOT for display
           const source =
             payment.email_date ||
             payment.emailDate ||
@@ -5082,7 +5083,21 @@
             const parts = getLAParts(date);
             if (!parts) return '';
             
-            return `${parts.year}-${parts.month}-${parts.day}`;
+            const result = `${parts.year}-${parts.month}-${parts.day}`;
+            
+            // DEBUG: Log payment date conversion for Dec 17-18
+            if (result === '2024-12-17' || result === '2024-12-18') {
+              console.log('🔍 PAYMENT DATE DEBUG:', {
+                payer: payment.payer_name || payment.resolved_student_name,
+                source_timestamp: source,
+                utc_date: date.toISOString(),
+                la_result: result,
+                la_parts: parts,
+                for_class: payment.for_class
+              });
+            }
+            
+            return result;
           } catch (e) {
             debugLog('⚠️ Error parsing payment date:', e);
             return '';
@@ -5682,6 +5697,8 @@
 
           // Build a lookup of scheduled class dates per student from the day map
           const scheduledDatesByStudent = new Map(); // studentId/name -> Set(dateStr)
+          const canceledDatesByStudent = new Map(); // studentId/name -> Set(dateStr) for canceled classes
+          
           Object.values(dayMap).forEach(dayEntry => {
             if (!dayEntry || !dayEntry.groups) return;
             const { dateStr, groups } = dayEntry;
@@ -5696,6 +5713,18 @@
                   scheduledDatesByStudent.set(studentKey, new Set());
                 }
                 scheduledDatesByStudent.get(studentKey).add(dateStr);
+                
+                // Check if this specific class was canceled for this student
+                const groupName = studentEntry.group_name || groupEntry.groupName;
+                if (groupName) {
+                  const skipInfo = getSkipInfoForGroup(groupName, dateStr);
+                  if (skipInfo && skipInfo.type === 'class-canceled') {
+                    if (!canceledDatesByStudent.has(studentKey)) {
+                      canceledDatesByStudent.set(studentKey, new Set());
+                    }
+                    canceledDatesByStudent.get(studentKey).add(dateStr);
+                  }
+                }
               });
             });
           });
@@ -5723,6 +5752,7 @@
 
             const studentKey = student.id != null ? String(student.id) : student.name;
             const scheduledDates = scheduledDatesByStudent.get(studentKey) || new Set();
+            const canceledDates = canceledDatesByStudent.get(studentKey) || new Set();
 
             studentPayments.forEach(payment => {
               if (!payment.forClass) {
@@ -5745,8 +5775,12 @@
               }
 
               const isScheduledClass = scheduledDates.has(forClassDate);
+              const isClassCanceled = canceledDates.has(forClassDate);
 
-              if (!isScheduledClass) {
+              // Show fuchsia dot if:
+              // 1. Payment for a date with no scheduled class (misallocated), OR
+              // 2. Payment for a canceled class (needs reassignment)
+              if (!isScheduledClass || isClassCanceled) {
                 addFuchsiaDot(forClassDate, student, payment);
                 totalFuchsiaDots++;
               }
