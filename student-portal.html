@@ -6996,6 +6996,7 @@
       }
       
       // Fetch absences data for this student
+      // CRITICAL: Check BOTH student_absences table AND payment_records with status='absent'
       let absences = [];
       try {
         const { data, error } = await supabaseClient
@@ -7006,7 +7007,7 @@
         if (!error && data) {
           // Extract just YYYY-MM-DD portion to match scheduled date format
           absences = data.map(a => a.class_date ? a.class_date.substring(0, 10) : a.class_date);
-          debugDebug(`✅ Loaded ${absences.length} absences for student:`, absences);
+          debugDebug(`✅ Loaded ${absences.length} absences from student_absences table:`, absences);
           debugDebug(`📋 Raw absence data:`, data);
         } else if (error) {
           console.error('⚠️ RLS Error loading absences:', error.message, error);
@@ -7015,6 +7016,28 @@
       } catch (err) {
         console.error('⚠️ Network error loading absences:', err);
         debugDebug('⚠️ Could not load absences:', err);
+      }
+      
+      // ALSO CHECK payment_records for status='absent' - this is where admin marks absences!
+      try {
+        const { data, error } = await supabaseClient
+          .from('payment_records')
+          .select('date, status')
+          .eq('student_id', student.id)
+          .eq('status', 'absent');
+        if (data && !error && data.length > 0) {
+          const absentFromRecords = data.map(a => a.date ? a.date.substring(0, 10) : a.date);
+          debugDebug(`✅ Loaded ${absentFromRecords.length} absences from payment_records table:`, absentFromRecords);
+          // Merge with student_absences (avoid duplicates)
+          absentFromRecords.forEach(date => {
+            if (!absences.includes(date)) {
+              absences.push(date);
+            }
+          });
+          debugDebug(`📋 Total absences after merging: ${absences.length}`, absences);
+        }
+      } catch (err) {
+        debugDebug('⚠️ Could not load absences from payment_records:', err);
       }
       
       // Fetch credit_payments to see which classes were paid via credit
@@ -7642,6 +7665,7 @@
      * @param {Object} note - Note object with posted_at, requires_payment, etc.
      * @param {Object} student - Student object with schedule data
      * @param {Set<string>} paidDatesSet - Set of dates (for_class) the student has paid for
+     * @param {Set<string>} absentDatesSet - Set of dates student was marked absent
      * @param {Object} scheduleData - Student's schedule data
      * @returns {boolean} True if note should be unlocked
      * 
@@ -7649,9 +7673,9 @@
      * - Notes are unlocked if student has payment with for_class matching note.class_date
      * - Doesn't matter when payment was made or if it was reassigned by admin
      * - ONLY checks: Does student have payment.for_class === note.class_date?
-     * - Absences don't block access if payment exists for that date
+     * - **ABSENCES LOCK NOTES**: If student was absent, notes STAY LOCKED regardless of payment
      */
-    function shouldUnlockNote(note, student, paidDatesSet, scheduleData, allNotesWithDates, paymentRecords) {
+    function shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, allNotesWithDates, paymentRecords) {
       // If note doesn't require payment, unlock it
       if (!note.requires_payment) {
         debugDebug(`🔓 Note ${note.id} unlocked: No payment required`);
@@ -7661,6 +7685,12 @@
       // If note has a specific class_date, check payment status
       if (note.class_date) {
         const noteClassDate = note.class_date.split('T')[0];
+        
+        // 🚫 CRITICAL: If student was absent on this date, LOCK the note regardless of payment
+        if (absentDatesSet && absentDatesSet.has(noteClassDate)) {
+          debugDebug(`🔒 Note ${note.id} (${noteClassDate}) LOCKED: Student was ABSENT on this date`);
+          return false;
+        }
         
         // ✅ ROBUST CHECK: Does student have payment with for_class = note.class_date?
         // This works even if payment was made late and admin reassigned for_class
@@ -7692,10 +7722,10 @@
      * 
      * ROBUST LOGIC:
      * 1. Builds set of dates student has paid for (using payment.for_class from database)
-     * 2. For each note with class_date, checks if student has payment.for_class matching that date
-     * 3. Doesn't matter when payment was received - only matters what class it was allocated to
-     * 4. Admin reassignments work perfectly: Payment received Dec 16 → reassigned to Dec 18 → unlocks Dec 18 note
-     * 5. Absences don't block access if payment exists for that class date
+     * 2. Builds set of dates student was marked absent (from payment_records status='absent')
+     * 3. For each note with class_date, checks if student has payment.for_class matching that date
+     * 4. **ABSENCES LOCK NOTES**: If student was absent, notes STAY LOCKED regardless of payment
+     * 5. Admin reassignments work perfectly: Payment received Dec 16 → reassigned to Dec 18 → unlocks Dec 18 note
      * 
      * @param {Array<Object>} notes - Array of notes
      * @param {Object} student - Student object
@@ -7728,12 +7758,13 @@
       
       // Check each note
       notes.forEach(note => {
-        const isPaid = shouldUnlockNote(note, student, paidDatesSet, scheduleData, notes, paymentRecords);
+        const isPaid = shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, notes, paymentRecords);
         notePaymentStatus.set(note.id, isPaid);
         
         if (note.class_date) {
           const noteDate = note.class_date.split('T')[0];
-          debugDebug(`  Note ${note.id} (${noteDate}): ${isPaid ? '🔓 UNLOCKED' : '🔒 LOCKED'}`);
+          const wasAbsent = absentDatesSet.has(noteDate);
+          debugDebug(`  Note ${note.id} (${noteDate}): ${isPaid ? '🔓 UNLOCKED' : '🔒 LOCKED'}${wasAbsent ? ' [ABSENT]' : ''}`);
         }
       });
       
