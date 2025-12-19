@@ -6632,11 +6632,24 @@
     // PAYMENT FUNCTIONS
     // ==========================================================================
 
+    /**
+     * Builds a Set of paid class dates from payment records
+     * 
+     * CRITICAL: Uses payment.for_class dates (allocated class dates) NOT payment.date (receipt dates)
+     * This ensures notes are unlocked based on what class the payment was allocated to,
+     * even if admin reassigned the payment to a different date than when it was received.
+     * 
+     * Example: Payment received Dec 16 but reassigned to Dec 18 → note for Dec 18 unlocks
+     * 
+     * @param {Array<Object>} payments - Payment objects with dateString (from for_class)
+     * @returns {Set<string>} Set of YYYY-MM-DD date strings student has paid for
+     */
     function buildPaidDatesSet(payments) {
-      return new Set(
+      const paidDates = new Set(
         (payments || [])
           .filter(payment => payment.status === 'paid' || payment.status === 'credit')
           .map(payment => {
+            // payment.dateString is already set to for_class in loadPaymentHistory()
             if (payment.dateString) return payment.dateString;
             if (typeof payment.date === 'string') return payment.date.split('T')[0];
             if (payment.date instanceof Date) return payment.date.toISOString().split('T')[0];
@@ -6644,6 +6657,9 @@
           })
           .filter(date => date !== null)
       );
+      
+      debugDebug(`💰 Built paidDatesSet with ${paidDates.size} dates:`, Array.from(paidDates).sort());
+      return paidDates;
     }
     
     // ---------- Payment History Loader ----------
@@ -6789,24 +6805,27 @@
           });
           
           const zelle = zellePayments.map(payment => {
-            // 🔧 CRITICAL FIX: Use for_class (allocated class date) instead of date (receipt date)
-            // This ensures payment matching uses the correct date for note unlocking
+            // 🔧 CRITICAL: Use for_class (allocated class date) instead of email_date (when received)
+            // This ensures notes unlock based on WHAT CLASS the payment was assigned to
+            // Example: Payment received Dec 16 → Admin reassigns to Dec 18 → Note for Dec 18 unlocks
+            // Even if student was absent on Dec 16, if admin allocated payment to Dec 18, they get Dec 18 notes
             const forClassStr = payment.for_class ? payment.for_class.substring(0, 10) : null;
             const dateStr = payment.date ? payment.date.substring(0, 10) : null;
             // Use for_class for payment date if available, otherwise fall back to date
             const classDateStr = forClassStr || dateStr;
             const paymentDate = classDateStr ? new Date(classDateStr + 'T00:00:00') : new Date(payment.email_date);
-            debugLog(`  → Using for_class="${payment.for_class}" (extracted: "${forClassStr}") as payment date: ${paymentDate.toLocaleDateString()}`);
+            debugLog(`  → Using for_class="${payment.for_class}" as payment date for note unlocking`);
             return {
               date: paymentDate,
-              dateString: classDateStr, // 🔧 Use for_class date for matching, not receipt date!
+              dateString: classDateStr, // ✅ THIS IS THE for_class DATE - used for note unlocking!
               status: 'paid', // Zelle payments are always paid
               amount: parseFloat(payment.amount) || 0,
               payment_method: 'Zelle',
               notes: payment.payer_name ? `From: ${payment.payer_name}` : payment.memo,
               id: payment.id,
               source: 'zelle',
-              receiptDate: dateStr // Store receipt date for reference
+              receiptDate: dateStr, // Store original receipt date for reference
+              forClass: forClassStr // Store for_class explicitly for debugging
             };
           });
           allPayments.push(...zelle);
@@ -7622,15 +7641,20 @@
      * Determines if a note should be unlocked for a student
      * @param {Object} note - Note object with posted_at, requires_payment, etc.
      * @param {Object} student - Student object with schedule data
-     * @param {Set<string>} paidDatesSet - Set of dates the student has paid for
+     * @param {Set<string>} paidDatesSet - Set of dates (for_class) the student has paid for
      * @param {Object} scheduleData - Student's schedule data
      * @returns {boolean} True if note should be unlocked
+     * 
+     * CRITICAL LOGIC:
+     * - Notes are unlocked if student has payment with for_class matching note.class_date
+     * - Doesn't matter when payment was made or if it was reassigned by admin
+     * - ONLY checks: Does student have payment.for_class === note.class_date?
+     * - Absences don't block access if payment exists for that date
      */
     function shouldUnlockNote(note, student, paidDatesSet, scheduleData, allNotesWithDates, paymentRecords) {
-      // PERFORMANCE: Removed console.log to reduce CPU usage
-      
       // If note doesn't require payment, unlock it
       if (!note.requires_payment) {
+        debugDebug(`🔓 Note ${note.id} unlocked: No payment required`);
         return true;
       }
       
@@ -7638,74 +7662,56 @@
       if (note.class_date) {
         const noteClassDate = note.class_date.split('T')[0];
         
-        // Check 1: Exact date match (student paid on class date)
-        if (paidDatesSet.has(noteClassDate)) {
+        // ✅ ROBUST CHECK: Does student have payment with for_class = note.class_date?
+        // This works even if payment was made late and admin reassigned for_class
+        const hasMatchingPayment = paidDatesSet.has(noteClassDate);
+        
+        if (hasMatchingPayment) {
+          debugDebug(`🔓 Note ${note.id} (${noteClassDate}) unlocked: Student has payment.for_class matching this date`);
           return true;
+        } else {
+          debugDebug(`🔒 Note ${note.id} (${noteClassDate}) LOCKED: No payment with for_class=${noteClassDate}. Student paid for: ${Array.from(paidDatesSet).join(', ')}`);
+          return false;
         }
-        
-        // Check 2: Grace period - payment before next class
-        // Get student's class schedule to find next class after noteClassDate
-        const noteDate = new Date(noteClassDate);
-        const studentGroup = student.group_letter;
-        
-        // Find next class date after this note's date
-        let nextClassDate = null;
-        if (scheduleData && scheduleData.classDates) {
-          const sortedDates = scheduleData.classDates
-            .map(d => new Date(d))
-            .sort((a, b) => a - b);
-          
-          for (const classDate of sortedDates) {
-            if (classDate > noteDate) {
-              nextClassDate = classDate;
-              break;
-            }
-          }
-        }
-        
-        // Grace period: Check if they paid between noteDate and day before nextClass (11:59 PM)
-        if (nextClassDate) {
-          const gracePeriodEnd = new Date(nextClassDate);
-          gracePeriodEnd.setDate(gracePeriodEnd.getDate() - 1); // Day before next class
-          gracePeriodEnd.setHours(23, 59, 59, 999); // 11:59 PM
-          
-          // Check if any payment falls within grace period
-          for (const paidDateStr of paidDatesSet) {
-            const paidDate = new Date(paidDateStr);
-            if (paidDate >= noteDate && paidDate <= gracePeriodEnd) {
-              return true;
-            }
-          }
-        }
-        
-        // NO REVERSE CUMULATIVE - Students must pay for the specific class date
-        return false;
       }
       
       // For notes without class_date but requires payment:
       // If student has ANY paid dates, unlock (they're a paying student)
       if (paidDatesSet.size > 0) {
+        debugDebug(`🔓 Note ${note.id} (no class_date) unlocked: Student has ${paidDatesSet.size} payment(s)`);
         return true;
       }
       
       // No payments found - lock the note
+      debugDebug(`🔒 Note ${note.id} LOCKED: No payments found`);
       return false;
     }
 
     /**
      * Computes payment status for all notes based on class dates and payments
+     * 
+     * ROBUST LOGIC:
+     * 1. Builds set of dates student has paid for (using payment.for_class from database)
+     * 2. For each note with class_date, checks if student has payment.for_class matching that date
+     * 3. Doesn't matter when payment was received - only matters what class it was allocated to
+     * 4. Admin reassignments work perfectly: Payment received Dec 16 → reassigned to Dec 18 → unlocks Dec 18 note
+     * 5. Absences don't block access if payment exists for that class date
+     * 
      * @param {Array<Object>} notes - Array of notes
      * @param {Object} student - Student object
-     * @param {Array<Object>} paymentRecords - Array of payment records
+     * @param {Array<Object>} paymentRecords - Array of payment records (with for_class dates)
      * @param {Object} scheduleData - Student's schedule data
      * @returns {Map<number, boolean>} Map of noteId -> isPaid status
      */
     function computeNotePaymentStatus(notes, student, paymentRecords, scheduleData) {
       const notePaymentStatus = new Map();
       
-      // Build set of paid dates (includes 'paid' and 'credit', excludes 'absent', 'unpaid', 'cancelled')
-      // CRITICAL: Students can be marked absent initially, but if they pay later, they get access
+      // Build set of paid dates using payment.for_class (allocated class dates)
+      // This includes both 'paid' and 'credit' statuses
+      // Excludes 'absent', 'unpaid', 'cancelled'
       const paidDatesSet = buildPaidDatesSet(paymentRecords);
+      
+      debugDebug(`📊 Computing note payment status for ${notes.length} notes. Student has payments for: ${Array.from(paidDatesSet).sort().join(', ')}`);
       
       // Build set of absence dates (for reference, though absences don't block paid access)
       const absentDatesSet = new Set(
@@ -7720,10 +7726,15 @@
           .filter(d => d !== null)
       );
       
-      // Check each note - pass all notes for cumulative calculation
+      // Check each note
       notes.forEach(note => {
         const isPaid = shouldUnlockNote(note, student, paidDatesSet, scheduleData, notes, paymentRecords);
         notePaymentStatus.set(note.id, isPaid);
+        
+        if (note.class_date) {
+          const noteDate = note.class_date.split('T')[0];
+          debugDebug(`  Note ${note.id} (${noteDate}): ${isPaid ? '🔓 UNLOCKED' : '🔒 LOCKED'}`);
+        }
       });
       
       return notePaymentStatus;
