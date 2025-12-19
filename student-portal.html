@@ -4110,8 +4110,8 @@
               currentStudent = student; // SET GLOBAL BEFORE LOADING
               window.currentStudent = student; // Also set window property
               await loadPortalData();
-              await ensurePaymentsData();
-              console.log('✅ Portal data loaded! paymentHistory:', window.paymentHistory);
+              // Payment data loads automatically via loadPaymentHistory in loadPortalData
+              console.log('✅ Portal data loaded!');
               return student;
             } else {
               console.log('❌ Student not found for ID:', masterToken.studentId);
@@ -6388,32 +6388,12 @@
           console.error('Schedule load failed:', error);
         });
         
-        // 🚀 PHASE 3: Load ALL other sections in background (completely non-blocking)
-        // These will load when user clicks the tabs
-        Promise.allSettled([
-          loadPaymentsSection().then(() => {
-            sectionLoadedState.payments = true;
-            perfTimer.mark('Payments loaded');
-          }),
-          loadMaterialsSection().then(() => {
-            sectionLoadedState.materials = true;
-            perfTimer.mark('Materials loaded');
-          }),
-          loadProgressSection().then(() => {
-            sectionLoadedState.progress = true;
-            perfTimer.mark('Progress loaded');
-          }),
-          loadStudentAlerts().then(() => {
-            perfTimer.mark('Alerts loaded');
-          })
-        ]).then(results => {
-          results.forEach((result, index) => {
-            if (result.status === 'rejected') {
-              const sections = ['payments', 'materials', 'progress', 'alerts'];
-              console.warn(`${sections[index]} background load failed:`, result.reason);
-            }
-          });
+        // 🚀 PHASE 3: Load alerts in background (other sections load on tab click)
+        loadStudentAlerts().then(() => {
+          perfTimer.mark('Alerts loaded');
           perfTimer.summary(); // Show final timing
+        }).catch(error => {
+          console.warn('Alerts background load failed:', error);
         });
         
       } catch (error) {
