@@ -6759,9 +6759,21 @@
      * @returns {Set<string>} Set of YYYY-MM-DD date strings student has paid for
      */
     function buildPaidDatesSet(payments) {
+      console.log('🏗️ Building paidDatesSet from', payments?.length || 0, 'payments');
+      
+      const filteredPayments = (payments || [])
+        .filter(payment => {
+          const isPaidOrCredit = payment.status === 'paid' || payment.status === 'credit';
+          if (payment.status === 'credit') {
+            console.log(`  ✅ Including CREDIT payment: date=${payment.dateString}, amount=${payment.amount}`);
+          }
+          return isPaidOrCredit;
+        });
+        
+      console.log(`  → Filtered to ${filteredPayments.length} paid/credit payments`);
+      
       const paidDates = new Set(
-        (payments || [])
-          .filter(payment => payment.status === 'paid' || payment.status === 'credit')
+        filteredPayments
           .map(payment => {
             // payment.dateString is already set to for_class in loadPaymentHistory()
             if (payment.dateString) return payment.dateString;
@@ -6772,7 +6784,7 @@
           .filter(date => date !== null)
       );
       
-      debugDebug(`💰 Built paidDatesSet with ${paidDates.size} dates:`, Array.from(paidDates).sort());
+      console.log(`💰 Built paidDatesSet with ${paidDates.size} dates:`, Array.from(paidDates).sort());
       return paidDates;
     }
     
@@ -6946,6 +6958,7 @@
         }
         
         // 3. Query credit_payments table (payments applied from student credit balance)
+        console.log('🔍 Querying credit_payments for student_id:', student.id);
         const { data: creditPayments, error: creditError } = await supabaseClient
           .from('credit_payments')
           .select('*')
@@ -6955,10 +6968,11 @@
         if (creditError) {
           console.error('❌ Error loading credit payments:', creditError);
         } else {
-          debugDebug(`💳 Raw credit_payments from database:`, creditPayments);
+          console.log(`💳 Raw credit_payments from database (${creditPayments?.length || 0} records):`, creditPayments);
           if (creditPayments && creditPayments.length > 0) {
             const credits = creditPayments.map(payment => {
               const dateStr = payment.class_date ? payment.class_date.substring(0, 10) : null;
+              console.log(`  → Processing credit payment: class_date=${dateStr}, amount=${payment.amount}`);
               return {
                 date: new Date(payment.class_date),
                 dateString: dateStr, // 🔧 Store original date string
@@ -6971,9 +6985,9 @@
               };
             });
             allPayments.push(...credits);
-            // PERFORMANCE: Removed console.log
+            console.log(`✅ Added ${credits.length} credit payments to allPayments. Total now: ${allPayments.length}`);
           } else {
-            // PERFORMANCE: Removed console.log
+            console.log('⚠️ No credit payments found for this student');
           }
         }
         
