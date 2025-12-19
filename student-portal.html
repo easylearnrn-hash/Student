@@ -7675,22 +7675,33 @@
      * - ONLY checks: Does student have payment.for_class === note.class_date?
      * - **ABSENCES LOCK NOTES**: If student was absent, notes STAY LOCKED regardless of payment
      */
-    function shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, allNotesWithDates, paymentRecords) {
+    function shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, allNotesWithDates, paymentRecords, freeNoteIds) {
       // If note doesn't require payment, unlock it
       if (!note.requires_payment) {
         debugDebug(`🔓 Note ${note.id} unlocked: No payment required`);
         return true;
       }
       
-      // If note has a specific class_date, check payment status
+      // 🚫 CRITICAL: Check absence FIRST (blocks even free access notes)
       if (note.class_date) {
         const noteClassDate = note.class_date.split('T')[0];
         
-        // 🚫 CRITICAL: If student was absent on this date, LOCK the note regardless of payment
+        // If student was absent on this date, LOCK the note regardless of payment OR free access
         if (absentDatesSet && absentDatesSet.has(noteClassDate)) {
           debugDebug(`🔒 Note ${note.id} (${noteClassDate}) LOCKED: Student was ABSENT on this date`);
           return false;
         }
+      }
+      
+      // 🎁 FREE ACCESS: Check if note has free access for this student's group
+      if (freeNoteIds && freeNoteIds.has(note.id)) {
+        debugDebug(`🎁 Note ${note.id} unlocked: FREE ACCESS granted to group`);
+        return true;
+      }
+      
+      // If note has a specific class_date, check payment status
+      if (note.class_date) {
+        const noteClassDate = note.class_date.split('T')[0];
         
         // ✅ ROBUST CHECK: Does student have payment with for_class = note.class_date?
         // This works even if payment was made late and admin reassigned for_class
@@ -7725,15 +7736,17 @@
      * 2. Builds set of dates student was marked absent (from payment_records status='absent')
      * 3. For each note with class_date, checks if student has payment.for_class matching that date
      * 4. **ABSENCES LOCK NOTES**: If student was absent, notes STAY LOCKED regardless of payment
-     * 5. Admin reassignments work perfectly: Payment received Dec 16 → reassigned to Dec 18 → unlocks Dec 18 note
+     * 5. **FREE ACCESS UNLOCKS NOTES**: If note has free access for student's group, notes UNLOCK (unless absent)
+     * 6. Admin reassignments work perfectly: Payment received Dec 16 → reassigned to Dec 18 → unlocks Dec 18 note
      * 
      * @param {Array<Object>} notes - Array of notes
      * @param {Object} student - Student object
      * @param {Array<Object>} paymentRecords - Array of payment records (with for_class dates)
      * @param {Object} scheduleData - Student's schedule data
+     * @param {Set<number>} freeNoteIds - Set of note IDs that have free access for student's group
      * @returns {Map<number, boolean>} Map of noteId -> isPaid status
      */
-    function computeNotePaymentStatus(notes, student, paymentRecords, scheduleData) {
+    function computeNotePaymentStatus(notes, student, paymentRecords, scheduleData, freeNoteIds) {
       const notePaymentStatus = new Map();
       
       // Build set of paid dates using payment.for_class (allocated class dates)
@@ -7758,7 +7771,7 @@
       
       // Check each note
       notes.forEach(note => {
-        const isPaid = shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, notes, paymentRecords);
+        const isPaid = shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, notes, paymentRecords, freeNoteIds);
         notePaymentStatus.set(note.id, isPaid);
         
         if (note.class_date) {
@@ -9792,7 +9805,8 @@
           notes,
           currentStudent,
           mergedPaymentRecords,
-          currentGroupScheduleData  // Student's schedule data loaded earlier
+          currentGroupScheduleData,  // Student's schedule data loaded earlier
+          freeNoteIds  // Pass free access note IDs to unlock notes (unless absent)
         );
         
         if (DEBUG_MODE) {
