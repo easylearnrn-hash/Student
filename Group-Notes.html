@@ -1458,7 +1458,7 @@
           if (DEBUG_MODE) console.log('✨ Loaded free access grants:', freeAccessGrants.length);
         }
 
-        renderSystems();
+        await renderSystems();
 
       } catch (error) {
         console.error('Load data error:', error);
@@ -1472,7 +1472,7 @@
     }
 
     // ===== SWITCH GROUP =====
-    function switchGroup(group) {
+    async function switchGroup(group) {
       currentGroup = group;
       
       // Update tab styling
@@ -1480,7 +1480,7 @@
         tab.classList.toggle('active', tab.dataset.group === group);
       });
 
-      renderSystems();
+      await renderSystems();
     }
     
     // ===== ONGOING SYSTEM MANAGEMENT =====
@@ -1705,7 +1705,7 @@
     }
 
     // ===== RENDER SYSTEMS =====
-    function renderSystems() {
+    async function renderSystems() {
       const container = document.getElementById('systemsContainer');
       const searchInput = document.getElementById('searchInput').value.toLowerCase();
 
@@ -1715,8 +1715,36 @@
         if (noteId) globalCheckedNoteIds.add(noteId);
       });
 
+      // Get ongoing system for current group
+      const groupLetter = currentGroup.replace('Group ', '');
+      let ongoingSystemName = null;
+      
+      try {
+        const { data: folders } = await supabaseClient
+          .from('note_folders')
+          .select('folder_name')
+          .eq('is_current', true)
+          .eq('group_letter', groupLetter)
+          .is('deleted_at', null)
+          .limit(1);
+        
+        ongoingSystemName = folders && folders.length > 0 ? folders[0].folder_name : null;
+      } catch (error) {
+        console.error('❌ Error fetching ongoing system:', error);
+      }
+
+      // Sort systems: ongoing first, then alphabetically
+      const sortedSystems = [...SYSTEMS].sort((a, b) => {
+        // If a is ongoing, it comes first
+        if (a.name === ongoingSystemName) return -1;
+        // If b is ongoing, it comes first
+        if (b.name === ongoingSystemName) return 1;
+        // Otherwise alphabetical
+        return a.name.localeCompare(b.name);
+      });
+
       // PERFORMANCE: Use document fragment for batch DOM updates
-      const systemsHTML = SYSTEMS.map(system => {
+      const systemsHTML = sortedSystems.map(system => {
         // Flexible column detection - check multiple possible column names
         let systemNotes = allNotes.filter(note => {
           const noteSystem = note.system || note.system_category || note.category || note.group_name;
@@ -2108,7 +2136,7 @@
         // PERFORMANCE: Clear permissions cache after mutation
         clearCache('permissions');
 
-        renderSystems();
+        await renderSystems();
 
       } catch (error) {
         console.error('Grant access error:', error);
@@ -2153,7 +2181,7 @@
         // PERFORMANCE: Clear permissions cache after mutation
         clearCache('permissions');
 
-        renderSystems();
+        await renderSystems();
 
       } catch (error) {
         console.error('Revoke access error:', error);
@@ -2982,7 +3010,7 @@
 
         await customAlert(`✓ ${successCount} note(s) deleted${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
         clearSelection();
-        renderSystems();
+        await renderSystems();
       } catch (error) {
         console.error('Batch delete error:', error);
         await customAlert('Failed to delete notes: ' + error.message);
@@ -3045,7 +3073,7 @@
         );
 
         clearSelection();
-        renderSystems();
+        await renderSystems();
       } catch (error) {
         console.error('Batch unfree access error:', error);
         await customAlert('Failed to remove free access: ' + error.message);
@@ -3113,7 +3141,7 @@
         selectedCheckboxes.forEach(cb => cb.checked = false);
         updateSelectedCount();
         await loadData();
-        renderSystems();
+        await renderSystems();
       } catch (error) {
         console.error('Batch show error:', error);
         await customAlert('Error', 'Failed to show notes: ' + error.message);
@@ -3167,7 +3195,7 @@
       const systemId = systemName.replace(/[^a-zA-Z0-9]/g, '');
       const systemSection = document.getElementById(`system-${systemId}`);
       if (!systemSection) return;
-      
+
       const selectedCheckboxes = systemSection.querySelectorAll('.note-checkbox:checked');
       const noteIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.noteId));
       
@@ -3190,14 +3218,12 @@
         selectedCheckboxes.forEach(cb => cb.checked = false);
         updateSelectedCount();
         await loadData();
-        renderSystems();
+        await renderSystems();
       } catch (error) {
         console.error('Batch hide error:', error);
         await customAlert('Error', 'Failed to hide notes: ' + error.message);
       }
-    }
-
-    async function systemBatchDelete(systemName) {
+    }    async function systemBatchDelete(systemName) {
       // Get selected notes from this system only
       const systemId = systemName.replace(/[^a-zA-Z0-9]/g, '');
       const systemSection = document.getElementById(`system-${systemId}`);
@@ -3264,7 +3290,7 @@
         
         selectedCheckboxes.forEach(cb => cb.checked = false);
         updateSelectedCount();
-        renderSystems();
+        await renderSystems();
       } catch (error) {
         console.error('Batch delete error:', error);
         await customAlert('Failed to delete notes: ' + error.message);
@@ -3350,7 +3376,7 @@
         selectedCheckboxes.forEach(cb => cb.checked = false);
         updateSelectedCount();
         await loadData();
-        renderSystems();
+        await renderSystems();
       } catch (error) {
         console.error('Bulk post error:', error);
         await customAlert('Error', 'Failed to post notes: ' + error.message);
@@ -3395,7 +3421,7 @@
         selectedCheckboxes.forEach(cb => cb.checked = false);
         updateSelectedCount();
         await loadData();
-        renderSystems();
+        await renderSystems();
       } catch (error) {
         console.error('Batch show error:', error);
         await customAlert('Error', 'Failed to show notes: ' + error.message);
@@ -3407,7 +3433,7 @@
       const systemId = systemName.replace(/[^a-zA-Z0-9]/g, '');
       const systemSection = document.getElementById(`system-${systemId}`);
       if (!systemSection) return;
-      
+
       const selectedCheckboxes = systemSection.querySelectorAll('.note-checkbox:checked');
       const noteIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.noteId));
       
@@ -3430,14 +3456,12 @@
         selectedCheckboxes.forEach(cb => cb.checked = false);
         updateSelectedCount();
         await loadData();
-        renderSystems();
+        await renderSystems();
       } catch (error) {
         console.error('Batch hide error:', error);
         await customAlert('Error', 'Failed to hide notes: ' + error.message);
       }
-    }
-
-    // ===== INDIVIDUAL STUDENT ACCESS =====
+    }    // ===== INDIVIDUAL STUDENT ACCESS =====
     let currentModalNoteId = null;
     let allStudents = [];
     let selectedStudentIds = new Set();
