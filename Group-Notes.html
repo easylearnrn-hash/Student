@@ -1922,14 +1922,31 @@
       
       // Check if this note has FREE access for current group
       const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
-      const hasFreeAccess = freeAccessGrants.some(grant => 
+      const freeAccessGrant = freeAccessGrants.find(grant => 
         grant.note_id === note.id && 
         grant.access_type === 'group' && 
         grant.group_letter === groupLetter
       );
+      const hasFreeAccess = !!freeAccessGrant;
 
       // CRITICAL FIX: Check if this note is in the global checked set
       const isChecked = globalCheckedNoteIds.has(note.id.toString());
+
+      // Format dates for display
+      const formatDate = (dateStr) => {
+        if (!dateStr) return '';
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      };
+
+      // Build status badges
+      let statusBadges = '';
+      if (hasFreeAccess && freeAccessGrant?.created_at) {
+        statusBadges += `<div style="display: inline-block; padding: 2px 8px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white; margin-top: 4px; margin-right: 6px;">🆓 FREE (${formatDate(freeAccessGrant.created_at)})</div>`;
+      }
+      if (isAccessible && permission?.created_at) {
+        statusBadges += `<div style="display: inline-block; padding: 2px 8px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white; margin-top: 4px;">👁️ Opened (${formatDate(permission.created_at)})</div>`;
+      }
 
       return `
         <div class="note-card ${isAccessible ? 'accessible' : ''}" data-note-id="${note.id}" onclick="toggleNoteSelection(${note.id}, event)" style="cursor: pointer;">
@@ -1946,7 +1963,7 @@
             </label>
             <div style="flex: 1;">
               <div class="note-title">${note.title}</div>
-              ${hasFreeAccess ? '<div style="display: inline-block; padding: 2px 8px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white; margin-top: 4px;">FREE Access</div>' : ''}
+              ${statusBadges}
             </div>
             <div class="access-badge ${isAccessible ? 'accessible' : 'restricted'}">
               ${isAccessible ? '✓ Visible' : '✕ Hidden'}
