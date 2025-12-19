@@ -4932,6 +4932,114 @@
       }
     }
     
+    // Show dialog for absent students
+    function showAbsentNoteDialog(classDate, noteItem = null) {
+      // Create modal overlay
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.75);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        animation: fadeIn 0.15s ease;
+      `;
+      
+      // Create dialog
+      const dialog = document.createElement('div');
+      dialog.style.cssText = `
+        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
+        border: 1px solid rgba(148, 163, 184, 0.3);
+        border-radius: 24px;
+        padding: 32px;
+        max-width: 440px;
+        width: 90%;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        animation: slideUp 0.2s ease;
+      `;
+      
+      dialog.innerHTML = `
+        <div style="text-align: center;">
+          <div style="
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 20px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.1));
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+          ">🚫</div>
+          
+          <h3 style="
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0 0 12px 0;
+            letter-spacing: -0.02em;
+          ">Note Not Available</h3>
+          
+          <p style="
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 1rem;
+            line-height: 1.6;
+            margin: 0 0 28px 0;
+          ">
+            You were marked absent for <strong style="color: rgba(255, 255, 255, 0.95);">${classDate}</strong>. 
+            Notes for this date are not accessible.
+          </p>
+          
+          <button id="closeDialogBtn" style="
+            width: 100%;
+            padding: 14px 24px;
+            border: none;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.15));
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid rgba(102, 126, 234, 0.3);
+          " onmouseover="this.style.background='linear-gradient(135deg, rgba(102, 126, 234, 0.3), rgba(118, 75, 162, 0.2))'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.3)'"
+             onmouseout="this.style.background='linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.15))'; this.style.transform='translateY(0)'; this.style.boxShadow='none'">
+            Got It
+          </button>
+        </div>
+      `;
+      
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+      
+      // Close handlers - PERFORMANCE: Instant close + collapse note
+      const closeDialog = () => {
+        // Collapse the note immediately if it was passed in
+        if (noteItem) {
+          noteItem.classList.add('note-collapsed');
+          noteItem.classList.remove('note-expanded');
+          const attachmentsDiv = noteItem.querySelector('.note-attachments');
+          const indicator = noteItem.querySelector('.note-expand-indicator');
+          if (attachmentsDiv) attachmentsDiv.style.display = 'none';
+          if (indicator) indicator.innerHTML = '▼';
+        }
+        // Remove overlay instantly
+        overlay.remove();
+      };
+      
+      document.getElementById('closeDialogBtn').addEventListener('click', closeDialog);
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeDialog();
+      });
+    }
+    
     // Payment Information Modal
     function showPaymentInfoModal() {
       const overlay = document.createElement('div');
@@ -9799,6 +9907,21 @@
         
         if (DEBUG_MODE) debugLog(`✨ FREE access notes: ${freeNoteIds.size} notes`);
         
+        // Build set of absence dates for checking if student was absent on note dates
+        const absentDatesSet = new Set(
+          (mergedPaymentRecords || [])
+            .filter(p => p.status === 'absent')
+            .map(p => {
+              if (p.dateString) return p.dateString;
+              if (typeof p.date === 'string') return p.date.split('T')[0];
+              if (p.date instanceof Date) return p.date.toISOString().split('T')[0];
+              return null;
+            })
+            .filter(d => d !== null)
+        );
+        
+        if (DEBUG_MODE) debugLog(`🚫 Absent dates: ${absentDatesSet.size} dates (${Array.from(absentDatesSet).join(', ')})`);
+        
         // 🔐 PAYMENT-LOCKED NOTES ENGINE: Compute payment status for all notes
         // This uses the student's schedule and payment history to determine which notes are unlocked
         const notePaymentStatus = computeNotePaymentStatus(
@@ -9841,7 +9964,11 @@
           // Check if student has FREE access to this note
           const hasFreeAccess = freeNoteIds.has(note.id);
           
-          // 🔐 Use payment-locked notes engine result
+          // � Check if student was ABSENT on this note's date
+          const noteClassDate = note.class_date ? note.class_date.split('T')[0] : null;
+          const isAbsent = noteClassDate ? absentDatesSet.has(noteClassDate) : false;
+          
+          // �🔐 Use payment-locked notes engine result
           const studentHasPaidForThisNote = notePaymentStatus.get(note.id) || false;
           
           // Student can access if: note doesn't require payment OR paid for this date OR has free access
@@ -9850,6 +9977,10 @@
           if (DEBUG_MODE && noteRequiresPayment && !isPaid && !hasFreeAccess) {
             const classDate = note.class_date ? note.class_date.split('T')[0] : 'unknown';
             debugLog(`🔒 Note "${note.title}" (${classDate}) is LOCKED - payment required`);
+          }
+          
+          if (DEBUG_MODE && isAbsent) {
+            debugLog(`🚫 Note "${note.title}" (${noteClassDate}) - Student was ABSENT`);
           }
           
           // CONSISTENT: Use helper function to get system name
@@ -9861,6 +9992,7 @@
             title: note.title || 'Untitled Note',
             text: note.description || note.title || 'Note', 
             isPaid: isPaid,
+            isAbsent: isAbsent, // Flag to show if student was absent
             hasFreeAccess: hasFreeAccess, // Pass FREE access flag to card
             course: systemName,
             folderIcon: '📚',
@@ -11055,7 +11187,7 @@
       
       const item = document.createElement('div');
       const noteTypeClass = note.type === 'warning' ? 'warning' : (note.type || 'material');
-      const lockedClass = !note.isPaid && note.type !== 'warning' ? 'locked' : '';
+      const lockedClass = (!note.isPaid || note.isAbsent) && note.type !== 'warning' ? 'locked' : '';
       item.className = `classroom-item ${noteTypeClass} ${lockedClass} note-collapsed`;
       
       // Apply system gradient as background
@@ -11081,6 +11213,10 @@
       if (note.type === 'warning' && note.isTemplateMissing) {
         badgeIcon = '⚠️';
         badgeText = 'Missing Content';
+      } else if (note.isAbsent) {
+        // Student was absent - show absence badge
+        badgeIcon = '🚫';
+        badgeText = 'Absent';
       } else if (!note.isPaid) {
         badgeIcon = '🔒';
         badgeText = 'Payment Required';
@@ -11180,12 +11316,12 @@
         `;
       }
       
-      // For locked notes, blur everything except title and date
-      const badgeBlur = !note.isPaid ? 'filter: blur(8px);' : '';
+      // For locked notes OR absent students, blur everything except title and date
+      const badgeBlur = (!note.isPaid || note.isAbsent) ? 'filter: blur(8px);' : '';
       
       // Check if note is new (not opened yet)
       const isNew = !isNoteOpened(note.id);
-      const newBadge = isNew && note.isPaid ? '<span style="position: absolute; top: 8px; right: 8px; padding: 4px 10px; background: linear-gradient(135deg, #ef4444, #dc2626); color: white; font-size: 10px; font-weight: 800; letter-spacing: 0.5px; border-radius: 12px; box-shadow: 0 0 12px rgba(239,68,68,0.6); animation: pulse 2s infinite; z-index: 10;">NEW</span>' : '';
+      const newBadge = isNew && note.isPaid && !note.isAbsent ? '<span style="position: absolute; top: 8px; right: 8px; padding: 4px 10px; background: linear-gradient(135deg, #ef4444, #dc2626); color: white; font-size: 10px; font-weight: 800; letter-spacing: 0.5px; border-radius: 12px; box-shadow: 0 0 12px rgba(239,68,68,0.6); animation: pulse 2s infinite; z-index: 10;">NEW</span>' : '';
       
       item.innerHTML = `
         ${newBadge}
@@ -11204,14 +11340,22 @@
           <div class="note-badge-container">
             <span class="classroom-badge ${badgeClass || (note.isPaid ? note.type || 'material' : 'locked')}" style="${badgeBlur}">${badgeIcon} ${badgeText}</span>
           </div>
-          ${note.isPaid && (note.attachments?.length > 0 || note.isTemplateMissing) ? '<div class="note-expand-indicator" style="text-align: center; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.5); font-size: 20px; user-select: none; cursor: pointer;">▼</div>' : '<div style="height: 29px;"></div>'}
+          ${note.isPaid && !note.isAbsent && (note.attachments?.length > 0 || note.isTemplateMissing) ? '<div class="note-expand-indicator" style="text-align: center; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.5); font-size: 20px; user-select: none; cursor: pointer;">▼</div>' : '<div style="height: 29px;"></div>'}
         </div>
         
         ${attachmentsHTML}
       `;
       
-      // Add click handler for locked notes only (expand/collapse now handled by event delegation)
-      if (!note.isPaid && !note.isTemplateMissing) {
+      // Add click handler for locked/absent notes (expand/collapse now handled by event delegation)
+      if (note.isAbsent && !note.isTemplateMissing) {
+        // Absent students show absence dialog
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', (e) => {
+          e.stopPropagation(); // PERFORMANCE: Prevent delegation handler from firing
+          const formattedDate = note.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+          showAbsentNoteDialog(formattedDate, item); // Show absence-specific dialog
+        });
+      } else if (!note.isPaid && !note.isTemplateMissing) {
         // Locked notes show payment dialog
         item.style.cursor = 'pointer';
         item.addEventListener('click', (e) => {
@@ -11219,7 +11363,7 @@
           const formattedDate = note.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
           showLockedNoteDialog(formattedDate, item); // Pass the item to collapse after dialog closes
         });
-      } else if (note.isPaid && (note.attachments?.length > 0 || note.isTemplateMissing)) {
+      } else if (note.isPaid && !note.isAbsent && (note.attachments?.length > 0 || note.isTemplateMissing)) {
         // Unlocked notes with attachments get pointer cursor (click handled by delegation)
         item.style.cursor = 'pointer';
       }
