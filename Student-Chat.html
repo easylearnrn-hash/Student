@@ -332,6 +332,36 @@
       box-shadow: 0 12px 30px rgba(0,0,0,.28), 0 0 18px rgba(148,163,184,.10);
     }
 
+    /* Reply indicator inside bubble */
+    .reply-indicator {
+      background: rgba(0,0,0,.25);
+      border-left: 3px solid rgba(167,139,250,.60);
+      padding: 8px 10px;
+      margin-bottom: 8px;
+      border-radius: 8px;
+      font-size: 11px;
+      opacity: 0.85;
+    }
+
+    .reply-indicator-sender {
+      font-weight: 600;
+      color: rgba(167,139,250,.90);
+      margin-bottom: 3px;
+      font-size: 10px;
+      letter-spacing: 0.3px;
+    }
+
+    .reply-indicator-text {
+      color: rgba(255,255,255,.65);
+      font-style: italic;
+      line-height: 1.3;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
     /* System message style */
     .system-msg {
       text-align: center;
@@ -1316,8 +1346,34 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     // Build inner HTML more efficiently
     let bubbleHTML = '';
     
-    if (text) {
-      bubbleHTML += `<div class="msg-text">${escapeHtml(text)}</div>`;
+    // Check if message is a reply (starts with ↩️)
+    let actualMessage = text;
+    let replyInfo = null;
+    
+    if (text && text.startsWith('↩️ Replying to ')) {
+      // Parse reply format: "↩️ Replying to Name: "quoted text"\n\nActual message"
+      const replyMatch = text.match(/^↩️ Replying to ([^:]+): "([^"]+)"\n\n(.+)$/s);
+      if (replyMatch) {
+        replyInfo = {
+          sender: replyMatch[1],
+          text: replyMatch[2]
+        };
+        actualMessage = replyMatch[3];
+      }
+    }
+    
+    // Add reply indicator if this is a reply
+    if (replyInfo) {
+      bubbleHTML += `
+        <div class="reply-indicator">
+          <div class="reply-indicator-sender">↩️ ${escapeHtml(replyInfo.sender)}</div>
+          <div class="reply-indicator-text">${escapeHtml(replyInfo.text)}</div>
+        </div>
+      `;
+    }
+    
+    if (actualMessage) {
+      bubbleHTML += `<div class="msg-text">${escapeHtml(actualMessage)}</div>`;
     }
 
     if (attachment) {
