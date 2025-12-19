@@ -1732,6 +1732,23 @@
       const searchInput = document.getElementById('searchInput').value.toLowerCase();
       const studentSearchInput = document.getElementById('studentSearchInput').value.toLowerCase();
 
+      const normalizeGroupName = (value) => {
+        if (!value && value !== 0) return null;
+        const raw = value.toString().trim();
+        if (!raw) return null;
+        const groupMatch = raw.match(/^group\s*([a-z0-9]+)/i);
+        if (groupMatch) return `Group ${groupMatch[1].toUpperCase()}`;
+        if (raw.length === 1) return `Group ${raw.toUpperCase()}`;
+        return raw;
+      };
+
+      const extractGroupLetter = (value) => {
+        const normalized = normalizeGroupName(value);
+        if (!normalized) return null;
+        const letterMatch = normalized.match(/^Group\s+([A-Z0-9]+)/i);
+        return letterMatch ? letterMatch[1].toUpperCase() : null;
+      };
+
       // CRITICAL FIX: Update global Set with currently checked boxes before re-render
       document.querySelectorAll('.note-checkbox:checked').forEach(checkbox => {
         const noteId = checkbox.getAttribute('data-note-id');
@@ -1740,15 +1757,63 @@
 
       // Find matching students if student search is active
       let filteredStudentIds = [];
-      let filteredStudentGroups = []; // Track group names of matching students
+      let filteredStudentGroups = []; // Raw group names from students table
+      let canonicalStudentGroups = []; // Normalized "Group X" labels
+      let studentGroupLetters = []; // Extracted single-letter codes
       if (studentSearchInput) {
         const matchingStudents = allStudentsGlobal.filter(student => 
           student.name.toLowerCase().includes(studentSearchInput)
         );
         filteredStudentIds = matchingStudents.map(s => s.id);
-        filteredStudentGroups = [...new Set(matchingStudents.map(s => s.group_name).filter(Boolean))]; // Unique groups
-        
-        if (DEBUG_MODE) console.log('🔍 Student search:', studentSearchInput, '→', matchingStudents.length, 'students', 'Groups:', filteredStudentGroups);
+        filteredStudentGroups = [...new Set(matchingStudents.map(s => s.group_name || '').filter(Boolean))];
+        canonicalStudentGroups = [...new Set(filteredStudentGroups.map(normalizeGroupName).filter(Boolean))];
+        studentGroupLetters = [...new Set(canonicalStudentGroups.map(extractGroupLetter).filter(Boolean))];
+
+        if (DEBUG_MODE) console.log('🔍 Student search:', studentSearchInput, '→', matchingStudents.length, 'students', 'Groups:', canonicalStudentGroups, 'Letters:', studentGroupLetters);
+      }
+
+      const studentIdSet = new Set(filteredStudentIds);
+      const studentGroupNameSet = new Set(canonicalStudentGroups);
+      const studentGroupLetterSet = new Set(studentGroupLetters);
+      const studentGroupNoteIds = new Set(); // Notes posted for student's group
+      const studentPersonalNoteIds = new Set(); // Notes student has explicitly opened
+      const studentFreeNoteIds = new Set(); // Notes granted for free (group or student level)
+
+      if (studentSearchInput && (studentIdSet.size > 0 || studentGroupNameSet.size > 0)) {
+        permissions.forEach(perm => {
+          const noteId = Number(perm.note_id);
+          if (!Number.isFinite(noteId)) return;
+
+          if (perm.group_name) {
+            const normalized = normalizeGroupName(perm.group_name);
+            if (normalized && studentGroupNameSet.has(normalized)) {
+              studentGroupNoteIds.add(noteId);
+            }
+          }
+
+          if (perm.student_id && studentIdSet.has(perm.student_id)) {
+            studentPersonalNoteIds.add(noteId);
+          }
+        });
+
+        freeAccessGrants.forEach(grant => {
+          const noteId = Number(grant.note_id);
+          if (!Number.isFinite(noteId)) return;
+
+          const grantLetter = (grant.group_letter || '').toString().trim().toUpperCase();
+          const matchesGroupFree = grantLetter && studentGroupLetterSet.has(grantLetter);
+          const matchesStudentFree = grant.student_id && studentIdSet.has(grant.student_id);
+
+          if (matchesGroupFree || matchesStudentFree) {
+            studentFreeNoteIds.add(noteId);
+          }
+        });
+
+        if (DEBUG_MODE) console.log('🎯 Student filter note sets:', {
+          groupNotes: studentGroupNoteIds.size,
+          personalNotes: studentPersonalNoteIds.size,
+          freeNotes: studentFreeNoteIds.size
+        });
       }
 
       // Get ongoing system for current group
@@ -1802,28 +1867,16 @@
         }
 
         // Apply student-based filter
-        if (studentSearchInput && (filteredStudentIds.length > 0 || filteredStudentGroups.length > 0)) {
+        if (studentSearchInput && (studentIdSet.size > 0 || studentGroupNameSet.size > 0)) {
           systemNotes = systemNotes.filter(note => {
-            // Check if ANY of the filtered students have access to this note via:
-            // 1. Their group matches the currently selected tab (currentGroup)
-            // 2. Explicit permissions (opened notes)
-            // 3. Free access grants
-            
-            // Check if note belongs to the student's group(s)
-            const noteIsForStudentGroup = filteredStudentGroups.includes(currentGroup);
-            
-            const hasPermission = permissions.some(perm => 
-              filteredStudentIds.includes(perm.student_id) && 
-              perm.note_id === note.id &&
-              perm.is_accessible
-            );
+            const noteId = Number(note.id);
+            if (!Number.isFinite(noteId)) return false;
 
-            const hasFreeAccess = freeAccessGrants.some(grant => 
-              filteredStudentIds.includes(grant.student_id) &&
-              grant.note_id === note.id
-            );
+            const noteIsForStudentGroup = studentGroupNoteIds.has(noteId);
+            const hasPersonalAccess = studentPersonalNoteIds.has(noteId);
+            const hasFreeAccess = studentFreeNoteIds.has(noteId);
 
-            return noteIsForStudentGroup || hasPermission || hasFreeAccess;
+            return noteIsForStudentGroup || hasPersonalAccess || hasFreeAccess;
           });
         }
         
