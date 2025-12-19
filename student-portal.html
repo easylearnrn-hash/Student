@@ -7254,29 +7254,39 @@
       const numericBalance = student ? Number(student.balance) : NaN;
       const pricePerClassValue = student ? (parseFloat(student.price_per_class) || 50) : 50;
       
-      // 🔴 ENHANCED: Calculate unpaid from schedule (matches Calendar red dots)
-      if (student && groupSchedule) {
-        const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
-        totalUnpaid = result.unpaidAmount;
-        unpaidClasses = result.unpaidClasses; // Capture unpaid class dates
-        absentClasses = result.absentClasses || []; // Capture absent class dates
-        debugDebug(`✅ Schedule-based unpaid calculation: $${result.unpaidAmount} (${unpaidClasses.length} classes)`);
-        debugDebug(`⚪ Absent classes: ${absentClasses.length}`);
-
-        // Return the calculated unpaid amount - students should always see unpaid classes
-        result.unpaidAmount = totalUnpaid;
-        result.unpaidClasses = unpaidClasses;
-        result.absentClasses = absentClasses;
-
+      // ✅ USE DATABASE BALANCE AS SOURCE OF TRUTH
+      // The `students.balance` field is managed by admin and is authoritative
+      // Do NOT override it with schedule calculations
+      if (Number.isFinite(numericBalance)) {
+        totalUnpaid = numericBalance;
+        debugDebug(`✅ Using database balance as source of truth: $${numericBalance}`);
+        
+        // Still calculate unpaid classes for display purposes (e.g., showing which classes are unpaid)
+        // but DON'T use this to override the balance
+        if (student && groupSchedule) {
+          const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
+          unpaidClasses = result.unpaidClasses; // Track which classes are unpaid
+          absentClasses = result.absentClasses || []; // Track absent classes
+          debugDebug(`📊 Calculated ${unpaidClasses.length} unpaid classes for reference (not affecting balance)`);
+        }
       } else {
-        // Fallback: Calculate from payment_records table only
-        debugDebug('⚠️ Using fallback payment_records calculation (no schedule data)');
-        payments.forEach(payment => {
-          const amount = parseFloat(payment.amount) || 0;
-          if (payment.status === 'unpaid' || payment.status === 'pending') {
-            totalUnpaid += amount;
-          }
-        });
+        // Fallback if balance is not set in database: calculate from schedule
+        debugDebug('⚠️ No database balance found - falling back to schedule calculation');
+        if (student && groupSchedule) {
+          const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
+          totalUnpaid = result.unpaidAmount;
+          unpaidClasses = result.unpaidClasses;
+          absentClasses = result.absentClasses || [];
+        } else {
+          // Last resort: Calculate from payment_records table only
+          debugDebug('⚠️ Using fallback payment_records calculation (no schedule data)');
+          payments.forEach(payment => {
+            const amount = parseFloat(payment.amount) || 0;
+            if (payment.status === 'unpaid' || payment.status === 'pending') {
+              totalUnpaid += amount;
+            }
+          });
+        }
       }
 
       if (studentMarkedAbsent && (totalUnpaid > 0 || unpaidClasses.length > 0)) {
