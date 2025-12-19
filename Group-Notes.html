@@ -482,9 +482,16 @@
           <input 
             type="text" 
             id="searchInput" 
-            placeholder="🔍 Search notes across all systems..." 
+            placeholder="🔍 Search by note title..." 
             oninput="debouncedRenderSystems()"
             style="flex: 1; padding: 12px 20px; background: rgba(255, 255, 255, 0.05); border: 2px solid rgba(255, 255, 255, 0.1); border-radius: 12px; color: white; font-size: 14px;"
+          />
+          <input 
+            type="text" 
+            id="studentSearchInput" 
+            placeholder="👤 Search by student name..." 
+            oninput="debouncedRenderSystems()"
+            style="flex: 1; padding: 12px 20px; background: rgba(139, 92, 246, 0.08); border: 2px solid rgba(139, 92, 246, 0.2); border-radius: 12px; color: white; font-size: 14px;"
           />
           <label style="display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: rgba(255, 255, 255, 0.05); border-radius: 10px; cursor: pointer; white-space: nowrap;">
             <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()" style="width: 16px; height: 16px; cursor: pointer;">
@@ -1190,6 +1197,7 @@
     let allNotes = [];
     let permissions = [];
     let freeAccessGrants = []; // Stores free access data from note_free_access table
+    let allStudentsGlobal = []; // Global students list for filtering
 
     // ===== CRITICAL: GLOBAL PERSISTENT CHECKBOX STATE =====
     // This Set accumulates ALL selected note IDs across all searches/renders
@@ -1458,6 +1466,20 @@
           if (DEBUG_MODE) console.log('✨ Loaded free access grants:', freeAccessGrants.length);
         }
 
+        // Load all students for filtering
+        const { data: students, error: studentsError } = await supabaseClient
+          .from('students')
+          .select('id, name, group_letter')
+          .order('name');
+
+        if (studentsError) {
+          console.warn('⚠️ Could not load students:', studentsError);
+          allStudentsGlobal = [];
+        } else {
+          allStudentsGlobal = students || [];
+          if (DEBUG_MODE) console.log('👥 Loaded students:', allStudentsGlobal.length);
+        }
+
         await renderSystems();
 
       } catch (error) {
@@ -1708,12 +1730,24 @@
     async function renderSystems() {
       const container = document.getElementById('systemsContainer');
       const searchInput = document.getElementById('searchInput').value.toLowerCase();
+      const studentSearchInput = document.getElementById('studentSearchInput').value.toLowerCase();
 
       // CRITICAL FIX: Update global Set with currently checked boxes before re-render
       document.querySelectorAll('.note-checkbox:checked').forEach(checkbox => {
         const noteId = checkbox.getAttribute('data-note-id');
         if (noteId) globalCheckedNoteIds.add(noteId);
       });
+
+      // Find matching students if student search is active
+      let filteredStudentIds = [];
+      if (studentSearchInput) {
+        const matchingStudents = allStudentsGlobal.filter(student => 
+          student.name.toLowerCase().includes(studentSearchInput)
+        );
+        filteredStudentIds = matchingStudents.map(s => s.id);
+        
+        if (DEBUG_MODE) console.log('🔍 Student search:', studentSearchInput, '→', matchingStudents.length, 'students');
+      }
 
       // Get ongoing system for current group
       const groupLetter = currentGroup.replace('Group ', '');
@@ -1753,7 +1787,7 @@
           return noteSystem === system.name;
         });
         
-        // Apply search filter
+        // Apply note title/description search filter
         if (searchInput) {
           systemNotes = systemNotes.filter(note => {
             const title = (note.title || '').toLowerCase();
@@ -1762,6 +1796,26 @@
             return title.includes(searchInput) || 
                    description.includes(searchInput) || 
                    system.includes(searchInput);
+          });
+        }
+
+        // Apply student-based filter
+        if (studentSearchInput && filteredStudentIds.length > 0) {
+          systemNotes = systemNotes.filter(note => {
+            // Check if ANY of the filtered students have access to this note
+            // Via permissions (opened) or free access grants
+            const hasPermission = permissions.some(perm => 
+              filteredStudentIds.includes(perm.student_id) && 
+              perm.note_id === note.id &&
+              perm.is_accessible
+            );
+
+            const hasFreeAccess = freeAccessGrants.some(grant => 
+              filteredStudentIds.includes(grant.student_id) &&
+              grant.note_id === note.id
+            );
+
+            return hasPermission || hasFreeAccess;
           });
         }
         
