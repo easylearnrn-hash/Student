@@ -257,6 +257,7 @@
       line-height: 1.35;
       font-size: 13px;
       word-wrap: break-word;
+      white-space: pre-wrap; /* Preserve line breaks and spaces */
       /* Performance: enable GPU acceleration for transforms */
       transform: translateZ(0);
       will-change: transform;
@@ -297,6 +298,10 @@
       box-shadow: 0 12px 30px rgba(0,0,0,.30), 0 0 22px rgba(239,68,68,.25);
       font-weight: 500;
     }
+    
+    .msg.admin .sender-info {
+      color: #6366f1 !important; /* Indigo for Administrator label */
+    }
 
     /* Announcement messages - prominent red centered style (kept for backward compatibility) */
     .msg.announcement {
@@ -334,32 +339,48 @@
 
     /* Reply indicator inside bubble */
     .reply-indicator {
-      background: rgba(0,0,0,.25);
-      border-left: 3px solid rgba(167,139,250,.60);
-      padding: 8px 10px;
-      margin-bottom: 8px;
-      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
       font-size: 11px;
-      opacity: 0.85;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #c7d2fe;
+      margin-bottom: 2px;
+    }
+
+    /* Pulsing dot */
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      background: #c7d2fe;
+      border-radius: 50%;
+      box-shadow: 0 0 14px rgba(129, 140, 248, 0.95);
+      animation: adminPulse 1.4s infinite;
+    }
+
+    @keyframes adminPulse {
+      0%   { transform: scale(1);   opacity: 1; }
+      40%  { transform: scale(1.9); opacity: 0.4; }
+      100% { transform: scale(1);   opacity: 1; }
     }
 
     .reply-indicator-sender {
-      font-weight: 600;
-      color: rgba(167,139,250,.90);
-      margin-bottom: 3px;
-      font-size: 10px;
-      letter-spacing: 0.3px;
+      font-weight: 700;
+      color: #c7d2fe;
     }
 
     .reply-indicator-text {
-      color: rgba(255,255,255,.65);
+      color: rgba(255,255,255,.75);
       font-style: italic;
-      line-height: 1.3;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
+      font-size: 10px;
+      text-transform: none;
+      font-weight: 400;
+      letter-spacing: normal;
+      display: block;
+      margin-top: 1px; /* tiny breathing room between name and message */
+      opacity: 0.9;
     }
 
     /* System message style */
@@ -1381,11 +1402,17 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     
     // Add reply indicator if this is a reply
     if (replyInfo) {
+      // Truncate reply text to ~40 characters for preview
+      const truncatedText = replyInfo.text.length > 40 
+        ? replyInfo.text.substring(0, 40) + '...' 
+        : replyInfo.text;
+      
       bubbleHTML += `
         <div class="reply-indicator">
-          <div class="reply-indicator-sender">↩️ ${escapeHtml(replyInfo.sender)}</div>
-          <div class="reply-indicator-text">${escapeHtml(replyInfo.text)}</div>
+          <span class="pulse-dot"></span>
+          <span class="reply-indicator-sender">⤶ ${escapeHtml(replyInfo.sender)}</span>
         </div>
+        <div class="reply-indicator-text">${escapeHtml(truncatedText)}</div>
       `;
     }
     
@@ -1425,7 +1452,7 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     let displayName = '';
     if (isAnnouncement) displayName = "📢 Admin Announcement";
     else if (isMe) displayName = senderName || currentStudentName || "You";
-    else if (isAdmin) displayName = "Admin";
+    else if (isAdmin) displayName = "Administrator";
     else displayName = senderName || "Student";
     
     bubbleHTML += '<div class="meta-line">';
@@ -1433,7 +1460,7 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
     if (senderCollege && senderCollege.trim()) {
       bubbleHTML += `<div class="college-info">${escapeHtml(senderCollege)}</div>`;
     }
-    bubbleHTML += `<div style="font-size:10px;opacity:0.6;margin-top:2px">${formatTime(timestamp)}</div>`;
+  bubbleHTML += `<div style="font-size:10px;opacity:0.6;margin-top:2px">${formatTime(timestamp)}</div>`;
     bubbleHTML += '</div>';
     
     bub.innerHTML = bubbleHTML;
@@ -1465,9 +1492,24 @@ const debugLog = (...args) => DEBUG_MODE && console.log(...args);
 
   function formatTime(timestamp) {
     const date = new Date(timestamp);
-    const h = String(date.getHours()).padStart(2, '0');
-    const m = String(date.getMinutes()).padStart(2, '0');
-    return `${h}:${m}`;
+
+    const monthNames = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+
+    const month = monthNames[date.getMonth()];
+    const day = date.getDate();
+    const year = date.getFullYear();
+
+    let hours = date.getHours();
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    if (hours === 0) hours = 12; // 12-hour clock adjustment
+
+    const timeStr = `${hours}:${minutes} ${ampm}`;
+    return `${month} ${day}, ${year} · ${timeStr}`;
   }
 
   // Optimized scrolling with requestAnimationFrame batching

@@ -609,6 +609,63 @@
     </div>
   </div>
 
+  <!-- Custom Confirmation Dialog -->
+  <div id="customConfirmModal" style="
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(8px);
+    z-index: 999999;
+    align-items: center;
+    justify-content: center;
+  ">
+    <div style="
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 24px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(16px);
+    ">
+      <div id="customConfirmMessage" style="
+        color: #fff;
+        font-size: 16px;
+        margin-bottom: 24px;
+        line-height: 1.5;
+      "></div>
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <button id="customConfirmCancel" style="
+          background: rgba(255, 255, 255, 0.1);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          color: #fff;
+          padding: 10px 24px;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          transition: all 0.2s;
+        ">Cancel</button>
+        <button id="customConfirmOK" style="
+          background: linear-gradient(135deg, #ef4444, #dc2626);
+          border: none;
+          color: #fff;
+          padding: 10px 24px;
+          border-radius: 8px;
+          cursor: pointer;
+          font-size: 14px;
+          font-weight: 500;
+          transition: all 0.2s;
+        ">OK</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     (function(){
       const $ = (id) => document.getElementById(id);
@@ -645,6 +702,43 @@
       let allStudents = [];
       let chats = {}; // In-memory per-student messages (replace with Supabase)
       let groupChatMessages = []; // Group chat messages from forum_messages table
+
+      // ---------- Custom Confirm Dialog ----------
+      function customConfirm(message) {
+        return new Promise((resolve) => {
+          const modal = document.getElementById('customConfirmModal');
+          const messageEl = document.getElementById('customConfirmMessage');
+          const okBtn = document.getElementById('customConfirmOK');
+          const cancelBtn = document.getElementById('customConfirmCancel');
+          
+          messageEl.textContent = message;
+          modal.style.display = 'flex';
+          
+          const handleOK = () => {
+            modal.style.display = 'none';
+            okBtn.removeEventListener('click', handleOK);
+            cancelBtn.removeEventListener('click', handleCancel);
+            resolve(true);
+          };
+          
+          const handleCancel = () => {
+            modal.style.display = 'none';
+            okBtn.removeEventListener('click', handleOK);
+            cancelBtn.removeEventListener('click', handleCancel);
+            resolve(false);
+          };
+          
+          okBtn.addEventListener('click', handleOK);
+          cancelBtn.addEventListener('click', handleCancel);
+          
+          // Close on backdrop click
+          modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+              handleCancel();
+            }
+          });
+        });
+      }
 
       // ---------- Helpers ----------
       function uid(){
@@ -1113,7 +1207,7 @@
         renderStudentList();
       }
 
-      // ---------- Group Chat (from forum_messages) ----------
+      // ---------- Group Chat (from chat_messages - same as student chat) ----------
       async function loadGroupChat(){
         try {
           console.log('🌐 Loading group chat...');
@@ -1127,16 +1221,17 @@
 
           cancelReply();
 
-          // Load messages from forum_messages table
+          // Load messages from chat_messages table (same as Student-Chat.html)
+          // Admin sees ALL messages (public + private) via RLS
           const { data: messages, error } = await supabase
-            .from('forum_messages')
-            .select('id, message, created_at, is_pinned, student_id')
+            .from('chat_messages')
+            .select('id, message, created_at, student_id, sender_name, sender_type, is_private')
             .order('created_at', { ascending: true });
 
           if (error) throw error;
 
-          // Now get student names for each message
-          const studentIds = [...new Set(messages.filter(m => m.student_id).map(m => m.student_id))];
+          // Now get student names for messages that have student_id but no sender_name
+          const studentIds = [...new Set(messages.filter(m => m.student_id && !m.sender_name).map(m => m.student_id))];
           const { data: students, error: studentsError } = await supabase
             .from('students')
             .select('id, name')
@@ -1152,16 +1247,36 @@
             studentMap[s.id] = s.name;
           });
 
-          groupChatMessages = (messages || []).map(m => ({
-            id: m.id,
-            role: m.student_id ? 'student' : 'admin',
-            html: escHtml(m.message),
-            time: formatTime(m.created_at),
-            pinned: m.is_pinned || false,
-            studentName: m.student_id ? (studentMap[m.student_id] || 'Unknown') : 'Admin',
-            studentId: m.student_id,
-            createdAt: m.created_at
-          }));
+          groupChatMessages = (messages || []).map(m => {
+            // Check if message contains HTML (has <br> or <div> tags)
+            const isHtmlMessage = m.message && (m.message.includes('<br>') || m.message.includes('<div'));
+            
+            // Determine student name: use sender_name if available, otherwise look up by student_id
+            const studentName = m.sender_name || (m.student_id ? studentMap[m.student_id] : null) || 'Administrator';
+            
+            // Extract actual message content (remove reply prefix if present)
+            let messageContent = m.message;
+            if (m.message && m.message.startsWith('↩️ Replying to ')) {
+              // Extract actual message after reply format: "↩️ Replying to Name: "text"\n\nActual message"
+              const actualMessageMatch = m.message.match(/^↩️ Replying to [^:]+: "[^"]+"\n\n(.+)$/s);
+              if (actualMessageMatch) {
+                messageContent = actualMessageMatch[1];
+              }
+            }
+            
+            return {
+              id: m.id,
+              role: m.sender_type === 'admin' || !m.student_id ? 'admin' : 'student',
+              html: isHtmlMessage ? messageContent : escHtml(messageContent).replace(/\n/g, '<br>'), // Escape old plain text messages
+              rawMessage: m.message, // Keep raw message to detect replies
+              time: formatTime(m.created_at),
+              pinned: false, // chat_messages doesn't have pinning
+              studentName: studentName,
+              studentId: m.student_id,
+              createdAt: m.created_at,
+              isPrivate: m.is_private || false
+            };
+          });
 
           renderGroupChat();
           renderStudentList();
@@ -1174,6 +1289,7 @@
       }
 
       function renderGroupChat(){
+        console.log('🎨 renderGroupChat() called with', groupChatMessages.length, 'messages');
         body.innerHTML = "";
         
         if(groupChatMessages.length === 0){
@@ -1184,6 +1300,7 @@
 
         const pinned = groupChatMessages.filter(m => m.pinned && !m.hardDeleted);
         const rest = groupChatMessages.filter(m => !m.pinned && !m.hardDeleted);
+        console.log('📌 Pinned:', pinned.length, '📝 Regular:', rest.length);
 
         [...pinned, ...rest].forEach(m => {
           if(m.softDeleted){
@@ -1206,10 +1323,33 @@
           // Add pin indicator if pinned
           const pinIndicator = m.pinned ? '<div style="position: absolute; top: 12px; right: 12px; font-size: 18px;" title="Pinned message">📌</div>' : '';
           
-          // Style admin messages with red color like in student portal
+          // Check if this is a reply - check for both old and new reply formats
+          const isReply = (m.rawMessage && (
+            m.rawMessage.includes('<div class="reply-quote">') || 
+            m.rawMessage.startsWith('↩️ Replying to ')
+          ));
+          
+          // Extract reply info if present
+          let replyHTML = '';
+          if (isReply && m.rawMessage.startsWith('↩️ Replying to ')) {
+            // New format: "↩️ Replying to Name: "quoted text"\n\nActual message"
+            const replyMatch = m.rawMessage.match(/^↩️ Replying to ([^:]+): "([^"]+)"/);
+            if (replyMatch) {
+              const replyTo = replyMatch[1];
+              const replyText = replyMatch[2];
+              replyHTML = `
+                <div style="background: rgba(255,255,255,0.1); border-left: 3px solid rgba(255,255,255,0.3); padding: 8px; margin-bottom: 8px; border-radius: 4px; font-size: 12px;">
+                  <div style="opacity: 0.7; margin-bottom: 4px;">↩️ Replying to <strong>${escHtml(replyTo)}</strong></div>
+                  <div style="opacity: 0.8; font-style: italic;">${escHtml(replyText)}</div>
+                </div>
+              `;
+            }
+          }
+          
+          // Admin colors - blue name, white message text (bubble has light red background)
           const isAdmin = m.role === 'admin';
-          const authorStyle = isAdmin ? 'color: #ef4444; font-weight: 600;' : '';
-          const messageStyle = isAdmin ? 'color: #ef4444;' : '';
+          const authorStyle = isAdmin ? 'color: #6366f1; font-weight: 600;' : ''; // Indigo-500 (blue)
+          const messageStyle = isAdmin ? 'color: #ffffff;' : ''; // White text
           
           bubble.innerHTML = `
             ${pinIndicator}
@@ -1217,34 +1357,36 @@
               <span style="${authorStyle}">👤 ${escHtml(m.studentName)}</span>
               <span>${m.time}${m.edited ? " • edited" : ""}</span>
             </div>
+            ${replyHTML}
             <div style="${messageStyle}">${m.html}</div>
           `;
 
-          // Add click-to-reply on bubble
+          // Single click: show context menu actions
           bubble.addEventListener("click", (e) => {
-            // Don't trigger if clicking on action buttons
-            if(!e.target.closest('.actions')){
-              startReplyGroup(m);
+            if(e.detail === 1) { // Only on single click
+              // Don't trigger if clicking on action buttons
+              if(!e.target.closest('.actions')){
+                setTimeout(() => {
+                  if(!e.detail || e.detail === 1) { // Check it wasn't part of double-click
+                    showContextMenu(e, m, true);
+                  }
+                }, 200); // Small delay to detect double-click
+              }
             }
           });
 
-          // Add double-click to show actions
+          // Double-click: reply to message
           bubble.addEventListener("dblclick", (e) => {
             e.preventDefault();
-            showContextMenu(e, m, true);
-          });
-          
-          // Keep single click for reply
-          bubble.addEventListener("click", (e) => {
-            if(e.detail === 1) { // Only on single click
-              startReplyGroup(m);
-            }
+            startReplyGroup(m);
           });
 
           wrap.appendChild(bubble);
           body.appendChild(wrap);
+          console.log('➕ Appended message:', m.studentName, '-', m.html.substring(0, 50));
         });
 
+        console.log('✅ Finished rendering. Body innerHTML length:', body.innerHTML.length);
         scrollBottom();
       }
 
@@ -1322,14 +1464,15 @@
           }
 
           try {
-            const { error } = await supabase.rpc('admin_edit_forum_message', {
-              message_id: m.id,
-              new_message: newText
-            });
+            const { error } = await supabase
+              .from('chat_messages')
+              .update({ message: newText })
+              .eq('id', m.id);
 
             if (error) throw error;
 
             m.html = escHtml(newText);
+            m.rawMessage = newText;
             m.edited = true;
             sys('✏️ Message edited');
             renderGroupChat();
@@ -1346,17 +1489,21 @@
       }
 
       async function deleteGroupMessage(m){
-        if(!confirm('Delete this message from group chat?')) return;
+        const confirmed = await customConfirm('Delete this message from group chat?');
+        if (!confirmed) return;
 
         try {
-          // Use RPC function to bypass RLS
-          const { error } = await supabase.rpc('admin_delete_forum_message', {
-            message_id: m.id
-          });
+          // Delete from chat_messages table
+          const { error } = await supabase
+            .from('chat_messages')
+            .delete()
+            .eq('id', m.id);
 
           if (error) throw error;
 
-          m.hardDeleted = true;
+          // Remove from local array
+          groupChatMessages = groupChatMessages.filter(msg => msg.id !== m.id);
+          
           sys('🗑️ Message deleted');
           renderGroupChat();
         } catch (error) {
@@ -1364,50 +1511,30 @@
           sys('Failed to delete message');
         }
       }
-
       async function sendGroupMessage(){
         if(locked) return;
         const text = (input.value || "").trim();
         if(!text) return;
 
         try {
-          let html = "";
+          // Build message with reply context if replying (use Student-Chat.html format)
+          let fullMessage = text;
           if(replyTo){
-            html += `<div class="reply-quote"><b>${escHtml(replyTo.author)}:</b> ${escHtml(replyTo.text)}</div>`;
-          }
-          html += escHtml(text);
-
-          // Get current admin user
-          const { data: { user } } = await supabase.auth.getUser();
-          
-          // Try to find admin's student record (if they have one)
-          let adminStudentId = null;
-          if (user?.email) {
-            const { data: adminStudent } = await supabase
-              .from('students')
-              .select('id')
-              .eq('email', user.email)
-              .single();
-            
-            if (adminStudent) {
-              adminStudentId = adminStudent.id;
-            }
+            // Format: "↩️ Replying to Name: "quoted text"\n\nActual message"
+            const quotedText = replyTo.text.substring(0, 50) + (replyTo.text.length > 50 ? '...' : '');
+            fullMessage = `↩️ Replying to ${replyTo.author}: "${quotedText}"\n\n${text}`;
           }
 
           const insertData = {
-            message: text,
-            is_pinned: false,
-            student_name: 'Admin', // Admin name
-            student_email: user?.email || 'admin@arnoma.com' // Admin email
+            student_id: null, // Admin messages have null student_id
+            message: fullMessage, // Store plain text with reply format
+            sender_type: 'admin', // Mark as admin message
+            sender_name: 'Administrator', // Admin display name
+            is_private: false // Public message visible to all
           };
-          
-          // Only add student_id if we have one (NULL if admin doesn't have student record)
-          if (adminStudentId) {
-            insertData.student_id = adminStudentId;
-          }
 
           const { data, error } = await supabase
-            .from('forum_messages')
+            .from('chat_messages')
             .insert(insertData)
             .select('id, created_at')
             .single();
@@ -1418,11 +1545,12 @@
           groupChatMessages.push({
             id: data.id,
             role: 'admin',
-            html: html,
+            html: escHtml(text).replace(/\n/g, '<br>'), // Display just the actual message
+            rawMessage: fullMessage, // Store full message for reply detection
             time: formatTime(data.created_at),
             pinned: false,
-            studentName: 'Admin',
-            studentId: adminStudentId,
+            studentName: 'Administrator',
+            studentId: null,
             createdAt: data.created_at
           });
 
@@ -1450,7 +1578,7 @@
       }
 
       // ---------- Open/Close ----------
-      function open(){
+      async function open(){
         popup.style.display = 'block';
         setupContextMenuListeners(); // Setup context menu
         loadStudents();
@@ -1493,8 +1621,14 @@
       // ---------- Auto-open for demo ----------
       open();
 
-      // Expose minimal API
-      window.AdminChatPopup = { open, close };
+      // Expose minimal API and debug variables
+      window.AdminChatPopup = { 
+        open, 
+        close,
+        // Debug helpers
+        getGroupChatMessages: () => groupChatMessages,
+        getChatBody: () => body
+      };
 
     })();
   </script>
