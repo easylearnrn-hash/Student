@@ -1,0 +1,1502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Chat - ARNOMA</title>
+  <link rel="icon" type="image/png" href="/richyfesta-logo.png">
+  
+  <!-- Supabase SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  
+  <!-- ============================== -->
+  <!-- 🛡️ ADMIN CHAT POPUP — FULL ACTIONS + REPLY (Liquid Glass) -->
+  <!-- ============================== -->
+
+  <style>
+    :root{
+      --glass: rgba(255,255,255,.08);
+      --stroke: rgba(255,255,255,.18);
+      --txt: rgba(255,255,255,.95);
+      --muted: rgba(255,255,255,.6);
+      --cyan: rgba(34,211,238,.9);
+      --violet: rgba(167,139,250,.9);
+      --danger: rgba(255,90,90,.9);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #0a1628 0%, #1a2942 100%);
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* POPUP OVERLAY */
+    .admin-chat-popup{
+      position:fixed; inset:0;
+      display:block;
+      background: rgba(0,0,0,.45);
+      z-index: 99999;
+    }
+
+    /* WINDOW */
+    .admin-chat-window{
+      position:absolute;
+      inset: 6%;
+      display:flex;
+      border-radius: 26px;
+      border: 1px solid var(--stroke);
+      background:
+        radial-gradient(140% 120% at 10% 0%, rgba(34,211,238,.18), transparent 55%),
+        radial-gradient(140% 140% at 90% 10%, rgba(167,139,250,.16), transparent 60%),
+        rgba(255,255,255,.06);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      box-shadow: 0 30px 80px rgba(0,0,0,.6);
+      overflow:hidden;
+    }
+
+    /* SIDEBAR */
+    .admin-chat-sidebar{
+      width: 320px;
+      border-right: 1px solid rgba(255,255,255,.12);
+      display:flex;
+      flex-direction:column;
+      min-width: 260px;
+    }
+    .admin-chat-sidebar header{
+      padding: 14px;
+      font-weight: 900;
+      color: var(--txt);
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .admin-close{
+      cursor:pointer;
+      width: 34px;
+      height: 34px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.06);
+      display:grid;
+      place-items:center;
+    }
+    .admin-close:hover{ background: rgba(255,255,255,.12); }
+
+    .admin-search{
+      margin: 0 12px 10px;
+      padding: 10px 10px;
+      border-radius: 14px;
+      border: 1px solid var(--stroke);
+      background: rgba(0,0,0,.25);
+      color: var(--txt);
+      outline: none;
+      width: calc(100% - 24px);
+    }
+    .admin-search::placeholder{ color: rgba(255,255,255,.45); }
+
+    .student-list{
+      flex:1;
+      overflow:auto;
+      padding: 8px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.20) transparent;
+    }
+    .student-list::-webkit-scrollbar{ width: 10px; }
+    .student-list::-webkit-scrollbar-thumb{
+      background: rgba(255,255,255,.16);
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+
+    .student-item{
+      padding: 10px 10px;
+      border-radius: 14px;
+      margin-bottom: 8px;
+      cursor:pointer;
+      background: rgba(255,255,255,.05);
+      border: 1px solid transparent;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+    }
+    .student-item:hover{ border-color: rgba(255,255,255,.20); }
+    .student-item.active{
+      background: linear-gradient(135deg, rgba(34,211,238,.22), rgba(167,139,250,.18));
+      border-color: rgba(255,255,255,.24);
+    }
+    .student-left{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap: 3px;
+    }
+    .student-name{
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--txt);
+      white-space: nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+    }
+    .student-sub{
+      font-size: 12px;
+      color: var(--muted);
+      display:flex;
+      gap: 8px;
+      align-items:center;
+    }
+    .pill{
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(0,0,0,.18);
+      color: rgba(255,255,255,.85);
+    }
+
+    /* GROUP CHAT ITEM */
+    .group-chat-item{
+      background: linear-gradient(135deg, rgba(34,211,238,.15), rgba(167,139,250,.12));
+      border: 1px solid rgba(34,211,238,.3);
+      margin-bottom: 12px;
+    }
+    .group-chat-item:hover{
+      background: linear-gradient(135deg, rgba(34,211,238,.22), rgba(167,139,250,.18));
+      border-color: rgba(34,211,238,.4);
+    }
+    .group-chat-item.active{
+      background: linear-gradient(135deg, rgba(34,211,238,.28), rgba(167,139,250,.22));
+      border-color: rgba(34,211,238,.5);
+    }
+
+    /* MAIN CHAT */
+    .admin-chat-main{
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      min-width: 0;
+    }
+
+    .admin-chat-head{
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255,255,255,.12);
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap: 12px;
+    }
+    .head-left{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap: 2px;
+    }
+    .head-name{
+      font-weight: 900;
+      color: var(--txt);
+      white-space: nowrap;
+      overflow:hidden;
+      text-overflow: ellipsis;
+    }
+    .head-sub{
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .head-actions{
+      display:flex;
+      gap: 8px;
+      align-items:center;
+    }
+    .head-btn{
+      width: 38px;
+      height: 38px;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.06);
+      cursor:pointer;
+      display:grid;
+      place-items:center;
+      transition: transform .15s ease, background .15s ease, border-color .15s ease;
+      user-select:none;
+    }
+    .head-btn:hover{
+      transform: translateY(-1px);
+      background: rgba(255,255,255,.10);
+      border-color: rgba(255,255,255,.24);
+    }
+
+    /* BODY */
+    .admin-chat-body{
+      flex:1;
+      overflow:auto;
+      padding: 14px;
+      position: relative;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,.20) transparent;
+    }
+    .admin-chat-body::-webkit-scrollbar{ width: 10px; }
+    .admin-chat-body::-webkit-scrollbar-thumb{
+      background: rgba(255,255,255,.16);
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: padding-box;
+    }
+
+    /* SYSTEM */
+    .system-msg{
+      text-align:center;
+      font-size: 12px;
+      color: var(--muted);
+      margin: 10px 0;
+      letter-spacing: .2px;
+    }
+
+    /* MESSAGE - Match student portal styling */
+    .msg{
+      margin-bottom: 14px;
+      position:relative;
+      width: 100%;
+      display: flex;
+    }
+
+    /* Student messages on LEFT */
+    .msg.student{
+      justify-content: flex-start;
+    }
+
+    /* Admin messages on RIGHT */
+    .msg.admin{
+      justify-content: flex-end;
+    }
+
+    /* Notes on RIGHT */
+    .msg.note{
+      justify-content: flex-end;
+    }
+
+    .bubble{
+      padding: 18px 20px;
+      border-radius: 12px;
+      max-width: 75%;
+      color: var(--txt);
+      font-size: 13px;
+      line-height: 1.5;
+      word-wrap: break-word;
+      position: relative;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      cursor: pointer;
+      /* Default student message style - BLUE */
+      background: linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(29, 78, 216, 0.3));
+      border: 1px solid rgba(96, 165, 250, 0.3);
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
+    }
+
+    .bubble:hover{
+      border-color: rgba(96, 165, 250, 0.5);
+      box-shadow: 0 4px 20px rgba(37, 99, 235, 0.25);
+      transform: translateY(-1px);
+    }
+
+    /* Admin messages - RED */
+    .msg.admin .bubble{
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.3));
+      border: 1px solid rgba(248, 113, 113, 0.4);
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+    }
+
+    .msg.admin .bubble:hover{
+      border-color: rgba(248, 113, 113, 0.6);
+      box-shadow: 0 4px 20px rgba(239, 68, 68, 0.25);
+    }
+
+    /* Pinned messages - yellow accent like in student portal */
+    .msg.pinned .bubble{
+      border: 2px solid rgba(251, 191, 36, 0.5);
+      box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.2) inset, 0 4px 16px rgba(251, 191, 36, 0.2);
+    }
+
+    /* Internal admin notes - purple accent */
+    .msg.note .bubble{
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(109, 40, 217, 0.3));
+      border: 1px solid rgba(167,139,250,.4);
+      box-shadow: 0 2px 8px rgba(139, 92, 246, 0.15);
+    }
+
+    .msg.deleted .bubble{
+      opacity:.6;
+      font-style: italic;
+    }
+
+    .meta{
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 6px;
+      display:flex;
+      justify-content:space-between;
+      gap: 10px;
+    }
+
+    /* CONTEXT MENU */
+    .context-menu{
+      position: fixed;
+      background: rgba(20, 20, 30, 0.98);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 10px;
+      padding: 4px;
+      min-width: 140px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      z-index: 999999;
+      display: none;
+      animation: contextMenuIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    @keyframes contextMenuIn {
+      from {
+        opacity: 0;
+        transform: scale(0.9) translateY(-5px);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+    
+    .context-menu-item{
+      padding: 8px 12px;
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border-radius: 6px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+    }
+    
+    .context-menu-item:hover{
+      background: rgba(255, 255, 255, 0.15);
+    }
+    
+    .context-menu-item:active{
+      transform: scale(0.97);
+    }
+    
+    .context-menu-item.danger{
+      color: rgba(239, 68, 68, 1);
+    }
+    
+    .context-menu-item.danger:hover{
+      background: rgba(239, 68, 68, 0.15);
+    }
+    
+    .context-menu-divider{
+      height: 1px;
+      background: rgba(255, 255, 255, 0.1);
+      margin: 3px 0;
+    }
+
+    /* EDIT MODE */
+    .edit-box{
+      width:100%;
+      min-height: 64px;
+      border-radius: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--stroke);
+      background: rgba(0,0,0,.28);
+      color: white;
+      outline:none;
+      resize: vertical;
+    }
+    .edit-actions{
+      display:flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .edit-save, .edit-cancel{
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,.18);
+      background: rgba(255,255,255,.08);
+      color: var(--txt);
+      cursor:pointer;
+    }
+    .edit-save:hover, .edit-cancel:hover{ background: rgba(255,255,255,.12); }
+    .edit-save{ border-color: rgba(34,211,238,.35); }
+    .edit-cancel{ border-color: rgba(255,255,255,.18); opacity:.9; }
+
+    /* REPLY */
+    .reply-preview-wrapper{
+      margin: 0 0 10px;
+    }
+    .reply-preview{
+      padding: 8px 10px;
+      border-left: 3px solid rgba(34,211,238,.9);
+      background: rgba(34,211,238,.12);
+      border-radius: 12px;
+      font-size: 12px;
+      color: rgba(255,255,255,.9);
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:10px;
+    }
+    .reply-preview span{ opacity:.9; }
+    .reply-cancel{
+      cursor:pointer;
+      font-weight:900;
+      color: rgba(255,90,90,.95);
+      user-select:none;
+    }
+
+    .reply-quote{
+      font-size: 12px;
+      opacity:.75;
+      margin-bottom: 8px;
+      padding-left: 8px;
+      border-left: 2px solid rgba(255,255,255,.25);
+    }
+
+    /* FOOTER */
+    .admin-chat-foot{
+      padding: 12px;
+      border-top: 1px solid rgba(255,255,255,.12);
+      display:flex;
+      flex-direction:column;
+      gap: 8px;
+    }
+    .compose-row{
+      display:flex;
+      gap: 8px;
+      align-items:flex-end;
+    }
+    .admin-input{
+      flex:1;
+      min-height: 42px;
+      max-height: 130px;
+      resize:none;
+      border-radius: 14px;
+      padding: 10px 10px;
+      background: rgba(0,0,0,.25);
+      border: 1px solid var(--stroke);
+      color: white;
+      outline:none;
+      line-height: 1.35;
+    }
+    .admin-input::placeholder{ color: rgba(255,255,255,.45); }
+    .admin-send{
+      width: 52px;
+      height: 42px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, rgba(34,211,238,.45), rgba(167,139,250,.45));
+      border: none;
+      font-weight: 900;
+      cursor:pointer;
+      color: rgba(10,10,15,.95);
+    }
+    .admin-send:disabled{ opacity:.45; cursor:not-allowed; }
+
+    /* LOCKED */
+    .locked .admin-input,
+    .locked .admin-send{
+      pointer-events:none;
+      opacity:.55;
+    }
+    @media (max-width: 900px){
+      .admin-chat-window{ inset: 4%; }
+      .admin-chat-sidebar{ width: 280px; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Popup -->
+  <div class="admin-chat-popup" id="adminChatPopup" role="dialog" aria-modal="true" aria-label="Admin Chat">
+    <div class="admin-chat-window">
+
+      <!-- LEFT SIDEBAR -->
+      <div class="admin-chat-sidebar">
+        <header>
+          <span>Admin Chat</span>
+          <div class="admin-close" id="adminChatClose" title="Close">✕</div>
+        </header>
+
+        <input class="admin-search" id="adminStudentSearch" placeholder="Search student…" />
+
+        <div class="student-list" id="adminStudentList">
+          <!-- Group Chat Button (same as student portal) -->
+          <div class="student-item group-chat-item" data-type="group-chat">
+            <div class="student-left">
+              <div class="student-name">🌐 Group Chat</div>
+              <div class="student-sub">
+                <span class="pill">All Students</span>
+                <span>Public chat</span>
+              </div>
+            </div>
+            <span class="pill">💬</span>
+          </div>
+          
+          <!-- Students will be loaded here -->
+        </div>
+      </div>
+
+      <!-- RIGHT CHAT -->
+      <div class="admin-chat-main" id="adminChatMain">
+        <div class="admin-chat-head">
+          <div class="head-left">
+            <div class="head-name" id="adminActiveStudentName">Select a student</div>
+            <div class="head-sub" id="adminActiveStudentSub">Choose from the list</div>
+          </div>
+          <div class="head-actions">
+            <div class="head-btn" id="adminLockBtn" title="Lock / Unlock">🔒</div>
+            <div class="head-btn" id="adminResolveBtn" title="Resolve / Reopen">✔</div>
+            <div class="head-btn" id="adminAddNoteBtn" title="Add internal admin note">📝</div>
+          </div>
+        </div>
+
+        <div class="admin-chat-body" id="adminChatBody">
+          <div class="system-msg">Select a student to start chatting</div>
+        </div>
+
+        <div class="admin-chat-foot" id="adminChatFoot">
+          <div id="adminReplyPreview" style="display:none;"></div>
+
+          <div class="compose-row">
+            <textarea class="admin-input" id="adminChatInput" rows="1" placeholder="Reply as admin… (Enter to send)"></textarea>
+            <button class="admin-send" id="adminSendBtn" title="Send">➤</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Context Menu (Fixed Positioning with High Z-Index) -->
+  <div class="context-menu" id="contextMenu">
+    <div class="context-menu-item" data-action="reply">
+      <span>↩️</span>
+      <span>Reply</span>
+    </div>
+    <div class="context-menu-item" data-action="edit">
+      <span>✏️</span>
+      <span>Edit</span>
+    </div>
+    <div class="context-menu-item" data-action="pin">
+      <span id="contextPinIcon">📍</span>
+      <span id="contextPinText">Pin</span>
+    </div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item danger" data-action="delete">
+      <span>🗑️</span>
+      <span>Delete</span>
+    </div>
+    <div class="context-menu-item danger" data-action="hard-delete" id="contextHardDelete" style="display: none;">
+      <span>💀</span>
+      <span>Hard Delete</span>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      const $ = (id) => document.getElementById(id);
+
+      const popup = $("adminChatPopup");
+      const closeBtn = $("adminChatClose");
+      const studentSearch = $("adminStudentSearch");
+      const studentList = $("adminStudentList");
+
+      const activeName = $("adminActiveStudentName");
+      const activeSub  = $("adminActiveStudentSub");
+
+      const body = $("adminChatBody");
+      const foot = $("adminChatFoot");
+      const input = $("adminChatInput");
+      const sendBtn = $("adminSendBtn");
+
+      const lockBtn = $("adminLockBtn");
+      const resolveBtn = $("adminResolveBtn");
+      const addNoteBtn = $("adminAddNoteBtn");
+
+      const replyPreview = $("adminReplyPreview");
+
+      // Supabase Config
+      const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+      const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      let locked = false;
+      let resolved = false;
+      let replyTo = null; // { author, text }
+      let currentStudentId = null;
+      let isGroupChat = true; // Track if viewing group chat - DEFAULT TO TRUE
+      let allStudents = [];
+      let chats = {}; // In-memory per-student messages (replace with Supabase)
+      let groupChatMessages = []; // Group chat messages from forum_messages table
+
+      // ---------- Helpers ----------
+      function uid(){
+        return "m_" + Math.random().toString(16).slice(2) + "_" + Date.now();
+      }
+
+      function escHtml(str){
+        return String(str)
+          .replaceAll("&","&amp;")
+          .replaceAll("<","&lt;")
+          .replaceAll(">","&gt;")
+          .replaceAll('"',"&quot;")
+          .replaceAll("'","&#039;");
+      }
+
+      function nowTime(){
+        const d = new Date();
+        const hh = String(d.getHours()).padStart(2,"0");
+        const mm = String(d.getMinutes()).padStart(2,"0");
+        return hh + ":" + mm;
+      }
+
+      function sys(text){
+        const el = document.createElement("div");
+        el.className = "system-msg";
+        el.textContent = text;
+        body.appendChild(el);
+        body.scrollTop = body.scrollHeight;
+      }
+
+      function scrollBottom(){ body.scrollTop = body.scrollHeight; }
+
+      function setLocked(on){
+        locked = !!on;
+        $("adminChatMain").classList.toggle("locked", locked);
+        sys(locked ? "🔒 Chat locked" : "🔓 Chat unlocked");
+      }
+
+      function setResolved(on){
+        resolved = !!on;
+        sys(resolved ? "✔ Chat resolved" : "↩ Chat reopened");
+      }
+
+      function render(){
+        body.innerHTML = "";
+        const msgs = chats[currentStudentId] || [];
+        const pinned = msgs.filter(m => m.pinned && !m.hardDeleted);
+        const rest = msgs.filter(m => !m.pinned && !m.hardDeleted);
+
+        [...pinned, ...rest].forEach(m => {
+          if(m.softDeleted){
+            renderMsg({
+              ...m,
+              role: "system",
+              html: "Message deleted by admin",
+              softDeleted: true
+            });
+          }else{
+            renderMsg(m);
+          }
+        });
+
+        scrollBottom();
+      }
+
+      // ---------- Context Menu ----------
+      let contextMenuMessage = null;
+      let contextMenuIsGroup = false;
+
+      function showContextMenu(e, message, isGroup){
+        contextMenuMessage = message;
+        contextMenuIsGroup = isGroup;
+        
+        const contextMenu = $("contextMenu");
+        if(!contextMenu) return;
+        
+        // Update pin button text
+        const pinIcon = $("contextPinIcon");
+        const pinText = $("contextPinText");
+        if(pinIcon && pinText){
+          if(message.pinned){
+            pinIcon.textContent = "📌";
+            pinText.textContent = "Unpin";
+          } else {
+            pinIcon.textContent = "📍";
+            pinText.textContent = "Pin";
+          }
+        }
+        
+        // Show/hide hard delete option
+        const hardDeleteBtn = $("contextHardDelete");
+        if(hardDeleteBtn){
+          if(message.softDeleted){
+            hardDeleteBtn.style.display = "flex";
+          } else {
+            hardDeleteBtn.style.display = "none";
+          }
+        }
+        
+        // Show menu first to get dimensions
+        contextMenu.style.display = "block";
+        
+        // Get dimensions
+        const menuWidth = contextMenu.offsetWidth;
+        const menuHeight = contextMenu.offsetHeight;
+        
+        // Use viewport positioning (fixed)
+        let x = e.clientX;
+        let y = e.clientY;
+        
+        // Keep menu within viewport
+        if(x + menuWidth > window.innerWidth){
+          x = window.innerWidth - menuWidth - 10;
+        }
+        if(y + menuHeight > window.innerHeight){
+          y = window.innerHeight - menuHeight - 10;
+        }
+        
+        contextMenu.style.left = x + "px";
+        contextMenu.style.top = y + "px";
+      }
+
+      function hideContextMenu(){
+        const contextMenu = $("contextMenu");
+        if(contextMenu){
+          contextMenu.style.display = "none";
+        }
+        contextMenuMessage = null;
+      }
+
+      // Handle context menu actions - setup on initialization
+      function setupContextMenuListeners(){
+        const contextMenu = $("contextMenu");
+        if(!contextMenu) return;
+        
+        contextMenu.addEventListener("click", (e) => {
+          const item = e.target.closest(".context-menu-item");
+          if(!item || !contextMenuMessage) return;
+          
+          const action = item.dataset.action;
+          const m = contextMenuMessage;
+          
+          if(contextMenuIsGroup){
+            // Group chat actions
+            if(action === "reply") startReplyGroup(m);
+            else if(action === "edit") startEditGroup(m);
+            else if(action === "pin") togglePinGroup(m);
+            else if(action === "delete") deleteGroupMessage(m);
+          } else {
+            // Private chat actions
+            if(action === "reply") startReply(m);
+            else if(action === "edit") startEdit(m);
+            else if(action === "pin") togglePin(m);
+            else if(action === "delete") softDelete(m);
+            else if(action === "hard-delete") hardDelete(m);
+          }
+          
+          hideContextMenu();
+        });
+      }
+
+      // Hide context menu on click outside
+      document.addEventListener("click", (e) => {
+        if(!e.target.closest("#contextMenu")){
+          hideContextMenu();
+        }
+      });
+
+      // Hide on scroll
+      body.addEventListener("scroll", hideContextMenu);
+
+      function renderMsg(m){
+        if(m.role === "system"){
+          const el = document.createElement("div");
+          el.className = "system-msg";
+          el.textContent = m.html;
+          body.appendChild(el);
+          return;
+        }
+
+        const wrap = document.createElement("div");
+        wrap.className = "msg " + (m.role === "admin" ? "admin" : m.role === "note" ? "note" : "student");
+        if(m.softDeleted) wrap.classList.add("deleted");
+        if(m.pinned) wrap.classList.add("pinned");
+        wrap.dataset.msgId = m.id;
+
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        
+        // Add pin indicator if pinned
+        const pinIndicator = m.pinned ? '<div style="position: absolute; top: 12px; right: 12px; font-size: 18px;" title="Pinned message">📌</div>' : '';
+        
+        // Style admin messages with red color like in student portal
+        const authorStyle = m.role === "admin" ? 'color: #ef4444; font-weight: 600;' : '';
+        const messageStyle = m.role === "admin" ? 'color: #ef4444;' : '';
+        
+        bubble.innerHTML = `
+          ${pinIndicator}
+          <div class="meta" style="margin-bottom: 8px;">
+            <span style="${authorStyle}">👤 ${m.role === "admin" ? "Admin" : m.role === "note" ? "Admin Note (Private)" : "Student"}</span>
+            <span>${escHtml(m.time || nowTime())}${m.edited ? " • edited" : ""}</span>
+          </div>
+          <div style="${messageStyle}">${m.html}</div>
+        `;
+
+        // Add double-click to show actions
+        bubble.addEventListener("dblclick", (e) => {
+          e.preventDefault();
+          showContextMenu(e, m, false);
+        });
+        
+        // Keep single click for reply
+        bubble.addEventListener("click", (e) => {
+          if(e.detail === 1) { // Only on single click
+            startReply(m);
+          }
+        });
+
+        wrap.appendChild(bubble);
+        body.appendChild(wrap);
+      }
+
+      function addMessage(role, html){
+        const msg = { id: uid(), role, html, time: nowTime() };
+        chats[currentStudentId] = chats[currentStudentId] || [];
+        chats[currentStudentId].push(msg);
+        render();
+      }
+
+      // ---------- Reply ----------
+      function startReply(m){
+        const author = m.role === "admin" ? "You" : (m.role === "note" ? "Admin Note" : "Student");
+        const plain = stripText(m.html).slice(0, 120);
+        replyTo = { author, text: plain };
+
+        replyPreview.innerHTML = `
+          <div class="reply-preview">
+            <span>Replying to <b>${escHtml(author)}</b>: "${escHtml(plain)}"</span>
+            <span class="reply-cancel" id="adminReplyCancel">✕</span>
+          </div>
+        `;
+        replyPreview.style.display = "block";
+        $("adminReplyCancel").addEventListener("click", cancelReply);
+
+        input.focus();
+        scrollBottom();
+      }
+
+      function cancelReply(){
+        replyTo = null;
+        replyPreview.style.display = "none";
+        replyPreview.innerHTML = "";
+      }
+
+      function stripText(html){
+        const tmp = document.createElement("div");
+        tmp.innerHTML = html;
+        return (tmp.textContent || "").trim();
+      }
+
+      // ---------- Edit ----------
+      function startEdit(m){
+        if(m.softDeleted || m.hardDeleted) return;
+
+        const node = body.querySelector(`[data-msg-id="${CSS.escape(m.id)}"]`);
+        if(!node) return;
+
+        const bubble = node.querySelector(".bubble");
+        const currentPlain = stripText(m.html);
+
+        bubble.innerHTML = `
+          <textarea class="edit-box" id="edit_${m.id}">${escHtml(currentPlain)}</textarea>
+          <div class="edit-actions">
+            <button class="edit-save" id="save_${m.id}">Save</button>
+            <button class="edit-cancel" id="cancel_${m.id}">Cancel</button>
+          </div>
+        `;
+
+        const box = $("edit_" + m.id);
+        box.focus();
+        box.setSelectionRange(box.value.length, box.value.length);
+
+        $("save_" + m.id).addEventListener("click", () => {
+          const next = (box.value || "").trim();
+          if(!next){
+            sys("⚠️ Cannot save empty message");
+            return;
+          }
+          m.html = escHtml(next);
+          m.edited = true;
+          render();
+        });
+
+        $("cancel_" + m.id).addEventListener("click", render);
+      }
+
+      // ---------- Delete / Pin ----------
+      function softDelete(m){
+        if(m.hardDeleted) return;
+        m.softDeleted = true;
+        sys("🗑️ Message deleted (soft)");
+        render();
+      }
+
+      function hardDelete(m){
+        m.hardDeleted = true;
+        sys("⛔ Message hard deleted");
+        render();
+      }
+
+      function togglePin(m){
+        if(m.hardDeleted) return;
+        m.pinned = !m.pinned;
+        sys(m.pinned ? "📌 Message pinned" : "📍 Message unpinned");
+        render();
+      }
+
+      // ---------- Send ----------
+      function send(){
+        if(locked) return;
+        
+        // Route to group chat or private chat
+        if(isGroupChat){
+          sendGroupMessage();
+        } else {
+          sendPrivateMessage();
+        }
+      }
+
+      function sendPrivateMessage(){
+        const text = (input.value || "").trim();
+        if(!text) return;
+
+        let html = "";
+        if(replyTo){
+          html += `
+            <div class="reply-quote">
+              <b>${escHtml(replyTo.author)}:</b> ${escHtml(replyTo.text)}
+            </div>
+          `;
+        }
+        html += escHtml(text);
+
+        addMessage("admin", html);
+
+        input.value = "";
+        autoResize();
+        cancelReply();
+      }
+
+      function autoResize(){
+        input.style.height = "auto";
+        input.style.height = Math.min(input.scrollHeight, 130) + "px";
+      }
+
+      // ---------- Notes (Admin-only) ----------
+      function addAdminNote(){
+        if(locked) return;
+        const note = prompt("Internal admin note (student will NOT see this):");
+        if(!note) return;
+        addMessage("note", escHtml(note));
+        sys("📝 Admin note added");
+      }
+
+      // ---------- Student switching ----------
+      async function loadStudents(){
+        try {
+          const { data: students, error } = await supabase
+            .from('students')
+            .select('id, name, group_name')
+            .order('name');
+
+          if (error) throw error;
+
+          allStudents = students || [];
+          renderStudentList();
+        } catch (error) {
+          console.error('❌ Error loading students:', error);
+          sys('Failed to load students');
+        }
+      }
+
+      function renderStudentList(){
+        const q = (studentSearch.value || "").trim().toLowerCase();
+        const filtered = allStudents.filter(s => {
+          if(!q) return true;
+          return s.name.toLowerCase().includes(q) || 
+                 (s.group_name && s.group_name.toLowerCase().includes(q));
+        });
+
+        // Build the list HTML
+        let html = '';
+        
+        // Group Chat Button (always at top, unless search query doesn't match)
+        if(!q || 'group chat'.includes(q) || 'all students'.includes(q)){
+          html += `
+            <div class="student-item group-chat-item ${isGroupChat ? 'active' : ''}" data-type="group-chat">
+              <div class="student-left">
+                <div class="student-name">🌐 Group Chat</div>
+                <div class="student-sub">
+                  <span class="pill">All Students</span>
+                  <span>Public chat</span>
+                </div>
+              </div>
+              <span class="pill">💬</span>
+            </div>
+          `;
+        }
+
+        if(filtered.length === 0){
+          studentList.innerHTML = html + '<div class="system-msg" style="margin:20px 10px;">No students found</div>';
+          return;
+        }
+
+        html += filtered.map(s => `
+          <div class="student-item ${currentStudentId === s.id && !isGroupChat ? 'active' : ''}" 
+               data-student-id="${s.id}" 
+               data-name="${escHtml(s.name)}" 
+               data-group="${escHtml(s.group_name || '')}">
+            <div class="student-left">
+              <div class="student-name">${escHtml(s.name)}</div>
+              <div class="student-sub">
+                ${s.group_name ? `<span class="pill">Group ${escHtml(s.group_name)}</span>` : ''}
+                <span>Private chat</span>
+              </div>
+            </div>
+            <span class="pill">●</span>
+          </div>
+        `).join('');
+
+        studentList.innerHTML = html;
+
+        // Bind clicks
+        [...studentList.querySelectorAll('.student-item')].forEach(el => {
+          const isGroupChatBtn = el.dataset.type === 'group-chat';
+          el.addEventListener('click', () => {
+            if(isGroupChatBtn){
+              loadGroupChat();
+            } else {
+              setActiveStudent(el);
+            }
+          });
+        });
+      }
+
+      function setActiveStudent(el){
+        const id = parseInt(el.dataset.studentId);
+        const name = el.dataset.name;
+        const group = el.dataset.group;
+
+        currentStudentId = id;
+        isGroupChat = false;
+
+        // Update UI
+        activeName.textContent = name;
+        activeSub.textContent = (group ? "Group " + group + " • " : "") + "Admin private chat";
+
+        cancelReply();
+        
+        // Initialize demo messages if not exist
+        if(!chats[currentStudentId]){
+          chats[currentStudentId] = [];
+        }
+        
+        render();
+        renderStudentList();
+      }
+
+      // ---------- Group Chat (from forum_messages) ----------
+      async function loadGroupChat(){
+        try {
+          console.log('🌐 Loading group chat...');
+          
+          currentStudentId = null;
+          isGroupChat = true;
+
+          // Update UI
+          activeName.textContent = '🌐 Group Chat';
+          activeSub.textContent = 'Public chat • All students can see';
+
+          cancelReply();
+
+          // Load messages from forum_messages table
+          const { data: messages, error } = await supabase
+            .from('forum_messages')
+            .select('id, message, created_at, is_pinned, student_id')
+            .order('created_at', { ascending: true });
+
+          if (error) throw error;
+
+          // Now get student names for each message
+          const studentIds = [...new Set(messages.filter(m => m.student_id).map(m => m.student_id))];
+          const { data: students, error: studentsError } = await supabase
+            .from('students')
+            .select('id, name')
+            .in('id', studentIds);
+
+          if (studentsError) {
+            console.warn('⚠️ Could not load student names:', studentsError);
+          }
+
+          // Create a map of student_id to name
+          const studentMap = {};
+          (students || []).forEach(s => {
+            studentMap[s.id] = s.name;
+          });
+
+          groupChatMessages = (messages || []).map(m => ({
+            id: m.id,
+            role: m.student_id ? 'student' : 'admin',
+            html: escHtml(m.message),
+            time: formatTime(m.created_at),
+            pinned: m.is_pinned || false,
+            studentName: m.student_id ? (studentMap[m.student_id] || 'Unknown') : 'Admin',
+            studentId: m.student_id,
+            createdAt: m.created_at
+          }));
+
+          renderGroupChat();
+          renderStudentList();
+
+          console.log(`✅ Loaded ${groupChatMessages.length} group chat messages`);
+        } catch (error) {
+          console.error('❌ Error loading group chat:', error);
+          sys('Failed to load group chat');
+        }
+      }
+
+      function renderGroupChat(){
+        body.innerHTML = "";
+        
+        if(groupChatMessages.length === 0){
+          sys('No messages in group chat yet');
+          scrollBottom();
+          return;
+        }
+
+        const pinned = groupChatMessages.filter(m => m.pinned && !m.hardDeleted);
+        const rest = groupChatMessages.filter(m => !m.pinned && !m.hardDeleted);
+
+        [...pinned, ...rest].forEach(m => {
+          if(m.softDeleted){
+            const el = document.createElement("div");
+            el.className = "system-msg";
+            el.textContent = "Message deleted by admin";
+            body.appendChild(el);
+            return;
+          }
+
+          const wrap = document.createElement("div");
+          wrap.className = "msg " + (m.role === 'admin' ? 'admin' : 'student');
+          if(m.softDeleted) wrap.classList.add("deleted");
+          if(m.pinned) wrap.classList.add("pinned");
+          wrap.dataset.msgId = m.id;
+
+          const bubble = document.createElement("div");
+          bubble.className = "bubble";
+          
+          // Add pin indicator if pinned
+          const pinIndicator = m.pinned ? '<div style="position: absolute; top: 12px; right: 12px; font-size: 18px;" title="Pinned message">📌</div>' : '';
+          
+          // Style admin messages with red color like in student portal
+          const isAdmin = m.role === 'admin';
+          const authorStyle = isAdmin ? 'color: #ef4444; font-weight: 600;' : '';
+          const messageStyle = isAdmin ? 'color: #ef4444;' : '';
+          
+          bubble.innerHTML = `
+            ${pinIndicator}
+            <div class="meta" style="margin-bottom: 8px;">
+              <span style="${authorStyle}">👤 ${escHtml(m.studentName)}</span>
+              <span>${m.time}${m.edited ? " • edited" : ""}</span>
+            </div>
+            <div style="${messageStyle}">${m.html}</div>
+          `;
+
+          // Add click-to-reply on bubble
+          bubble.addEventListener("click", (e) => {
+            // Don't trigger if clicking on action buttons
+            if(!e.target.closest('.actions')){
+              startReplyGroup(m);
+            }
+          });
+
+          // Add double-click to show actions
+          bubble.addEventListener("dblclick", (e) => {
+            e.preventDefault();
+            showContextMenu(e, m, true);
+          });
+          
+          // Keep single click for reply
+          bubble.addEventListener("click", (e) => {
+            if(e.detail === 1) { // Only on single click
+              startReplyGroup(m);
+            }
+          });
+
+          wrap.appendChild(bubble);
+          body.appendChild(wrap);
+        });
+
+        scrollBottom();
+      }
+
+      function startReplyGroup(m){
+        const plain = stripText(m.html).slice(0, 120);
+        replyTo = { author: m.studentName, text: plain };
+
+        replyPreview.innerHTML = `
+          <div class="reply-preview">
+            <span>Replying to <b>${escHtml(m.studentName)}</b>: "${escHtml(plain)}"</span>
+            <span class="reply-cancel" id="adminReplyCancel">✕</span>
+          </div>
+        `;
+        replyPreview.style.display = "block";
+        $("adminReplyCancel").addEventListener("click", cancelReply);
+
+        input.focus();
+        scrollBottom();
+      }
+
+      async function togglePinGroup(m){
+        try {
+          const newPinned = !m.pinned;
+          
+          // Use RPC function to bypass RLS
+          const { error } = await supabase.rpc('admin_toggle_pin_forum_message', {
+            message_id: m.id,
+            new_pin_state: newPinned
+          });
+
+          if (error) throw error;
+
+          m.pinned = newPinned;
+          sys(m.pinned ? "📌 Message pinned" : "📍 Message unpinned");
+          renderGroupChat();
+        } catch (error) {
+          console.error('❌ Error toggling pin:', error);
+          sys('Failed to pin/unpin message');
+        }
+      }
+
+      async function startEditGroup(m){
+        // Only allow editing admin's own messages
+        if(m.role !== 'admin'){
+          sys('Can only edit admin messages');
+          return;
+        }
+
+        const node = body.querySelector(`[data-msg-id="${CSS.escape(m.id)}"]`);
+        if(!node) return;
+
+        const bubble = node.querySelector(".bubble");
+        const currentPlain = stripText(m.html);
+
+        // Store original HTML
+        const originalHTML = bubble.innerHTML;
+
+        bubble.innerHTML = `
+          <textarea class="edit-box" id="edit_group_${m.id}" style="width: 100%; min-height: 80px; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.4); color: white; font-size: 13px; resize: vertical;">${escHtml(currentPlain)}</textarea>
+          <div class="edit-actions" style="display: flex; gap: 8px; margin-top: 10px;">
+            <button class="edit-save" id="save_group_${m.id}" style="padding: 8px 16px; background: rgba(34, 211, 238, 0.2); border: 1px solid rgba(34, 211, 238, 0.4); border-radius: 8px; color: #22d3ee; cursor: pointer; font-weight: 500;">Save</button>
+            <button class="edit-cancel" id="cancel_group_${m.id}" style="padding: 8px 16px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: white; cursor: pointer; font-weight: 500;">Cancel</button>
+          </div>
+        `;
+
+        const box = $("edit_group_" + m.id);
+        box.focus();
+        box.setSelectionRange(box.value.length, box.value.length);
+
+        $("save_group_" + m.id).addEventListener("click", async () => {
+          const newText = (box.value || "").trim();
+          if(!newText){
+            sys("⚠️ Cannot save empty message");
+            return;
+          }
+
+          try {
+            const { error } = await supabase.rpc('admin_edit_forum_message', {
+              message_id: m.id,
+              new_message: newText
+            });
+
+            if (error) throw error;
+
+            m.html = escHtml(newText);
+            m.edited = true;
+            sys('✏️ Message edited');
+            renderGroupChat();
+          } catch (error) {
+            console.error('❌ Error editing message:', error);
+            sys('Failed to edit message');
+            bubble.innerHTML = originalHTML;
+          }
+        });
+
+        $("cancel_group_" + m.id).addEventListener("click", () => {
+          bubble.innerHTML = originalHTML;
+        });
+      }
+
+      async function deleteGroupMessage(m){
+        if(!confirm('Delete this message from group chat?')) return;
+
+        try {
+          // Use RPC function to bypass RLS
+          const { error } = await supabase.rpc('admin_delete_forum_message', {
+            message_id: m.id
+          });
+
+          if (error) throw error;
+
+          m.hardDeleted = true;
+          sys('🗑️ Message deleted');
+          renderGroupChat();
+        } catch (error) {
+          console.error('❌ Error deleting message:', error);
+          sys('Failed to delete message');
+        }
+      }
+
+      async function sendGroupMessage(){
+        if(locked) return;
+        const text = (input.value || "").trim();
+        if(!text) return;
+
+        try {
+          let html = "";
+          if(replyTo){
+            html += `<div class="reply-quote"><b>${escHtml(replyTo.author)}:</b> ${escHtml(replyTo.text)}</div>`;
+          }
+          html += escHtml(text);
+
+          // Get current admin user
+          const { data: { user } } = await supabase.auth.getUser();
+          
+          // Try to find admin's student record (if they have one)
+          let adminStudentId = null;
+          if (user?.email) {
+            const { data: adminStudent } = await supabase
+              .from('students')
+              .select('id')
+              .eq('email', user.email)
+              .single();
+            
+            if (adminStudent) {
+              adminStudentId = adminStudent.id;
+            }
+          }
+
+          const insertData = {
+            message: text,
+            is_pinned: false,
+            student_name: 'Admin', // Admin name
+            student_email: user?.email || 'admin@arnoma.com' // Admin email
+          };
+          
+          // Only add student_id if we have one (NULL if admin doesn't have student record)
+          if (adminStudentId) {
+            insertData.student_id = adminStudentId;
+          }
+
+          const { data, error } = await supabase
+            .from('forum_messages')
+            .insert(insertData)
+            .select('id, created_at')
+            .single();
+
+          if (error) throw error;
+
+          // Add to local array
+          groupChatMessages.push({
+            id: data.id,
+            role: 'admin',
+            html: html,
+            time: formatTime(data.created_at),
+            pinned: false,
+            studentName: 'Admin',
+            studentId: adminStudentId,
+            createdAt: data.created_at
+          });
+
+          input.value = "";
+          autoResize();
+          cancelReply();
+          renderGroupChat();
+
+          console.log('✅ Group message sent');
+        } catch (error) {
+          console.error('❌ Error sending group message:', error);
+          sys('Failed to send message');
+        }
+      }
+
+      function formatTime(timestamp){
+        const date = new Date(timestamp);
+        const hh = String(date.getHours()).padStart(2,"0");
+        const mm = String(date.getMinutes()).padStart(2,"0");
+        return hh + ":" + mm;
+      }
+
+      function filterStudents(){
+        renderStudentList();
+      }
+
+      // ---------- Open/Close ----------
+      function open(){
+        popup.style.display = 'block';
+        setupContextMenuListeners(); // Setup context menu
+        loadStudents();
+        loadGroupChat(); // Load group chat by default
+        setTimeout(() => input.focus(), 60);
+      }
+      
+      function close(){
+        popup.style.display = 'none';
+        window.parent.postMessage('closeAdminChat', '*');
+      }
+
+      // ---------- Wire events ----------
+      closeBtn.addEventListener("click", close);
+
+      popup.addEventListener("mousedown", (e) => {
+        if(e.target === popup) close();
+      });
+
+      studentSearch.addEventListener("input", filterStudents);
+
+      sendBtn.addEventListener("click", send);
+
+      input.addEventListener("input", autoResize);
+      input.addEventListener("keydown", (e) => {
+        if(e.key === "Enter" && !e.shiftKey){
+          e.preventDefault();
+          send();
+        }
+      });
+
+      lockBtn.addEventListener("click", () => setLocked(!locked));
+      resolveBtn.addEventListener("click", () => setResolved(!resolved));
+      addNoteBtn.addEventListener("click", addAdminNote);
+
+      document.addEventListener("keydown", (e) => {
+        if(e.key === "Escape" && popup.style.display === "block") close();
+      });
+
+      // ---------- Auto-open for demo ----------
+      open();
+
+      // Expose minimal API
+      window.AdminChatPopup = { open, close };
+
+    })();
+  </script>
+</body>
+</html>
