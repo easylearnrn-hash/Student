@@ -776,21 +776,17 @@
       try {
         console.log(`📧 Sending email notification for posted note to ${groupName}`);
         const groupLetter = groupName?.replace('Group ', '').trim();
-        const encodedGroupLetter = encodeURIComponent(groupLetter);
-        const encodedGroupName = encodeURIComponent(groupName);
         
         if (!groupLetter) {
           console.warn('⚠️ Unable to determine group letter from', groupName);
           return;
         }
 
-        const groupFilter = `group_letter.eq.${encodedGroupLetter},group_name.eq.${encodedGroupLetter},group_name.eq.${encodedGroupName}`;
-
         // Get all students in this specific group
-  const { data: students, error: studentsError } = await supabaseClient
+        const { data: students, error: studentsError } = await supabaseClient
           .from('students')
           .select('email, name, group_name')
-          .or(groupFilter)
+          .eq('group_name', groupLetter)
           .eq('show_in_grid', true)
           .not('email', 'is', null);
 
@@ -1405,6 +1401,93 @@
         // If AUTH_REQUIRED, redirect should already be happening via ensureSession
       }
     })();
+
+    // ===== HELPER: Parse Schedule String =====
+    function parseSchedule(schedule) {
+      // Parse schedule - it can be either a string like "Tuesday 8:00 PM, Thursday 8:00 PM"
+      // or abbreviated like "Mon 8:00 PM, Wed 8:00 PM"
+      // or an object like {monday: true, tuesday: true, ...}
+      if (typeof schedule === 'string') {
+        const lowerSchedule = schedule.toLowerCase();
+        return {
+          monday: lowerSchedule.includes('monday') || lowerSchedule.includes('mon ') || lowerSchedule.includes('mon,'),
+          tuesday: lowerSchedule.includes('tuesday') || lowerSchedule.includes('tue ') || lowerSchedule.includes('tue,') || lowerSchedule.includes('tues '),
+          wednesday: lowerSchedule.includes('wednesday') || lowerSchedule.includes('wed ') || lowerSchedule.includes('wed,'),
+          thursday: lowerSchedule.includes('thursday') || lowerSchedule.includes('thu ') || lowerSchedule.includes('thu,') || lowerSchedule.includes('thurs '),
+          friday: lowerSchedule.includes('friday') || lowerSchedule.includes('fri ') || lowerSchedule.includes('fri,'),
+          saturday: lowerSchedule.includes('saturday') || lowerSchedule.includes('sat ') || lowerSchedule.includes('sat,'),
+          sunday: lowerSchedule.includes('sunday') || lowerSchedule.includes('sun ') || lowerSchedule.includes('sun,')
+        };
+      } else if (typeof schedule === 'object' && schedule !== null) {
+        return schedule;
+      }
+      return {};
+    }
+
+    // ===== HELPER: Send Admin Notification Email =====
+    async function sendAdminNotification(groupName, classDate, notesList) {
+      try {
+        const emailHTML = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+              .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+              .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+              .content { background: #f9f9f9; padding: 20px; border-radius: 8px; }
+              .note-item { background: white; padding: 12px; margin: 8px 0; border-left: 4px solid #667eea; border-radius: 4px; }
+              .footer { margin-top: 20px; text-align: center; color: #666; font-size: 12px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <h2>📚 Notes Posted to ${groupName}</h2>
+                <p>Class Date: ${new Date(classDate).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              </div>
+              <div class="content">
+                <h3>Notes Posted (${notesList.length}):</h3>
+                ${notesList.map(note => `
+                  <div class="note-item">
+                    <strong>${note.title || 'Untitled Note'}</strong>
+                    ${note.system_category ? `<br><small style="color: #666;">System: ${note.system_category}</small>` : ''}
+                  </div>
+                `).join('')}
+              </div>
+              <div class="footer">
+                <p>ARNOMA Group Notes Manager • Automated Notification</p>
+              </div>
+            </div>
+          </body>
+          </html>
+        `;
+
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({
+            to: 'easylearnrn@gmail.com',
+            subject: `📚 Notes Posted: ${groupName} - ${classDate}`,
+            html: emailHTML
+          })
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`❌ Failed to send admin notification:`, response.status, errorText);
+        } else {
+          const result = await response.json();
+          console.log(`✅ Admin notification sent successfully`, result);
+        }
+      } catch (error) {
+        console.error('❌ Admin notification error:', error);
+        // Don't throw - we don't want to block the posting operation
+      }
+    }
 
     // ===== LOAD DATA =====
     async function loadData(forceRefresh = false) {
@@ -2823,10 +2906,104 @@
         return;
       }
 
-      const confirmed = await customConfirm(`Show ${selectedNoteIds.size} note(s) to ${currentGroup}?`);
+      // Fetch group's class dates for current month as clickable buttons
+      let classDatesArray = [];
+      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+      
+      try {
+        console.log('🔍 Fetching schedule for group:', groupLetter);
+        const { data: group, error } = await supabaseClient
+          .from('groups')
+          .select('schedule')
+          .eq('group_name', groupLetter)
+          .single();
+        
+        console.log('📅 Group data:', group, 'Error:', error);
+        
+        if (group && group.schedule) {
+          const schedule = group.schedule;
+          console.log('📋 Schedule:', schedule);
+          
+          const scheduleDays = parseSchedule(schedule);
+          console.log('📋 Parsed schedule days:', scheduleDays);
+          
+          const today = new Date();
+          const currentMonth = today.getMonth();
+          const currentYear = today.getFullYear();
+          const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+          
+          // Set today to start of day for comparison
+          const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+          
+          for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(currentYear, currentMonth, day);
+            
+            // Only include dates that are today or in the past
+            if (date > todayStart) continue;
+            
+            const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+            
+            const matchesSchedule = 
+              (scheduleDays.monday && dayName === 'Monday') ||
+              (scheduleDays.tuesday && dayName === 'Tuesday') ||
+              (scheduleDays.wednesday && dayName === 'Wednesday') ||
+              (scheduleDays.thursday && dayName === 'Thursday') ||
+              (scheduleDays.friday && dayName === 'Friday') ||
+              (scheduleDays.saturday && dayName === 'Saturday') ||
+              (scheduleDays.sunday && dayName === 'Sunday');
+            
+            if (matchesSchedule) {
+              const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              const dayStr = date.toLocaleDateString('en-US', { weekday: 'short' });
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const dayNum = String(date.getDate()).padStart(2, '0');
+              const dateValue = `${year}-${month}-${dayNum}`;
+              
+              classDatesArray.push({
+                display: `${dateStr} (${dayStr})`,
+                value: dateValue
+              });
+            }
+          }
+          console.log('📆 Generated class dates array:', classDatesArray);
+        }
+      } catch (error) {
+        console.error('❌ Error fetching group schedule:', error);
+      }
+
+      console.log('🎯 Calling customPromptWithDate with:', {
+        title: 'Set Class Date',
+        message: 'What date are these notes for?',
+        dateLabel: 'Or pick any date:',
+        defaultDate: new Date().toISOString().split('T')[0],
+        classDatesCount: classDatesArray.length,
+        classDates: classDatesArray
+      });
+
+      // Ask for class date
+      const classDate = await customPromptWithDate(
+        'Set Class Date',
+        `What date are these notes for?`,
+        'Or pick any date:',
+        new Date().toISOString().split('T')[0],
+        classDatesArray
+      );
+      
+      if (!classDate) return; // User cancelled
+
+      const confirmed = await customConfirm(`Show ${selectedNoteIds.size} note(s) to ${currentGroup} for ${classDate}?`);
       if (!confirmed) return;
 
       try {
+        // First update the class_date for all selected notes
+        const { error: updateError } = await supabaseClient
+          .from('student_notes')
+          .update({ class_date: classDate })
+          .in('id', Array.from(selectedNoteIds));
+
+        if (updateError) throw updateError;
+
         let successCount = 0;
         let errorCount = 0;
 
@@ -2864,6 +3041,28 @@
         }
 
         await customAlert(`✓ ${successCount} note(s) shown${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
+        
+        // Send email notifications to students in the group
+        if (successCount > 0) {
+          console.log('📧 Starting student email notification process...');
+          try {
+            const emailResult = await sendNotePostedEmail(currentGroup, `${successCount} new note(s)`, 'Various');
+            console.log('✅ Student email notifications sent successfully!', emailResult);
+          } catch (emailError) {
+            console.error('❌ Student email notification failed:', emailError);
+          }
+          
+          // Send admin notification email
+          const { data: postedNotes } = await supabaseClient
+            .from('student_notes')
+            .select('id, title, system_category')
+            .in('id', Array.from(selectedNoteIds));
+          
+          if (postedNotes && postedNotes.length > 0) {
+            await sendAdminNotification(currentGroup, classDate, postedNotes);
+          }
+        }
+        
         clearSelection();
         
         // PERFORMANCE FIX: Reload fresh data immediately to update tags
@@ -3096,11 +3295,76 @@
       
       if (noteIds.length === 0) return;
 
-      // Ask for the class date
+      // Fetch group's class dates for current month as clickable buttons
+      let classDatesArray = [];
+      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+      
+      try {
+        console.log('🔍 Fetching schedule for group:', groupLetter);
+        const { data: group, error } = await supabaseClient
+          .from('groups')
+          .select('schedule')
+          .eq('group_name', groupLetter)
+          .single();
+        
+        if (group && group.schedule) {
+          const scheduleDays = parseSchedule(group.schedule);
+          const today = new Date();
+          const currentMonth = today.getMonth();
+          const currentYear = today.getFullYear();
+          
+          // Set today to start of day for comparison
+          const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+          
+          // Generate all dates for current month based on schedule
+          const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+          
+          for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(currentYear, currentMonth, day);
+            
+            // Only include dates that are today or in the past
+            if (date > todayStart) continue;
+            
+            const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+            
+            // Check if this day matches the schedule
+            const matchesSchedule = 
+              (scheduleDays.monday && dayName === 'Monday') ||
+              (scheduleDays.tuesday && dayName === 'Tuesday') ||
+              (scheduleDays.wednesday && dayName === 'Wednesday') ||
+              (scheduleDays.thursday && dayName === 'Thursday') ||
+              (scheduleDays.friday && dayName === 'Friday') ||
+              (scheduleDays.saturday && dayName === 'Saturday') ||
+              (scheduleDays.sunday && dayName === 'Sunday');
+            
+            if (matchesSchedule) {
+              const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              const dayStr = date.toLocaleDateString('en-US', { weekday: 'short' });
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const dayNum = String(date.getDate()).padStart(2, '0');
+              const dateValue = `${year}-${month}-${dayNum}`;
+              
+              classDatesArray.push({
+                display: `${dateStr} (${dayStr})`,
+                value: dateValue
+              });
+            }
+          }
+          
+          console.log('📆 Found class dates for posting:', classDatesArray.length);
+        }
+      } catch (error) {
+        console.error('❌ Error fetching group schedule:', error);
+      }
+
+      // Ask for the class date with clickable quick-select buttons
       const classDate = await customPromptWithDate(
         'Set Class Date',
         'What date are these notes for?',
-        new Date().toISOString().split('T')[0]
+        'Or pick any date:',
+        new Date().toISOString().split('T')[0],
+        classDatesArray
       );
       
       if (!classDate) return; // User cancelled
@@ -3139,6 +3403,25 @@
         if (error) throw error;
 
         await customAlert('Success', `${noteIds.length} note(s) are now visible to ${currentGroup} for ${classDate}`);
+        
+        // Send email notifications to students in the group
+        console.log('📧 Starting student email notification process...');
+        try {
+          const emailResult = await sendNotePostedEmail(currentGroup, `${noteIds.length} new note(s)`, systemName);
+          console.log('✅ Student email notifications sent successfully!', emailResult);
+        } catch (emailError) {
+          console.error('❌ Student email notification failed:', emailError);
+        }
+        
+        // Send admin notification email
+        const { data: postedNotes } = await supabaseClient
+          .from('student_notes')
+          .select('id, title, system_category')
+          .in('id', noteIds);
+        
+        if (postedNotes && postedNotes.length > 0) {
+          await sendAdminNotification(currentGroup, classDate, postedNotes);
+        }
         
         selectedCheckboxes.forEach(cb => cb.checked = false);
         updateSelectedCount();
@@ -3315,6 +3598,71 @@
         return;
       }
 
+      // Fetch group's class dates for current month as clickable buttons
+      let classDatesArray = [];
+      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+      
+      try {
+        console.log('🔍 [bulkPostFilteredNotes] Fetching schedule for group:', groupLetter);
+        const { data: group, error } = await supabaseClient
+          .from('groups')
+          .select('schedule')
+          .eq('group_name', groupLetter)
+          .single();
+        
+        console.log('📅 [bulkPostFilteredNotes] Group data:', group, 'Error:', error);
+        
+        if (group && group.schedule) {
+          console.log('📋 [bulkPostFilteredNotes] Raw schedule:', group.schedule);
+          const scheduleDays = parseSchedule(group.schedule);
+          console.log('🔄 [bulkPostFilteredNotes] Parsed scheduleDays:', scheduleDays);
+          const today = new Date();
+          const currentMonth = today.getMonth();
+          const currentYear = today.getFullYear();
+          
+          // Set today to start of day for comparison
+          const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+          
+          const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+          
+          for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(currentYear, currentMonth, day);
+            
+            // Only include dates that are today or in the past
+            if (date > todayStart) continue;
+            
+            const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+            
+            const matchesSchedule = 
+              (scheduleDays.monday && dayName === 'Monday') ||
+              (scheduleDays.tuesday && dayName === 'Tuesday') ||
+              (scheduleDays.wednesday && dayName === 'Wednesday') ||
+              (scheduleDays.thursday && dayName === 'Thursday') ||
+              (scheduleDays.friday && dayName === 'Friday') ||
+              (scheduleDays.saturday && dayName === 'Saturday') ||
+              (scheduleDays.sunday && dayName === 'Sunday');
+            
+            if (matchesSchedule) {
+              const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              const dayStr = date.toLocaleDateString('en-US', { weekday: 'short' });
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const dayNum = String(date.getDate()).padStart(2, '0');
+              const dateValue = `${year}-${month}-${dayNum}`;
+              
+              classDatesArray.push({
+                display: `${dateStr} (${dayStr})`,
+                value: dateValue
+              });
+            }
+          }
+          
+          console.log('📆 [bulkPostFilteredNotes] Generated class dates:', classDatesArray.length, classDatesArray);
+        }
+      } catch (error) {
+        console.error('❌ [bulkPostFilteredNotes] Error fetching group schedule:', error);
+      }
+
       const today = new Date().toISOString().split('T')[0];
       
       // Use date picker if available
@@ -3323,8 +3671,9 @@
         postDate = await customPromptWithDate(
           'Set Post Date',
           `Post ${noteIds.length} note(s) from ${systemName} to ${currentGroup}`,
-          'Select the class date for these notes:',
-          today
+          'Or pick any date:',
+          today,
+          classDatesArray
         );
         if (!postDate) return; // User cancelled
       } else {
@@ -3350,18 +3699,33 @@
 
         // Create permissions in note_free_access table (CORRECT TABLE!)
         const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
+        
+        console.log('🚨 [BULK POST DEBUG]');
+        console.log('📊 Current Group:', currentGroup);
+        console.log('🔤 Group Letter:', groupLetter);
+        console.log('📝 Note IDs:', noteIds);
+        console.log('📧 Admin Email:', adminEmail);
+        
         const records = noteIds.map(noteId => ({
           note_id: noteId,
           access_type: 'group',
           group_letter: groupLetter,  // Use group_letter (E, not "Group E")
           created_by: adminEmail
         }));
+        
+        console.log('📦 Records to insert:', records);
 
-  const { error } = await supabaseClient
+  const { error, data: insertedData } = await supabaseClient
           .from('note_free_access')  // CORRECT TABLE!
-          .insert(records);
+          .insert(records)
+          .select();
 
-        if (error) throw error;
+        if (error) {
+          console.error('❌ Insert error:', error);
+          throw error;
+        }
+        
+        console.log('✅ Successfully inserted records:', insertedData);
 
         // Send email notifications to students in the group
         console.log('📧 Starting email notification process...');
@@ -3374,6 +3738,16 @@
           await customAlert('Success', `Posted ${noteIds.length} note(s) to ${currentGroup}\n⚠️ Note: Email notifications failed to send`);
         }
         
+        // Send admin notification email
+        const { data: postedNotes } = await supabaseClient
+          .from('student_notes')
+          .select('id, title, system_category')
+          .in('id', noteIds);
+        
+        if (postedNotes && postedNotes.length > 0) {
+          await sendAdminNotification(currentGroup, postDate, postedNotes);
+        }
+        
         // Clear selection and refresh
         selectedCheckboxes.forEach(cb => cb.checked = false);
         updateSelectedCount();
@@ -3382,51 +3756,6 @@
       } catch (error) {
         console.error('Bulk post error:', error);
         await customAlert('Error', 'Failed to post notes: ' + error.message);
-      }
-    }
-
-    async function batchShowToGroup(systemName) {
-      // Get selected notes from this system only
-      const systemId = systemName.replace(/[^a-zA-Z0-9]/g, '');
-      const systemSection = document.getElementById(`system-${systemId}`);
-      if (!systemSection) return;
-      
-      const selectedCheckboxes = systemSection.querySelectorAll('.note-checkbox:checked');
-      const noteIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.noteId));
-      
-      if (noteIds.length === 0) return;
-
-      const confirmed = await customConfirm('Show Notes', `Show ${noteIds.length} note(s) to ${currentGroup}?`);
-      if (!confirmed) return;
-
-      try {
-  const { data: { session } } = await supabaseClient.auth.getSession();
-        const adminEmail = session?.user?.email;
-
-        const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
-        const records = noteIds.map(noteId => ({
-          note_id: noteId,
-          access_type: 'group',
-          group_letter: groupLetter,
-          created_by: adminEmail
-        }));
-
-  const { error } = await supabaseClient
-          .from('note_free_access')
-          .insert(records)
-          .select();
-
-        if (error) throw error;
-
-        await customAlert('Success', `${noteIds.length} note(s) are now visible to ${currentGroup}`);
-        
-        selectedCheckboxes.forEach(cb => cb.checked = false);
-        updateSelectedCount();
-        await loadData();
-        await renderSystems();
-      } catch (error) {
-        console.error('Batch show error:', error);
-        await customAlert('Error', 'Failed to show notes: ' + error.message);
       }
     }
 
@@ -3881,11 +4210,90 @@
 
     async function grantFreeAccess() {
       try {
-        // Ask for the class date first
+        // Get selected group to show their class dates
+        let groupLetter = null;
+        if (freeAccessType === 'group') {
+          groupLetter = document.getElementById('freeGroupSelect').value;
+          if (!groupLetter) {
+            await customAlert('No Group Selected', 'Please select a group');
+            return;
+          }
+        }
+
+        // Fetch group's class dates for current month as clickable buttons
+        let classDatesArray = [];
+        if (groupLetter) {
+          try {
+            console.log('🔍 Fetching schedule for group:', groupLetter);
+            const { data: group, error } = await supabaseClient
+              .from('groups')
+              .select('schedule')
+              .eq('group_name', groupLetter)
+              .single();
+            
+            console.log('📅 Group data:', group, 'Error:', error);
+            
+            if (group && group.schedule) {
+              console.log('📋 [FREE] Raw schedule:', group.schedule);
+              const scheduleDays = parseSchedule(group.schedule);
+              console.log('� [FREE] Parsed scheduleDays:', scheduleDays);
+              const today = new Date();
+              const currentMonth = today.getMonth();
+              const currentYear = today.getFullYear();
+              
+              // Generate all dates for current month based on schedule
+              const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+              
+              // Set today to start of day for comparison
+              const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+              
+              for (let day = 1; day <= daysInMonth; day++) {
+                const date = new Date(currentYear, currentMonth, day);
+                
+                // Only include dates that are today or in the past
+                if (date > todayStart) continue;
+                
+                const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+                
+                // Check if this day matches the schedule
+                const matchesSchedule = 
+                  (scheduleDays.monday && dayName === 'Monday') ||
+                  (scheduleDays.tuesday && dayName === 'Tuesday') ||
+                  (scheduleDays.wednesday && dayName === 'Wednesday') ||
+                  (scheduleDays.thursday && dayName === 'Thursday') ||
+                  (scheduleDays.friday && dayName === 'Friday') ||
+                  (scheduleDays.saturday && dayName === 'Saturday') ||
+                  (scheduleDays.sunday && dayName === 'Sunday');
+                
+                if (matchesSchedule) {
+                  const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                  const dayStr = date.toLocaleDateString('en-US', { weekday: 'short' });
+                  const year = date.getFullYear();
+                  const month = String(date.getMonth() + 1).padStart(2, '0');
+                  const dayNum = String(date.getDate()).padStart(2, '0');
+                  const dateValue = `${year}-${month}-${dayNum}`;
+                  
+                  classDatesArray.push({
+                    display: `${dateStr} (${dayStr})`,
+                    value: dateValue
+                  });
+                }
+              }
+              
+              console.log('📆 Found class dates:', classDatesArray.length, classDatesArray);
+            }
+          } catch (error) {
+            console.error('❌ Error fetching group schedule:', error);
+          }
+        }
+        
+        // Ask for the class date with clickable quick-select buttons
         const classDate = await customPromptWithDate(
           'Set Class Date for Free Access',
-          'What date should these notes show as opened for free?',
-          new Date().toISOString().split('T')[0]
+          `What date should these notes show as opened for free?`,
+          'Or pick any date:',
+          new Date().toISOString().split('T')[0],
+          classDatesArray
         );
         
         if (!classDate) {
@@ -3893,12 +4301,7 @@
         }
         
         if (freeAccessType === 'group') {
-          const groupLetter = document.getElementById('freeGroupSelect').value;
-          
-          if (!groupLetter) {
-            await customAlert('No Group Selected', 'Please select a group');
-            return;
-          }
+          // groupLetter already validated above
 
           const confirmed = await customConfirm(
             'Grant FREE Access to Group', 
@@ -4750,6 +5153,71 @@
         return;
       }
 
+      // Fetch group's class dates for current month as clickable buttons
+      let classDatesArray = [];
+      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+      
+      try {
+        console.log('🔍 [bulkPostFilteredNotes-modal] Fetching schedule for group:', groupLetter);
+        const { data: group, error } = await supabaseClient
+          .from('groups')
+          .select('schedule')
+          .eq('group_name', groupLetter)
+          .single();
+        
+        console.log('📅 [bulkPostFilteredNotes-modal] Group data:', group, 'Error:', error);
+        
+        if (group && group.schedule) {
+          console.log('📋 [bulkPostFilteredNotes-modal] Raw schedule:', group.schedule);
+          const scheduleDays = parseSchedule(group.schedule);
+          console.log('🔄 [bulkPostFilteredNotes-modal] Parsed scheduleDays:', scheduleDays);
+          const today = new Date();
+          const currentMonth = today.getMonth();
+          const currentYear = today.getFullYear();
+          
+          // Set today to start of day for comparison
+          const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+          
+          const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+          
+          for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(currentYear, currentMonth, day);
+            
+            // Only include dates that are today or in the past
+            if (date > todayStart) continue;
+            
+            const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+            
+            const matchesSchedule = 
+              (scheduleDays.monday && dayName === 'Monday') ||
+              (scheduleDays.tuesday && dayName === 'Tuesday') ||
+              (scheduleDays.wednesday && dayName === 'Wednesday') ||
+              (scheduleDays.thursday && dayName === 'Thursday') ||
+              (scheduleDays.friday && dayName === 'Friday') ||
+              (scheduleDays.saturday && dayName === 'Saturday') ||
+              (scheduleDays.sunday && dayName === 'Sunday');
+            
+            if (matchesSchedule) {
+              const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              const dayStr = date.toLocaleDateString('en-US', { weekday: 'short' });
+              const year = date.getFullYear();
+              const month = String(date.getMonth() + 1).padStart(2, '0');
+              const dayNum = String(date.getDate()).padStart(2, '0');
+              const dateValue = `${year}-${month}-${dayNum}`;
+              
+              classDatesArray.push({
+                display: `${dateStr} (${dayStr})`,
+                value: dateValue
+              });
+            }
+          }
+          
+          console.log('📆 [bulkPostFilteredNotes-modal] Generated class dates:', classDatesArray.length, classDatesArray);
+        }
+      } catch (error) {
+        console.error('❌ [bulkPostFilteredNotes-modal] Error fetching group schedule:', error);
+      }
+
       // 🔥 NEW: Ask for post date with date picker
       console.log('🔍 Checking if customPromptWithDate exists:', typeof window.customPromptWithDate);
       
@@ -4768,8 +5236,9 @@
         var postDate = await customPromptWithDate(
           'Set Post Date',
           `Post ${selectedFilteredNotes.size} note(s) to ${currentGroup}`,
-          'Select the class date for these notes:',
-          today
+          'Or pick any date:',
+          today,
+          classDatesArray
         );
         
         if (!postDate) return; // User cancelled
@@ -4793,18 +5262,33 @@
         }
 
         const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
+        
+        console.log('🚨 [BULK POST MODAL DEBUG]');
+        console.log('📊 Current Group:', currentGroup);
+        console.log('🔤 Group Letter:', groupLetter);
+        console.log('📝 Note IDs:', noteIdsArray);
+        console.log('📧 Admin Email:', adminEmail);
+        
         const records = noteIdsArray.map(noteId => ({
           note_id: noteId,
           access_type: 'group',
           group_letter: groupLetter,
           created_by: adminEmail
         }));
+        
+        console.log('📦 Records to insert:', records);
 
-  const { error } = await supabaseClient
+  const { error, data: insertedData } = await supabaseClient
           .from('note_free_access')
-          .insert(records);
+          .insert(records)
+          .select();
 
-        if (error) throw error;
+        if (error) {
+          console.error('❌ Insert error:', error);
+          throw error;
+        }
+        
+        console.log('✅ Successfully inserted records:', insertedData);
 
   // Capture count before clearing
   const count = selectedFilteredNotes.size;
