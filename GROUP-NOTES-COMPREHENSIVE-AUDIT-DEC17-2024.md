@@ -383,7 +383,7 @@ const BUCKET_NAME = 'student-notes';
 - Link to student portal
 
 **Supabase Queries**:
-1. Fetch students in group: `.from('students').select('*').eq('group_letter', groupLetter)`
+1. Fetch students in group: `.from('students').select('*').eq('group_name', groupLetter)`
 2. Call edge function: `supabaseClient.functions.invoke('send-email', { body: {...} })`
 
 **Status**: ✅ **FUNCTIONAL** - Template renders correctly, emails sent via edge function

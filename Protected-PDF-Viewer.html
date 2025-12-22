@@ -216,6 +216,44 @@
       overflow: hidden;
       border: 1px solid rgba(125, 211, 252, 0.1);
     }
+
+    .page-screenshot-frame {
+      position: relative;
+      width: 100%;
+      background: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(125, 211, 252, 0.08);
+      background-repeat: no-repeat;
+      background-position: top center;
+      background-size: contain;
+    }
+
+    .page-screenshot-image {
+      width: 100%;
+      height: auto;
+      display: block;
+      background: #ffffff;
+    }
+
+    .page-screenshot-canvas {
+      display: none;
+    }
+
+    .page-screenshot-badge {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      background: rgba(2, 6, 23, 0.65);
+      color: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(125, 211, 252, 0.35);
+      box-shadow: 0 6px 18px rgba(2, 6, 23, 0.45);
+    }
     
     .page-canvas {
       display: block;
@@ -435,6 +473,8 @@
         border-radius: 0;
         background: white;
         position: relative;
+        min-height: 11in; /* Ensure full page height */
+        width: 100%;
       }
       
       .page-container:last-child {
@@ -446,6 +486,7 @@
         display: flex !important;
         opacity: 1 !important;
         z-index: 9999 !important;
+        pointer-events: none !important;
         background: repeating-linear-gradient(
           45deg,
           transparent,
@@ -456,7 +497,7 @@
       }
       
       .watermark-content {
-        opacity: 0.35 !important; /* Highly visible in print */
+        opacity: 0.25 !important; /* Reduced opacity so content is more visible */
         transform: rotate(-45deg) translateX(40px) !important;
       }
       
@@ -485,13 +526,43 @@
         height: auto !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
-        image-rendering: pixelated !important;
-        filter: contrast(1.03) saturate(0.92);
+        page-break-inside: avoid !important;
+      }
+
+      .page-screenshot-frame {
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+        position: relative;
+        width: 100%;
+        display: block !important;
+        page-break-inside: avoid !important;
+      }
+
+      .page-screenshot-badge {
+        background: rgba(2, 6, 23, 0.75) !important;
+        color: #e0f2fe !important;
+        border-color: rgba(125, 211, 252, 0.5) !important;
       }
       
-      .page-canvas-screen,
-      .page-canvas-print {
-        display: none !important; /* Hide canvas elements in print */
+      .page-canvas-screen {
+        display: none !important;
+      }
+
+      .page-screenshot-canvas {
+        display: none !important;
+      }
+
+      .page-screenshot-image {
+        display: block !important;
+        max-width: 100% !important;
+        width: 100% !important;
+        height: auto !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        page-break-inside: avoid !important;
+        opacity: 1 !important;
+        visibility: visible !important;
       }
       
       /* Ensure all images print */
@@ -1112,7 +1183,7 @@
           <span class="zoom-level" id="zoomLevel">150%</span>
           <button class="control-btn" onclick="changeZoom(0.1)">+</button>
         </div>
-        <button class="control-btn print-btn" onclick="printNote()">🖨️ Print</button>
+  <button class="control-btn print-btn" id="printButton" onclick="printNote()">🖨️ Print</button>
       </div>
     </div>
     
@@ -1230,6 +1301,7 @@
     let fallbackStudent = null;
     let noteData = null;
     let currentLoadingMessage = 'Loading protected PDF...';
+    let isPreparingPrint = false;
 
     function updateLoadingStatus(message) {
       currentLoadingMessage = message;
@@ -1956,14 +2028,16 @@
         pageContainer.className = 'page-container';
         
         // Add watermark overlay with ARNOMA logo and student info
+        const studentNameSafe = escapeHtml(getStudentDisplayName());
+        const studentGroupSafe = escapeHtml(getStudentDisplayGroup());
         const watermark = document.createElement('div');
         watermark.className = 'watermark-overlay';
         watermark.innerHTML = `
           <div class="watermark-content">
             <div class="watermark-logo">ARNOMA</div>
             <div class="watermark-text">
-              ${getStudentDisplayName()}<br>
-              Group ${getStudentDisplayGroup()}
+              ${studentNameSafe}<br>
+              Group ${studentGroupSafe}
             </div>
           </div>
         `;
@@ -2012,83 +2086,173 @@
     // ============================================================
     
     async function printNote() {
+      if (isPreparingPrint) {
+        return;
+      }
+
+      if (!pdfDoc || totalPages === 0) {
+        alert('Still preparing this note. Please try printing again in a moment.');
+        return;
+      }
+
+      isPreparingPrint = true;
+      const printButton = document.getElementById('printButton');
+      const originalButtonLabel = printButton ? printButton.innerHTML : null;
+
+      if (printButton) {
+        printButton.disabled = true;
+        printButton.innerHTML = 'Preparing…';
+      }
+
+      const content = document.getElementById('pdfContent');
+      if (!content) {
+        console.error('Print error: pdfContent container missing');
+        if (printButton && originalButtonLabel !== null) {
+          printButton.innerHTML = originalButtonLabel;
+          printButton.disabled = false;
+        }
+        isPreparingPrint = false;
+        return;
+      }
+
+      const placeholder = document.createElement('div');
+      placeholder.className = 'loading-text';
+      placeholder.textContent = 'Preparing secure print version…';
+      content.innerHTML = '';
+      content.appendChild(placeholder);
+
+      const studentNameSafe = escapeHtml(getStudentDisplayName());
+      const studentGroupSafe = escapeHtml(getStudentDisplayGroup());
+
       try {
-        // Render all pages for printing with watermarks
-        const content = document.getElementById('pdfContent');
-        content.innerHTML = '<div class="loading-text">Preparing for print...</div>';
-        
-        const afterPrint = () => {
-          // Restore single page view after print
-          renderPage(currentPage);
+        const pagesFragment = document.createDocumentFragment();
+        const imageElements = [];
+        const printScale = Math.min(3, Math.max(zoomLevel * 2, 2.2));
+
+        // Use data URLs instead of blob URLs for better Safari print compatibility
+        const canvasToDataUrl = (baseCanvas) => {
+          try {
+            // Try PNG first for better quality
+            return baseCanvas.toDataURL('image/png', 0.95);
+          } catch (error) {
+            console.warn('PNG conversion failed, falling back to JPEG:', error);
+            // Fallback to JPEG if PNG fails
+            return baseCanvas.toDataURL('image/jpeg', 0.92);
+          }
         };
-        
-        window.addEventListener('afterprint', afterPrint, { once: true });
-        
+
         for (let i = 1; i <= totalPages; i++) {
           const page = await pdfDoc.getPage(i);
-          
-          // High-quality rendering for printing
-          const scale = 2.5;
-          const viewport = page.getViewport({ scale: scale });
-          
-          // Create canvas
+          const viewport = page.getViewport({ scale: printScale });
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
-          
+
           canvas.height = viewport.height;
           canvas.width = viewport.width;
-          
+
           await page.render({
             canvasContext: context,
-            viewport: viewport
+            viewport
           }).promise;
 
-          // Convert to a rasterized, obfuscated image before exposing to the print dialog
-          const rasterCanvas = obfuscateCanvasForPrint(canvas);
-          const imageDataUrl = rasterCanvas.toDataURL('image/jpeg', 0.65);
-          const img = document.createElement('img');
-          img.decoding = 'async';
-          img.loading = 'lazy';
-          img.src = imageDataUrl;
-          img.className = 'page-image';
-          img.style.width = (viewport.width / scale) + 'px';
-          img.style.height = (viewport.height / scale) + 'px';
-          img.style.display = 'block';
-          img.style.maxWidth = '100%';
-          img.style.imageRendering = 'pixelated';
-          img.alt = 'Rasterized copy-protected note page';
-          img.setAttribute('aria-hidden', 'true');
-          
+          const screenshotDataUrl = canvasToDataUrl(canvas);
+
+          const imageElement = document.createElement('img');
+          imageElement.decoding = 'sync';
+          imageElement.loading = 'eager';
+          imageElement.src = screenshotDataUrl;
+          imageElement.className = 'page-image page-screenshot-image';
+          imageElement.style.width = '100%';
+          imageElement.style.height = 'auto';
+          imageElement.style.display = 'block';
+          imageElement.style.opacity = '1';
+          imageElement.style.visibility = 'visible';
+          imageElement.alt = `Protected ARNOMA note page ${i}`;
+          imageElement.setAttribute('aria-hidden', 'true');
+
+          imageElements.push(imageElement);
+          // No need to track URLs since we're using data URLs
+
+          const printCanvasCopy = document.createElement('canvas');
+          printCanvasCopy.width = canvas.width;
+          printCanvasCopy.height = canvas.height;
+          printCanvasCopy.className = 'page-canvas page-screenshot-canvas';
+          printCanvasCopy.style.width = '100%';
+          printCanvasCopy.style.height = 'auto';
+          const copyContext = printCanvasCopy.getContext('2d');
+          if (copyContext) {
+            copyContext.drawImage(canvas, 0, 0, canvas.width, canvas.height);
+          }
+
           const pageContainer = document.createElement('div');
           pageContainer.className = 'page-container';
-          
-          // Add prominent watermark
+
+          const screenshotFrame = document.createElement('div');
+          screenshotFrame.className = 'page-screenshot-frame';
+          screenshotFrame.appendChild(imageElement);
+          screenshotFrame.appendChild(printCanvasCopy);
+
+          const screenshotBadge = document.createElement('div');
+          screenshotBadge.className = 'page-screenshot-badge';
+          screenshotBadge.textContent = `Screenshot – Page ${i}`;
+          screenshotFrame.appendChild(screenshotBadge);
+
           const watermark = document.createElement('div');
           watermark.className = 'watermark-overlay';
           watermark.innerHTML = `
             <div class="watermark-content">
               <div class="watermark-logo">ARNOMA</div>
               <div class="watermark-text">
-                ${currentStudent.name}<br>
-                Group ${currentStudent.group || currentStudent.group_name || 'N/A'}<br>
+                ${studentNameSafe}<br>
+                Group ${studentGroupSafe}<br>
                 <span style="font-size: 0.7em; opacity: 0.8;">NOT FOR REDISTRIBUTION</span>
               </div>
             </div>
           `;
-          
-          pageContainer.appendChild(img);
+
+          pageContainer.appendChild(screenshotFrame);
           pageContainer.appendChild(watermark);
-          content.appendChild(pageContainer);
+          pagesFragment.appendChild(pageContainer);
         }
-        
-        // Trigger print dialog
+
+        content.innerHTML = '';
+        content.appendChild(pagesFragment);
+
+        await Promise.all(imageElements.map(waitForImageLoad));
+
+        let afterPrintHandled = false;
+        const finalizePrint = () => {
+          if (afterPrintHandled) return;
+          afterPrintHandled = true;
+          renderPage(currentPage);
+          if (printButton && originalButtonLabel !== null) {
+            printButton.innerHTML = originalButtonLabel;
+            printButton.disabled = false;
+          }
+          isPreparingPrint = false;
+          // No URL cleanup needed for data URLs
+        };
+
+        window.addEventListener('afterprint', finalizePrint, { once: true });
+
         setTimeout(() => {
           window.print();
-        }, 500);
-        
+          setTimeout(finalizePrint, 400);
+        }, 250);
       } catch (error) {
         console.error('Print error:', error);
-        alert('Failed to prepare for printing');
+        alert('Failed to prepare this note for printing. Please try again.');
+        if (printButton && originalButtonLabel !== null) {
+          printButton.innerHTML = originalButtonLabel;
+          printButton.disabled = false;
+        }
+        isPreparingPrint = false;
+        renderPage(currentPage);
+      }
+
+      function finalizePrintCleanupUrls(urls = []) {
+        // No cleanup needed for data URLs
+        return;
       }
     }
 
@@ -2198,6 +2362,29 @@
     // UTILITY FUNCTIONS
     // ============================================================
     
+    function escapeHtml(value = '') {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function waitForImageLoad(img) {
+      if (!img) return Promise.resolve();
+      if (typeof img.decode === 'function') {
+        return img.decode().catch(() => {});
+      }
+      if (img.complete) {
+        return Promise.resolve();
+      }
+      return new Promise((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve();
+      });
+    }
+
     function showError(message) {
       const content = document.getElementById('pdfContent');
       content.innerHTML = `<div class="error-message">${message}</div>`;

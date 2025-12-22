@@ -57,7 +57,7 @@ CREATE POLICY "Students can view their free access"
     (
       access_type = 'group'
       AND group_letter = (
-        SELECT group_letter FROM students
+        SELECT group_name FROM students  -- FIXED: students table uses group_name
         WHERE auth_user_id = auth.uid()
       )
     )

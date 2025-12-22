@@ -5458,16 +5458,16 @@ ORDER BY timestamp DESC;</pre>
             switch (value) {
               case 'current':
                 {
-                  // Start of current month at midnight
-                  const startOfMonth = new Date(currentYear, currentMonth, 1, 0, 0, 0, 0);
+                  // Start of current month at midnight (using UTC to match stored timestamps)
+                  const startOfMonth = new Date(Date.UTC(currentYear, currentMonth, 1, 0, 0, 0, 0));
                   fromTime = startOfMonth.getTime();
                   toTime = null; // No end limit for current month (ongoing)
                 }
                 break;
               case 'ytd':
                 {
-                  // Start of current year at midnight
-                  const startOfYear = new Date(currentYear, 0, 1, 0, 0, 0, 0);
+                  // Start of current year at midnight (using UTC to match stored timestamps)
+                  const startOfYear = new Date(Date.UTC(currentYear, 0, 1, 0, 0, 0, 0));
                   fromTime = startOfYear.getTime();
                   toTime = null; // No end limit for YTD (ongoing)
                 }
@@ -5476,14 +5476,13 @@ ORDER BY timestamp DESC;</pre>
                 if (/^\d{4}-\d{2}$/.test(value)) {
                   const [year, month] = value.split('-').map(Number);
                   
-                  // Start of selected month at midnight (month is 1-indexed in string, convert to 0-indexed)
-                  const startOfMonth = new Date(year, month - 1, 1, 0, 0, 0, 0);
+                  // Start of selected month at midnight UTC (month is 1-indexed in string, convert to 0-indexed)
+                  const startOfMonth = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
                   
-                  // End of selected month: last millisecond of the last day
-                  // Using new Date(year, month, 0) gets the last day of previous month
-                  // So new Date(year, month, 0) = last day of (month-1) = last day of our target month
-                  const lastDayOfMonth = new Date(year, month, 0).getDate(); // Get day number (28-31)
-                  const endOfMonth = new Date(year, month - 1, lastDayOfMonth, 23, 59, 59, 999);
+                  // End of selected month: last millisecond of the last day in UTC
+                  // Date.UTC(year, month, 0) gives us the last day of the previous month
+                  // which is the last day of our target month
+                  const endOfMonth = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
                   
                   fromTime = startOfMonth.getTime();
                   toTime = endOfMonth.getTime();
@@ -5833,7 +5832,34 @@ ORDER BY timestamp DESC;</pre>
         }
 
         async function updateMonthTotals() {
-          // ⚡ GRAND TOTALS: Check cache first (5-minute TTL)
+          // 🔍 FILTERED TOTALS: If filters are active, calculate from filtered records
+          const hasActiveFilters = state.filters.search || 
+                                   state.filters.dateFrom || 
+                                   state.filters.dateTo || 
+                                   (state.filters.methods && state.filters.methods.size > 0) ||
+                                   (state.filters.monthFilter && state.filters.monthFilter !== 'all');
+          
+          if (hasActiveFilters && state.filtered && state.filtered.length >= 0) {
+            // Calculate totals from filtered records
+            let count = 0;
+            let usd = 0;
+            let amd = 0;
+
+            state.filtered.forEach(record => {
+              count += 1;
+              usd += record.amountUSD;
+              amd += record.amountAMD;
+            });
+
+            if (dom.monthTotalCount) dom.monthTotalCount.textContent = count.toString();
+            if (dom.monthTotalUSD) dom.monthTotalUSD.textContent = formatUsd(usd);
+            if (dom.monthTotalAMD) dom.monthTotalAMD.textContent = formatAmd(amd);
+
+            debugLog(`💰 Filtered Totals: ${count} payments, ${formatUsd(usd)}, ${formatAmd(amd)}`);
+            return;
+          }
+
+          // ⚡ GRAND TOTALS: Check cache first (5-minute TTL) - only when no filters
           const TOTALS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
           const now = Date.now();
           

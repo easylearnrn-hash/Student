@@ -166,8 +166,7 @@ function createMockStudent(id, name, groupLetter = 'A') {
     id: id,
     name: name,
     group: groupLetter,
-    group_name: `Group ${groupLetter}`,
-    group_letter: groupLetter,
+    group_name: groupLetter,  // Real DB uses group_name, not group_letter
     email: `${name.toLowerCase().replace(/\s/g, '.')}@test.com`,
     show_in_grid: true
   };
@@ -312,7 +311,7 @@ async function runFunctionalTests() {
 
   const mockStudent = createMockStudent(1, 'John Doe', 'B');
   assert(mockStudent.name === 'John Doe', 'Test 1.31: createMockStudent() sets name');
-  assert(mockStudent.group_letter === 'B', 'Test 1.32: createMockStudent() sets group letter');
+  assert(mockStudent.group_name === 'B', 'Test 1.32: createMockStudent() sets group_name');  // Changed from group_letter
   assert(mockStudent.email === 'john.doe@test.com', 'Test 1.33: createMockStudent() generates email');
 
   endCategory('1. FUNCTIONAL TESTS');
@@ -704,7 +703,7 @@ async function runStressTests() {
   
   const groupCounts = {};
   maxStudents.forEach(s => {
-    groupCounts[s.group_letter] = (groupCounts[s.group_letter] || 0) + 1;
+    groupCounts[s.group_name] = (groupCounts[s.group_name] || 0) + 1;  // Changed from group_letter
   });
   
   assert(Object.keys(groupCounts).length === 6, 'Test 5.5: Students in 6 groups');
@@ -1022,7 +1021,7 @@ async function runSecurityTests() {
     createMockStudent(2, 'Bob', 'B')
   ];
   
-  const groupAStudents = students.filter(s => s.group_letter === 'A');
+  const groupAStudents = students.filter(s => s.group_name === 'A');  // DB uses group_name
   assert(groupAStudents.length === 1, 'Test 8.8: Filter students by group');
   assert(groupAStudents[0].name === 'Alice', 'Test 8.9: Correct student in Group A');
 

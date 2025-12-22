@@ -668,6 +668,33 @@
       white-space: pre-wrap;
     }
 
+    .message-bubble.editing {
+      background: linear-gradient(135deg, rgba(156,220,254,0.18), rgba(199,146,234,0.25));
+      box-shadow: 0 0 20px rgba(156, 220, 254, 0.2);
+    }
+
+    .message-edit-input {
+      width: 100%;
+      border: 1px solid rgba(156, 220, 254, 0.4);
+      border-radius: 10px;
+      background: rgba(10, 22, 40, 0.5);
+      color: var(--text-white);
+      font-family: inherit;
+      font-size: 14px;
+      line-height: 1.6;
+      padding: 10px 12px;
+      resize: none;
+      min-height: 80px;
+      margin-bottom: 8px;
+      box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.35);
+    }
+
+    .message-edit-input:focus {
+      outline: none;
+      border-color: var(--accent-purple);
+      box-shadow: 0 0 0 2px rgba(199, 146, 234, 0.25);
+    }
+
     .message-footer {
       display: flex;
       gap: 8px;
@@ -698,6 +725,28 @@
       background: rgba(255, 107, 107, 0.2);
       border-color: var(--danger-red);
       color: var(--danger-red);
+    }
+
+    .msg-action.edit {
+      margin-right: 6px;
+    }
+
+    .msg-action.edit:hover {
+      background: rgba(156, 220, 254, 0.2);
+      border-color: var(--accent-blue);
+      color: var(--accent-blue);
+    }
+
+    .msg-action.save:hover {
+      background: rgba(81, 207, 102, 0.2);
+      border-color: var(--success-green);
+      color: var(--success-green);
+    }
+
+    .msg-action.cancel:hover {
+      background: rgba(255, 212, 59, 0.2);
+      border-color: var(--warning-yellow);
+      color: var(--warning-yellow);
     }
 
     /* Input Area */
@@ -1058,7 +1107,7 @@
   </div>
 
   <script>
-    const DEBUG_MODE = true;
+    const DEBUG_MODE = false;
     const debugLog = (...args) => DEBUG_MODE && console.log(...args);
 
     // Supabase Config
@@ -1390,9 +1439,11 @@
         let messageClass = senderType;
         if (isPrivate) messageClass += ' private';
 
+        const canEdit = senderType === 'admin' && !isFullChatMode;
+
         html += `
           <div class="message ${messageClass}">
-            <div class="message-bubble">
+            <div class="message-bubble" ${canEdit ? `data-message-id="${msg.id}" ondblclick="editMessage(${msg.id})"` : ''}>
               <div class="message-header">
                 <div class="message-sender">
                   ${isPrivate ? '🔒 ' : ''}${senderName}
@@ -1400,8 +1451,11 @@
                 <div class="message-time">${formatTime(msg.created_at)}</div>
               </div>
               <div class="message-text">${escapeHtml(msg.message)}</div>
-              ${senderType === 'admin' && !isFullChatMode ? `
+              ${canEdit ? `
                 <div class="message-footer">
+                  <button class="msg-action edit" onclick="editMessage(${msg.id})">
+                    Edit
+                  </button>
                   <button class="msg-action delete" onclick="deleteMessage(${msg.id})">
                     Delete
                   </button>
@@ -1495,6 +1549,134 @@
       } catch (error) {
         console.error('❌ Error deleting message:', error);
       }
+    }
+
+    // Edit Message
+    let editingMessageId = null;
+    let originalMessageContent = null;
+
+    function getMessageBubble(messageId) {
+      return document.querySelector(`.message-bubble[data-message-id="${messageId}"]`);
+    }
+
+    function getDefaultFooterHtml(messageId) {
+      return `
+        <button class="msg-action edit" onclick="editMessage(${messageId})">
+          Edit
+        </button>
+        <button class="msg-action delete" onclick="deleteMessage(${messageId})">
+          Delete
+        </button>
+      `;
+    }
+
+    function autoResizeTextarea(el) {
+      el.style.height = 'auto';
+      el.style.height = `${el.scrollHeight}px`;
+    }
+
+    function editMessage(messageId) {
+      if (isFullChatMode) return;
+
+  const bubble = getMessageBubble(messageId);
+  if (!bubble || bubble.classList.contains('editing')) return;
+
+      // If another message is currently being edited, cancel it first
+      if (editingMessageId && editingMessageId !== messageId) {
+        cancelEdit(editingMessageId);
+      }
+
+      const messageTextEl = bubble.querySelector('.message-text');
+      const messageFooter = bubble.querySelector('.message-footer');
+      if (!messageTextEl || !messageFooter) return;
+
+      editingMessageId = messageId;
+      originalMessageContent = messageTextEl.textContent;
+
+      messageTextEl.style.display = 'none';
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'message-edit-input';
+      textarea.value = originalMessageContent;
+      textarea.setAttribute('data-edit-input', 'true');
+      bubble.insertBefore(textarea, messageFooter);
+      bubble.classList.add('editing');
+
+      autoResizeTextarea(textarea);
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      textarea.addEventListener('input', () => autoResizeTextarea(textarea));
+
+      messageFooter.innerHTML = `
+        <button class="msg-action save" onclick="saveMessage(${messageId})">
+          Save
+        </button>
+        <button class="msg-action cancel" onclick="cancelEdit(${messageId})">
+          Cancel
+        </button>
+      `;
+    }
+
+    async function saveMessage(messageId) {
+      const bubble = getMessageBubble(messageId);
+      if (!bubble) return;
+
+      const textarea = bubble.querySelector('.message-edit-input');
+      if (!textarea) return;
+
+      const newText = textarea.value.trim();
+      if (!newText) {
+        alert('Message cannot be empty');
+        return;
+      }
+
+      try {
+        const { error } = await supabaseClient
+          .from('chat_messages')
+          .update({ message: newText })
+          .eq('id', messageId);
+
+        if (error) throw error;
+
+        finishEditing(bubble, newText);
+        debugLog('✅ Message updated');
+      } catch (error) {
+        console.error('❌ Error updating message:', error);
+        alert('Failed to update message. Please try again.');
+      }
+    }
+
+    function cancelEdit(messageId) {
+      const bubble = getMessageBubble(messageId);
+      if (!bubble) return;
+      finishEditing(bubble, originalMessageContent);
+    }
+
+    function finishEditing(bubble, text) {
+      const messageId = bubble.dataset.messageId;
+      const messageTextEl = bubble.querySelector('.message-text');
+      const textarea = bubble.querySelector('.message-edit-input');
+      const messageFooter = bubble.querySelector('.message-footer');
+
+      if (textarea) {
+        textarea.remove();
+      }
+
+      if (messageTextEl) {
+        if (typeof text === 'string') {
+          messageTextEl.textContent = text;
+        }
+        messageTextEl.style.display = '';
+      }
+
+      bubble.classList.remove('editing');
+
+      if (messageFooter) {
+        messageFooter.innerHTML = getDefaultFooterHtml(messageId);
+      }
+
+      editingMessageId = null;
+      originalMessageContent = null;
     }
 
     // Clear All Messages

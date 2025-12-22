@@ -302,6 +302,11 @@
       box-shadow: 0 2px 8px rgba(37, 99, 235, 0.15);
     }
 
+    .bubble.editing-mode{
+      box-shadow: 0 0 0 2px rgba(34,211,238,.25), 0 8px 24px rgba(0,0,0,.35);
+      border-color: rgba(34,211,238,.45);
+    }
+
     .bubble:hover{
       border-color: rgba(96, 165, 250, 0.5);
       box-shadow: 0 4px 20px rgba(37, 99, 235, 0.25);
@@ -999,6 +1004,27 @@
         return (tmp.textContent || "").trim();
       }
 
+      function lockBubbleSize(bubble){
+        if(!bubble) return;
+        const width = bubble.offsetWidth || bubble.clientWidth || bubble.scrollWidth || 0;
+        if(width){
+          bubble.dataset.lockedWidth = width;
+          bubble.style.width = width + "px";
+          bubble.style.maxWidth = width + "px";
+          bubble.style.minWidth = width + "px";
+        }
+        bubble.classList.add("editing-mode");
+      }
+
+      function releaseBubbleSize(bubble){
+        if(!bubble) return;
+        delete bubble.dataset.lockedWidth;
+        bubble.style.width = "";
+        bubble.style.maxWidth = "";
+        bubble.style.minWidth = "";
+        bubble.classList.remove("editing-mode");
+      }
+
       // ---------- Edit ----------
       function startEdit(m){
         if(m.softDeleted || m.hardDeleted) return;
@@ -1008,6 +1034,8 @@
 
         const bubble = node.querySelector(".bubble");
         const currentPlain = stripText(m.html);
+
+        lockBubbleSize(bubble);
 
         bubble.innerHTML = `
           <textarea class="edit-box" id="edit_${m.id}">${escHtml(currentPlain)}</textarea>
@@ -1029,10 +1057,14 @@
           }
           m.html = escHtml(next);
           m.edited = true;
+          releaseBubbleSize(bubble);
           render();
         });
 
-        $("cancel_" + m.id).addEventListener("click", render);
+        $("cancel_" + m.id).addEventListener("click", () => {
+          releaseBubbleSize(bubble);
+          render();
+        });
       }
 
       // ---------- Delete / Pin ----------
@@ -1439,13 +1471,36 @@
         if(!node) return;
 
         const bubble = node.querySelector(".bubble");
-        const currentPlain = stripText(m.html);
+  lockBubbleSize(bubble);
+        
+        // Get the raw message text with line breaks preserved
+        const currentPlain = m.rawMessage || stripText(m.html);
 
         // Store original HTML
         const originalHTML = bubble.innerHTML;
 
+        // Keep bubble styling, just swap content for textarea
         bubble.innerHTML = `
-          <textarea class="edit-box" id="edit_group_${m.id}" style="width: 100%; min-height: 80px; padding: 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.3); background: rgba(0,0,0,0.4); color: white; font-size: 13px; resize: vertical;">${escHtml(currentPlain)}</textarea>
+          <textarea class="edit-box" id="edit_group_${m.id}" style="
+            width: 100%;
+            height: 100%;
+            min-height: 200px;
+            padding: 0;
+            margin: 0;
+            border: none;
+            background: transparent;
+            color: white;
+            font-size: 13px;
+            line-height: 1.5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            resize: both;
+            box-sizing: border-box;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            outline: 2px solid rgba(34, 211, 238, 0.5);
+            outline-offset: -2px;
+          ">${escHtml(currentPlain)}</textarea>
           <div class="edit-actions" style="display: flex; gap: 8px; margin-top: 10px;">
             <button class="edit-save" id="save_group_${m.id}" style="padding: 8px 16px; background: rgba(34, 211, 238, 0.2); border: 1px solid rgba(34, 211, 238, 0.4); border-radius: 8px; color: #22d3ee; cursor: pointer; font-weight: 500;">Save</button>
             <button class="edit-cancel" id="cancel_group_${m.id}" style="padding: 8px 16px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 8px; color: white; cursor: pointer; font-weight: 500;">Cancel</button>
@@ -1453,6 +1508,7 @@
         `;
 
         const box = $("edit_group_" + m.id);
+        
         box.focus();
         box.setSelectionRange(box.value.length, box.value.length);
 
@@ -1475,16 +1531,19 @@
             m.rawMessage = newText;
             m.edited = true;
             sys('✏️ Message edited');
+            releaseBubbleSize(bubble);
             renderGroupChat();
           } catch (error) {
             console.error('❌ Error editing message:', error);
             sys('Failed to edit message');
             bubble.innerHTML = originalHTML;
+            releaseBubbleSize(bubble);
           }
         });
 
         $("cancel_group_" + m.id).addEventListener("click", () => {
           bubble.innerHTML = originalHTML;
+          releaseBubbleSize(bubble);
         });
       }
 

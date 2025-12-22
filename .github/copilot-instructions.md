@@ -9,19 +9,70 @@ Each HTML file is a **self-contained application** with inline CSS/JS—no bundl
 - **Shared Modules**: `shared-auth.js`, `shared-dialogs.js` (imported via `<script src>`—no module syntax)
 
 All pages load Supabase via CDN: `https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1`  
-**CRITICAL**: Always hard-code `SUPABASE_URL` and `SUPABASE_ANON_KEY` in each page, then instantiate: `window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)`
+
+---
+
+## ⚠️ CRITICAL: Supabase Client Variable Name Enforcement
+
+### ❗ THE ONLY VALID SUPABASE CLIENT VARIABLE IS:
+
+```javascript
+supabaseClient
+```
+
+### 🚫 NEVER USE:
+- ❌ `Supabase`
+- ❌ `supabase`
+- ❌ `client`
+- ❌ `db`
+- ❌ Any other variation
+
+### ✅ MANDATORY PATTERN:
+
+**All HTML pages MUST use this exact pattern:**
+
+```javascript
+const SUPABASE_URL = 'https://ekndrsvdyajpbaghhzol.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVrbmRyc3ZkeWFqcGJhZ2hoem9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzMyNjc4NTEsImV4cCI6MjA0ODg0Mzg1MX0.VCJxi5ECgy4gCzk6UbkAJSaWBpx7_y0kZSZRgD7HkVo';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+```
+
+### 📌 Enforcement Rules:
+
+1. **Before writing ANY Supabase code:**
+   - Scan the current file for existing Supabase client variable
+   - If `supabaseClient` exists, REUSE IT
+   - NEVER create new variables like `supabase`, `client`, etc.
+
+2. **All Supabase operations MUST use `supabaseClient`:**
+   ```javascript
+   // ✅ CORRECT
+   await supabaseClient.from('students').select('*')
+   await supabaseClient.auth.signIn()
+   await supabaseClient.storage.from('bucket').upload()
+   
+   // ❌ WRONG - Will cause "supabase.from is not a function" error
+   await supabase.from('students').select('*')
+   await Supabase.from('students').select('*')
+   ```
+
+3. **Auto-Fix Rule:**
+   - If you catch yourself writing `supabase.from(...)`, immediately rewrite as `supabaseClient.from(...)`
+   - This applies to ALL Supabase operations: queries, inserts, updates, deletes, auth, storage, realtime
+
+4. **Applies to:**
+   - Database queries (`.from()`, `.select()`, `.insert()`, `.update()`, `.delete()`)
+   - Authentication (`.auth.signIn()`, `.auth.signOut()`, `.auth.getSession()`)
+   - Storage operations (`.storage.from()`)
+   - Realtime subscriptions (`.channel()`, `.on()`)
+   - Edge Function calls (`.functions.invoke()`)
+
+### 🧠 Copilot Behavior:
+**ASSUME**: "This project uses `supabaseClient` as the single source of truth for all Supabase access. No exceptions."
 
 ---
 
 ## 🗄️ Data Layer: Supabase Schema & Cross-Module Contracts
-
-### Supabase Connection Details
-**CRITICAL**: All HTML pages must hard-code these credentials:
-```javascript
-const SUPABASE_URL = 'https://ekndrsvdyajpbaghhzol.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVrbmRyc3ZkeWFqcGJhZ2hoem9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzMyNjc4NTEsImV4cCI6MjA0ODg0Mzg1MX0.VCJxi5ECgy4gCzk6UbkAJSaWBpx7_y0kZSZRgD7HkVo';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-```
 
 ### Complete Table Schema & Indexes
 All tables with their primary keys, indexes, and unique constraints:
@@ -51,7 +102,8 @@ All tables with their primary keys, indexes, and unique constraints:
 - `students` - Student records
   - PK: `id`
   - Indexes: `auth_user_id`, `show_in_grid`
-  - Fields: `name`, `group_letter`, `price_per_class`, `balance`, `aliases[]`
+  - Fields: `name`, `group_name` (stores "A", "B", "C", etc.), `price_per_class`, `balance`, `aliases[]`, `email`, `phone`, `status`, `notes`, `show_in_grid`
+  - **IMPORTANT**: Uses `group_name` NOT `group_letter`
 
 - `student_absences` - Absence tracking
   - PK: `id`
@@ -61,6 +113,7 @@ All tables with their primary keys, indexes, and unique constraints:
 - `groups` - Group definitions
   - PK: `id`
   - Index: `group_name`
+  - Fields: `group_name` (stores "A", "B", "C", etc.), `schedule` (TEXT format like "Mon 8:00 PM, Wed 8:00 PM"), `active`, `color`, `one_time_schedules`, `updated_at`
 
 - `skipped_classes` - Group-wide class cancellations
   - PK: `id`
@@ -71,11 +124,13 @@ All tables with their primary keys, indexes, and unique constraints:
 - `student_notes` - PDF notes system
   - PK: `id`
   - Indexes: `created_at`, `(group_name, class_date)`, `requires_payment`, `(group_name, sort_order, created_at)`, `category`, `system_category`
+  - Fields: `title`, `pdf_url`, `system_category`, `requires_payment`, `is_system_note`, `class_date`, `created_at`
 
 - `note_folders` - Note organization
   - PK: `id`
-  - Unique: `(folder_name, group_letter)`
-  - Indexes: `group_letter`, `sort_order`
+  - Unique: `(folder_name, group_name)`
+  - Indexes: `group_name`, `sort_order`
+  - **FIXED**: Uses `group_name` NOT `group_letter`
 
 - `note_templates` - Note templates
   - PK: `id`
@@ -95,6 +150,7 @@ All tables with their primary keys, indexes, and unique constraints:
   - PK: `id`
   - Unique: `(note_id, group_letter)`, `(note_id, student_id)`
   - Indexes: `note_id`, `student_id`, `group_letter`
+  - Fields: `note_id`, `access_type` ('group' or 'individual'), `group_letter`, `student_id`, `created_by`
 
 - `student_note_permissions` - Note access permissions
   - PK: `id`
@@ -220,7 +276,7 @@ All tables with their primary keys, indexes, and unique constraints:
 ### Core Tables (shared across all pages)
 | Table | Owner | Readers | Key Fields | Notes |
 |-------|-------|---------|-----------|-------|
-| `students` | `Student-Manager.html` | `Calendar`, `student-portal`, `Payment-Records` | `id`, `name`, `group_letter`, `price_per_class`, `balance`, `show_in_grid`, `aliases[]` | Source of truth for student records |
+| `students` | `Student-Manager.html` | `Calendar`, `student-portal`, `Payment-Records` | `id`, `name`, `group_name`, `price_per_class`, `balance`, `show_in_grid`, `aliases[]`, `email`, `phone`, `status`, `notes` | Source of truth for student records |
 | `payment_records` | `Payment-Records.html` | `Calendar`, `student-portal` | `student_id`, `date`, `amount`, `status` (`paid\|unpaid\|pending\|cancelled\|absent`) | Manual payment entries |
 | `payments` | Auto (Zelle/Venmo) | `Payment-Records`, `student-portal` | `linked_student_id`, `student_id`, `resolved_student_name`, `payer_name`, `for_class` | Automated payment imports with unique constraint on (student_id, for_class) |
 | `student_notes` | `Notes-Manager-NEW.html` | `Group-Notes`, `student-portal`, `Protected-PDF-Viewer` | `pdf_url`, `requires_payment`, `is_system_note`, `system_category` | PDFs in `student-notes` bucket |

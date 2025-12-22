@@ -304,8 +304,9 @@ window.customPrompt = function(title, message, placeholder = '', defaultValue = 
   });
 };
 
-// Custom Prompt with Date Picker
-window.customPromptWithDate = (title, message, dateLabel = 'Select date:', defaultDate = null) => {
+// Custom Prompt with Date Picker (with optional clickable date buttons)
+window.customPromptWithDate = (title, message, dateLabel = 'Select date:', defaultDate = null, classDates = []) => {
+  console.log('🎨 customPromptWithDate called with:', { title, dateLabel, defaultDate, classDatesCount: classDates?.length, classDates });
   initCustomDialogs();
   return new Promise((resolve) => {
     const overlay = document.getElementById('customAlertOverlay');
@@ -316,7 +317,41 @@ window.customPromptWithDate = (title, message, dateLabel = 'Select date:', defau
     const cancelBtn = document.getElementById('customAlertCancel');
 
     titleEl.textContent = title;
-    messageEl.innerHTML = `${message}<br><br><label style="display: block; color: rgba(255,255,255,0.8); font-size: 14px; margin-bottom: 8px;">${dateLabel}</label>`;
+    
+    // Build message with clickable date buttons if provided
+    let fullMessage = message;
+    
+    console.log('🔍 Checking classDates:', classDates, 'Length:', classDates?.length);
+    
+    if (classDates && classDates.length > 0) {
+      console.log('✅ Building date buttons HTML...');
+      const today = new Date();
+      const monthName = today.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      
+      const dateButtonsHtml = `
+        <div style="margin: 20px 0; padding: 16px; background: rgba(59, 130, 246, 0.1); border-left: 3px solid #3b82f6; border-radius: 8px;">
+          <strong style="color: #60a5fa; display: block; margin-bottom: 12px; font-size: 14px;">📅 Quick Select - ${monthName}</strong>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            ${classDates.map(dateObj => {
+              const dateStr = dateObj.display; // "Dec 23 (Mon)"
+              const dateValue = dateObj.value; // "2025-12-23"
+              return `<button 
+                type="button"
+                class="quick-date-btn" 
+                data-date="${dateValue}"
+                style="padding: 8px 16px; background: rgba(59, 130, 246, 0.2); border: 2px solid rgba(59, 130, 246, 0.4); border-radius: 8px; color: #60a5fa; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.background='rgba(59, 130, 246, 0.3)'; this.style.borderColor='rgba(59, 130, 246, 0.6)'"
+                onmouseout="this.style.background='rgba(59, 130, 246, 0.2)'; this.style.borderColor='rgba(59, 130, 246, 0.4)'"
+              >${dateStr}</button>`;
+            }).join('')}
+          </div>
+        </div>
+      `;
+      fullMessage += dateButtonsHtml;
+    }
+    
+    messageEl.innerHTML = `${fullMessage}<br><label style="display: block; color: rgba(255,255,255,0.8); font-size: 14px; margin-bottom: 8px;">${dateLabel}</label>`;
+    
     inputEl.style.display = 'block';
     inputEl.type = 'date';
     // Get local date in YYYY-MM-DD format without timezone conversion
@@ -333,6 +368,24 @@ window.customPromptWithDate = (title, message, dateLabel = 'Select date:', defau
     okBtn.textContent = 'Post';
     okBtn.className = 'custom-alert-btn ok';
 
+    // Add click handlers for quick date buttons
+    const handleQuickDateClick = (e) => {
+      if (e.target.classList.contains('quick-date-btn')) {
+        const dateValue = e.target.getAttribute('data-date');
+        inputEl.value = dateValue;
+        
+        // Visual feedback
+        document.querySelectorAll('.quick-date-btn').forEach(btn => {
+          btn.style.background = 'rgba(59, 130, 246, 0.2)';
+          btn.style.borderColor = 'rgba(59, 130, 246, 0.4)';
+        });
+        e.target.style.background = 'rgba(34, 197, 94, 0.3)';
+        e.target.style.borderColor = 'rgba(34, 197, 94, 0.6)';
+      }
+    };
+    
+    messageEl.addEventListener('click', handleQuickDateClick);
+
     const handleOk = () => {
       const value = inputEl.value;
       // Ensure the date string stays in local timezone YYYY-MM-DD format
@@ -342,6 +395,7 @@ window.customPromptWithDate = (title, message, dateLabel = 'Select date:', defau
       okBtn.removeEventListener('click', handleOk);
       cancelBtn.removeEventListener('click', handleCancel);
       inputEl.removeEventListener('keypress', handleEnter);
+      messageEl.removeEventListener('click', handleQuickDateClick);
       inputEl.type = 'text'; // Reset for future prompts
       resolve(value || null);
     };
@@ -352,6 +406,7 @@ window.customPromptWithDate = (title, message, dateLabel = 'Select date:', defau
       okBtn.removeEventListener('click', handleOk);
       cancelBtn.removeEventListener('click', handleCancel);
       inputEl.removeEventListener('keypress', handleEnter);
+      messageEl.removeEventListener('click', handleQuickDateClick);
       inputEl.type = 'text'; // Reset for future prompts
       resolve(null);
     };

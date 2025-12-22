@@ -9939,7 +9939,7 @@
         // Query for individual student access OR group access
         let freeAccessQuery = supabaseClient
           .from('note_free_access')
-          .select('note_id, access_type, group_letter, student_id');
+          .select('note_id, access_type, group_letter, student_id, created_at'); // 🔥 ADD created_at to get post date per group
         
         // Build OR condition: individual access for this student OR group access for their group
         if (normalizedGroupLetter) {
@@ -9964,6 +9964,19 @@
         }
         
         const freeAccessNoteIds = freeAccessGrants?.map(fa => fa.note_id) || [];
+        
+        // 🔥 FIX: Create map of note_id -> created_at from free_access table
+        // This gives us the ACTUAL date each note was posted to THIS group
+        const notePostDateMap = new Map();
+        if (freeAccessGrants) {
+          freeAccessGrants.forEach(grant => {
+            // Use the created_at from note_free_access (when it was posted to this group)
+            if (grant.created_at) {
+              notePostDateMap.set(grant.note_id, grant.created_at);
+            }
+          });
+        }
+        console.log('📅 Note post dates loaded:', notePostDateMap.size, 'notes with specific post dates');
         
         // Combine permission-based access AND free access
         const allAccessibleNoteIds = [...new Set([...permissionNoteIds, ...freeAccessNoteIds])];
@@ -10038,11 +10051,18 @@
         
         // Transform notes to match expected format
         const transformedNotes = notes.map(note => {
-          // Use class_date if available (preferred), fallback to updated_at/created_at
-          // CRITICAL: Parse dates in LOCAL timezone to prevent UTC shift
+          // 🔥 FIX: Use the ACTUAL post date for this group from note_free_access.created_at
+          // This shows when the note was posted to THIS specific group, not the global class_date
           let displayDate;
-          if (note.class_date) {
-            // Parse class_date in local timezone (YYYY-MM-DD format)
+          const groupPostDate = notePostDateMap.get(note.id);
+          
+          if (groupPostDate) {
+            // Use the date from note_free_access (when posted to THIS group)
+            const dateParts = groupPostDate.split('T')[0].split('-');
+            displayDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+            console.log(`📅 Note ${note.id} "${note.title}" posted to this group on: ${groupPostDate.split('T')[0]}`);
+          } else if (note.class_date) {
+            // Fallback to class_date if no free access date (shouldn't happen for free notes)
             const dateParts = note.class_date.split('T')[0].split('-');
             displayDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
           } else if (note.updated_at) {
