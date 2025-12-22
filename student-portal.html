@@ -4832,7 +4832,7 @@
     // CUSTOM DIALOG SYSTEM
     // ==========================================================================
     
-    function showLockedNoteDialog(classDate, noteItem = null) {
+    function showLockedNoteDialog(classDate, noteItem = null, isAbsent = false) {
       // Create modal overlay
       const overlay = document.createElement('div');
       overlay.style.cssText = `
@@ -4863,7 +4863,87 @@
         animation: slideUp 0.2s ease;
       `;
       
-      dialog.innerHTML = `
+      // 🔥 Different message for absent vs unpaid
+      const dialogContent = isAbsent ? `
+        <div style="text-align: center;">
+          <div style="
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 20px;
+            border-radius: 20px;
+            background: linear-gradient(135deg, rgba(251, 146, 60, 0.2), rgba(249, 115, 22, 0.1));
+            border: 1px solid rgba(251, 146, 60, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+          ">🚫</div>
+          
+          <h3 style="
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0 0 12px 0;
+            letter-spacing: -0.02em;
+          ">Note Locked - Absent</h3>
+          
+          <p style="
+            color: rgba(255, 255, 255, 0.75);
+            font-size: 1rem;
+            line-height: 1.6;
+            margin: 0 0 28px 0;
+          ">
+            The system shows you were <strong style="color: rgba(251, 146, 60, 0.95);">absent</strong> on <strong style="color: rgba(255, 255, 255, 0.95);">${classDate}</strong>. 
+            <br><br>
+            If you still want to access the notes and class recording, please make the payment
+            <button id="paymentInfoBtn" style="
+              display: inline-flex;
+              align-items: center;
+              justify-content: center;
+              width: 18px;
+              height: 18px;
+              border-radius: 50%;
+              background: rgba(251, 146, 60, 0.2);
+              border: 1px solid rgba(251, 146, 60, 0.4);
+              color: rgba(251, 146, 60, 0.9);
+              cursor: pointer;
+              font-size: 12px;
+              font-weight: 600;
+              vertical-align: baseline;
+              margin: 0 3px;
+              padding: 0;
+              transition: all 0.2s ease;
+              position: relative;
+              top: 2px;
+            " onmouseover="this.style.background='rgba(251, 146, 60, 0.3)'; this.style.transform='scale(1.15)'"
+               onmouseout="this.style.background='rgba(251, 146, 60, 0.2)'; this.style.transform='scale(1)'"
+               title="Payment Information">
+              <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+              </svg>
+            </button>
+            for this class.
+          </p>
+          
+          <button id="closeDialogBtn" style="
+            width: 100%;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, rgba(251, 146, 60, 0.9), rgba(249, 115, 22, 0.9));
+            border: 1px solid rgba(251, 146, 60, 0.5);
+            border-radius: 12px;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+          " onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 20px rgba(251, 146, 60, 0.4)'"
+             onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='none'">
+            Got it
+          </button>
+        </div>
+      ` : `
         <div style="text-align: center;">
           <div style="
             width: 80px;
@@ -4941,6 +5021,8 @@
           </button>
         </div>
       `;
+      
+      dialog.innerHTML = dialogContent;
       
       overlay.appendChild(dialog);
       document.body.appendChild(overlay);
@@ -7052,6 +7134,40 @@
           }
         }
         
+        // 4. Add absences from student_absences table
+        // Load absences - this happens BEFORE deduplication
+        let absences = [];
+        try {
+          const { data, error } = await supabaseClient
+            .from('student_absences')
+            .select('*')
+            .eq('student_id', student.id);
+          
+          if (!error && data) {
+            // Convert absences to payment records with status='absent'
+            const absenceRecords = data.map(a => {
+              const dateStr = a.class_date ? a.class_date.substring(0, 10) : a.class_date;
+              return {
+                date: new Date(dateStr + 'T00:00:00'),
+                dateString: dateStr,
+                status: 'absent',
+                amount: 0,
+                payment_method: null,
+                notes: 'Marked absent',
+                id: `absence-${a.id}`,
+                source: 'absence'
+              };
+            });
+            allPayments.push(...absenceRecords);
+          } else if (error) {
+            console.error('⚠️ RLS Error loading absences:', error.message, error);
+            debugDebug('⚠️ Error loading absences:', error);
+          }
+        } catch (err) {
+          console.error('⚠️ Network error loading absences:', err);
+          debugDebug('⚠️ Could not load absences:', err);
+        }
+        
         // Sort all payments by date (most recent first)
         allPayments.sort((a, b) => b.date - a.date);
         
@@ -7064,8 +7180,8 @@
         for (const payment of allPayments) {
           const dateKey = payment.date.toISOString().split('T')[0]; // YYYY-MM-DD format
           
-          // ⚠️ ALWAYS include credit payments (don't deduplicate)
-          if (payment.source === 'credit') {
+          // ⚠️ ALWAYS include credit payments and absences (don't deduplicate)
+          if (payment.source === 'credit' || payment.source === 'absence') {
             deduplicatedPayments.push(payment);
             continue;
           }
@@ -7881,11 +7997,9 @@
         }
       }
       
-      // 🎁 FREE ACCESS: Check if note has free access for this student's group
-      if (freeNoteIds && freeNoteIds.has(note.id)) {
-        debugDebug(`🎁 Note ${note.id} unlocked: FREE ACCESS granted to group`);
-        return true;
-      }
+      // 🔥 REMOVED: Free access bypass - notes MUST have payment for their date
+      // Free access just means students CAN SEE the note exists, not that it's unlocked
+      // The note will show blurred until payment is made for that specific date
       
       // If note has a specific class_date, check payment status
       if (note.class_date) {
@@ -10083,15 +10197,19 @@
           // Check if student has FREE access to this note
           const hasFreeAccess = freeNoteIds.has(note.id);
           
-          // � Check if student was ABSENT on this note's date
-          const noteClassDate = note.class_date ? note.class_date.split('T')[0] : null;
+          // 🚫 Check if student was ABSENT on this note's date
+          // 🔥 FIX: Use group-specific post date (from note_free_access), NOT global class_date
+          const noteClassDate = groupPostDate ? groupPostDate.split('T')[0] : 
+                                (note.class_date ? note.class_date.split('T')[0] : null);
           const isAbsent = noteClassDate ? absentDatesSet.has(noteClassDate) : false;
           
-          // �🔐 Use payment-locked notes engine result
+          // 🔐 Use payment-locked notes engine result
           const studentHasPaidForThisNote = notePaymentStatus.get(note.id) || false;
           
-          // Student can access if: note doesn't require payment OR paid for this date OR has free access
-          const isPaid = !noteRequiresPayment || studentHasPaidForThisNote || hasFreeAccess;
+          // 🔥 FIX: Free access notes STILL require payment for the specific date
+          // Free access just means they CAN see it's there, not that it's unlocked
+          // Student can access if: note doesn't require payment OR has paid for this date
+          const isPaid = !noteRequiresPayment || studentHasPaidForThisNote;
           
           if (DEBUG_MODE && noteRequiresPayment && !isPaid && !hasFreeAccess) {
             const classDate = note.class_date ? note.class_date.split('T')[0] : 'unknown';
@@ -11370,9 +11488,12 @@
           // For PDF attachments from our system, use Protected-PDF-Viewer.html
           // Pass student info in URL since sessionStorage doesn't transfer to new tabs
           // CRITICAL: Also pass note ID so video_url can be loaded from database
+          // 🔥 FIX: Pass group-specific post date (not global class_date)
           const cacheBuster = Date.now();
+          // Format date in LOCAL timezone (YYYY-MM-DD) to avoid UTC shift
+          const groupPostDate = `${note.date.getFullYear()}-${String(note.date.getMonth() + 1).padStart(2, '0')}-${String(note.date.getDate()).padStart(2, '0')}`;
           const clickHandler = attachment.type === 'pdf' 
-            ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&note=${note.id}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&v=${cacheBuster}', '_blank')`
+            ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&note=${note.id}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&classDate=${groupPostDate}&v=${cacheBuster}', '_blank')`
             : `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`;
           
           attachmentsHTML += `
@@ -11479,12 +11600,12 @@
       
       // Add click handler for locked/absent notes (expand/collapse now handled by event delegation)
       if (note.isAbsent && !note.isTemplateMissing) {
-        // Absent students show absence dialog
+        // Absent students show absence dialog with payment option
         item.style.cursor = 'pointer';
         item.addEventListener('click', (e) => {
           e.stopPropagation(); // PERFORMANCE: Prevent delegation handler from firing
           const formattedDate = note.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-          showAbsentNoteDialog(formattedDate, item); // Show absence-specific dialog
+          showLockedNoteDialog(formattedDate, item, true); // Pass isAbsent=true
         });
       } else if (!note.isPaid && !note.isTemplateMissing) {
         // Locked notes show payment dialog
@@ -11492,7 +11613,7 @@
         item.addEventListener('click', (e) => {
           e.stopPropagation(); // PERFORMANCE: Prevent delegation handler from firing
           const formattedDate = note.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-          showLockedNoteDialog(formattedDate, item); // Pass the item to collapse after dialog closes
+          showLockedNoteDialog(formattedDate, item, false); // Pass isAbsent=false
         });
       } else if (note.isPaid && !note.isAbsent && (note.attachments?.length > 0 || note.isTemplateMissing)) {
         // Unlocked notes with attachments get pointer cursor (click handled by delegation)
