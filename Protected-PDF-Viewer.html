@@ -1443,6 +1443,7 @@
         const studentName = urlParams.get('studentName'); // Passed from portal
         const studentGroup = urlParams.get('studentGroup'); // Passed from portal
         const studentIdParam = urlParams.get('studentId');
+        const classDateOverride = urlParams.get('classDate'); // 🔥 Group-specific post date from portal
         const parsedStudentId = studentIdParam && !Number.isNaN(Number(studentIdParam))
           ? Number(studentIdParam)
           : null;
@@ -1652,9 +1653,12 @@
                 permissionGrants: permissionGrants.length
               });
               
-              // Check if note requires payment
-              if (note.requires_payment) {
-                console.log('💳 Checking payment requirement for class date:', note.class_date);
+              // Check if note requires payment (FREE access overrides payment enforcement)
+              if (note.requires_payment && !hasFreeAccess) {
+                // 🔥 FIX: Use group-specific date from URL if provided, otherwise fall back to note.class_date
+                const checkDate = classDateOverride || (note.class_date ? note.class_date.split('T')[0] : null);
+                console.log('💳 Checking payment requirement for class date:', checkDate);
+                console.log('   - Date source:', classDateOverride ? 'URL (group-specific)' : 'note.class_date (global)');
                 
                 // Check ALL THREE payment sources (like student portal does)
                 // 1. Manual payment records
@@ -1715,11 +1719,13 @@
                 }
                 
                 // Check if student paid for this note's class date
-                const noteDate = note.class_date ? note.class_date.split('T')[0] : null;
+                // 🔥 FIX: Use the override date (group-specific) instead of note.class_date
+                const noteDate = classDateOverride || (note.class_date ? note.class_date.split('T')[0] : null);
                 const hasPaidForThisDate = noteDate && paidDates.has(noteDate);
                 
                 console.log('💰 Payment check:', {
                   noteDate,
+                  dateSource: classDateOverride ? 'URL (group-specific)' : 'note.class_date (global)',
                   totalPaidDates: paidDates.size,
                   hasPaidForThisDate,
                   paidDates: Array.from(paidDates).sort()
@@ -1731,6 +1737,8 @@
                   return;
                 }
                 console.log('✅ Payment verified for date:', noteDate);
+              } else if (note.requires_payment && hasFreeAccess) {
+                console.log('🆓 FREE ACCESS: Skipping payment verification for note', noteId);
               }
               
               // Store full note data

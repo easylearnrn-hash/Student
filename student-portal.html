@@ -4430,10 +4430,11 @@
           const masterToken = JSON.parse(masterTokenStr);
           console.log('📋 Master token parsed:', masterToken);
           console.log('🔍 Is master access?', masterToken.isMasterAccess);
-          console.log('🔍 Is expired?', masterToken.expiresAt < Date.now());
+          // 🔥 REMOVED TIMEOUT CHECK - impersonation never expires
+          // console.log('🔍 Is expired?', masterToken.expiresAt < Date.now());
           
-          if (masterToken.isMasterAccess && masterToken.expiresAt > Date.now()) {
-            console.log('🔓 MASTER ACCESS detected for:', masterToken.studentName);
+          if (masterToken.isMasterAccess) {
+            console.log('🔓 MASTER ACCESS detected (no timeout):', masterToken.studentName);
             
             // Load student data
             const { data: student, error } = await supabaseClient
@@ -4482,21 +4483,22 @@
           const impersonationToken = JSON.parse(tokenData);
           debugLog('📋 Token parsed:', impersonationToken);
           
-          // Validate token hasn't expired
-          if (impersonationToken.expiresAt < Date.now()) {
-            console.error('⏰ Token expired');
-            alert('Impersonation session has expired.');
-            sessionStorage.removeItem('impersonation_token');
-            localStorage.removeItem('impersonation_token');
-            
-            // If in iframe, tell parent to close modal
-            if (window.self !== window.top) {
-              window.parent.postMessage({ action: 'closeImpersonation', reason: 'expired' }, '*');
-            } else {
-              window.location.href = 'Student-Portal-Admin.html';
-            }
-            return null;
-          }
+          // 🔥 REMOVED TIMEOUT CHECK - impersonation never expires
+          // Admin can stay in impersonation mode indefinitely
+          // if (impersonationToken.expiresAt < Date.now()) {
+          //   console.error('⏰ Token expired');
+          //   alert('Impersonation session has expired.');
+          //   sessionStorage.removeItem('impersonation_token');
+          //   localStorage.removeItem('impersonation_token');
+          //   
+          //   // If in iframe, tell parent to close modal
+          //   if (window.self !== window.top) {
+          //     window.parent.postMessage({ action: 'closeImpersonation', reason: 'expired' }, '*');
+          //   } else {
+          //     window.location.href = 'Student-Portal-Admin.html';
+          //   }
+          //   return null;
+          // }
           
           // Validate student ID matches (convert both to string for comparison)
           if (String(impersonationToken.studentId) !== String(impersonateId)) {
@@ -6309,12 +6311,13 @@
             
             debugDebug('🎭 Parsed impersonation token:', impersonationToken);
             
-            // Validate token hasn't expired
-            if (impersonationToken.expiresAt < Date.now()) {
-              alert('Impersonation session has expired. Returning to admin panel.');
-              exitImpersonation();
-              return;
-            }
+            // 🔥 REMOVED TIMEOUT CHECK - impersonation never expires
+            // Admin can stay in impersonation mode indefinitely
+            // if (impersonationToken.expiresAt < Date.now()) {
+            //   alert('Impersonation session has expired. Returning to admin panel.');
+            //   exitImpersonation();
+            //   return;
+            // }
             
             // Validate student ID matches
             if (impersonationToken.studentId != impersonateId) {
@@ -6968,7 +6971,8 @@
       });
       
       // Check cache first
-      const cacheKey = `payments-${student.id}`;
+      // 🔥 CACHE VERSION: Increment this number to bust cache after deduplication fix
+      const cacheKey = `payments-v2-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached payment history for student:', student.id);
@@ -7002,15 +7006,16 @@
         if (paymentRecords.length > 0) {
           const records = paymentRecords.map(record => {
             const dateStr = record.date ? record.date.substring(0, 10) : null;
+            const normalizedStatus = (record.status || 'unpaid').toLowerCase();
             return {
               date: new Date(record.date),
               dateString: dateStr, // 🔧 Store original date string
-              status: record.status || 'unpaid',
+              status: normalizedStatus,
               amount: parseFloat(record.amount) || 0,
               payment_method: record.payment_method,
               notes: record.notes,
               id: record.id,
-              source: 'manual'
+              source: normalizedStatus === 'absent' ? 'absence' : 'manual'
             };
           });
           allPayments.push(...records);
@@ -7173,15 +7178,29 @@
         
         // ---------- DEDUPLICATION: Remove duplicate payments for same date ----------
         // IMPORTANT: Credit payments are NEVER deduplicated (they're separate transactions)
+        // Absences ARE deduplicated (same date from student_absences + payment_records = one entry)
         // Only deduplicate Zelle/manual payments if they match on the same day
-        const deduplicatedPayments = [];
-        const seenDates = new Map(); // Track date -> payment mapping (excluding credits)
+  const deduplicatedPayments = [];
+  const seenDates = new Map(); // Track date -> payment mapping (excluding credits)
+  const seenAbsenceDates = new Set(); // Track absence dates to prevent duplicates
         
         for (const payment of allPayments) {
           const dateKey = payment.date.toISOString().split('T')[0]; // YYYY-MM-DD format
           
-          // ⚠️ ALWAYS include credit payments and absences (don't deduplicate)
-          if (payment.source === 'credit' || payment.source === 'absence') {
+          // ⚠️ ALWAYS include credit payments (don't deduplicate - they're separate transactions)
+          if (payment.source === 'credit') {
+            deduplicatedPayments.push(payment);
+            continue;
+          }
+          
+          // 🔥 FIX: Deduplicate absences (same date from student_absences + payment_records)
+          const isAbsentStatus = (payment.status || '').toLowerCase() === 'absent';
+          if (payment.source === 'absence' || isAbsentStatus) {
+            if (seenAbsenceDates.has(dateKey)) {
+              debugDebug(`⚠️ Skipping duplicate absence for ${dateKey}`);
+              continue; // Skip duplicate absence
+            }
+            seenAbsenceDates.add(dateKey);
             deduplicatedPayments.push(payment);
             continue;
           }
@@ -7737,7 +7756,8 @@
       paymentList.innerHTML = '';
       
       // � COMBINE ALL ENTRIES: unpaid, absent, and paid into single array
-      const allEntries = [];
+  const allEntries = [];
+  const absenceDisplayDates = new Set();
       
       // Add unpaid class entries
       if (unpaidClasses && unpaidClasses.length > 0) {
@@ -7762,6 +7782,8 @@
           const dateOnlyStr = absentClass.date ? absentClass.date.substring(0, 10) : absentClass.date;
           const parts = dateOnlyStr.split('-');
           const classDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+          const dateKey = dateOnlyStr;
+          absenceDisplayDates.add(dateKey);
           
           allEntries.push({
             date: classDate,
@@ -7805,6 +7827,14 @@
                 statusText = payment.status || 'Unknown';
             }
           }
+          const dateKey = payment.date ? payment.date.toISOString().split('T')[0] : null;
+          if ((payment.status === 'absent' || statusClass === 'absent') && dateKey) {
+            if (absenceDisplayDates.has(dateKey)) {
+              debugDebug(`⚠️ Skipping duplicate displayed absence entry for ${dateKey}`);
+              return;
+            }
+            absenceDisplayDates.add(dateKey);
+          }
           
           allEntries.push({
             date: payment.date,
@@ -7817,21 +7847,40 @@
         });
       }
       
+      // 🔁 FINAL SAFETY: Deduplicate by date + status to prevent duplicates from any source
+      const uniqueEntryMap = new Map();
+      const toDateKey = (dateObj) => {
+        if (!(dateObj instanceof Date) || isNaN(dateObj)) return 'invalid-date';
+        return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+      };
+      allEntries.forEach(entry => {
+        const dateKey = toDateKey(entry.date);
+        const statusKey = entry.statusClass || entry.statusText || entry.type || 'unknown';
+        const dedupeKey = `${dateKey}__${statusKey.toLowerCase()}`;
+        if (!uniqueEntryMap.has(dedupeKey)) {
+          uniqueEntryMap.set(dedupeKey, entry);
+        } else {
+          debugDebug('⚠️ Dropping duplicate payment entry', { dedupeKey, dropped: entry, kept: uniqueEntryMap.get(dedupeKey) });
+        }
+      });
+      const uniqueEntries = Array.from(uniqueEntryMap.values());
+      debugDebug(`🧮 Payment entries: ${allEntries.length} raw → ${uniqueEntries.length} unique after dedupe`);
+      
       // Check if we have any entries
-      if (allEntries.length === 0) {
+      if (uniqueEntries.length === 0) {
         paymentList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 40px;">No payment records found.</div>';
         return;
       }
       
       // 🔄 SORT ALL ENTRIES BY DATE (NEWEST FIRST)
-      allEntries.sort((a, b) => b.date - a.date);
+      uniqueEntries.sort((a, b) => b.date - a.date);
       
-      debugDebug(`📋 Displaying ${allEntries.length} total payment entries sorted by date (newest first)`);
+      debugDebug(`📋 Displaying ${uniqueEntries.length} total payment entries sorted by date (newest first)`);
       
       // Render all entries in chronological order
       const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       
-      allEntries.forEach(entry => {
+  uniqueEntries.forEach(entry => {
         const item = document.createElement('div');
         item.className = `payment-item ${entry.statusClass}`;
         
@@ -7986,20 +8035,24 @@
         return true;
       }
       
-      // 🚫 CRITICAL: Check absence FIRST (blocks even free access notes)
+      // 🎁 FREE ACCESS BYPASS: If note has free access, unlock it UNCONDITIONALLY
+      // Free access means admin granted access regardless of payment, absence, or class schedule
+      const hasFreeAccess = freeNoteIds && freeNoteIds.has(note.id);
+      if (hasFreeAccess) {
+        debugDebug(`🎁 Note ${note.id} unlocked: Has FREE ACCESS (bypasses all checks)`);
+        return true;
+      }
+      
+      // 🚫 CRITICAL: Check absence FIRST (blocks paid notes but not free access notes)
       if (note.class_date) {
         const noteClassDate = note.class_date.split('T')[0];
         
-        // If student was absent on this date, LOCK the note regardless of payment OR free access
+        // If student was absent on this date, LOCK the note (unless it has free access)
         if (absentDatesSet && absentDatesSet.has(noteClassDate)) {
           debugDebug(`🔒 Note ${note.id} (${noteClassDate}) LOCKED: Student was ABSENT on this date`);
           return false;
         }
       }
-      
-      // 🔥 REMOVED: Free access bypass - notes MUST have payment for their date
-      // Free access just means students CAN SEE the note exists, not that it's unlocked
-      // The note will show blurred until payment is made for that specific date
       
       // If note has a specific class_date, check payment status
       if (note.class_date) {
@@ -10053,7 +10106,7 @@
         // Query for individual student access OR group access
         let freeAccessQuery = supabaseClient
           .from('note_free_access')
-          .select('note_id, access_type, group_letter, student_id, created_at'); // 🔥 ADD created_at to get post date per group
+          .select('note_id, access_type, group_letter, student_id, created_at, class_date'); // Include per-group class_date when available
         
         // Build OR condition: individual access for this student OR group access for their group
         if (normalizedGroupLetter) {
@@ -10083,10 +10136,27 @@
         // This gives us the ACTUAL date each note was posted to THIS group
         const notePostDateMap = new Map();
         if (freeAccessGrants) {
+          const normalizeDateString = (value) => {
+            if (!value) return null;
+            return value.includes('T') ? value.split('T')[0] : value;
+          };
+
           freeAccessGrants.forEach(grant => {
-            // Use the created_at from note_free_access (when it was posted to this group)
-            if (grant.created_at) {
-              notePostDateMap.set(grant.note_id, grant.created_at);
+            const classDateString = normalizeDateString(grant.class_date);
+            const createdDateString = normalizeDateString(grant.created_at);
+
+            if (classDateString) {
+              // Prefer explicit class_date recorded when admin posted for this group
+              notePostDateMap.set(grant.note_id, {
+                dateString: classDateString,
+                source: 'class_date'
+              });
+            } else if (!notePostDateMap.has(grant.note_id) && createdDateString) {
+              // Fallback: use created_at only if no class_date captured yet
+              notePostDateMap.set(grant.note_id, {
+                dateString: createdDateString,
+                source: 'created_at'
+              });
             }
           });
         }
@@ -10168,13 +10238,13 @@
           // 🔥 FIX: Use the ACTUAL post date for this group from note_free_access.created_at
           // This shows when the note was posted to THIS specific group, not the global class_date
           let displayDate;
-          const groupPostDate = notePostDateMap.get(note.id);
+          const groupPostMeta = notePostDateMap.get(note.id);
           
-          if (groupPostDate) {
-            // Use the date from note_free_access (when posted to THIS group)
-            const dateParts = groupPostDate.split('T')[0].split('-');
+          if (groupPostMeta?.dateString) {
+            // Use the per-group class_date (or fallback) captured from note_free_access
+            const dateParts = groupPostMeta.dateString.split('-');
             displayDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
-            console.log(`📅 Note ${note.id} "${note.title}" posted to this group on: ${groupPostDate.split('T')[0]}`);
+            console.log(`📅 Note ${note.id} "${note.title}" posted to this group on: ${groupPostMeta.dateString} (source: ${groupPostMeta.source})`);
           } else if (note.class_date) {
             // Fallback to class_date if no free access date (shouldn't happen for free notes)
             const dateParts = note.class_date.split('T')[0].split('-');
@@ -10199,7 +10269,7 @@
           
           // 🚫 Check if student was ABSENT on this note's date
           // 🔥 FIX: Use group-specific post date (from note_free_access), NOT global class_date
-          const noteClassDate = groupPostDate ? groupPostDate.split('T')[0] : 
+          const noteClassDate = groupPostMeta?.dateString || 
                                 (note.class_date ? note.class_date.split('T')[0] : null);
           const isAbsent = noteClassDate ? absentDatesSet.has(noteClassDate) : false;
           

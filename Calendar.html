@@ -8876,10 +8876,43 @@
       let skippedClassesData = {};
   creditPaymentsLookup = {};
       
+      // 🔧 ONE-TIME CLEANUP: Clear for_class from ignored payments
+      async function cleanupIgnoredPayments() {
+        try {
+          const { data: ignoredPayments, error } = await supabaseClient
+            .from('ignored_fuchsia_payments')
+            .select('payment_id');
+          
+          if (error || !ignoredPayments || ignoredPayments.length === 0) {
+            return;
+          }
+          
+          console.log('🔧 Cleaning up', ignoredPayments.length, 'ignored payments...');
+          
+          // Clear for_class for all ignored payments
+          const paymentIds = ignoredPayments.map(p => p.payment_id);
+          const { error: updateError } = await supabaseClient
+            .from('payments')
+            .update({ for_class: null })
+            .in('id', paymentIds);
+          
+          if (updateError) {
+            console.warn('⚠️ Could not cleanup ignored payments:', updateError);
+          } else {
+            console.log('✅ Cleared for_class from', paymentIds.length, 'ignored payments');
+          }
+        } catch (err) {
+          console.warn('⚠️ Cleanup error:', err);
+        }
+      }
+      
       async function initializeData() {
         console.time('⏱️ initializeData Total');
         debugLog('🚀 Initializing calendar data...');
         debugLog('🌎 Using timezone:', LA_TIMEZONE);
+        
+        // 🔧 Run one-time cleanup
+        await cleanupIgnoredPayments();
         
         // Verify current LA time
         const now = new Date();
@@ -12301,15 +12334,16 @@
           try {
             // Create individual payment records for each selected date
             const paymentRecords = dates.map((dateStr, index) => ({
+              id: generatePaymentId(),
               student_id: studentId,
+              linked_student_id: studentId,
               amount: pricePerClass,
               for_class: dateStr,
-              payment_method: 'distributed',
-              notes: `Distributed from original payment of $${paymentAmount} on ${receiptDate}`,
-              dateStr: receiptDate,
-              date: receiptDate,
               resolved_student_name: studentName,
-              source: 'distribution'
+              payer_name: studentName,
+              date: receiptDate,
+              email_date: receiptDate + 'T12:00:00',
+              created_at: new Date().toISOString()
             }));
 
             // Insert new distributed payment records
@@ -12324,7 +12358,18 @@
               return;
             }
 
-            // Mark the original payment as ignored (so fuchsia dot disappears)
+            // ✅ CRITICAL: Remove the for_class allocation from original payment
+            // This prevents the fuchsia dot from appearing (payment no longer misallocated)
+            const { error: updateError } = await supabaseClient
+              .from('payments')
+              .update({ for_class: null })
+              .eq('id', paymentId);
+
+            if (updateError) {
+              console.warn('⚠️ Could not clear for_class from original payment:', updateError);
+            }
+
+            // Mark the original payment as ignored (backup tracking)
             let userEmail = 'admin';
             try {
               const { data: { session } } = await supabaseClient.auth.getSession();
@@ -12340,8 +12385,7 @@
               .insert({
                 payment_id: paymentId,
                 student_id: studentId,
-                ignored_by: userEmail,
-                notes: `Distributed across ${dates.length} dates: ${dates.join(', ')}`
+                ignored_by: userEmail
               });
 
             if (ignoreError) {
@@ -12352,7 +12396,16 @@
 
             // Reload calendar to reflect changes
             if (typeof renderCalendar === 'function') {
+              if (window.studentPaymentMatchCache && typeof window.studentPaymentMatchCache.clear === 'function') {
+                window.studentPaymentMatchCache.clear();
+              }
+
               await loadPayments();
+
+              if (typeof clearMonthCache === 'function') {
+                clearMonthCache();
+              }
+
               renderCalendar();
             }
           } catch (err) {
@@ -12509,18 +12562,40 @@
                   Select ${classesCount} Class Date(s) for Distribution:
                   <span id="selectionCounter" style="color: #ffc107; margin-left: 8px;">(0/${classesCount} selected)</span>
                 </label>
-                <div id="multiSelectList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
-                  ${unpaidClasses.map(cls => `
-                    <button class="multi-select-btn" data-date="${cls.dateStr}" 
-                      style="background: linear-gradient(135deg, rgba(255, 107, 107, 0.2), rgba(255, 107, 107, 0.3)); 
-                      border: 2px solid rgba(255, 107, 107, 0.4); color: #fff; padding: 12px; 
-                      border-radius: 8px; cursor: pointer; text-align: left; transition: all 0.2s; font-size: 14px; position: relative;">
-                      <div style="font-weight: bold;">${cls.dateStr}</div>
-                      <div style="font-size: 12px; opacity: 0.8;">${cls.groupDisplay} • Unpaid</div>
-                      <div class="checkmark" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); 
-                        font-size: 20px; opacity: 0; transition: opacity 0.2s;">✓</div>
+                
+                ${unpaidClasses.length > 0 ? `
+                  <div style="margin-bottom: 15px;">
+                    <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin: 0 0 8px 0;">Quick select from unpaid classes:</p>
+                    <div id="multiSelectList" style="display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto;">
+                      ${unpaidClasses.map(cls => `
+                        <button class="multi-select-btn" data-date="${cls.dateStr}" 
+                          style="background: linear-gradient(135deg, rgba(255, 107, 107, 0.2), rgba(255, 107, 107, 0.3)); 
+                          border: 2px solid rgba(255, 107, 107, 0.4); color: #fff; padding: 12px; 
+                          border-radius: 8px; cursor: pointer; text-align: left; transition: all 0.2s; font-size: 14px; position: relative;">
+                          <div style="font-weight: bold;">${cls.dateStr}</div>
+                          <div style="font-size: 12px; opacity: 0.8;">${cls.groupDisplay} • Unpaid</div>
+                          <div class="checkmark" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); 
+                            font-size: 20px; opacity: 0; transition: opacity 0.2s;">✓</div>
+                        </button>
+                      `).join('')}
+                    </div>
+                  </div>
+                ` : ''}
+                
+                <div style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; margin-top: 15px;">
+                  <p style="color: rgba(255,255,255,0.7); font-size: 13px; margin: 0 0 8px 0;">Or add dates manually:</p>
+                  <div style="display: flex; gap: 8px; align-items: center;">
+                    <input type="date" id="manualDatePicker" 
+                      style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.2); 
+                      background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 14px;">
+                    <button id="addManualDateBtn" 
+                      style="padding: 10px 20px; background: linear-gradient(135deg, #667eea, #764ba2); 
+                      border: none; color: #fff; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold; 
+                      transition: all 0.2s; white-space: nowrap;">
+                      Add Date
                     </button>
-                  `).join('')}
+                  </div>
+                  <div id="manualDatesList" style="margin-top: 10px; display: flex; flex-wrap: wrap; gap: 8px;"></div>
                 </div>
               </div>
             ` : `
@@ -12585,7 +12660,28 @@
           const multiSelectBtns = modal.querySelectorAll('.multi-select-btn');
           const selectionCounter = modal.querySelector('#selectionCounter');
 
-          // 💰 OVERPAYMENT MULTI-SELECT LOGIC
+          // � SHARED HELPER: Update button state and counter (used by both quick-select and manual)
+          const updateButtonState = () => {
+            if (selectionCounter) {
+              selectionCounter.textContent = `(${selectedDates.size}/${classesCount} selected)`;
+            }
+            
+            if (selectedDates.size === classesCount) {
+              okBtn.disabled = false;
+              okBtn.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+              okBtn.style.color = '#fff';
+              okBtn.style.cursor = 'pointer';
+              okBtn.textContent = `Confirm Distribution (${classesCount} dates)`;
+            } else {
+              okBtn.disabled = true;
+              okBtn.style.background = 'rgba(100,100,100,0.3)';
+              okBtn.style.color = 'rgba(255,255,255,0.4)';
+              okBtn.style.cursor = 'not-allowed';
+              okBtn.textContent = `Confirm (${selectedDates.size}/${classesCount})`;
+            }
+          };
+
+          // �💰 OVERPAYMENT MULTI-SELECT LOGIC
           if (isOverpayment && multiSelectBtns.length > 0) {
             multiSelectBtns.forEach(btn => {
               btn.addEventListener('click', () => {
@@ -12612,24 +12708,8 @@
                   checkmark.style.opacity = '1';
                 }
                 
-                // Update counter and button
-                if (selectionCounter) {
-                  selectionCounter.textContent = `(${selectedDates.size}/${classesCount} selected)`;
-                }
-                
-                if (selectedDates.size === classesCount) {
-                  okBtn.disabled = false;
-                  okBtn.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
-                  okBtn.style.color = '#fff';
-                  okBtn.style.cursor = 'pointer';
-                  okBtn.textContent = `Confirm Distribution (${classesCount} dates)`;
-                } else {
-                  okBtn.disabled = true;
-                  okBtn.style.background = 'rgba(100,100,100,0.3)';
-                  okBtn.style.color = 'rgba(255,255,255,0.4)';
-                  okBtn.style.cursor = 'not-allowed';
-                  okBtn.textContent = `Confirm (${selectedDates.size}/${classesCount})`;
-                }
+                // Update counter and button state (shared with manual dates)
+                updateButtonState();
               });
 
               // Hover effect
@@ -12657,6 +12737,85 @@
                 }
               `;
               document.head.appendChild(style);
+            }
+
+            // 📅 MANUAL DATE PICKER LOGIC
+            const manualDatePicker = modal.querySelector('#manualDatePicker');
+            const addManualDateBtn = modal.querySelector('#addManualDateBtn');
+            const manualDatesList = modal.querySelector('#manualDatesList');
+
+            const renderManualDates = () => {
+              const manualDates = Array.from(selectedDates).filter(date => {
+                // Check if this date was added manually (not in unpaid list)
+                return !Array.from(multiSelectBtns).some(btn => btn.getAttribute('data-date') === date);
+              });
+
+              manualDatesList.innerHTML = manualDates.map(date => `
+                <div style="display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; 
+                  background: rgba(102, 126, 234, 0.3); border: 1px solid rgba(102, 126, 234, 0.5); 
+                  border-radius: 8px; font-size: 13px; color: #fff;">
+                  <span>${date}</span>
+                  <button class="remove-manual-date" data-date="${date}" 
+                    style="background: none; border: none; color: #ff6b6b; cursor: pointer; 
+                    font-size: 16px; padding: 0; line-height: 1;">×</button>
+                </div>
+              `).join('');
+
+              // Add remove handlers
+              manualDatesList.querySelectorAll('.remove-manual-date').forEach(removeBtn => {
+                removeBtn.addEventListener('click', () => {
+                  const dateToRemove = removeBtn.getAttribute('data-date');
+                  selectedDates.delete(dateToRemove);
+                  
+                  // Also uncheck the quick-select button if it exists
+                  const quickBtn = Array.from(multiSelectBtns).find(btn => btn.getAttribute('data-date') === dateToRemove);
+                  if (quickBtn) {
+                    const checkmark = quickBtn.querySelector('.multi-select-checkmark');
+                    if (checkmark) checkmark.style.opacity = '0';
+                    quickBtn.style.background = 'linear-gradient(135deg, rgba(255, 107, 107, 0.2), rgba(255, 107, 107, 0.3))';
+                    quickBtn.style.borderColor = 'rgba(255, 107, 107, 0.5)';
+                  }
+
+                  renderManualDates();
+                  updateButtonState();
+                });
+              });
+            };
+
+            if (addManualDateBtn && manualDatePicker) {
+              addManualDateBtn.addEventListener('click', () => {
+                const dateValue = manualDatePicker.value;
+                
+                if (!dateValue) {
+                  addManualDateBtn.style.animation = 'shake 0.3s';
+                  setTimeout(() => { addManualDateBtn.style.animation = ''; }, 300);
+                  return;
+                }
+
+                if (selectedDates.size >= classesCount) {
+                  addManualDateBtn.style.animation = 'shake 0.3s';
+                  setTimeout(() => { addManualDateBtn.style.animation = ''; }, 300);
+                  return;
+                }
+
+                if (selectedDates.has(dateValue)) {
+                  // Already selected - just clear input
+                  manualDatePicker.value = '';
+                  return;
+                }
+
+                selectedDates.add(dateValue);
+                manualDatePicker.value = '';
+                renderManualDates();
+                updateButtonState();
+              });
+
+              // Allow Enter key to add date
+              manualDatePicker.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                  addManualDateBtn.click();
+                }
+              });
             }
           }
 

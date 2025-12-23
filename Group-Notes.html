@@ -2041,6 +2041,9 @@
         grant.group_letter === groupLetter
       );
       const hasFreeAccess = !!freeAccessGrant;
+      
+      // 🎁 FREE ACCESS = VISIBLE: If note has free access, treat it as visible
+      const isVisible = isAccessible || hasFreeAccess;
 
       // CRITICAL FIX: Check if this note is in the global checked set
       const isChecked = globalCheckedNoteIds.has(note.id.toString());
@@ -2048,21 +2051,29 @@
       // Format dates for display
       const formatDate = (dateStr) => {
         if (!dateStr) return '';
-        const date = new Date(dateStr);
+        let date;
+        if (typeof dateStr === 'string' && dateStr.length === 10 && dateStr.includes('-')) {
+          const [year, month, day] = dateStr.split('-');
+          date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        } else {
+          date = new Date(dateStr);
+        }
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       };
 
       // Build status badges
       let statusBadges = '';
-      if (hasFreeAccess && freeAccessGrant?.created_at) {
-        statusBadges += `<div style="display: inline-block; padding: 2px 8px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white; margin-top: 4px; margin-right: 6px;">🆓 FREE (${formatDate(freeAccessGrant.created_at)})</div>`;
+      if (hasFreeAccess && (freeAccessGrant?.class_date || freeAccessGrant?.created_at)) {
+        const freeBadgeDate = freeAccessGrant?.class_date || freeAccessGrant?.created_at;
+        statusBadges += `<div style="display: inline-block; padding: 2px 8px; background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white; margin-top: 4px; margin-right: 6px;">🆓 FREE (${formatDate(freeBadgeDate)})</div>`;
       }
-      if (isAccessible && permission?.created_at) {
-        statusBadges += `<div style="display: inline-block; padding: 2px 8px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white; margin-top: 4px;">👁️ Opened (${formatDate(permission.created_at)})</div>`;
+      if (isAccessible && (permission?.class_date || permission?.created_at)) {
+        const openedBadgeDate = permission?.class_date || permission?.created_at;
+        statusBadges += `<div style="display: inline-block; padding: 2px 8px; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); border-radius: 6px; font-size: 11px; font-weight: 600; color: white; margin-top: 4px;">👁️ Opened (${formatDate(openedBadgeDate)})</div>`;
       }
 
       return `
-        <div class="note-card ${isAccessible ? 'accessible' : ''}" data-note-id="${note.id}" onclick="toggleNoteSelection(${note.id}, event)" style="cursor: pointer;">
+        <div class="note-card ${isVisible ? 'accessible' : ''}" data-note-id="${note.id}" onclick="toggleNoteSelection(${note.id}, event)" style="cursor: pointer;">
           <div class="note-header">
             <label style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; margin-right: 10px;" onclick="event.stopPropagation()">
               <input 
@@ -2078,12 +2089,35 @@
               <div class="note-title">${note.title}</div>
               ${statusBadges}
             </div>
-            <div class="access-badge ${isAccessible ? 'accessible' : 'restricted'}">
-              ${isAccessible ? '✓ Visible' : '✕ Hidden'}
+            <div class="access-badge ${isVisible ? 'accessible' : 'restricted'}">
+              ${isVisible ? '✓ Visible' : '✕ Hidden'}
             </div>
           </div>
           <div class="note-meta">
-            <span>📅 ${new Date(note.class_date).toLocaleDateString()}</span>
+            <span>📅 ${(() => {
+              // 🔥 CRITICAL: Get date from GROUP-SPECIFIC permission/free_access, NOT global note.class_date!
+              let displayDate = null;
+              
+              // Check if this group has free access with a date
+              if (hasFreeAccess && freeAccessGrant?.class_date) {
+                displayDate = freeAccessGrant.class_date;
+              }
+              // Otherwise check if opened (permission) with a date
+              else if (isAccessible && permission?.class_date) {
+                displayDate = permission.class_date;
+              }
+              // Fallback to note's global date (legacy)
+              else if (note.class_date) {
+                displayDate = note.class_date;
+              }
+              
+              if (!displayDate) return 'No date';
+              
+              // Parse date string as local date (not UTC) to avoid timezone shift
+              const [year, month, day] = displayDate.split('T')[0].split('-');
+              const localDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+              return localDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            })()}</span>
             <span>${note.requires_payment ? '🔒 Paid' : '🔓 Free'}</span>
             <span>📦 ${formatFileSize(note.file_size)}</span>
           </div>
@@ -2972,11 +3006,15 @@
         console.error('❌ Error fetching group schedule:', error);
       }
 
+      // Get today's date in LA timezone (YYYY-MM-DD format)
+      const laDateToday = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+      const todayLa = new Date(laDateToday).toISOString().split('T')[0];
+      
       console.log('🎯 Calling customPromptWithDate with:', {
         title: 'Set Class Date',
         message: 'What date are these notes for?',
         dateLabel: 'Or pick any date:',
-        defaultDate: new Date().toISOString().split('T')[0],
+        defaultDate: todayLa,
         classDatesCount: classDatesArray.length,
         classDates: classDatesArray
       });
@@ -2986,7 +3024,7 @@
         'Set Class Date',
         `What date are these notes for?`,
         'Or pick any date:',
-        new Date().toISOString().split('T')[0],
+        todayLa,
         classDatesArray
       );
       
@@ -2996,14 +3034,21 @@
       if (!confirmed) return;
 
       try {
-        // First update the class_date for all selected notes
-        const { error: updateError } = await supabaseClient
-          .from('student_notes')
-          .update({ class_date: classDate })
-          .in('id', Array.from(selectedNoteIds));
+        // 🔥 FIRST: Delete old permissions for these notes+group (to remove old date associations)
+        console.log('🗑️ Removing old permissions for notes:', Array.from(selectedNoteIds));
+        const { error: deleteError } = await supabaseClient
+          .from('student_note_permissions')
+          .delete()
+          .in('note_id', Array.from(selectedNoteIds))
+          .eq('group_name', currentGroup);
 
-        if (updateError) throw updateError;
+        if (deleteError) {
+          console.warn('⚠️ Error deleting old permissions (may not exist):', deleteError);
+        } else {
+          console.log('✅ Old permissions removed');
+        }
 
+        // ✅ CREATE PERMISSIONS with class_date PER-GROUP (not global!)
         let successCount = 0;
         let errorCount = 0;
 
@@ -3016,16 +3061,21 @@
             if (existing) {
               await supabaseClient
                 .from('student_note_permissions')
-                .update({ is_accessible: true })
+                .update({ 
+                  is_accessible: true,
+                  class_date: classDate  // 🔥 DATE PER-GROUP!
+                })
                 .eq('id', existing.id);
               existing.is_accessible = true;
+              existing.class_date = classDate;
             } else {
               const { data, error } = await supabaseClient
                 .from('student_note_permissions')
                 .insert([{
                   note_id: noteId,
                   group_name: currentGroup,
-                  is_accessible: true
+                  is_accessible: true,
+                  class_date: classDate  // 🔥 DATE PER-GROUP!
                 }])
                 .select()
                 .single();
@@ -3358,12 +3408,16 @@
         console.error('❌ Error fetching group schedule:', error);
       }
 
+      // Get today's date in LA timezone (YYYY-MM-DD format)
+      const laDateToday = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+      const todayLa = new Date(laDateToday).toISOString().split('T')[0];
+      
       // Ask for the class date with clickable quick-select buttons
       const classDate = await customPromptWithDate(
         'Set Class Date',
         'What date are these notes for?',
         'Or pick any date:',
-        new Date().toISOString().split('T')[0],
+        todayLa,
         classDatesArray
       );
       
@@ -3378,20 +3432,25 @@
   const { data: { session } } = await supabaseClient.auth.getSession();
         const adminEmail = session?.user?.email;
 
-        // First update the class_date for all selected notes
-  const { error: updateError } = await supabaseClient
-          .from('student_notes')
-          .update({ class_date: classDate })
-          .in('id', noteIds);
+        // 🔥 FIRST: Delete old permissions for these notes+group (to remove old date associations)
+        console.log('🗑️ Removing old permissions for notes:', noteIds);
+        const { error: deleteError } = await supabaseClient
+          .from('student_note_permissions')
+          .delete()
+          .in('note_id', noteIds)
+          .eq('group_name', currentGroup);
 
-        if (updateError) throw updateError;
+        if (deleteError) {
+          console.warn('⚠️ Error deleting old permissions (may not exist):', deleteError);
+        } else {
+          console.log('✅ Old permissions removed');
+        }
 
-        // PERFORMANCE: Removed database verification logs
-
-        // Then create permissions
+        // ✅ CREATE PERMISSIONS with class_date PER-GROUP (not global!)
         const records = noteIds.map(noteId => ({
           note_id: noteId,
           group_name: currentGroup,
+          class_date: classDate,  // 🔥 DATE PER-GROUP!
           granted_by: adminEmail
         }));
 
@@ -3663,7 +3722,9 @@
         console.error('❌ [bulkPostFilteredNotes] Error fetching group schedule:', error);
       }
 
-      const today = new Date().toISOString().split('T')[0];
+      // Get today's date in LA timezone (YYYY-MM-DD format)
+      const laDate = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+      const today = new Date(laDate).toISOString().split('T')[0];
       
       // Use date picker if available
       let postDate;
@@ -3689,7 +3750,24 @@
   const { data: { session } } = await supabaseClient.auth.getSession();
         const adminEmail = session?.user?.email;
 
-        // Update class_date
+        // Get group letter for deletion
+        const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
+
+        // 🔥 FIRST: Delete old free access records for these notes+group (to remove old date associations)
+        console.log('🗑️ Removing old free access for notes:', noteIds, 'Group:', groupLetter);
+        const { error: deleteError } = await supabaseClient
+          .from('note_free_access')
+          .delete()
+          .in('note_id', noteIds)
+          .eq('group_letter', groupLetter);
+
+        if (deleteError) {
+          console.warn('⚠️ Error deleting old free access (may not exist):', deleteError);
+        } else {
+          console.log('✅ Old free access records removed');
+        }
+
+        // THEN: Update class_date
   const { error: updateError } = await supabaseClient
           .from('student_notes')
           .update({ class_date: postDate })
@@ -3698,7 +3776,7 @@
         if (updateError) console.error('Error updating class_date:', updateError);
 
         // Create permissions in note_free_access table (CORRECT TABLE!)
-        const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
+        // (groupLetter already defined above)
         
         console.log('🚨 [BULK POST DEBUG]');
         console.log('📊 Current Group:', currentGroup);
@@ -4287,18 +4365,27 @@
           }
         }
         
+        // Get today's date in LA timezone (YYYY-MM-DD format)
+        const laDateToday = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+        const todayLa = new Date(laDateToday).toISOString().split('T')[0];
+        
         // Ask for the class date with clickable quick-select buttons
         const classDate = await customPromptWithDate(
           'Set Class Date for Free Access',
           `What date should these notes show as opened for free?`,
           'Or pick any date:',
-          new Date().toISOString().split('T')[0],
+          todayLa,
           classDatesArray
         );
         
         if (!classDate) {
           return;
         }
+        
+        // 🔍 DEBUG: Log the selected date to verify it's correct
+        console.log('🗓️ [FREE ACCESS] Selected class date:', classDate);
+        console.log('🗓️ [FREE ACCESS] Date type:', typeof classDate);
+        console.log('🗓️ [FREE ACCESS] Date value will be saved to database as:', classDate);
         
         if (freeAccessType === 'group') {
           // groupLetter already validated above
@@ -4315,18 +4402,45 @@
           const { data: { session } } = await supabaseClient.auth.getSession();
           const adminEmail = session?.user?.email;
           
-          // First update the class_date for all selected notes
-          const { error: updateError } = await supabaseClient
-            .from('student_notes')
-            .update({ class_date: classDate })
-            .in('id', Array.from(selectedNoteIds));
+          // 🎬 SHOW LOADING ANIMATION
+          const loadingDiv = document.createElement('div');
+          loadingDiv.id = 'free-access-loading';
+          loadingDiv.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 99999; display: flex; align-items: center; justify-content: center; flex-direction: column;';
+          loadingDiv.innerHTML = `
+            <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 40px; border-radius: 20px; text-align: center; border: 1px solid rgba(255,255,255,0.1);">
+              <div style="font-size: 48px; margin-bottom: 20px; animation: spin 1s linear infinite;">⚙️</div>
+              <div style="color: white; font-size: 18px; font-weight: 600;">Granting FREE Access...</div>
+              <div style="color: rgba(255,255,255,0.6); font-size: 14px; margin-top: 10px;">Updating ${selectedNoteIds.size} note(s)</div>
+            </div>
+            <style>
+              @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            </style>
+          `;
+          document.body.appendChild(loadingDiv);
+          
+          // 🔥 FIRST: Delete old free access records for these notes+group (to remove old date associations)
+          console.log('🗑️ Removing old free access for notes:', Array.from(selectedNoteIds), 'Group:', groupLetter);
+          const { error: deleteError } = await supabaseClient
+            .from('note_free_access')
+            .delete()
+            .in('note_id', Array.from(selectedNoteIds))
+            .eq('group_letter', groupLetter);
 
-          if (updateError) {
-            console.error('   ❌ Error updating class_date:', updateError);
-            throw updateError;
+          if (deleteError) {
+            console.warn('⚠️ Error deleting old free access (may not exist):', deleteError);
+          } else {
+            console.log('✅ Old free access records removed');
+            // 🧹 ALSO remove them from local cache so re-render uses fresh data
+            freeAccessGrants = freeAccessGrants.filter(grant => {
+              if (grant.access_type !== 'group') return true;
+              const matchesGroup = grant.group_letter === groupLetter;
+              const matchesNote = selectedNoteIds.has(grant.note_id);
+              return !(matchesGroup && matchesNote);
+            });
           }
 
-          // Update all selected notes to have free access for this group
+          // ✅ CREATE FREE ACCESS with class_date PER-GROUP (not global!)
+          console.log('💾 [FREE ACCESS] Creating free access for Group', groupLetter, 'with date:', classDate);
           let successCount = 0;
           let duplicateCount = 0;
           
@@ -4337,6 +4451,7 @@
                 note_id: noteId,
                 group_letter: groupLetter,
                 access_type: 'group',
+                class_date: classDate,  // 🔥 DATE PER-GROUP!
                 created_by: adminEmail
               })
               .select();
@@ -4350,6 +4465,13 @@
               console.error(`   ❌ Error for note ${noteId}:`, error);
               throw error;
             }
+            
+            // ✅ UPDATE LOCAL CACHE (like OPEN/POST does!)
+            if (data && data.length > 0) {
+              freeAccessGrants.push(data[0]);
+              console.log('✅ Added to local freeAccessGrants:', data[0]);
+            }
+            
             successCount++;
           }
 
@@ -4416,7 +4538,17 @@
             }
           );
 
+          // 🎬 REMOVE LOADING ANIMATION
+          const loadingElement = document.getElementById('free-access-loading');
+          if (loadingElement) loadingElement.remove();
+          
           await customAlert('Success', message);
+          
+          // Close the free access modal
+          closeFreeAccessModal();
+          
+          // ✅ RE-RENDER to show updated dates (local cache updated above)
+          await renderSystems();
           
         } else {
           // Individual students
@@ -4437,18 +4569,40 @@
           const { data: { session } } = await supabaseClient.auth.getSession();
           const adminEmail = session?.user?.email;
           
-          // First update the class_date for all selected notes
-          const { error: updateError } = await supabaseClient
-            .from('student_notes')
-            .update({ class_date: classDate })
-            .in('id', Array.from(selectedNoteIds));
+          // 🎬 SHOW LOADING ANIMATION
+          const loadingDiv2 = document.createElement('div');
+          loadingDiv2.id = 'individual-free-access-loading';
+          loadingDiv2.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 99999; display: flex; align-items: center; justify-content: center; flex-direction: column;';
+          loadingDiv2.innerHTML = `
+            <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 40px; border-radius: 20px; text-align: center; border: 1px solid rgba(255,255,255,0.1);">
+              <div style="font-size: 48px; margin-bottom: 20px; animation: spin 1s linear infinite;">⚙️</div>
+              <div style="color: white; font-size: 18px; font-weight: 600;">Granting FREE Access...</div>
+              <div style="color: rgba(255,255,255,0.6); font-size: 14px; margin-top: 10px;">Updating ${selectedNoteIds.size} note(s) for ${freeSelectedStudents.size} student(s)</div>
+            </div>
+            <style>
+              @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            </style>
+          `;
+          document.body.appendChild(loadingDiv2);
+          
+          // 🔥 FIRST: Delete old free access records for these notes+students (to remove old date associations)
+          console.log('🗑️ Removing old individual free access for notes:', Array.from(selectedNoteIds));
+          const { error: deleteError } = await supabaseClient
+            .from('note_free_access')
+            .delete()
+            .in('note_id', Array.from(selectedNoteIds))
+            .in('student_id', Array.from(freeSelectedStudents))
+            .eq('access_type', 'individual');
 
-          if (updateError) {
-            console.error('   ❌ Error updating class_date:', updateError);
-            throw updateError;
+          if (deleteError) {
+            console.warn('⚠️ Error deleting old individual free access (may not exist):', deleteError);
+          } else {
+            console.log('✅ Old individual free access records removed');
           }
 
-          // Update all selected notes to have free access for these students
+          // ✅ CREATE FREE ACCESS with class_date PER-STUDENT (not global!)
+          console.log('💾 [INDIVIDUAL FREE ACCESS] Creating free access with date:', classDate);
+          
           const records = [];
           for (const noteId of selectedNoteIds) {
             for (const studentId of freeSelectedStudents) {
@@ -4456,6 +4610,7 @@
                 note_id: noteId,
                 student_id: studentId,
                 access_type: 'individual',
+                class_date: classDate,  // 🔥 DATE PER-STUDENT!
                 created_by: adminEmail
               });
             }
@@ -4480,6 +4635,13 @@
               console.error('   ❌ Insert error:', error);
               throw error;
             }
+            
+            // ✅ UPDATE LOCAL CACHE (like OPEN/POST does!)
+            if (data && data.length > 0) {
+              freeAccessGrants.push(data[0]);
+              console.log('✅ Added to local freeAccessGrants:', data[0]);
+            }
+            
             successCount++;
           }
 
@@ -4551,22 +4713,20 @@
             }
           );
 
+          // 🎬 REMOVE LOADING ANIMATION
+          const loadingElement2 = document.getElementById('individual-free-access-loading');
+          if (loadingElement2) loadingElement2.remove();
+          
+          // � CLOSE MODAL
+          closeFreeAccessModal();
+          
+          // ✅ SHOW SUCCESS
           await customAlert('Success', message);
+          
+          // ✅ RE-RENDER to show updated dates (local cache updated above)
+          await renderSystems();
         }
 
-        // Reload free access grants to update the UI badges
-  const { data: freeAccess, error: freeError } = await supabaseClient
-          .from('note_free_access')
-          .select('*');
-
-        if (!freeError && freeAccess) {
-          freeAccessGrants = freeAccess;
-        }
-        
-        // PERFORMANCE FIX: Reload fresh data immediately to update FREE tags
-        await loadData(true); // Force refresh - background reload
-
-        closeFreeAccessModal();
         clearSelection();
 
       } catch (error) {
@@ -5221,7 +5381,9 @@
       // 🔥 NEW: Ask for post date with date picker
       console.log('🔍 Checking if customPromptWithDate exists:', typeof window.customPromptWithDate);
       
-      const today = new Date().toISOString().split('T')[0];
+      // Get today's date in LA timezone (YYYY-MM-DD format)
+      const laDate = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+      const today = new Date(laDate).toISOString().split('T')[0];
       
       // Check if function exists
       if (typeof window.customPromptWithDate !== 'function') {
@@ -5249,8 +5411,30 @@
         const adminEmail = session?.user?.email;
 
         const noteIdsArray = Array.from(selectedFilteredNotes);
+        const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
         
-        // Update class_date for all selected notes to chosen date
+        // 🔥 FIRST: Delete old free access records for these notes+group (to remove old date associations)
+        console.log('🗑️ Removing old free access for notes:', noteIdsArray, 'Group:', groupLetter);
+        const { error: deleteError } = await supabaseClient
+          .from('note_free_access')
+          .delete()
+          .in('note_id', noteIdsArray)
+          .eq('group_letter', groupLetter);
+
+        if (deleteError) {
+          console.warn('⚠️ Error deleting old free access (may not exist):', deleteError);
+        } else {
+          console.log('✅ Old free access records removed');
+            // 🧹 ALSO remove them from local cache so re-render uses fresh data
+            freeAccessGrants = freeAccessGrants.filter(grant => {
+              if (grant.access_type !== 'individual') return true;
+              const matchesStudent = freeSelectedStudents.has(grant.student_id);
+              const matchesNote = selectedNoteIds.has(grant.note_id);
+              return !(matchesStudent && matchesNote);
+            });
+        }
+
+        // THEN: Update class_date for all selected notes to chosen date
   const { error: updateError } = await supabaseClient
           .from('student_notes')
           .update({ class_date: postDate })
@@ -5261,8 +5445,6 @@
           // Continue anyway - permissions are more critical
         }
 
-        const groupLetter = currentGroup.replace('Group ', ''); // "Group E" -> "E"
-        
         console.log('🚨 [BULK POST MODAL DEBUG]');
         console.log('📊 Current Group:', currentGroup);
         console.log('🔤 Group Letter:', groupLetter);
