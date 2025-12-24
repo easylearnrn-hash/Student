@@ -572,6 +572,11 @@
     let mediaItems = [];
     let allNotes = []; // Store all notes for filtering
     let currentGroupFilter = 'all'; // Track active group filter
+
+    const normalizeGroupLetter = (value) => {
+      if (!value) return '';
+      return value.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '').charAt(0);
+    };
     let activeGroups = []; // Store active groups from database
     let selectedNotes = new Set(); // Track selected note IDs for bulk operations
 
@@ -634,10 +639,11 @@
 
       // Add tabs only for active groups
       activeGroups.forEach(group => {
-        const letter = group.letter.trim();
+        const normalizedLetter = normalizeGroupLetter(group.letter);
+        const displayLetter = normalizedLetter || group.letter.trim();
         tabsHTML += `
-          <button class="group-tab" onclick="filterByGroup('${letter}')">
-            Group ${letter} <span class="group-tab-badge" id="badge-${letter}">0</span>
+          <button class="group-tab" onclick="filterByGroup('${normalizedLetter}')">
+            Group ${displayLetter} <span class="group-tab-badge" id="badge-${normalizedLetter}">0</span>
           </button>
         `;
       });
@@ -685,28 +691,29 @@
 
       // Initialize counts for active groups only
       activeGroups.forEach(group => {
-        groupCounts[group.letter.trim()] = 0;
+        groupCounts[normalizeGroupLetter(group.letter)] = 0;
       });
 
       // Count notes per group based on video_allowed_groups
       allNotes.forEach(note => {
-        // If video_allowed_groups is null or empty, note is available to all groups
-        if (!note.video_allowed_groups || note.video_allowed_groups.length === 0) {
-          activeGroups.forEach(group => {
-            const letter = group.letter.trim();
-            if (groupCounts[letter] !== undefined) {
-              groupCounts[letter]++;
-            }
-          });
-        } else {
-          // Count only for allowed groups (and only if they're active)
-          note.video_allowed_groups.forEach(groupLetter => {
-            const isActiveGroup = activeGroups.some(g => g.letter.trim() === groupLetter);
-            if (isActiveGroup && groupCounts[groupLetter] !== undefined) {
-              groupCounts[groupLetter]++;
-            }
-          });
-        }
+          // If video_allowed_groups is null or empty, note is available to all groups
+          if (!note.video_allowed_groups || note.video_allowed_groups.length === 0) {
+            activeGroups.forEach(group => {
+              const normalized = normalizeGroupLetter(group.letter);
+              if (groupCounts[normalized] !== undefined) {
+                groupCounts[normalized]++;
+              }
+            });
+          } else {
+            // Count only for allowed groups (and only if they're active)
+            note.video_allowed_groups.forEach(groupLetter => {
+              const normalizedLetter = normalizeGroupLetter(groupLetter);
+              const isActiveGroup = activeGroups.some(g => normalizeGroupLetter(g.letter) === normalizedLetter);
+              if (isActiveGroup && groupCounts[normalizedLetter] !== undefined) {
+                groupCounts[normalizedLetter]++;
+              }
+            });
+          }
       });
 
       // Update badge displays
@@ -740,7 +747,8 @@
             return true;
           }
           // Otherwise, check if current group is in allowed groups
-          return note.video_allowed_groups.includes(currentGroupFilter);
+          const normalizedAllowed = note.video_allowed_groups.map(normalizeGroupLetter);
+          return normalizedAllowed.includes(currentGroupFilter);
         });
       }
 
@@ -898,7 +906,7 @@
     // ============================================================
 
     function filterByGroup(group) {
-      currentGroupFilter = group;
+      currentGroupFilter = group === 'all' ? 'all' : normalizeGroupLetter(group);
       
       // Update active tab
       document.querySelectorAll('.group-tab').forEach(tab => {
@@ -1063,6 +1071,32 @@
       }
 
       try {
+        // 🔒 CRITICAL: Update note's video_allowed_groups based on current group filter
+        // If a specific group is selected, restrict media to ONLY that group
+        // If "All Groups" is selected, make media available to all groups
+        let allowedGroups = null;
+        
+        if (currentGroupFilter !== 'all') {
+          // Specific group selected - restrict to ONLY this group
+          allowedGroups = [currentGroupFilter];
+          console.log(`🔒 Restricting media to Group ${currentGroupFilter} ONLY`);
+        } else {
+          // All Groups selected - media available to everyone
+          allowedGroups = null; // null or empty array = all groups
+          console.log('🌐 Making media available to ALL groups');
+        }
+
+        // Update the note's video_allowed_groups field
+        const { error: updateError } = await supabaseClient
+          .from('student_notes')
+          .update({ 
+            video_allowed_groups: allowedGroups 
+          })
+          .eq('id', currentNote.id);
+
+        if (updateError) throw updateError;
+
+        // Insert the media
         const { data, error } = await supabaseClient
           .from('pdf_media')
           .insert([{
@@ -1076,6 +1110,9 @@
 
         if (error) throw error;
 
+        // Update currentNote object to reflect changes
+        currentNote.video_allowed_groups = allowedGroups;
+
         // Clear form
         document.getElementById('mediaTitle').value = '';
         document.getElementById('mediaUrl').value = '';
@@ -1084,7 +1121,14 @@
         // Reload media
         await loadMedia(currentNote.id);
 
-        await customAlert('Success', '✅ Media added successfully!');
+        // Reload notes list to show updated group access
+        await loadNotes();
+
+        const groupMsg = currentGroupFilter !== 'all' 
+          ? `This media is ONLY visible to Group ${currentGroupFilter}` 
+          : 'This media is visible to ALL groups';
+        
+        await customAlert('Success', `✅ Media added successfully!\n\n${groupMsg}`);
 
       } catch (error) {
         console.error('Error adding media:', error);

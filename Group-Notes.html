@@ -3046,43 +3046,32 @@
           console.warn('⚠️ Error deleting old permissions (may not exist):', deleteError);
         } else {
           console.log('✅ Old permissions removed');
+          // 🔥 CRITICAL FIX: Remove deleted permissions from local array
+          permissions = permissions.filter(p => 
+            !(selectedNoteIds.has(p.note_id) && p.group_name === currentGroup)
+          );
         }
 
-        // ✅ CREATE PERMISSIONS with class_date PER-GROUP (not global!)
+        // ✅ CREATE NEW PERMISSIONS with class_date PER-GROUP
         let successCount = 0;
         let errorCount = 0;
 
         for (const noteId of selectedNoteIds) {
           try {
-            const existing = permissions.find(p => 
-              p.note_id === noteId && p.group_name === currentGroup
-            );
+            // Since we deleted all matching permissions above, always INSERT new ones
+            const { data, error } = await supabaseClient
+              .from('student_note_permissions')
+              .insert([{
+                note_id: noteId,
+                group_name: currentGroup,
+                is_accessible: true,
+                class_date: classDate  // 🔥 DATE PER-GROUP!
+              }])
+              .select()
+              .single();
 
-            if (existing) {
-              await supabaseClient
-                .from('student_note_permissions')
-                .update({ 
-                  is_accessible: true,
-                  class_date: classDate  // 🔥 DATE PER-GROUP!
-                })
-                .eq('id', existing.id);
-              existing.is_accessible = true;
-              existing.class_date = classDate;
-            } else {
-              const { data, error } = await supabaseClient
-                .from('student_note_permissions')
-                .insert([{
-                  note_id: noteId,
-                  group_name: currentGroup,
-                  is_accessible: true,
-                  class_date: classDate  // 🔥 DATE PER-GROUP!
-                }])
-                .select()
-                .single();
-
-              if (error) throw error;
-              permissions.push(data);
-            }
+            if (error) throw error;
+            permissions.push(data);
             successCount++;
           } catch (error) {
             console.error(`Error showing note ${noteId}:`, error);

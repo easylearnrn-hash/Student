@@ -1653,6 +1653,10 @@
                 permissionGrants: permissionGrants.length
               });
               
+              // 🔒 NOTE: video_allowed_groups check is handled in loadMediaContent()
+              // The note PDF is always accessible if student has free/permission access
+              // But videos are blocked if: (1) note is free OR (2) student not in video_allowed_groups
+              
               // Check if note requires payment (FREE access overrides payment enforcement)
               if (note.requires_payment && !hasFreeAccess) {
                 // 🔥 FIX: Use group-specific date from URL if provided, otherwise fall back to note.class_date
@@ -1741,7 +1745,12 @@
                 console.log('🆓 FREE ACCESS: Skipping payment verification for note', noteId);
               }
               
-              // Store full note data
+              // Determine how the student gained access (paid vs free)
+              const accessMode = note.requires_payment
+                ? (hasFreeAccess ? 'free-grant' : 'paid')
+                : 'free-note';
+
+              // Store full note data (include access mode for media rules)
               noteData = {
                 ...noteData,
                 ...note,
@@ -1749,7 +1758,10 @@
                 video_allowed_groups: note.video_allowed_groups,
                 video_controls: note.video_controls,
                 video_title: note.video_title,
-                title: note.title
+                title: note.title,
+                accessMode,
+                hasFreeAccess,
+                hasPermissionAccess
               };
               
             } catch (e) {
@@ -2920,41 +2932,176 @@
     /**
      * Load media content for the current note
      * Fetches video_url from student_notes table and displays it securely
-     * Checks group-specific access if video_allowed_groups is set
+     * 🔒 CRITICAL SECURITY RULES:
+     * 1. If note requires_payment = false (FREE) → NO VIDEO ACCESS for anyone
+     * 2. If note requires_payment = true AND student paid AND in video_allowed_groups → Video access
+     * 3. PDF is always accessible if student has note access (free or paid)
      */
     async function loadMediaContent() {
       const mediaPanelContent = document.getElementById('mediaPanelContent');
       
-      // Check if we have noteData with video_url
-      if (noteData && noteData.video_url) {
-        // Check group-specific access
-        const hasGroupAccess = checkVideoGroupAccess(noteData);
-        
-        if (!hasGroupAccess) {
-          // Video exists but not allowed for this group
+      try {
+        const accessMode = noteData?.accessMode || 'unknown';
+        const isFreeAccess = accessMode === 'free-note' || accessMode === 'free-grant';
+
+        // 🔒 CRITICAL RULE: If note is FREE or accessed via free grant, BLOCK all media access
+        // Videos are ONLY for PAID students in allowed groups
+        if (isFreeAccess) {
+          console.log('🔒 MEDIA BLOCKED:', {
+            reason: accessMode === 'free-note' ? 'Note is free' : 'Free access grant',
+            accessMode,
+            noteId: noteData?.id,
+            student: currentStudent?.name || currentStudent?.id
+          });
           mediaPanelContent.innerHTML = `
             <div class="media-item">
               <h4>📚 Study Resources</h4>
               <p style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
-                🔒 Video content not available for your group.
+                🔒 Video content is only available to paid students in approved groups.
               </p>
             </div>
           `;
           return;
         }
         
-        // Use custom video_title if available, otherwise fall back to note title
-        const videoTitle = noteData.video_title || noteData.title || 'Study Video';
-        const videoEmbed = createProtectedVideoEmbed(noteData.video_url, videoTitle, noteData.video_controls);
+        // 🔒 STEP 1: Check group access for PAID notes
+        const hasGroupAccess = checkVideoGroupAccess(noteData);
         
-        mediaPanelContent.innerHTML = videoEmbed;
-      } else {
-        // No video available - show placeholder
+        if (!hasGroupAccess) {
+          // Group restriction: Student's group NOT in video_allowed_groups
+          console.log('🔒 MEDIA ACCESS DENIED:', {
+            studentGroup: currentStudent?.group_letter || currentStudent?.group_name,
+            allowedGroups: noteData?.video_allowed_groups,
+            noteId: noteData?.id,
+            requiresPayment: noteData?.requires_payment
+          });
+          
+          mediaPanelContent.innerHTML = `
+            <div class="media-item">
+              <h4>📚 Study Resources</h4>
+              <p style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                🔒 Media content not available for your group.
+              </p>
+            </div>
+          `;
+          return;
+        }
+        
+        console.log('✅ MEDIA ACCESS GRANTED:', {
+          studentGroup: currentStudent?.group_letter || currentStudent?.group_name,
+          allowedGroups: noteData?.video_allowed_groups,
+          requiresPayment: noteData?.requires_payment,
+          noteId: noteData?.id,
+          accessMode
+        });
+        
+        if (!hasGroupAccess) {
+          // Group restriction: Student's group NOT in video_allowed_groups
+          console.log('🔒 MEDIA ACCESS DENIED:', {
+            studentGroup: currentStudent?.group_letter || currentStudent?.group_name,
+            allowedGroups: noteData?.video_allowed_groups,
+            noteId: noteData?.id
+          });
+          
+          mediaPanelContent.innerHTML = `
+            <div class="media-item">
+              <h4>📚 Study Resources</h4>
+              <p style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                🔒 Media content not available for your group.
+              </p>
+            </div>
+          `;
+          return;
+        }
+        
+        // 🔒 STEP 2: If group access passed, load media from pdf_media table
+        let mediaHTML = '';
+        
+        // Load media items from pdf_media table
+        const { data: mediaItems, error: mediaError } = await supabaseClient
+          .from('pdf_media')
+          .select('*')
+          .eq('note_id', noteData.id)
+          .order('created_at', { ascending: true });
+        
+        if (mediaError) {
+          console.error('❌ Error loading media:', mediaError);
+        }
+        
+        // Render media items (GIFs, videos, links)
+        if (mediaItems && mediaItems.length > 0) {
+          console.log(`✅ Loaded ${mediaItems.length} media items for note ${noteData.id} (Group ${currentStudent?.group_letter || currentStudent?.group_name} access)`);
+          
+          mediaItems.forEach(item => {
+            if (item.type === 'image') {
+              mediaHTML += `
+                <div class="media-item">
+                  <h4>📸 ${item.title}</h4>
+                  ${item.description ? `<p>${item.description}</p>` : ''}
+                  <div style="margin-top: 12px;">
+                    <img src="${item.url}" alt="${item.title}" style="max-width: 100%; border-radius: 8px;">
+                  </div>
+                </div>
+              `;
+            } else if (item.type === 'video') {
+              const videoEmbed = createProtectedVideoEmbed(item.url, item.title, true);
+              mediaHTML += `
+                <div class="media-item">
+                  <h4>🎬 ${item.title}</h4>
+                  ${item.description ? `<p>${item.description}</p>` : ''}
+                  ${videoEmbed}
+                </div>
+              `;
+            } else if (item.type === 'link') {
+              mediaHTML += `
+                <div class="media-item">
+                  <h4>🔗 ${item.title}</h4>
+                  ${item.description ? `<p>${item.description}</p>` : ''}
+                  <div style="margin-top: 12px;">
+                    <a href="${item.url}" target="_blank" rel="noopener noreferrer" 
+                       style="color: var(--accent-primary); text-decoration: none;">
+                      Open Link →
+                    </a>
+                  </div>
+                </div>
+              `;
+            }
+          });
+        }
+        
+        // Legacy: Also check for old video_url field in student_notes
+        if (noteData && noteData.video_url) {
+          const videoTitle = noteData.video_title || noteData.title || 'Study Video';
+          const videoEmbed = createProtectedVideoEmbed(noteData.video_url, videoTitle, noteData.video_controls);
+          mediaHTML += `
+            <div class="media-item">
+              <h4>🎬 ${videoTitle}</h4>
+              ${videoEmbed}
+            </div>
+          `;
+        }
+        
+        // Display media or show "no media" message
+        if (mediaHTML) {
+          mediaPanelContent.innerHTML = mediaHTML;
+        } else {
+          mediaPanelContent.innerHTML = `
+            <div class="media-item">
+              <h4>📚 Study Resources</h4>
+              <p style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                No additional media available for this note.
+              </p>
+            </div>
+          `;
+        }
+        
+      } catch (error) {
+        console.error('❌ Error loading media content:', error);
         mediaPanelContent.innerHTML = `
           <div class="media-item">
-            <h4>📚 Study Resources</h4>
+            <h4>❌ Error</h4>
             <p style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
-              No additional media available for this note.
+              Failed to load media content.
             </p>
           </div>
         `;
@@ -2962,18 +3109,18 @@
     }
 
     /**
-     * Check if current student's group has access to the video
+     * Check if current student's group has access to media for this note
      * Returns true if:
      * - video_allowed_groups is NULL (all groups allowed)
      * - video_allowed_groups is empty array (all groups allowed)
      * - student's group is in video_allowed_groups array
+     * 
+     * 🔒 CRITICAL: This controls access to ALL media (video_url + pdf_media items)
      */
     function checkVideoGroupAccess(note) {
-      // If no video, no need to check
-      if (!note.video_url) return false;
-      
       // If no restriction set (NULL or empty), allow all groups
       if (!note.video_allowed_groups || note.video_allowed_groups.length === 0) {
+        console.log('✅ No group restrictions - allowing all groups');
         return true;
       }
       
@@ -2985,16 +3132,33 @@
                           fallbackStudent?.group_name ||
                           fallbackStudent?.group;
       
-      if (!studentGroup) return false;
+      if (!studentGroup) {
+        console.log('❌ Student has no group assigned');
+        return false;
+      }
       
       // Normalize to single letter (handle "Group A" or "A")
       const groupLetter = studentGroup.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '').charAt(0);
       
+      console.log('🔍 Checking group access:', {
+        studentGroup: groupLetter,
+        allowedGroups: note.video_allowed_groups,
+        noteId: note.id
+      });
+      
       // Check if student's group is in allowed list
-      return note.video_allowed_groups.some(allowedGroup => {
+      const hasAccess = note.video_allowed_groups.some(allowedGroup => {
         const normalizedAllowed = allowedGroup.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '').charAt(0);
         return normalizedAllowed === groupLetter;
       });
+      
+      if (hasAccess) {
+        console.log(`✅ Group ${groupLetter} HAS ACCESS to note ${note.id}`);
+      } else {
+        console.log(`🔒 Group ${groupLetter} BLOCKED from note ${note.id} (allowed: ${note.video_allowed_groups.join(', ')})`);
+      }
+      
+      return hasAccess;
     }
     
     function toggleMediaPanel(event) {

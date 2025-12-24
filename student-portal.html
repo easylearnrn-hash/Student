@@ -2902,6 +2902,17 @@
       color: #667eea;
     }
     
+    .payment-breakdown-note {
+      margin-top: 8px;
+      padding: 8px 12px;
+      background: rgba(102,126,234,0.1);
+      border-left: 2px solid rgba(102,126,234,0.4);
+      border-radius: 6px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.75);
+      line-height: 1.4;
+    }
+    
     .summary-stats {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -3945,6 +3956,7 @@
             <div class="stat-card" style="border-color: #ef4444;">
               <div class="stat-label">Unpaid</div>
               <div class="stat-value" style="color: #ef4444;" id="totalUnpaid">$0</div>
+              <div class="stat-date" id="unpaidSourceNote" style="display: none;">-</div>
             </div>
             <div class="stat-card" style="border-color: #22c55e;">
           <div class="stat-label">Last Paid</div>
@@ -7511,6 +7523,53 @@
       
       debugDebug(`📅 Generated ${scheduledDates.length} scheduled class dates (after excluding ${skippedClassDates.length} skipped classes)`);
       
+      // 🔥 ADD ONE-TIME SCHEDULED CLASSES (e.g., makeup classes, rescheduled classes)
+      // These are stored in groups.one_time_schedules as JSON array of objects with date/time/description
+      if (groupScheduleData.one_time_schedules && Array.isArray(groupScheduleData.one_time_schedules)) {
+        groupScheduleData.one_time_schedules.forEach(oneTime => {
+          const oneTimeDate = oneTime.date ? oneTime.date.substring(0, 10) : null;
+          if (!oneTimeDate) return;
+          
+          // Parse the date to compare with today
+          const parts = oneTimeDate.split('-');
+          if (parts.length !== 3) return;
+          
+          const oneTimeClassDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+          
+          // Only include if it's in the past or today (and class has started)
+          if (oneTimeClassDate <= todayLA) {
+            // Check if today and class hasn't started yet
+            if (oneTimeDate === todayDateStr) {
+              // Extract time from one-time schedule
+              const oneTimeMatch = oneTime.time ? oneTime.time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i) : null;
+              if (oneTimeMatch) {
+                let hours = parseInt(oneTimeMatch[1]);
+                const minutes = parseInt(oneTimeMatch[2]);
+                const meridiem = oneTimeMatch[3].toUpperCase();
+                if (meridiem === 'PM' && hours !== 12) hours += 12;
+                if (meridiem === 'AM' && hours === 12) hours = 0;
+                const oneTimeInMinutes = hours * 60 + minutes;
+                
+                if (currentTimeInMinutes < oneTimeInMinutes) {
+                  debugDebug(`⏭️ One-time class ${oneTimeDate} hasn't started yet - skipping`);
+                  return;
+                }
+              }
+            }
+            
+            // Add to scheduled dates if not already present and not skipped
+            if (!scheduledDates.includes(oneTimeDate) && !skippedClassDates.includes(oneTimeDate)) {
+              scheduledDates.push(oneTimeDate);
+              debugDebug(`✅ Added one-time scheduled class: ${oneTimeDate} (${oneTime.description || 'Makeup class'})`);
+            }
+          }
+        });
+        
+        // Sort all dates chronologically
+        scheduledDates.sort();
+        debugDebug(`📅 Total scheduled dates (including ${groupScheduleData.one_time_schedules.length} one-time classes): ${scheduledDates.length}`);
+      }
+      
       // Check each scheduled date for payment status
       const unpaidClasses = [];
       const absentClasses = []; // Track absent classes for display
@@ -7582,11 +7641,12 @@
     
     // Load student payment UI only when needed (with DOM caching)
     async function updatePaymentUI(payments = [], student = null, groupSchedule = null) {
-      let totalUnpaid = 0;
+      let totalUnpaid = 0; // Value from ledger/balance calculations
       let lastPaidAmount = 0;
       let lastPaidDate = null;
       let unpaidClasses = []; // Track individual unpaid class dates
       let absentClasses = []; // Track absent class dates
+      let scheduleUnpaidAmount = 0; // Amount derived from schedule analysis
       
       // Cache frequently accessed DOM elements
       let lastPaidEl = getCachedDOM('lastPaid') || document.getElementById('lastPaid');
@@ -7621,8 +7681,9 @@
       const pricePerClassValue = student ? (parseFloat(student.price_per_class) || 50) : 50;
       
       // ✅ USE DATABASE BALANCE AS SOURCE OF TRUTH
-      // The `students.balance` field is managed by admin and is authoritative
-      // Do NOT override it with schedule calculations
+      // The `students.balance` field is managed by admin and is authoritative for ledger tracking.
+      // We still surface schedule-detected unpaid classes so nothing slips through, but we keep
+      // the ledger amount for exports/profile modals.
       if (Number.isFinite(numericBalance)) {
         totalUnpaid = numericBalance;
         debugDebug(`✅ Using database balance as source of truth: $${numericBalance}`);
@@ -7633,6 +7694,7 @@
           const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
           unpaidClasses = result.unpaidClasses; // Track which classes are unpaid
           absentClasses = result.absentClasses || []; // Track absent classes
+          scheduleUnpaidAmount = result.unpaidAmount || 0;
           debugDebug(`📊 Calculated ${unpaidClasses.length} unpaid classes for reference (not affecting balance)`);
         }
       } else {
@@ -7643,6 +7705,7 @@
           totalUnpaid = result.unpaidAmount;
           unpaidClasses = result.unpaidClasses;
           absentClasses = result.absentClasses || [];
+          scheduleUnpaidAmount = result.unpaidAmount || 0;
         } else {
           // Last resort: Calculate from payment_records table only
           debugDebug('⚠️ Using fallback payment_records calculation (no schedule data)');
@@ -7655,15 +7718,30 @@
         }
       }
 
-      if (studentMarkedAbsent && (totalUnpaid > 0 || unpaidClasses.length > 0)) {
+      let displayUnpaidAmount = totalUnpaid;
+      let unpaidSource = 'none';
+      const ledgerAmount = Number.isFinite(numericBalance) ? numericBalance : null;
+
+      if (!Number.isFinite(numericBalance) && scheduleUnpaidAmount > 0) {
+        displayUnpaidAmount = scheduleUnpaidAmount;
+        unpaidSource = 'schedule';
+      } else if (scheduleUnpaidAmount > totalUnpaid) {
+        displayUnpaidAmount = scheduleUnpaidAmount;
+        unpaidSource = 'schedule';
+      } else if (totalUnpaid > 0) {
+        unpaidSource = 'ledger';
+      }
+
+      if (studentMarkedAbsent && (displayUnpaidAmount > 0 || unpaidClasses.length > 0)) {
         debugDebug('🚫 Student marked absent — clearing unpaid totals from portal view.');
-        totalUnpaid = 0;
+        displayUnpaidAmount = 0;
         unpaidClasses = [];
+        unpaidSource = 'none';
       }
       
       // Store globally for profile modal
-      currentTotalUnpaid = totalUnpaid;
-      window.currentTotalUnpaid = totalUnpaid;
+      currentTotalUnpaid = displayUnpaidAmount;
+      window.currentTotalUnpaid = displayUnpaidAmount;
       
       // Calculate last paid
       payments.forEach(payment => {
@@ -7697,7 +7775,26 @@
       
       document.getElementById('lastPaid').textContent = `$${lastPaidAmount.toFixed(0)}`;
       document.getElementById('lastPaidDate').textContent = lastPaidDateText;
-      document.getElementById('totalUnpaid').textContent = `$${totalUnpaid.toFixed(0)}`;
+      document.getElementById('totalUnpaid').textContent = `$${displayUnpaidAmount.toFixed(0)}`;
+
+      const unpaidSourceNoteEl = document.getElementById('unpaidSourceNote');
+      if (unpaidSourceNoteEl) {
+        if (displayUnpaidAmount <= 0) {
+          unpaidSourceNoteEl.style.display = 'none';
+        } else if (unpaidSource === 'schedule' && unpaidClasses.length > 0) {
+          const label = unpaidClasses.length === 1 ? 'class' : 'classes';
+          unpaidSourceNoteEl.textContent = `${unpaidClasses.length} ${label} flagged from schedule`;
+          unpaidSourceNoteEl.style.display = 'block';
+        } else if (unpaidSource === 'ledger') {
+          unpaidSourceNoteEl.textContent = 'Balance from admin ledger';
+          unpaidSourceNoteEl.style.display = 'block';
+        } else if (ledgerAmount !== null && ledgerAmount > 0) {
+          unpaidSourceNoteEl.textContent = 'Balance from admin ledger';
+          unpaidSourceNoteEl.style.display = 'block';
+        } else {
+          unpaidSourceNoteEl.style.display = 'none';
+        }
+      }
 
       const creditCardEl = document.getElementById('creditCard');
       const creditValueEl = document.getElementById('creditBalance');
@@ -7748,7 +7845,7 @@
       
       const unpaidCard = document.querySelector('.stat-card[style*="#ef4444"]');
       if (unpaidCard) {
-        unpaidCard.classList.toggle('has-unpaid', totalUnpaid > 0);
+        unpaidCard.classList.toggle('has-unpaid', displayUnpaidAmount > 0);
       }
       
       const paymentList = document.getElementById('paymentList');
@@ -7797,6 +7894,24 @@
       
       // Add paid payment entries
       if (payments && payments.length > 0) {
+        // Month names for breakdown note formatting
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        
+        // First, build a map of original receipt dates to see which payments were split
+        const receiptDateMap = new Map(); // receiptDate -> [{amount, forClass}, ...]
+        payments.forEach(payment => {
+          if (payment.receiptDate && payment.forClass && payment.receiptDate !== payment.forClass) {
+            // This payment was reassigned from receiptDate to forClass
+            if (!receiptDateMap.has(payment.receiptDate)) {
+              receiptDateMap.set(payment.receiptDate, []);
+            }
+            receiptDateMap.get(payment.receiptDate).push({
+              amount: parseFloat(payment.amount) || 0,
+              forClass: payment.forClass
+            });
+          }
+        });
+        
         payments.forEach(payment => {
           const isCreditPayment = payment.source === 'credit';
           let statusText = 'Unknown';
@@ -7827,7 +7942,41 @@
                 statusText = payment.status || 'Unknown';
             }
           }
-          const dateKey = payment.date ? payment.date.toISOString().split('T')[0] : null;
+          
+          // FIX: Use for_class date (payment.dateString) instead of email_date (payment.date)
+          // This shows when the payment was allocated to, not when it was received
+          let displayDate;
+          let breakdownNote = null;
+          
+          if (payment.dateString) {
+            // payment.dateString is the for_class date (YYYY-MM-DD string)
+            const parts = payment.dateString.split('-');
+            displayDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            console.log(`[Payment Display] Using for_class date: ${payment.dateString}, amount: $${payment.amount}, method: ${payment.payment_method}`);
+            
+            // Check if this payment was split from a larger payment
+            if (payment.receiptDate && receiptDateMap.has(payment.receiptDate)) {
+              const splits = receiptDateMap.get(payment.receiptDate);
+              if (splits.length > 1) {
+                // This payment was split - add a breakdown note
+                const totalAmount = splits.reduce((sum, s) => sum + s.amount, 0);
+                const classesText = splits.map(s => {
+                  const date = new Date(s.forClass + 'T00:00:00');
+                  return `${monthNames[date.getMonth()]} ${date.getDate()}`;
+                }).join(', ');
+                breakdownNote = `Received $${totalAmount} on ${payment.receiptDate} for classes: ${classesText}`;
+              }
+            }
+          } else if (payment.date) {
+            // Fallback to payment.date if dateString not available
+            displayDate = payment.date;
+            console.log(`[Payment Display] No dateString, using payment.date: ${payment.date}, amount: $${payment.amount}`);
+          } else {
+            displayDate = new Date(); // Last resort fallback
+            console.log(`[Payment Display] No date available, using today`);
+          }
+          
+          const dateKey = payment.dateString || (payment.date ? payment.date.toISOString().split('T')[0] : null);
           if ((payment.status === 'absent' || statusClass === 'absent') && dateKey) {
             if (absenceDisplayDates.has(dateKey)) {
               debugDebug(`⚠️ Skipping duplicate displayed absence entry for ${dateKey}`);
@@ -7837,12 +7986,13 @@
           }
           
           allEntries.push({
-            date: payment.date,
+            date: displayDate,  // Now uses for_class date instead of email_date
             type: isCreditPayment ? 'credit' : payment.status,
             amount: parseFloat(payment.amount) || 0,
             statusText: statusText,
             statusClass: statusClass,
-            paymentMethod: payment.payment_method && !isCreditPayment ? ` (${payment.payment_method})` : ''
+            paymentMethod: payment.payment_method && !isCreditPayment ? ` (${payment.payment_method})` : '',
+            breakdownNote: breakdownNote  // Add breakdown note if payment was split
           });
         });
       }
@@ -7892,6 +8042,7 @@
             <span class="status-badge ${entry.statusClass}">${entry.statusText}${entry.paymentMethod || ''}</span>
             ${entry.amount > 0 ? `<span class="payment-amount">$${entry.amount.toFixed(0)}</span>` : (entry.type === 'absent' ? '<span class="payment-amount">-</span>' : '')}
           </div>
+          ${entry.breakdownNote ? `<div class="payment-breakdown-note">${entry.breakdownNote}</div>` : ''}
         `;
         
         paymentList.appendChild(item);
@@ -8020,15 +8171,16 @@
      * @param {Set<string>} paidDatesSet - Set of dates (for_class) the student has paid for
      * @param {Set<string>} absentDatesSet - Set of dates student was marked absent
      * @param {Object} scheduleData - Student's schedule data
+     * @param {string} perGroupClassDate - Per-group posting date from notePostDateMap (overrides note.class_date)
      * @returns {boolean} True if note should be unlocked
      * 
      * CRITICAL LOGIC:
-     * - Notes are unlocked if student has payment with for_class matching note.class_date
-     * - Doesn't matter when payment was made or if it was reassigned by admin
-     * - ONLY checks: Does student have payment.for_class === note.class_date?
+     * - Notes are unlocked if student has payment with for_class matching the PER-GROUP posting date
+     * - Per-group date comes from student_note_permissions.class_date or note_free_access.class_date
+     * - Falls back to note.class_date only if no per-group date available
      * - **ABSENCES LOCK NOTES**: If student was absent, notes STAY LOCKED regardless of payment
      */
-    function shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, allNotesWithDates, paymentRecords, freeNoteIds) {
+    function shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, allNotesWithDates, paymentRecords, freeNoteIds, perGroupClassDate = null) {
       // If note doesn't require payment, unlock it
       if (!note.requires_payment) {
         debugDebug(`🔓 Note ${note.id} unlocked: No payment required`);
@@ -8043,30 +8195,36 @@
         return true;
       }
       
+      // � FIX: Use per-group class date if available, otherwise fall back to note.class_date
+      const effectiveClassDate = perGroupClassDate || (note.class_date ? note.class_date.split('T')[0] : null);
+      
       // 🚫 CRITICAL: Check absence FIRST (blocks paid notes but not free access notes)
-      if (note.class_date) {
-        const noteClassDate = note.class_date.split('T')[0];
-        
+      if (effectiveClassDate) {
         // If student was absent on this date, LOCK the note (unless it has free access)
-        if (absentDatesSet && absentDatesSet.has(noteClassDate)) {
-          debugDebug(`🔒 Note ${note.id} (${noteClassDate}) LOCKED: Student was ABSENT on this date`);
+        if (absentDatesSet && absentDatesSet.has(effectiveClassDate)) {
+          debugDebug(`🔒 Note ${note.id} (${effectiveClassDate}) LOCKED: Student was ABSENT on this date`);
           return false;
         }
       }
       
       // If note has a specific class_date, check payment status
-      if (note.class_date) {
-        const noteClassDate = note.class_date.split('T')[0];
-        
-        // ✅ ROBUST CHECK: Does student have payment with for_class = note.class_date?
+      if (effectiveClassDate) {
+        // ✅ ROBUST CHECK: Does student have payment with for_class = effectiveClassDate?
         // This works even if payment was made late and admin reassigned for_class
-        const hasMatchingPayment = paidDatesSet.has(noteClassDate);
+        const hasMatchingPayment = paidDatesSet.has(effectiveClassDate);
+        
+        // DEBUG: Log payment check
+        console.log(`[shouldUnlockNote] Payment check for note ${note.id}:`, {
+          effectiveDate: effectiveClassDate,
+          hasPayment: hasMatchingPayment,
+          paidDates: Array.from(paidDatesSet)
+        });
         
         if (hasMatchingPayment) {
-          debugDebug(`🔓 Note ${note.id} (${noteClassDate}) unlocked: Student has payment.for_class matching this date`);
+          console.log(`[shouldUnlockNote] UNLOCKED Note ${note.id} (${effectiveClassDate}): Payment found`);
           return true;
         } else {
-          debugDebug(`🔒 Note ${note.id} (${noteClassDate}) LOCKED: No payment with for_class=${noteClassDate}. Student paid for: ${Array.from(paidDatesSet).join(', ')}`);
+          console.log(`[shouldUnlockNote] LOCKED Note ${note.id} (${effectiveClassDate}): No payment. Paid dates: ${Array.from(paidDatesSet).join(', ')}`);
           return false;
         }
       }
@@ -8093,15 +8251,17 @@
      * 4. **ABSENCES LOCK NOTES**: If student was absent, notes STAY LOCKED regardless of payment
      * 5. **FREE ACCESS UNLOCKS NOTES**: If note has free access for student's group, notes UNLOCK (unless absent)
      * 6. Admin reassignments work perfectly: Payment received Dec 16 → reassigned to Dec 18 → unlocks Dec 18 note
+     * 7. **PER-GROUP DATES**: Uses notePostDateMap to check per-group posting dates instead of global note.class_date
      * 
      * @param {Array<Object>} notes - Array of notes
      * @param {Object} student - Student object
      * @param {Array<Object>} paymentRecords - Array of payment records (with for_class dates)
      * @param {Object} scheduleData - Student's schedule data
      * @param {Set<number>} freeNoteIds - Set of note IDs that have free access for student's group
+     * @param {Map<number, string>} notePostDateMap - Map of noteId → per-group posting date (from permissions/free_access)
      * @returns {Map<number, boolean>} Map of noteId -> isPaid status
      */
-    function computeNotePaymentStatus(notes, student, paymentRecords, scheduleData, freeNoteIds) {
+    function computeNotePaymentStatus(notes, student, paymentRecords, scheduleData, freeNoteIds, notePostDateMap = null) {
       const notePaymentStatus = new Map();
       
       // Build set of paid dates using payment.for_class (allocated class dates)
@@ -8126,7 +8286,23 @@
       
       // Check each note
       notes.forEach(note => {
-        const isPaid = shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, notes, paymentRecords, freeNoteIds);
+        // 🔥 FIX: Get per-group posting date if available
+        // notePostDateMap stores objects like {dateString: "2025-12-21", source: "..."}
+        // Extract just the dateString
+        const perGroupDateObj = notePostDateMap ? notePostDateMap.get(note.id) : null;
+        const perGroupDate = perGroupDateObj ? perGroupDateObj.dateString : null;
+        
+        const isPaid = shouldUnlockNote(
+          note, 
+          student, 
+          paidDatesSet, 
+          absentDatesSet, 
+          scheduleData, 
+          notes, 
+          paymentRecords, 
+          freeNoteIds,
+          perGroupDate  // 🔥 Pass per-group date STRING (not object)
+        );
         notePaymentStatus.set(note.id, isPaid);
         
         if (note.class_date) {
@@ -10075,9 +10251,10 @@
         if (DEBUG_MODE) debugLog('📚 Loading notes for Student ID:', studentId, 'Group:', studentGroup);
         
         // Fetch permissions for this student (both group and individual access)
+        // 🔥 FIX: Also fetch class_date and granted_at for per-group posting dates
         const { data: permissions, error: permError} = await supabaseClient
           .from('student_note_permissions')
-          .select('note_id, is_accessible')
+          .select('note_id, is_accessible, class_date, granted_at')
           .or(`student_id.eq.${studentId},and(group_name.eq.${studentGroup},student_id.is.null)`)
           .eq('is_accessible', true);
         
@@ -10132,9 +10309,11 @@
         
         const freeAccessNoteIds = freeAccessGrants?.map(fa => fa.note_id) || [];
         
-        // 🔥 FIX: Create map of note_id -> created_at from free_access table
+        // 🔥 FIX: Create map of note_id -> class_date from BOTH free_access AND permissions tables
         // This gives us the ACTUAL date each note was posted to THIS group
         const notePostDateMap = new Map();
+        
+        // 1. Add dates from FREE ACCESS grants
         if (freeAccessGrants) {
           const normalizeDateString = (value) => {
             if (!value) return null;
@@ -10149,18 +10328,54 @@
               // Prefer explicit class_date recorded when admin posted for this group
               notePostDateMap.set(grant.note_id, {
                 dateString: classDateString,
-                source: 'class_date'
+                source: 'free_access_class_date'
               });
             } else if (!notePostDateMap.has(grant.note_id) && createdDateString) {
               // Fallback: use created_at only if no class_date captured yet
               notePostDateMap.set(grant.note_id, {
                 dateString: createdDateString,
-                source: 'created_at'
+                source: 'free_access_created_at'
               });
             }
           });
         }
+        
+        // 2. Add dates from PERMISSION-BASED PAID ACCESS (student_note_permissions)
+        // CRITICAL: This ensures paid notes show the correct per-group posting date
+        if (permissions) {
+          const normalizeDateString = (value) => {
+            if (!value) return null;
+            return value.includes('T') ? value.split('T')[0] : value;
+          };
+
+          permissions.forEach(permission => {
+            const classDateString = normalizeDateString(permission.class_date);
+            const grantedAtString = normalizeDateString(permission.granted_at);
+
+            // Only set if not already set by free_access (free_access takes priority)
+            if (!notePostDateMap.has(permission.note_id)) {
+              if (classDateString) {
+                // Use the class_date field from student_note_permissions (set when admin posts notes)
+                notePostDateMap.set(permission.note_id, {
+                  dateString: classDateString,
+                  source: 'permission_class_date'
+                });
+              } else if (grantedAtString) {
+                // Fallback: use granted_at timestamp
+                notePostDateMap.set(permission.note_id, {
+                  dateString: grantedAtString,
+                  source: 'permission_granted_at'
+                });
+              }
+            }
+          });
+        }
+        
         console.log('📅 Note post dates loaded:', notePostDateMap.size, 'notes with specific post dates');
+        console.log('   Sources:', Array.from(notePostDateMap.values()).reduce((acc, v) => {
+          acc[v.source] = (acc[v.source] || 0) + 1;
+          return acc;
+        }, {}));
         
         // Combine permission-based access AND free access
         const allAccessibleNoteIds = [...new Set([...permissionNoteIds, ...freeAccessNoteIds])];
@@ -10225,7 +10440,8 @@
           currentStudent,
           mergedPaymentRecords,
           currentGroupScheduleData,  // Student's schedule data loaded earlier
-          freeNoteIds  // Pass free access note IDs to unlock notes (unless absent)
+          freeNoteIds,  // Pass free access note IDs to unlock notes (unless absent)
+          notePostDateMap  // 🔥 FIX: Pass per-group posting dates for payment checking
         );
         
         if (DEBUG_MODE) {
