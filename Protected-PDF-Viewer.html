@@ -436,10 +436,16 @@
        PRINT STYLES - ANTI-PDF-SAVE PROTECTION
        ========================================================================== */
     
+    @page {
+      size: auto;
+      margin: 0;
+    }
+
     @media print {
       body {
         background: white;
         padding: 0;
+        margin: 0;
       }
 
       body::before {
@@ -473,8 +479,8 @@
         border-radius: 0;
         background: white;
         position: relative;
-        min-height: 11in; /* Ensure full page height */
         width: 100%;
+        height: auto;
       }
       
       .page-container:last-child {
@@ -487,17 +493,16 @@
         opacity: 1 !important;
         z-index: 9999 !important;
         pointer-events: none !important;
-        background: repeating-linear-gradient(
-          45deg,
-          transparent,
-          transparent 200px,
-          rgba(125, 211, 252, 0.03) 200px,
-          rgba(125, 211, 252, 0.03) 400px
-        );
+        background: transparent !important; /* FIXED: Transparent so content shows through */
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
       }
       
       .watermark-content {
-        opacity: 0.25 !important; /* Reduced opacity so content is more visible */
+        opacity: 0.15 !important; /* Reduced opacity so content is more visible */
         transform: rotate(-45deg) translateX(40px) !important;
       }
       
@@ -535,14 +540,13 @@
         box-shadow: none;
         position: relative;
         width: 100%;
+        height: auto;
         display: block !important;
         page-break-inside: avoid !important;
       }
 
       .page-screenshot-badge {
-        background: rgba(2, 6, 23, 0.75) !important;
-        color: #e0f2fe !important;
-        border-color: rgba(125, 211, 252, 0.5) !important;
+        display: none !important; /* Hide badge in print */
       }
       
       .page-canvas-screen {
@@ -563,6 +567,11 @@
         page-break-inside: avoid !important;
         opacity: 1 !important;
         visibility: visible !important;
+        position: relative !important;
+        z-index: 1 !important;
+        object-fit: contain !important;
+        margin: 0 !important;
+        padding: 0 !important;
       }
       
       /* Ensure all images print */
@@ -2115,6 +2124,9 @@
         return;
       }
 
+      // Show custom copyright alert before printing
+      await showPrintWarning();
+
       isPreparingPrint = true;
       const printButton = document.getElementById('printButton');
       const originalButtonLabel = printButton ? printButton.innerHTML : null;
@@ -2447,6 +2459,44 @@
         if (e.target === overlay) {
           overlay.remove();
         }
+      });
+    }
+
+    // Print Warning Function - Shows alert and waits for user confirmation
+    function showPrintWarning() {
+      return new Promise((resolve) => {
+        const studentName = getStudentDisplayName();
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'custom-alert-overlay';
+        overlay.innerHTML = `
+          <div class="custom-alert-modal">
+            <div class="custom-alert-icon">⚠️</div>
+            <div class="custom-alert-title">ATTENTION</div>
+            <div class="custom-alert-message">
+              This document belongs to <strong>ARNOMA</strong> and is provided exclusively for <strong>${studentName}</strong>.<br><br>
+              Kindly respect the copyright and refrain from sharing it with others.<br><br>
+              Thank you for your understanding.
+            </div>
+            <button class="custom-alert-button" id="printWarningBtn">
+              I Understand
+            </button>
+          </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        // Resolve promise and remove overlay when button is clicked
+        const button = overlay.querySelector('#printWarningBtn');
+        button.addEventListener('click', () => {
+          overlay.remove();
+          resolve();
+        });
+        
+        // Prevent closing on overlay click for print warning
+        overlay.addEventListener('click', function(e) {
+          e.stopPropagation();
+        });
       });
     }
 
