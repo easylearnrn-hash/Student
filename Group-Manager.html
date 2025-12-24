@@ -2296,8 +2296,43 @@
             .sort((a, b) => a.order - b.order);
         }
 
-        // Add one-time schedules
+        // Add one-time schedules (filter out past ones)
+        const now = new Date();
         const oneTimeParsed = (oneTimeSchedules || [])
+          .filter(schedule => {
+            if (!schedule.date) return false; // Skip if no date
+            
+            // Parse the class date and time
+            const classDateParts = schedule.date.split('-');
+            if (classDateParts.length !== 3) return false;
+            
+            // Extract time from schedule.time (e.g., "8:00 AM")
+            const timeMatch = schedule.time ? schedule.time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i) : null;
+            let hours = 0, minutes = 0;
+            if (timeMatch) {
+              hours = parseInt(timeMatch[1]);
+              const minutesPart = parseInt(timeMatch[2]);
+              const meridiem = timeMatch[3].toUpperCase();
+              if (meridiem === 'PM' && hours !== 12) hours += 12;
+              if (meridiem === 'AM' && hours === 12) hours = 0;
+              minutes = minutesPart;
+            }
+            
+            // Create class end time (class + 2 hours)
+            const classDate = new Date(
+              parseInt(classDateParts[0]),
+              parseInt(classDateParts[1]) - 1,
+              parseInt(classDateParts[2]),
+              hours,
+              minutes
+            );
+            
+            // Add 2 hours for class duration
+            const classEndTime = new Date(classDate.getTime() + (2 * 60 * 60 * 1000));
+            
+            // Only show if class hasn't ended yet
+            return now < classEndTime;
+          })
           .map(schedule => {
             const laDay = normalizeDayName(schedule.day) || schedule.day;
             const laTime = normalizeTimeLabel(schedule.time);
