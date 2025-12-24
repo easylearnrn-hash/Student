@@ -7,12 +7,12 @@
        Purpose: Main student dashboard with schedule, payments, notes, and progress
        Auth: Supports both regular student login and admin impersonation mode
        Data: Direct Supabase integration (self-contained, no bundler)
-       VERSION: 2024-12-24-v3 - ONE-TIME CLASS PAYMENT LABELING FIX
+       VERSION: 2024-12-24-v7 - BALANCE SIGN FIX: POSITIVE=CREDIT, NEGATIVE=DEBT
        ============================================================================ -->
   
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Student Portal - ARNOMA v2024-12-24-v3</title>
+  <title>Student Portal - ARNOMA v2024-12-24-v7</title>
   <link rel="icon" type="image/png" href="/richyfesta-logo.png">
   <link rel="apple-touch-icon" href="/richyfesta-logo.png">
   
@@ -4340,11 +4340,11 @@
        Architecture: Self-contained vanilla JS with direct Supabase integration
        Patterns: DOM caching, data caching with TTL, event-driven updates
        Auth: Supports student login + admin impersonation mode
-       VERSION: 2024-12-24-v2 - CREDIT PAYMENT FIX DEPLOYED
+       VERSION: 2024-12-24-v7 - BALANCE SIGN FIX: POSITIVE=CREDIT, NEGATIVE=DEBT
        ========================================================================== */
     
     // 🔥 VERSION CHECK - Verify this code is loading
-    console.log('🚀 STUDENT PORTAL VERSION: 2024-12-24-v3 (One-Time Class Payment Labeling)');
+    console.log('🚀 STUDENT PORTAL VERSION: 2024-12-24-v7 (Balance Sign Fix: Positive=Credit, Negative=Debt)');
     console.log('📅 Loaded at:', new Date().toLocaleString());
     
     // ==========================================================================
@@ -5650,8 +5650,42 @@
           .sort((a, b) => a.order - b.order);
       }
       
-      // Add one-time schedules
+      // Add one-time schedules (filter out past ones)
+      // Get current time in LA timezone
+      const nowLA = getNowLA();
+      
       const oneTimeParsed = (oneTimeSchedules || [])
+        .filter(schedule => {
+          if (!schedule.date) return false; // Skip if no date
+          
+          // Parse the class date and time
+          const classDateParts = schedule.date.split('-');
+          if (classDateParts.length !== 3) return false;
+          
+          // Extract time from schedule.time (e.g., "8:00 AM")
+          const timeMatch = schedule.time ? schedule.time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i) : null;
+          let hours = 0, minutes = 0;
+          if (timeMatch) {
+            hours = parseInt(timeMatch[1]);
+            const minutesPart = parseInt(timeMatch[2]);
+            const meridiem = timeMatch[3].toUpperCase();
+            if (meridiem === 'PM' && hours !== 12) hours += 12;
+            if (meridiem === 'AM' && hours === 12) hours = 0;
+            minutes = minutesPart;
+          }
+          
+          // Create class end time (class + 2 hours) in LA timezone
+          const classEndTime = new Date(
+            parseInt(classDateParts[0]),
+            parseInt(classDateParts[1]) - 1,
+            parseInt(classDateParts[2]),
+            hours + 2, // Add 2 hours for class duration directly
+            minutes
+          );
+          
+          // Only show if class hasn't ended yet (compare LA times)
+          return nowLA < classEndTime;
+        })
         .map(schedule => {
           const laDay = normalizeDayName(schedule.day) || schedule.day;
           const laTime = normalizeTimeLabel(schedule.time);
@@ -7697,11 +7731,14 @@
       
       // ✅ USE DATABASE BALANCE AS SOURCE OF TRUTH
       // The `students.balance` field is managed by admin and is authoritative for ledger tracking.
+      // SIGN CONVENTION: Positive = Credit (overpayment), Negative = Debt (unpaid)
       // We still surface schedule-detected unpaid classes so nothing slips through, but we keep
       // the ledger amount for exports/profile modals.
       if (Number.isFinite(numericBalance)) {
-        totalUnpaid = numericBalance;
-        debugDebug(`✅ Using database balance as source of truth: $${numericBalance}`);
+        // 🔧 FIX: Only treat NEGATIVE balance as unpaid debt
+        // Positive balance is CREDIT (overpayment), not unpaid
+        totalUnpaid = numericBalance < 0 ? Math.abs(numericBalance) : 0;
+        debugDebug(`✅ Using database balance as source of truth: $${numericBalance} (unpaid: $${totalUnpaid})`);
         
         // Still calculate unpaid classes for display purposes (e.g., showing which classes are unpaid)
         // but DON'T use this to override the balance
@@ -7737,6 +7774,7 @@
       let unpaidSource = 'none';
       const ledgerAmount = Number.isFinite(numericBalance) ? numericBalance : null;
 
+      // Use schedule calculation if it's higher than ledger
       if (!Number.isFinite(numericBalance) && scheduleUnpaidAmount > 0) {
         displayUnpaidAmount = scheduleUnpaidAmount;
         unpaidSource = 'schedule';
@@ -7796,17 +7834,25 @@
       const unpaidSourceNoteEl = document.getElementById('unpaidSourceNote');
       if (unpaidSourceNoteEl) {
         if (displayUnpaidAmount <= 0) {
+          // Hide the note completely - no need to show admin messages to students
           unpaidSourceNoteEl.style.display = 'none';
+          // But still log it for admins viewing console
+          if (unpaidSource === 'schedule-override' && ledgerAmount > 0) {
+            console.log(`✅ Overriding stale database balance of $${ledgerAmount} for ${student?.name} - schedule shows all classes are paid`);
+          }
         } else if (unpaidSource === 'schedule' && unpaidClasses.length > 0) {
           const label = unpaidClasses.length === 1 ? 'class' : 'classes';
           unpaidSourceNoteEl.textContent = `${unpaidClasses.length} ${label} flagged from schedule`;
           unpaidSourceNoteEl.style.display = 'block';
+          unpaidSourceNoteEl.style.color = ''; // Reset color
         } else if (unpaidSource === 'ledger') {
           unpaidSourceNoteEl.textContent = 'Balance from admin ledger';
           unpaidSourceNoteEl.style.display = 'block';
+          unpaidSourceNoteEl.style.color = ''; // Reset color
         } else if (ledgerAmount !== null && ledgerAmount > 0) {
           unpaidSourceNoteEl.textContent = 'Balance from admin ledger';
           unpaidSourceNoteEl.style.display = 'block';
+          unpaidSourceNoteEl.style.color = ''; // Reset color
         } else {
           unpaidSourceNoteEl.style.display = 'none';
         }
@@ -7972,8 +8018,8 @@
             console.log(`[Payment Display] Using for_class date: ${payment.dateString}, amount: $${payment.amount}, method: ${payment.payment_method}`);
             
             // Check if this date matches a one-time class
-            if (groupScheduleData && groupScheduleData.one_time_schedules && Array.isArray(groupScheduleData.one_time_schedules)) {
-              isOneTimeClass = groupScheduleData.one_time_schedules.some(oneTime => oneTime.date === payment.dateString);
+            if (groupSchedule && groupSchedule.one_time_schedules && Array.isArray(groupSchedule.one_time_schedules)) {
+              isOneTimeClass = groupSchedule.one_time_schedules.some(oneTime => oneTime.date === payment.dateString);
               if (isOneTimeClass) {
                 console.log(`[Payment Display] ✨ Payment for ONE-TIME CLASS: ${payment.dateString}`);
               }
@@ -8064,21 +8110,19 @@
         
         // Build payment method string with one-time class label if applicable
         let paymentMethodStr = entry.paymentMethod || '';
+        let oneTimeClassLabel = '';
         if (entry.isOneTimeClass) {
-          // Add one-time class label
-          if (paymentMethodStr) {
-            // Has existing method like "(Zelle)" → change to "(Zelle - One time class)"
-            paymentMethodStr = paymentMethodStr.replace(')', ' - One time class)');
-          } else {
-            // No existing method → add "(One time class)"
-            paymentMethodStr = ' (One time class)';
-          }
+          // Add one-time class label as separate line
+          oneTimeClassLabel = '<div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">(One time class)</div>';
         }
         
         item.innerHTML = `
           <div class="payment-date">${dateStr}</div>
           <div class="payment-status">
-            <span class="status-badge ${entry.statusClass}">${entry.statusText}${paymentMethodStr}</span>
+            <span class="status-badge ${entry.statusClass}">
+              ${entry.statusText}${paymentMethodStr}
+              ${oneTimeClassLabel}
+            </span>
             ${entry.amount > 0 ? `<span class="payment-amount">$${entry.amount.toFixed(0)}</span>` : (entry.type === 'absent' ? '<span class="payment-amount">-</span>' : '')}
           </div>
           ${entry.breakdownNote ? `<div class="payment-breakdown-note">${entry.breakdownNote}</div>` : ''}

@@ -2060,6 +2060,7 @@
         overflow: hidden;
         box-shadow: none;
         animation: slideUpModule 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        pointer-events: none;
       }
 
       @keyframes slideUpModule {
@@ -2089,6 +2090,12 @@
         z-index: 100001;
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         box-shadow: 0 0 20px rgba(239, 68, 68, 0.4);
+        pointer-events: auto;
+      }
+
+      /* Hide module close button when notification center is open (it has its own close) */
+      .module-popup-overlay.notification-center-open .module-popup-close {
+        display: none;
       }
 
       .module-popup-close:hover {
@@ -2109,6 +2116,7 @@
         height: 100%;
         border: none;
         background: transparent;
+        pointer-events: auto;
       }
 
       /* ============================================================
@@ -2306,7 +2314,7 @@
         font-size: 18px;
         font-weight: 400;
         position: relative;
-        overflow: hidden;
+        overflow: visible;
         user-select: none;
       }
 
@@ -2430,6 +2438,8 @@
         justify-content: center;
         box-shadow: 0 2px 8px rgba(138, 180, 255, 0.6);
         animation: pulseNavBadge 2s ease-in-out infinite;
+        z-index: 100;
+        pointer-events: none;
       }
 
       /* ============================================================
@@ -11477,6 +11487,13 @@ ORDER BY timestamp DESC;</pre>
         // Show overlay with animation
         overlay.classList.add('active');
 
+        // Add special class for notification center to hide the module close button
+        if (moduleUrl.includes('Notification-Center.html')) {
+          overlay.classList.add('notification-center-open');
+        } else {
+          overlay.classList.remove('notification-center-open');
+        }
+
         // Log success
   debugLog(`✅ Module popup opened: ${moduleTitle}`);
 
@@ -11497,6 +11514,7 @@ ORDER BY timestamp DESC;</pre>
 
         // Hide overlay
         overlay.classList.remove('active');
+        overlay.classList.remove('notification-center-open');
 
         // Clear iframe source after animation completes
         setTimeout(() => {
@@ -11523,10 +11541,23 @@ ORDER BY timestamp DESC;</pre>
         const overlay = document.getElementById('modulePopupOverlay');
         if (overlay) {
           overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) {
+            // Only close if clicking directly on the overlay (not the container or iframe)
+            if (e.target === overlay || e.target.classList.contains('module-popup-overlay')) {
+              debugLog('📦 Clicked overlay background, closing popup');
               closeModulePopup();
             }
           });
+          debugLog('✅ Overlay click listener attached');
+        } else {
+          console.warn('⚠️ Module popup overlay not found');
+        }
+      });
+
+      // Listen for iframe postMessage close events
+      window.addEventListener('message', (event) => {
+        if (event?.data?.type === 'close-module-popup') {
+          debugLog('📨 Received close-module-popup message');
+          closeModulePopup();
         }
       });
 

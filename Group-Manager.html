@@ -6,13 +6,13 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>ARNOMA - Group Manager [Connected to Supabase] v2024-12-24-v3</title>
+    <title>ARNOMA - Group Manager [Connected to Supabase] v2024-12-24-v4</title>
     
     <!-- Supabase Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
     
     <!--
-      v2.24.0 - ONE-TIME CLASS AUTO-HIDE FIX (Dec 24, 2025)
+      v2.25.0 - ARCHIVED CLASSES HISTORY MODAL (Dec 24, 2025)
 
       DESIGN SYSTEM:
       - Matches Student Manager NEW glassmorphism design
@@ -28,6 +28,7 @@
       - Group color picker with live preview
       - Schedule editor (LA/Yerevan timezone support)
       - Active/Inactive toggle
+      - 📦 NEW: Archived Classes modal showing past one-time classes
       - Student count per group
       - Search and filter functionality
       - Responsive grid layout (3/2/1 columns)
@@ -1386,6 +1387,7 @@
         <div class="header-actions">
           <button class="btn-header-primary" onclick="openAddGroupModal()">+ Add Group</button>
           <button class="btn-header-secondary" onclick="openReorderModal()">↕️ Reorder</button>
+          <button class="btn-header-secondary" onclick="openArchivedClassesModal()">📦 Archived</button>
         </div>
       </div>
       <div class="header-row-2">
@@ -1539,9 +1541,39 @@
       </div>
     </div>
 
+    <!-- Archived One-Time Classes Modal -->
+    <div
+      id="archivedClassesModal"
+      class="modal-backdrop"
+      onclick="if(event.target.id==='archivedClassesModal'){closeArchivedClassesModal();}"
+    >
+      <div class="modal-card" onclick="event.stopPropagation()" style="max-width: 700px">
+        <button class="modal-close" onclick="closeArchivedClassesModal()">&times;</button>
+
+        <div class="modal-scroll">
+          <!-- Header -->
+          <div class="modal-header">
+            <h2 class="modal-title">📦 Archived One-Time Classes</h2>
+          </div>
+
+          <!-- Body -->
+          <div class="modal-body">
+            <div id="archivedClassesList" style="display: flex; flex-direction: column; gap: 12px">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+
+          <!-- Footer -->
+          <div class="modal-footer">
+            <button class="btn-modal-cancel" onclick="closeArchivedClassesModal()">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script>
     // 🔥 VERSION CHECK - Verify this code is loading
-    console.log('🚀 GROUP MANAGER VERSION: 2024-12-24-v3 (One-Time Class Auto-Hide Fix - LA Timezone)');
+    console.log('🚀 GROUP MANAGER VERSION: 2024-12-24-v4 (Archived Classes History Modal)');
     console.log('📅 Loaded at:', new Date().toLocaleString());      // Group colors matching Payment-Records badges (A-F)
       const groupColors = [
         { name: 'Blue (A)', value: '#3b82f6', gradient: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)' },
@@ -3319,6 +3351,200 @@
       // Close Students Modal
       function closeStudentsModal() {
         const modal = document.getElementById('studentsModal');
+        modal.style.display = 'none';
+      }
+
+      // Open Archived Classes Modal
+      async function openArchivedClassesModal() {
+        const modal = document.getElementById('archivedClassesModal');
+        const listContainer = document.getElementById('archivedClassesList');
+        
+        modal.style.display = 'flex';
+        listContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: rgba(255,255,255,0.6);">Loading...</div>';
+        
+        try {
+          // Get current LA time using existing function
+          const nowLA = getNowLA();
+          
+          // Fetch all groups with one-time schedules
+          const { data: groupsData, error } = await supabaseClient
+            .from('groups')
+            .select('*')
+            .not('one_time_schedules', 'is', null);
+          
+          if (error) throw error;
+          
+          // Collect all archived (past) one-time classes
+          const archivedClasses = [];
+          
+          groupsData.forEach(group => {
+            const oneTimeSchedules = group.one_time_schedules || [];
+            
+            oneTimeSchedules.forEach(schedule => {
+              if (!schedule.date) return;
+              
+              // Parse date and time
+              const dateParts = schedule.date.split('-');
+              if (dateParts.length !== 3) return;
+              
+              const timeMatch = schedule.time ? schedule.time.match(/(\d{1,2}):(\d{2})\\s*(AM|PM)/i) : null;
+              let hours = 0, minutes = 0;
+              if (timeMatch) {
+                hours = parseInt(timeMatch[1]);
+                minutes = parseInt(timeMatch[2]);
+                const meridiem = timeMatch[3].toUpperCase();
+                if (meridiem === 'PM' && hours !== 12) hours += 12;
+                if (meridiem === 'AM' && hours === 12) hours = 0;
+              }
+              
+              // Create class end time (start + 2 hours)
+              const classEndTime = new Date(
+                parseInt(dateParts[0]),
+                parseInt(dateParts[1]) - 1,
+                parseInt(dateParts[2]),
+                hours + 2,
+                minutes
+              );
+              
+              // Only include if class has ended (past)
+              if (classEndTime < nowLA) {
+                archivedClasses.push({
+                  groupName: group.group_name || 'Unknown Group',
+                  groupColor: group.color?.value || '#667eea',
+                  date: schedule.date,
+                  time: schedule.time,
+                  day: schedule.day,
+                  description: schedule.description || '',
+                  classEndTime: classEndTime
+                });
+              }
+            });
+          });
+          
+          // Sort by date (most recent first)
+          archivedClasses.sort((a, b) => b.classEndTime - a.classEndTime);
+          
+          // Display archived classes
+          if (archivedClasses.length === 0) {
+            listContainer.innerHTML = `
+              <div style="
+                text-align: center;
+                padding: 40px 20px;
+                color: rgba(255, 255, 255, 0.5);
+              ">
+                <div style="font-size: 48px; margin-bottom: 12px;">📭</div>
+                <div style="font-size: 16px;">No archived one-time classes found</div>
+              </div>
+            `;
+            return;
+          }
+          
+          listContainer.innerHTML = archivedClasses.map(cls => {
+            // Format date nicely
+            const dateObj = new Date(cls.date + 'T00:00:00');
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const formattedDate = `${monthNames[dateObj.getMonth()]} ${dateObj.getDate()}, ${dateObj.getFullYear()}`;
+            
+            return `
+              <div style="
+                background: linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(51, 65, 85, 0.7));
+                border: 1px solid rgba(148, 163, 184, 0.2);
+                border-radius: 12px;
+                padding: 16px;
+                display: flex;
+                gap: 16px;
+                align-items: flex-start;
+                transition: all 0.2s ease;
+              " onmouseover="this.style.borderColor='rgba(148, 163, 184, 0.4)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='rgba(148, 163, 184, 0.2)'; this.style.transform='translateY(0)'">
+                
+                <!-- Group Color Badge -->
+                <div style="
+                  width: 40px;
+                  height: 40px;
+                  border-radius: 8px;
+                  background: ${cls.groupColor};
+                  box-shadow: 0 4px 12px ${cls.groupColor}66;
+                  flex-shrink: 0;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  font-weight: 700;
+                  color: white;
+                  font-size: 18px;
+                ">
+                  ${cls.groupName.slice(-1)}
+                </div>
+                
+                <!-- Class Details -->
+                <div style="flex: 1;">
+                  <div style="
+                    color: rgba(255, 255, 255, 0.95);
+                    font-weight: 600;
+                    font-size: 15px;
+                    margin-bottom: 6px;
+                  ">
+                    ${cls.groupName}
+                  </div>
+                  
+                  <div style="
+                    display: flex;
+                    gap: 12px;
+                    flex-wrap: wrap;
+                    margin-bottom: 6px;
+                  ">
+                    <span style="
+                      color: rgba(255, 255, 255, 0.7);
+                      font-size: 13px;
+                    ">
+                      📅 ${formattedDate}
+                    </span>
+                    <span style="
+                      color: rgba(255, 255, 255, 0.7);
+                      font-size: 13px;
+                    ">
+                      🕐 ${cls.time}
+                    </span>
+                    <span style="
+                      color: rgba(255, 255, 255, 0.7);
+                      font-size: 13px;
+                    ">
+                      ${cls.day}
+                    </span>
+                  </div>
+                  
+                  ${cls.description ? `
+                    <div style="
+                      color: rgba(255, 255, 255, 0.6);
+                      font-size: 12px;
+                      font-style: italic;
+                    ">
+                      ${cls.description}
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          }).join('');
+          
+        } catch (error) {
+          console.error('Error loading archived classes:', error);
+          listContainer.innerHTML = `
+            <div style="
+              text-align: center;
+              padding: 40px 20px;
+              color: rgba(239, 68, 68, 0.9);
+            ">
+              <div style="font-size: 48px; margin-bottom: 12px;">⚠️</div>
+              <div style="font-size: 16px;">Error loading archived classes</div>
+              <div style="font-size: 13px; margin-top: 8px; opacity: 0.7;">${error.message}</div>
+            </div>
+          `;
+        }
+      }
+
+      // Close Archived Classes Modal
+      function closeArchivedClassesModal() {
+        const modal = document.getElementById('archivedClassesModal');
         modal.style.display = 'none';
       }
 

@@ -36,7 +36,7 @@
       right: 0;
       bottom: 0;
       background: transparent !important;
-      pointer-events: none; /* Allow clicks to pass through */
+      pointer-events: auto; /* Enable click detection on overlay */
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1539,15 +1539,25 @@
     // CLOSE NOTIFICATION CENTER
     // ============================================================
     function closeNotificationCenter() {
+      let handled = false;
       try {
         if (window.parent && window.parent.closeModulePopup) {
           window.parent.closeModulePopup();
-        } else {
-          window.close();
+          handled = true;
         }
       } catch (e) {
         // Cross-origin access blocked (when opened via file:// protocol)
-        // Silently fall back to window.close()
+        // Fall through to postMessage/window.close fallback
+      }
+
+      if (!handled) {
+        try {
+          window.parent?.postMessage({ type: 'close-module-popup' }, '*');
+        } catch (postMessageError) {
+          // Ignore
+        }
+
+        // Final fallback when running fully standalone
         window.close();
       }
     }
