@@ -4442,17 +4442,17 @@
       
       // Check for MASTER ACCESS token (from login page)
       const masterTokenStr = sessionStorage.getItem('impersonation_token') || localStorage.getItem('impersonation_token');
-      console.log('🔍 Checking for master token:', masterTokenStr ? 'FOUND' : 'NOT FOUND');
+      debugLog('🔍 Checking for master token:', masterTokenStr ? 'FOUND' : 'NOT FOUND');
       if (masterTokenStr) {
         try {
           const masterToken = JSON.parse(masterTokenStr);
-          console.log('📋 Master token parsed:', masterToken);
-          console.log('🔍 Is master access?', masterToken.isMasterAccess);
+          debugLog('📋 Master token parsed:', masterToken);
+          debugLog('🔍 Is master access?', masterToken.isMasterAccess);
           // 🔥 REMOVED TIMEOUT CHECK - impersonation never expires
           // console.log('🔍 Is expired?', masterToken.expiresAt < Date.now());
           
           if (masterToken.isMasterAccess) {
-            console.log('🔓 MASTER ACCESS detected (no timeout):', masterToken.studentName);
+            debugLog('🔓 MASTER ACCESS detected (no timeout):', masterToken.studentName);
             
             // Load student data
             const { data: student, error } = await supabaseClient
@@ -4461,17 +4461,17 @@
               .eq('id', masterToken.studentId)
               .single();
             
-            console.log('Student data:', student);
-            console.log('Error:', error);
+            debugLog('Student data:', student);
+            debugLog('Error:', error);
             
             if (student) {
-              console.log('✅ Master access granted for:', student.name);
-              console.log('📊 Setting currentStudent and loading portal data...');
+              debugLog('✅ Master access granted for:', student.name);
+              debugLog('📊 Setting currentStudent and loading portal data...');
               currentStudent = student; // SET GLOBAL BEFORE LOADING
               window.currentStudent = student; // Also set window property
               await loadPortalData();
               await ensurePaymentsData();
-              console.log('✅ Portal data loaded! paymentHistory:', window.paymentHistory);
+              debugLog('✅ Portal data loaded! paymentHistory:', window.paymentHistory);
               return student;
             } else {
               console.log('❌ Student not found for ID:', masterToken.studentId);
@@ -5833,14 +5833,14 @@
       try {
         // Normalize group name for consistent lookup
         const normalizedGroup = canonicalizeGroupCode(groupName);
-        console.log('🔍 Looking up group schedule:', { original: groupName, normalized: normalizedGroup });
+        debugLog('🔍 Looking up group schedule:', { original: groupName, normalized: normalizedGroup });
         debugDebug('🔍 Looking up group schedule:', { original: groupName, normalized: normalizedGroup });
         
         // Check cache first
         const cacheKey = `group-schedule-${normalizedGroup}`;
         const cached = getCachedData(cacheKey);
         if (cached) {
-          console.log('⚡ Using cached group schedule for:', normalizedGroup);
+          debugLog('⚡ Using cached group schedule for:', normalizedGroup);
           debugDebug('⚡ Using cached group schedule:', normalizedGroup);
           return cached;
         }
@@ -5862,7 +5862,7 @@
           return null;
         }
         
-        console.log('📚 All groups in database:', allGroups.map(g => ({
+        debugLog('📚 All groups in database:', allGroups.map(g => ({
           group_code: g.group_code,
           group_name: g.group_name,
           name: g.name,
@@ -5892,7 +5892,7 @@
           return null;
         }
         
-        console.log('✅ Found matching group:', matchingGroup);
+        debugLog('✅ Found matching group:', matchingGroup);
         debugDebug('✅ Found group schedule:', matchingGroup);
         
         const scheduleData = {
@@ -6957,18 +6957,18 @@
      * @returns {Set<string>} Set of YYYY-MM-DD date strings student has paid for
      */
     function buildPaidDatesSet(payments) {
-      console.log('🏗️ Building paidDatesSet from', payments?.length || 0, 'payments');
+      debugLog('🏗️ Building paidDatesSet from', payments?.length || 0, 'payments');
       
       const filteredPayments = (payments || [])
         .filter(payment => {
           const isPaidOrCredit = payment.status === 'paid' || payment.status === 'credit';
           if (payment.status === 'credit') {
-            console.log(`  ✅ Including CREDIT payment: date=${payment.dateString}, amount=${payment.amount}`);
+            debugLog(`  ✅ Including CREDIT payment: date=${payment.dateString}, amount=${payment.amount}`);
           }
           return isPaidOrCredit;
         });
         
-      console.log(`  → Filtered to ${filteredPayments.length} paid/credit payments`);
+      debugLog(`  → Filtered to ${filteredPayments.length} paid/credit payments`);
       
       const paidDates = new Set(
         filteredPayments
@@ -6982,7 +6982,7 @@
           .filter(date => date !== null)
       );
       
-      console.log(`💰 Built paidDatesSet with ${paidDates.size} dates:`, Array.from(paidDates).sort());
+      debugLog(`💰 Built paidDatesSet with ${paidDates.size} dates:`, Array.from(paidDates).sort());
       return paidDates;
     }
     
@@ -7158,7 +7158,7 @@
         }
         
         // 3. Query credit_payments table (payments applied from student credit balance)
-        console.log('🔍 Querying credit_payments for student_id:', student.id);
+        debugLog('🔍 Querying credit_payments for student_id:', student.id);
         const { data: creditPayments, error: creditError } = await supabaseClient
           .from('credit_payments')
           .select('*')
@@ -7168,11 +7168,11 @@
         if (creditError) {
           console.error('❌ Error loading credit payments:', creditError);
         } else {
-          console.log(`💳 Raw credit_payments from database (${creditPayments?.length || 0} records):`, creditPayments);
+          debugLog(`💳 Raw credit_payments from database (${creditPayments?.length || 0} records):`, creditPayments);
           if (creditPayments && creditPayments.length > 0) {
             const credits = creditPayments.map(payment => {
               const dateStr = payment.class_date ? payment.class_date.substring(0, 10) : null;
-              console.log(`  → Processing credit payment: class_date=${dateStr}, amount=${payment.amount}`);
+              debugLog(`  → Processing credit payment: class_date=${dateStr}, amount=${payment.amount}`);
               return {
                 date: new Date(payment.class_date),
                 dateString: dateStr, // 🔧 Store original date string
@@ -7185,9 +7185,9 @@
               };
             });
             allPayments.push(...credits);
-            console.log(`✅ Added ${credits.length} credit payments to allPayments. Total now: ${allPayments.length}`);
+            debugLog(`✅ Added ${credits.length} credit payments to allPayments. Total now: ${allPayments.length}`);
           } else {
-            console.log('⚠️ No credit payments found for this student');
+            debugLog('⚠️ No credit payments found for this student');
           }
         }
         
@@ -7648,7 +7648,7 @@
           // Payment matches if it's for the SAME date (exact match)
           // or if it's within 7 days after class (Calendar logic: payment applies to nearest past class)
           if (paymentDateStr === dateStr) {
-            console.log(`  ✅ EXACT MATCH: Payment ${paymentDateStr} (status=${p.status}, source=${p.source}) matches class ${dateStr}`);
+            debugLog(`  ✅ EXACT MATCH: Payment ${paymentDateStr} (status=${p.status}, source=${p.source}) matches class ${dateStr}`);
             debugDebug(`  ✅ EXACT MATCH: Payment ${paymentDateStr} matches class ${dateStr}`);
             return true; // Exact date match
           }
@@ -7658,7 +7658,7 @@
           const daysDiff = Math.floor((paymentDate - classDate) / (1000 * 60 * 60 * 24));
           const withinWeek = daysDiff >= 0 && daysDiff <= 7;
           if (withinWeek) {
-            console.log(`  ✅ WITHIN 7 DAYS: Payment ${paymentDateStr} (status=${p.status}, source=${p.source}) is ${daysDiff} days after class ${dateStr}`);
+            debugLog(`  ✅ WITHIN 7 DAYS: Payment ${paymentDateStr} (status=${p.status}, source=${p.source}) is ${daysDiff} days after class ${dateStr}`);
             debugDebug(`  ✅ WITHIN 7 DAYS: Payment ${paymentDateStr} is ${daysDiff} days after class ${dateStr}`);
           }
           return withinWeek; // Within a week after class
@@ -7669,18 +7669,18 @@
             date: dateStr,
             amount: pricePerClass
           });
-          console.log(`🔴 ${dateStr}: UNPAID (no payment found)`);
+          debugLog(`🔴 ${dateStr}: UNPAID (no payment found)`);
           debugDebug(`🔴 ${dateStr}: UNPAID (no payment found)`);
         } else {
-          console.log(`🟢 ${dateStr}: PAID`);
+          debugLog(`🟢 ${dateStr}: PAID`);
           debugDebug(`🟢 ${dateStr}: PAID`);
         }
       }
       
       const unpaidAmount = unpaidClasses.length * pricePerClass;
-      console.log(`💰 FINAL UNPAID CALCULATION: $${unpaidAmount} (${unpaidClasses.length} unpaid classes × $${pricePerClass})`);
+      debugLog(`💰 FINAL UNPAID CALCULATION: $${unpaidAmount} (${unpaidClasses.length} unpaid classes × $${pricePerClass})`);
       if (unpaidClasses.length > 0) {
-        console.log(`📋 Unpaid class dates:`, unpaidClasses.map(c => c.date));
+        debugLog(`📋 Unpaid class dates:`, unpaidClasses.map(c => c.date));
       }
       debugDebug(`💰 Total unpaid: $${unpaidAmount} (${unpaidClasses.length} classes × $${pricePerClass})`);
       debugDebug(`⚪ Total absent: ${absentClasses.length} classes`);
@@ -7838,7 +7838,7 @@
           unpaidSourceNoteEl.style.display = 'none';
           // But still log it for admins viewing console
           if (unpaidSource === 'schedule-override' && ledgerAmount > 0) {
-            console.log(`✅ Overriding stale database balance of $${ledgerAmount} for ${student?.name} - schedule shows all classes are paid`);
+            debugLog(`✅ Overriding stale database balance of $${ledgerAmount} for ${student?.name} - schedule shows all classes are paid`);
           }
         } else if (unpaidSource === 'schedule' && unpaidClasses.length > 0) {
           const label = unpaidClasses.length === 1 ? 'class' : 'classes';
@@ -8015,13 +8015,13 @@
             // payment.dateString is the for_class date (YYYY-MM-DD string)
             const parts = payment.dateString.split('-');
             displayDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-            console.log(`[Payment Display] Using for_class date: ${payment.dateString}, amount: $${payment.amount}, method: ${payment.payment_method}`);
+            debugLog(`[Payment Display] Using for_class date: ${payment.dateString}, amount: $${payment.amount}, method: ${payment.payment_method}`);
             
             // Check if this date matches a one-time class
             if (groupSchedule && groupSchedule.one_time_schedules && Array.isArray(groupSchedule.one_time_schedules)) {
               isOneTimeClass = groupSchedule.one_time_schedules.some(oneTime => oneTime.date === payment.dateString);
               if (isOneTimeClass) {
-                console.log(`[Payment Display] ✨ Payment for ONE-TIME CLASS: ${payment.dateString}`);
+                debugLog(`[Payment Display] ✨ Payment for ONE-TIME CLASS: ${payment.dateString}`);
               }
             }
             
@@ -8041,10 +8041,10 @@
           } else if (payment.date) {
             // Fallback to payment.date if dateString not available
             displayDate = payment.date;
-            console.log(`[Payment Display] No dateString, using payment.date: ${payment.date}, amount: $${payment.amount}`);
+            debugLog(`[Payment Display] No dateString, using payment.date: ${payment.date}, amount: $${payment.amount}`);
           } else {
             displayDate = new Date(); // Last resort fallback
-            console.log(`[Payment Display] No date available, using today`);
+            debugLog(`[Payment Display] No date available, using today`);
           }
           
           const dateKey = payment.dateString || (payment.date ? payment.date.toISOString().split('T')[0] : null);
@@ -8297,17 +8297,17 @@
         const hasMatchingPayment = paidDatesSet.has(effectiveClassDate);
         
         // DEBUG: Log payment check
-        console.log(`[shouldUnlockNote] Payment check for note ${note.id}:`, {
+        debugLog(`[shouldUnlockNote] Payment check for note ${note.id}:`, {
           effectiveDate: effectiveClassDate,
           hasPayment: hasMatchingPayment,
           paidDates: Array.from(paidDatesSet)
         });
         
         if (hasMatchingPayment) {
-          console.log(`[shouldUnlockNote] UNLOCKED Note ${note.id} (${effectiveClassDate}): Payment found`);
+          debugLog(`[shouldUnlockNote] UNLOCKED Note ${note.id} (${effectiveClassDate}): Payment found`);
           return true;
         } else {
-          console.log(`[shouldUnlockNote] LOCKED Note ${note.id} (${effectiveClassDate}): No payment. Paid dates: ${Array.from(paidDatesSet).join(', ')}`);
+          debugLog(`[shouldUnlockNote] LOCKED Note ${note.id} (${effectiveClassDate}): No payment. Paid dates: ${Array.from(paidDatesSet).join(', ')}`);
           return false;
         }
       }
@@ -8405,8 +8405,8 @@
       const groupName = getStudentGroup(student);
       
       // COMPREHENSIVE DEBUG: Log all student group fields
-      console.log('🔍 SCHEDULE LOAD DEBUG for student:', student.name);
-      console.log('📋 Student group fields:', {
+      debugLog('🔍 SCHEDULE LOAD DEBUG for student:', student.name);
+      debugLog('📋 Student group fields:', {
         group_name: student.group_name,
         group_letter: student.group_letter,
         group: student.group,
@@ -8430,7 +8430,7 @@
       
       try {
         const scheduleData = await getGroupSchedule(groupName);
-        console.log('📦 getGroupSchedule returned for group', groupName, ':', scheduleData);
+        debugLog('📦 getGroupSchedule returned for group', groupName, ':', scheduleData);
         debugDebug('📦 getGroupSchedule returned:', scheduleData);
         
         if (scheduleData) {
@@ -8600,10 +8600,10 @@
       // Use window.currentStudent to ensure it's accessible
       const student = window.currentStudent || currentStudent;
       
-      console.log('🔍 Opening profile modal, full student object:', student);
-      console.log('💰 Price per class:', student?.price_per_class);
-      console.log('💳 Balance:', student?.balance);
-      console.log('📊 All student keys:', student ? Object.keys(student) : 'no student');
+      debugLog('🔍 Opening profile modal, full student object:', student);
+      debugLog('💰 Price per class:', student?.price_per_class);
+      debugLog('💳 Balance:', student?.balance);
+      debugLog('📊 All student keys:', student ? Object.keys(student) : 'no student');
       
       // Populate modal with current student data
       if (student) {
@@ -8642,7 +8642,7 @@
         // This matches the "Unpaid" amount shown in the Payment History section
         let balanceText = '$0.00';
         const unpaidAmount = window.currentTotalUnpaid || currentTotalUnpaid || 0;
-        console.log('💳 Using calculated unpaid amount:', unpaidAmount);
+        debugLog('💳 Using calculated unpaid amount:', unpaidAmount);
         
         if (unpaidAmount > 0) {
           balanceText = `$${unpaidAmount.toFixed(2)}`;
@@ -8678,7 +8678,7 @@
         }
         document.getElementById('modalStudentAliases').textContent = aliasesText;
         
-        console.log('✅ Profile modal populated:', {
+        debugLog('✅ Profile modal populated:', {
           name: student.name,
           email: emailText,
           group: groupText,
@@ -10353,11 +10353,11 @@
         const studentGroupLetter = currentStudent.group_letter || currentStudent.group || currentStudent.group_name;
         const normalizedGroupLetter = studentGroupLetter ? studentGroupLetter.toString().replace(/Group\s*/i, '').trim().toUpperCase() : null;
         
-        console.log('🚨 [CRITICAL DEBUG - FREE ACCESS]');
-        console.log('📊 Student ID:', studentId);
-        console.log('👤 Student Name:', currentStudent.name);
-        console.log('🏫 Raw Group:', studentGroupLetter);
-        console.log('🔤 Normalized Group Letter:', normalizedGroupLetter);
+        debugLog('🚨 [CRITICAL DEBUG - FREE ACCESS]');
+        debugLog('📊 Student ID:', studentId);
+        debugLog('👤 Student Name:', currentStudent.name);
+        debugLog('🏫 Raw Group:', studentGroupLetter);
+        debugLog('🔤 Normalized Group Letter:', normalizedGroupLetter);
         
         if (!normalizedGroupLetter) {
           console.error('❌ CRITICAL: Student has no group assigned! This will show ALL group notes!');
@@ -10371,7 +10371,7 @@
         // Build OR condition: individual access for this student OR group access for their group
         if (normalizedGroupLetter) {
           freeAccessQuery = freeAccessQuery.or(`student_id.eq.${studentId},and(access_type.eq.group,group_letter.eq.${normalizedGroupLetter})`);
-          console.log('✅ Applied group filter:', `student_id.eq.${studentId},and(access_type.eq.group,group_letter.eq.${normalizedGroupLetter})`);
+          debugLog('✅ Applied group filter:', `student_id.eq.${studentId},and(access_type.eq.group,group_letter.eq.${normalizedGroupLetter})`);
         } else {
           freeAccessQuery = freeAccessQuery.eq('student_id', studentId);
           console.warn('⚠️ No group - only showing individual access');
@@ -10379,11 +10379,11 @@
         
         const { data: freeAccessGrants, error: freeAccessError } = await freeAccessQuery;
         
-        console.log('📦 Free Access Query Result:', freeAccessGrants);
-        console.log('📊 Total free access grants:', freeAccessGrants?.length || 0);
+        debugLog('📦 Free Access Query Result:', freeAccessGrants);
+        debugLog('📊 Total free access grants:', freeAccessGrants?.length || 0);
         if (freeAccessGrants && freeAccessGrants.length > 0) {
-          console.log('📋 Sample grants:', freeAccessGrants.slice(0, 5));
-          console.log('🏫 Unique group letters in grants:', [...new Set(freeAccessGrants.map(g => g.group_letter))]);
+          debugLog('📋 Sample grants:', freeAccessGrants.slice(0, 5));
+          debugLog('🏫 Unique group letters in grants:', [...new Set(freeAccessGrants.map(g => g.group_letter))]);
         }
         
         if (freeAccessError) {
@@ -10454,8 +10454,8 @@
           });
         }
         
-        console.log('📅 Note post dates loaded:', notePostDateMap.size, 'notes with specific post dates');
-        console.log('   Sources:', Array.from(notePostDateMap.values()).reduce((acc, v) => {
+        debugLog('📅 Note post dates loaded:', notePostDateMap.size, 'notes with specific post dates');
+        debugLog('   Sources:', Array.from(notePostDateMap.values()).reduce((acc, v) => {
           acc[v.source] = (acc[v.source] || 0) + 1;
           return acc;
         }, {}));
@@ -10543,7 +10543,7 @@
             // Use the per-group class_date (or fallback) captured from note_free_access
             const dateParts = groupPostMeta.dateString.split('-');
             displayDate = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
-            console.log(`📅 Note ${note.id} "${note.title}" posted to this group on: ${groupPostMeta.dateString} (source: ${groupPostMeta.source})`);
+            debugLog(`📅 Note ${note.id} "${note.title}" posted to this group on: ${groupPostMeta.dateString} (source: ${groupPostMeta.source})`);
           } else if (note.class_date) {
             // Fallback to class_date if no free access date (shouldn't happen for free notes)
             const dateParts = note.class_date.split('T')[0].split('-');

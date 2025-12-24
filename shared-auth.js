@@ -1,7 +1,9 @@
 (function (global) {
   const AUTH_CACHE_KEY = 'arnoma:auth:session';
   const AUTH_USER_KEY = 'arnoma:auth:user';
-  const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
+  const REMEMBER_ME_KEY = 'arnoma:remember-me';
+  const SESSION_EXPIRY_KEY = 'arnoma:session-expiry';
+  const DEFAULT_SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7; // 7 days default
 
   function clearCache() {
     try {
@@ -46,10 +48,28 @@
       const cached = localStorage.getItem(AUTH_CACHE_KEY);
       if (!cached) return null;
       const parsed = JSON.parse(cached);
-      if (parsed?.stored_at && Date.now() - parsed.stored_at > SESSION_MAX_AGE_MS) {
+      
+      // Check if "Remember me" was enabled
+      const rememberMe = localStorage.getItem(REMEMBER_ME_KEY) === 'true';
+      const customExpiry = localStorage.getItem(SESSION_EXPIRY_KEY);
+      
+      let maxAge = DEFAULT_SESSION_MAX_AGE_MS;
+      
+      if (rememberMe && customExpiry) {
+        // Use the custom 30-day expiry set during login
+        const expiryTime = parseInt(customExpiry, 10);
+        if (Date.now() > expiryTime) {
+          console.log('ArnomaAuth: Session expired (30-day remember-me expired)');
+          clearCache();
+          return null;
+        }
+      } else if (parsed?.stored_at && Date.now() - parsed.stored_at > maxAge) {
+        // Default 7-day expiry for non-remember-me sessions
+        console.log('ArnomaAuth: Session expired (7-day default)');
         clearCache();
         return null;
       }
+      
       return parsed;
     } catch (error) {
       console.error('ArnomaAuth: failed to parse cached session', error);
