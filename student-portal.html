@@ -7,12 +7,12 @@
        Purpose: Main student dashboard with schedule, payments, notes, and progress
        Auth: Supports both regular student login and admin impersonation mode
        Data: Direct Supabase integration (self-contained, no bundler)
-       VERSION: 2024-12-24-v2 - CREDIT PAYMENT FIX
+       VERSION: 2024-12-24-v3 - ONE-TIME CLASS PAYMENT LABELING FIX
        ============================================================================ -->
   
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Student Portal - ARNOMA</title>
+  <title>Student Portal - ARNOMA v2024-12-24-v3</title>
   <link rel="icon" type="image/png" href="/richyfesta-logo.png">
   <link rel="apple-touch-icon" href="/richyfesta-logo.png">
   
@@ -4344,7 +4344,7 @@
        ========================================================================== */
     
     // 🔥 VERSION CHECK - Verify this code is loading
-    console.log('🚀 STUDENT PORTAL VERSION: 2024-12-24-v2 (Credit Payment Fix)');
+    console.log('🚀 STUDENT PORTAL VERSION: 2024-12-24-v3 (One-Time Class Payment Labeling)');
     console.log('📅 Loaded at:', new Date().toLocaleString());
     
     // ==========================================================================
@@ -7963,12 +7963,21 @@
           // This shows when the payment was allocated to, not when it was received
           let displayDate;
           let breakdownNote = null;
+          let isOneTimeClass = false;
           
           if (payment.dateString) {
             // payment.dateString is the for_class date (YYYY-MM-DD string)
             const parts = payment.dateString.split('-');
             displayDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
             console.log(`[Payment Display] Using for_class date: ${payment.dateString}, amount: $${payment.amount}, method: ${payment.payment_method}`);
+            
+            // Check if this date matches a one-time class
+            if (groupScheduleData && groupScheduleData.one_time_schedules && Array.isArray(groupScheduleData.one_time_schedules)) {
+              isOneTimeClass = groupScheduleData.one_time_schedules.some(oneTime => oneTime.date === payment.dateString);
+              if (isOneTimeClass) {
+                console.log(`[Payment Display] ✨ Payment for ONE-TIME CLASS: ${payment.dateString}`);
+              }
+            }
             
             // Check if this payment was split from a larger payment
             if (payment.receiptDate && receiptDateMap.has(payment.receiptDate)) {
@@ -8008,7 +8017,8 @@
             statusText: statusText,
             statusClass: statusClass,
             paymentMethod: payment.payment_method && !isCreditPayment ? ` (${payment.payment_method})` : '',
-            breakdownNote: breakdownNote  // Add breakdown note if payment was split
+            breakdownNote: breakdownNote,  // Add breakdown note if payment was split
+            isOneTimeClass: isOneTimeClass  // Flag for one-time class payment
           });
         });
       }
@@ -8052,10 +8062,23 @@
         
         const dateStr = `${monthNames[entry.date.getMonth()]} ${entry.date.getDate()}, ${entry.date.getFullYear()}`;
         
+        // Build payment method string with one-time class label if applicable
+        let paymentMethodStr = entry.paymentMethod || '';
+        if (entry.isOneTimeClass) {
+          // Add one-time class label
+          if (paymentMethodStr) {
+            // Has existing method like "(Zelle)" → change to "(Zelle - One time class)"
+            paymentMethodStr = paymentMethodStr.replace(')', ' - One time class)');
+          } else {
+            // No existing method → add "(One time class)"
+            paymentMethodStr = ' (One time class)';
+          }
+        }
+        
         item.innerHTML = `
           <div class="payment-date">${dateStr}</div>
           <div class="payment-status">
-            <span class="status-badge ${entry.statusClass}">${entry.statusText}${entry.paymentMethod || ''}</span>
+            <span class="status-badge ${entry.statusClass}">${entry.statusText}${paymentMethodStr}</span>
             ${entry.amount > 0 ? `<span class="payment-amount">$${entry.amount.toFixed(0)}</span>` : (entry.type === 'absent' ? '<span class="payment-amount">-</span>' : '')}
           </div>
           ${entry.breakdownNote ? `<div class="payment-breakdown-note">${entry.breakdownNote}</div>` : ''}
