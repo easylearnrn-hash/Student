@@ -1897,15 +1897,33 @@
       };
     }
     
+    // ===== PERFORMANCE: TAB ELEMENT CACHE =====
+    let cachedTabElements = null;
+    let cachedTabContentElements = null;
+    
+    function initializeTabCache() {
+      if (!cachedTabElements) {
+        cachedTabElements = Array.from(document.querySelectorAll('.tab'));
+        cachedTabContentElements = Array.from(document.querySelectorAll('.tab-content'));
+      }
+    }
+    
     // Tab Switching
     function switchTab(e, tab) {
+      // 🚀 PERFORMANCE: Use cached tab elements
+      initializeTabCache();
+      
       // Update tabs
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      cachedTabElements.forEach(t => t.classList.remove('active'));
       e.currentTarget.classList.add('active');
       
       // Update content
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      document.getElementById(tab + 'Tab').classList.add('active');
+      cachedTabContentElements.forEach(c => c.classList.remove('active'));
+      const tabContent = getCachedDOM(tab + 'Tab') || document.getElementById(tab + 'Tab');
+      if (tabContent) {
+        setCachedDOM(tab + 'Tab', tabContent);
+        tabContent.classList.add('active');
+      }
       
       // Load data for tab (with caching)
       if (tab === 'students') loadStudents();
@@ -2363,8 +2381,15 @@
     // Load Notes
     async function loadNotes() {
       try {
-  await ensureAdminSession();
-  const { data: notes, error } = await supabaseClient
+        // 🚀 PERFORMANCE: Check cache first (30-second TTL)
+        const cached = getCachedData('notes');
+        if (cached) {
+          renderNotesTable(cached);
+          return;
+        }
+        
+        await ensureAdminSession();
+        const { data: notes, error } = await supabaseClient
           .from('student_notes')
           .select('*')
           .eq('deleted', false)
@@ -2375,30 +2400,41 @@
           throw error;
         }
         
-        const tbody = document.getElementById('notesTableBody');
-        
-        if (!notes || notes.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">📄</div><div>No notes found</div></td></tr>';
-          return;
-        }
-        
-        tbody.innerHTML = notes.map(note => `
-          <tr>
-            <td>${note.title || 'Untitled'}</td>
-            <td>${note.system || '-'}</td>
-            <td>${note.group_name || '-'}</td>
-            <td>${note.class_date ? new Date(note.class_date).toLocaleDateString() : '-'}</td>
-            <td><span class="badge ${note.requires_payment ? 'locked' : 'free'}">${note.requires_payment ? '🔒 Locked' : '✓ Free'}</span></td>
-            <td>
-              <button class="action-btn view" onclick="viewNote(${note.id})">View</button>
-              <button class="action-btn delete" onclick="deleteNote(${note.id})">Delete</button>
-            </td>
-          </tr>
-        `).join('');
+        // 🚀 PERFORMANCE: Cache the result
+        setCachedData('notes', notes);
+        renderNotesTable(notes);
       } catch (error) {
         console.error('Error loading notes:', error);
-        document.getElementById('notesTableBody').innerHTML = '<tr><td colspan="6" style="text-align:center; color: #ef4444;">Error loading notes</td></tr>';
+        const tbody = getCachedDOM('notesTableBody') || document.getElementById('notesTableBody');
+        if (tbody) {
+          setCachedDOM('notesTableBody', tbody);
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color: #ef4444;">Error loading notes</td></tr>';
+        }
       }
+    }
+    
+    function renderNotesTable(notes) {
+      const tbody = getCachedDOM('notesTableBody') || document.getElementById('notesTableBody');
+      if (tbody) setCachedDOM('notesTableBody', tbody);
+        
+      if (!notes || notes.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">📄</div><div>No notes found</div></td></tr>';
+        return;
+      }
+      
+      tbody.innerHTML = notes.map(note => `
+        <tr>
+          <td>${note.title || 'Untitled'}</td>
+          <td>${note.system || '-'}</td>
+          <td>${note.group_name || '-'}</td>
+          <td>${note.class_date ? new Date(note.class_date).toLocaleDateString() : '-'}</td>
+          <td><span class="badge ${note.requires_payment ? 'locked' : 'free'}">${note.requires_payment ? '🔒 Locked' : '✓ Free'}</span></td>
+          <td>
+            <button class="action-btn view" onclick="viewNote(${note.id})">View</button>
+            <button class="action-btn delete" onclick="deleteNote(${note.id})">Delete</button>
+          </td>
+        </tr>
+      `).join('');
     }
     
     // Group Notes now handled by standalone Group-Notes.html page
@@ -3030,28 +3066,33 @@
       const search = document.getElementById('studentSearch').value.toLowerCase();
       const selectedGroup = document.getElementById('groupFilterSelect')?.value || '';
       
-      // PERFORMANCE: Immediate count update, defer row filtering
-      const tbody = document.getElementById('studentsTableBody');
+      // 🚀 PERFORMANCE: Immediate count update, defer row filtering
+      const tbody = getCachedDOM('studentsTableBody') || document.getElementById('studentsTableBody');
       if (!tbody) return;
+      setCachedDOM('studentsTableBody', tbody);
       
       const rows = tbody.querySelectorAll('tr');
       
-      // PERFORMANCE: Defer heavy DOM operations to next animation frame
+      // 🚀 PERFORMANCE: Cache querySelector results in a Map to avoid repeated queries
+      const rowDataMap = new Map();
+      rows.forEach(row => {
+        const statusBtn = row.querySelector('.action-btn.info');
+        rowDataMap.set(row, {
+          text: row.textContent.toLowerCase(),
+          rowGroup: row.getAttribute('data-group') || '',
+          isOnline: statusBtn && statusBtn.classList.contains('online'),
+          isActive: row.getAttribute('data-active') === 'true'
+        });
+      });
+      
+      // 🚀 PERFORMANCE: Defer heavy DOM operations to next animation frame
       requestAnimationFrame(() => {
         let visibleCount = 0;
         
         rows.forEach(row => {
-          const text = row.textContent.toLowerCase();
-          const rowGroup = row.getAttribute('data-group') || '';
-          const matchesSearch = text.includes(search);
-          const matchesGroup = !selectedGroup || rowGroup === selectedGroup;
-          
-          // Check if student is online (has .online class on status button)
-          const statusBtn = row.querySelector('.action-btn.info');
-          const isOnline = statusBtn && statusBtn.classList.contains('online');
-          
-          // Check if student is active (data-active attribute)
-          const isActive = row.getAttribute('data-active') === 'true';
+          const data = rowDataMap.get(row);
+          const matchesSearch = data.text.includes(search);
+          const matchesGroup = !selectedGroup || data.rowGroup === selectedGroup;
           
           // Show row if it matches all filters:
           // - search term AND
@@ -3060,29 +3101,15 @@
           // - active filter (if enabled)
           const shouldShow = matchesSearch && 
                             matchesGroup && 
-                            (!showOnlineOnly || isOnline) &&
-                            (!showActiveOnly || isActive);
+                            (!showOnlineOnly || data.isOnline) &&
+                            (!showActiveOnly || data.isActive);
           row.style.display = shouldShow ? '' : 'none';
           if (shouldShow) visibleCount++;
         });
       });
     }
     
-    // Create debounced versions of filter functions (300ms delay) - MUST be after functions are defined
-    const debouncedFilterStudents = debounce(filterStudents, 300);
-    const debouncedFilterNotes = debounce(() => {
-      const search = document.getElementById('notesSearch')?.value.toLowerCase() || '';
-      const rows = document.querySelectorAll('#notesTableBody tr');
-      rows.forEach(row => {
-        row.style.display = row.textContent.toLowerCase().includes(search) ? '' : 'none';
-      });
-    }, 300);
-    const debouncedFilterStudentList = debounce(() => {
-      const search = document.getElementById('studentAlertSearch')?.value.toLowerCase() || '';
-      document.querySelectorAll('.alert-student-item').forEach(item => {
-        item.style.display = item.textContent.toLowerCase().includes(search) ? '' : 'none';
-      });
-    }, 300);
+    // ✅ Debounced versions already created earlier in file (after debounce() function definition)
     
     // Initialize
     document.addEventListener('DOMContentLoaded', async () => {
@@ -3283,11 +3310,16 @@
           return;
         }
         
+        // 🚀 PERFORMANCE: Build DOM once, filter with display property
         // Get group from student data (try multiple possible column names)
         checkboxGroup.innerHTML = students.map(student => {
           const group = student.group_letter || student.group || student.group_name || '';
           return `
-            <div class="student-checkbox-item">
+            <div class="student-checkbox-item" 
+                 data-student-id="${student.id}"
+                 data-name="${(student.name || '').toLowerCase()}"
+                 data-group="${group.toLowerCase()}"
+                 data-email="${(student.email || '').toLowerCase()}">
               <input 
                 type="checkbox" 
                 id="student_${student.id}" 
@@ -3367,48 +3399,44 @@
       const searchTerm = document.getElementById('alertStudentSearch').value.toLowerCase();
       const checkboxGroup = document.getElementById('studentCheckboxGroup');
       
-      if (!allStudentsData || allStudentsData.length === 0) {
-        console.warn('⚠️ No students data available for filtering');
+      // 🚀 PERFORMANCE: Use display filtering instead of innerHTML rebuild
+      const items = checkboxGroup.querySelectorAll('.student-checkbox-item');
+      
+      if (items.length === 0) {
+        console.warn('⚠️ No student items found for filtering');
         return;
       }
       
-      // If search is empty, show all students
-      const filtered = searchTerm === '' ? allStudentsData : allStudentsData.filter(student => {
-        const name = (student.name || '').toLowerCase();
-        const email = (student.email || '').toLowerCase();
-        const group = (student.group_letter || student.group || student.group_name || '').toLowerCase();
+      let visibleCount = 0;
+      
+      items.forEach(item => {
+        const name = item.getAttribute('data-name') || '';
+        const email = item.getAttribute('data-email') || '';
+        const group = item.getAttribute('data-group') || '';
         
-        return name.includes(searchTerm) || 
-               email.includes(searchTerm) || 
-               group.includes(searchTerm);
+        const matches = searchTerm === '' || 
+                       name.includes(searchTerm) || 
+                       email.includes(searchTerm) || 
+                       group.includes(searchTerm);
+        
+        item.style.display = matches ? '' : 'none';
+        if (matches) visibleCount++;
       });
       
-      if (filtered.length === 0) {
-        checkboxGroup.innerHTML = `
-          <div style="padding: 20px; text-align: center; color: rgba(255,255,255,0.5);">
-            No students match "${searchTerm}"
-          </div>
-        `;
-        return;
-      }
+      // Show "no results" message if needed
+      const existingNoResults = checkboxGroup.querySelector('.no-results-message');
       
-      checkboxGroup.innerHTML = filtered.map(student => {
-        const group = student.group_letter || student.group || student.group_name || '';
-        return `
-          <div class="student-checkbox-item">
-            <input 
-              type="checkbox" 
-              id="student_${student.id}" 
-              value="${student.id}"
-              data-name="${student.name || ''}"
-              data-group="${group}"
-              data-email="${student.email || ''}"
-              data-balance="${student.balance || 0}"
-            />
-            <label for="student_${student.id}">${student.name} ${group ? `(${group})` : ''}</label>
-          </div>
-        `;
-      }).join('');
+      if (visibleCount === 0 && searchTerm !== '') {
+        if (!existingNoResults) {
+          const noResultsDiv = document.createElement('div');
+          noResultsDiv.className = 'no-results-message';
+          noResultsDiv.style.cssText = 'padding: 20px; text-align: center; color: rgba(255,255,255,0.5);';
+          noResultsDiv.textContent = `No students match "${searchTerm}"`;
+          checkboxGroup.appendChild(noResultsDiv);
+        }
+      } else if (existingNoResults) {
+        existingNoResults.remove();
+      }
     }
     
     function toggleQuestionField() {
