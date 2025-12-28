@@ -1519,75 +1519,66 @@
       }
 
       try {
-        // 🚀 PERFORMANCE: Use cache with 30s TTL (was disabled)
-        let notes = forceRefresh ? null : getCachedData('notes');
-        if (!notes) {
-          const notesStart = performance.now();
-          console.log('🔄 Fetching notes from Supabase...');
-          
-          const { data, error: notesError } = await supabaseClient
-            .from('student_notes')
-            .select('id, title, system_category, category, group_name, class_date, description, pdf_url, requires_payment, video_url, created_at')
-            .order('class_date', { ascending: false })
-            .limit(500); // PERFORMANCE: Limit to 500 most recent notes
+        // 🚀 PERFORMANCE: Check cache first
+        const notesCache = forceRefresh ? null : getCachedData('notes');
+        const permsCache = forceRefresh ? null : getCachedData('permissions');
+        const freeAccessCache = forceRefresh ? null : getCachedData('freeAccess');
 
-          console.log(`✅ Notes fetched in ${Math.round(performance.now() - notesStart)}ms`);
+        // 🚀 PERFORMANCE: Parallel fetches if any data missing from cache
+        const fetchStart = performance.now();
+        
+        if (!notesCache || !permsCache || !freeAccessCache) {
+          console.log('🔄 Fetching data from Supabase (parallel)...');
           
-          if (notesError) throw notesError;
-          notes = data || [];
-          setCachedData('notes', notes);
-        } else {
-          console.log('✅ Notes loaded from cache');
-        }
-        allNotes = notes;
-        console.log(`📚 Notes count: ${allNotes.length}`);
+          const [notesResult, permsResult, freeAccessResult] = await Promise.all([
+            // Fetch notes (if not cached)
+            notesCache ? Promise.resolve({ data: notesCache, error: null }) : 
+              supabaseClient
+                .from('student_notes')
+                .select('id, title, system_category, category, group_name, class_date, description, pdf_url, requires_payment, video_url, created_at')
+                .order('class_date', { ascending: false })
+                .limit(500),
+            
+            // Fetch permissions (if not cached)
+            permsCache ? Promise.resolve({ data: permsCache, error: null }) :
+              supabaseClient
+                .from('student_note_permissions')
+                .select('note_id, group_name, is_accessible, class_date, granted_at')
+                .limit(1000),
+            
+            // Fetch free access (if not cached)
+            freeAccessCache ? Promise.resolve({ data: freeAccessCache, error: null }) :
+              supabaseClient
+                .from('note_free_access')
+                .select('note_id, access_type, group_letter, student_id, class_date, created_at')
+          ]);
 
-        // 🚀 PERFORMANCE: Use cache for permissions
-        let perms = forceRefresh ? null : getCachedData('permissions');
-        if (!perms) {
-          const permsStart = performance.now();
-          console.log('🔄 Fetching permissions from Supabase...');
-          
-          const { data, error: permsError } = await supabaseClient
-            .from('student_note_permissions')
-            .select('note_id, group_name, is_accessible, class_date, granted_at')
-            .limit(1000); // PERFORMANCE: Limit permissions
+          console.log(`✅ All data fetched in ${Math.round(performance.now() - fetchStart)}ms (parallel)`);
 
-          console.log(`✅ Permissions fetched in ${Math.round(performance.now() - permsStart)}ms`);
-          
-          if (permsError) throw permsError;
-          perms = data || [];
-          setCachedData('permissions', perms);
-        } else {
-          console.log('✅ Permissions loaded from cache');
-        }
-        permissions = perms;
-        console.log(`🔑 Permissions count: ${permissions.length}`);
-
-        // 🚀 PERFORMANCE: Use cache for free access
-        let freeAccess = forceRefresh ? null : getCachedData('freeAccess');
-        if (!freeAccess) {
-          const freeStart = performance.now();
-          console.log('🔄 Fetching free access from Supabase...');
-          
-          const { data, error: freeError } = await supabaseClient
-            .from('note_free_access')
-            .select('note_id, access_type, group_letter, student_id, class_date, created_at');
-
-          console.log(`✅ Free access fetched in ${Math.round(performance.now() - freeStart)}ms`);
-          
-          if (freeError) {
-            console.warn('⚠️ Could not load free access grants:', freeError);
-            freeAccess = [];
-          } else {
-            freeAccess = data || [];
-            setCachedData('freeAccess', freeAccess);
+          // Handle errors
+          if (notesResult.error) throw notesResult.error;
+          if (permsResult.error) throw permsResult.error;
+          if (freeAccessResult.error) {
+            console.warn('⚠️ Could not load free access grants:', freeAccessResult.error);
           }
+
+          // Store in cache and variables
+          allNotes = notesResult.data || [];
+          permissions = permsResult.data || [];
+          freeAccessGrants = freeAccessResult.data || [];
+
+          if (!notesCache) setCachedData('notes', allNotes);
+          if (!permsCache) setCachedData('permissions', permissions);
+          if (!freeAccessCache) setCachedData('freeAccess', freeAccessGrants);
+
+          console.log(`📚 Notes: ${allNotes.length} | 🔑 Permissions: ${permissions.length} | ✨ Free access: ${freeAccessGrants.length}`);
         } else {
-          console.log('✅ Free access loaded from cache');
+          console.log('✅ All data loaded from cache');
+          allNotes = notesCache;
+          permissions = permsCache;
+          freeAccessGrants = freeAccessCache;
+          console.log(`📚 Notes: ${allNotes.length} | 🔑 Permissions: ${permissions.length} | ✨ Free access: ${freeAccessGrants.length}`);
         }
-        freeAccessGrants = freeAccess;
-        console.log(`✨ Free access count: ${freeAccessGrants.length}`);
 
         const renderStart = performance.now();
         console.log('🎨 Starting renderSystems()...');
