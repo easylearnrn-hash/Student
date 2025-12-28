@@ -1,9 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- ============================================================================
+       STUDENT PORTAL ADMIN - ARNOMA NURSING ACADEMY
+       ============================================================================
+       Purpose: Admin dashboard for managing students, notes, and impersonation
+       Version: 2024-12-28-PERFORMANCE - Re-enabled caching + DOM cache + tab visibility
+       ============================================================================ -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Student Portal Admin - ARNOMA</title>
+  <title>Student Portal Admin - ARNOMA v2024-12-28-PERFORMANCE</title>
   <link rel="icon" type="image/png" href="/richyfesta-logo.png">
   
   <!-- Supabase SDK -->
@@ -1826,9 +1832,9 @@
     
     // ===== PERFORMANCE: DATA CACHE =====
     const DATA_CACHE = {
-      students: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 }, // 5 min
-      notes: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 },
-      stats: { data: null, timestamp: 0, ttl: 2 * 60 * 1000 } // 2 min
+      students: { data: null, timestamp: 0, ttl: 30 * 1000 }, // 30 seconds for real-time feel
+      notes: { data: null, timestamp: 0, ttl: 30 * 1000 }, // 30 seconds
+      stats: { data: null, timestamp: 0, ttl: 30 * 1000 } // 30 seconds
     };
 
     function getCachedData(key) {
@@ -1861,6 +1867,21 @@
           DATA_CACHE[k].timestamp = 0;
         });
       }
+    }
+
+    // ===== PERFORMANCE: DOM CACHE =====
+    const domCache = new Map();
+
+    function getCachedDOM(selector) {
+      return domCache.get(selector) || null;
+    }
+
+    function setCachedDOM(selector, element) {
+      domCache.set(selector, element);
+    }
+
+    function clearDOMCache() {
+      domCache.clear();
     }
 
     // ===== PERFORMANCE: DEBOUNCE HELPER =====
@@ -2005,7 +2026,13 @@
     // Load Stats
     async function loadStats() {
       try {
-        // PERFORMANCE FIX: Disabled caching - always fetch fresh data for real-time updates
+        // 🚀 PERFORMANCE: Check cache first (30-second TTL for real-time feel)
+        const cached = getCachedData('stats');
+        if (cached) {
+          updateStatsUI(cached);
+          return;
+        }
+        
         await ensureAdminSession();
         
         // Total Students & Active Students
@@ -2035,6 +2062,8 @@
           notes: notesCount
         };
         
+        // 🚀 PERFORMANCE: Cache the result
+        setCachedData('stats', stats);
         updateStatsUI(stats);
         
       } catch (error) {
@@ -2043,8 +2072,19 @@
     }
     
     function updateStatsUI(stats) {
-      document.getElementById('totalStudents').textContent = `${stats.activeStudents}/${stats.students}`;
-      document.getElementById('totalNotes').textContent = stats.notes;
+      // 🚀 PERFORMANCE: Use DOM cache for frequent lookups
+      let totalStudentsEl = getCachedDOM('totalStudents') || document.getElementById('totalStudents');
+      let totalNotesEl = getCachedDOM('totalNotes') || document.getElementById('totalNotes');
+      
+      if (totalStudentsEl) {
+        setCachedDOM('totalStudents', totalStudentsEl);
+        totalStudentsEl.textContent = `${stats.activeStudents}/${stats.students}`;
+      }
+      
+      if (totalNotesEl) {
+        setCachedDOM('totalNotes', totalNotesEl);
+        totalNotesEl.textContent = stats.notes;
+      }
     }
     
     // Helper to parse and format schedule for display
@@ -2141,7 +2181,12 @@
     // Load Students
     async function loadStudents() {
       try {
-        // PERFORMANCE FIX: Disabled caching - always fetch fresh data for real-time updates
+        // 🚀 PERFORMANCE: Check cache first (30-second TTL for real-time feel)
+        const cached = getCachedData('students');
+        if (cached) {
+          renderStudentsTable(cached);
+          return;
+        }
         
         await ensureAdminSession();
         
@@ -2226,6 +2271,8 @@
           allSessionsMap
         };
         
+        // 🚀 PERFORMANCE: Cache the result
+        setCachedData('students', data);
         renderStudentsTable(data);
         
       } catch (error) {
@@ -2237,9 +2284,10 @@
     function renderStudentsTable(data) {
       const { students, groupMap, uniqueGroups, onlineMap, allSessionsMap } = data;
       
-      // PERFORMANCE: Immediate UI update for group filter
-      const groupFilter = document.getElementById('groupFilterSelect');
+      // 🚀 PERFORMANCE: Use DOM cache for frequent lookups
+      const groupFilter = getCachedDOM('groupFilterSelect') || document.getElementById('groupFilterSelect');
       if (groupFilter) {
+        setCachedDOM('groupFilterSelect', groupFilter);
         const currentSelection = groupFilter.value;
         const options = ['<option value="">All Groups</option>'];
         Array.from(uniqueGroups).sort().forEach(code => {
@@ -2251,14 +2299,16 @@
         }
       }
       
-      const tbody = document.getElementById('studentsTableBody');
+      // 🚀 PERFORMANCE: Use DOM cache for table body
+      const tbody = getCachedDOM('studentsTableBody') || document.getElementById('studentsTableBody');
+      if (tbody) setCachedDOM('studentsTableBody', tbody);
       
       if (students.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="empty-state-icon">👥</div><div>No students found</div></td></tr>';
         return;
       }
       
-      // PERFORMANCE: Defer heavy DOM operations to next animation frame
+      // 🚀 PERFORMANCE: Defer heavy DOM operations to next animation frame
       requestAnimationFrame(() => {
         // Build all rows in a single innerHTML assignment (faster than createElement loops)
         tbody.innerHTML = students.map(student => {
@@ -3055,8 +3105,11 @@
         // Check for new messages on load
         checkNewMessages();
         
-        // Poll for new messages every 30 seconds
-        setInterval(checkNewMessages, 30000);
+        // 🚀 PERFORMANCE: Poll for new messages every 30 seconds (skip if tab hidden)
+        setInterval(() => {
+          if (document.hidden) return; // Skip if tab not visible
+          checkNewMessages();
+        }, 30000);
         
       } catch (error) {
         console.error('❌ Initialization error:', error);
