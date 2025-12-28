@@ -1931,10 +1931,11 @@
           // Both posted or both unposted - sort by DISPLAY date (permission/free access date, NOT note's class_date)
           let aDate, bDate;
           
-          // For posted notes, use the permission or free access date (what's shown in the badge)
+          // For posted notes, use the CLASS DATE (what admin chose), not the timestamp
           if (aIsPosted) {
             if (aPermission) {
-              aDate = aPermission.granted_at || aPermission.class_date;
+              // Use class_date if available, otherwise fall back to granted_at timestamp
+              aDate = aPermission.class_date || aPermission.granted_at;
             } else if (aIsFree) {
               const freeGrant = freeAccessGrants.find(g => g.note_id === a.id && g.group_letter === groupLetter);
               aDate = freeGrant?.class_date || freeGrant?.created_at;
@@ -1946,7 +1947,8 @@
           
           if (bIsPosted) {
             if (bPermission) {
-              bDate = bPermission.granted_at || bPermission.class_date;
+              // Use class_date if available, otherwise fall back to granted_at timestamp
+              bDate = bPermission.class_date || bPermission.granted_at;
             } else if (bIsFree) {
               const freeGrant = freeAccessGrants.find(g => g.note_id === b.id && g.group_letter === groupLetter);
               bDate = freeGrant?.class_date || freeGrant?.created_at;
@@ -1991,17 +1993,23 @@
           return dateDiff;
         });
 
-        // DEBUG: Log final sorted order
-        console.log('📋 Final sorted order (first 10):', systemNotes.slice(0, 10).map(n => `${n.title?.substring(0, 30)} - ${(() => {
+        // DEBUG: Log final sorted order with DATE ONLY (not timestamp)
+        console.log('📋 Final sorted order (first 10):', systemNotes.slice(0, 10).map(n => {
           const perm = permissionsMap.get(`${n.id}_${currentGroup}`);
           const isFree = freeAccessMap.has(`${n.id}_${groupLetter}`);
-          if (perm) return perm.granted_at || perm.class_date;
-          if (isFree) {
+          let dateUsed;
+          if (perm) {
+            dateUsed = perm.class_date || perm.granted_at;
+          } else if (isFree) {
             const fg = freeAccessGrants.find(g => g.note_id === n.id && g.group_letter === groupLetter);
-            return fg?.class_date || fg?.created_at;
+            dateUsed = fg?.class_date || fg?.created_at;
+          } else {
+            dateUsed = n.class_date;
           }
-          return n.class_date;
-        })()}`));
+          // Extract just the date part (YYYY-MM-DD)
+          const dateOnly = dateUsed ? dateUsed.split('T')[0] : 'NO DATE';
+          return `${n.title?.substring(0, 30)} - ${dateOnly}`;
+        }));
 
         // �🚀 PERFORMANCE: Use Maps for O(1) lookups instead of .some() loops
         const freeNotesCount = systemNotes.filter(note => 
