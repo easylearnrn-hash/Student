@@ -1789,7 +1789,7 @@
         const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
         
         // Fetch which folder is marked as current from database FOR THIS GROUP
-  const { data: folders, error } = await supabaseClient
+        const { data: folders, error } = await supabaseClient
           .from('note_folders')
           .select('folder_name, is_current')
           .eq('is_current', true)
@@ -1804,10 +1804,15 @@
         
         const ongoingSystemName = folders && folders.length > 0 ? folders[0].folder_name : null;
         
-        // PERFORMANCE: Removed console.log
+        // 🚀 PERFORMANCE: Cache checkbox query
+        let ongoingCheckboxes = getCachedDOM('ongoingCheckboxes');
+        if (!ongoingCheckboxes) {
+          ongoingCheckboxes = document.querySelectorAll('.system-ongoing-checkbox');
+          setCachedDOM('ongoingCheckboxes', ongoingCheckboxes);
+        }
         
         // Update all checkboxes and apply tint to ongoing system
-        document.querySelectorAll('.system-ongoing-checkbox').forEach(checkbox => {
+        ongoingCheckboxes.forEach(checkbox => {
           const isOngoing = (checkbox.dataset.system === ongoingSystemName);
           checkbox.checked = isOngoing;
           
@@ -1829,11 +1834,21 @@
 
     // ===== RENDER SYSTEMS =====
     async function renderSystems() {
-      const container = document.getElementById('systemsContainer');
-      const searchInput = document.getElementById('searchInput').value.toLowerCase();
+      const container = getCachedDOM('systemsContainer') || document.getElementById('systemsContainer');
+      if (container) setCachedDOM('systemsContainer', container);
+      
+      const searchInput = getCachedDOM('searchInput') || document.getElementById('searchInput');
+      if (searchInput) setCachedDOM('searchInput', searchInput);
+      const searchValue = searchInput ? searchInput.value.toLowerCase() : '';
 
+      // 🚀 PERFORMANCE: Cache checkbox queries
+      let checkedBoxes = getCachedDOM('checkedNoteBoxes');
+      if (!checkedBoxes) {
+        checkedBoxes = document.querySelectorAll('.note-checkbox:checked');
+      }
+      
       // CRITICAL FIX: Update global Set with currently checked boxes before re-render
-      document.querySelectorAll('.note-checkbox:checked').forEach(checkbox => {
+      checkedBoxes.forEach(checkbox => {
         const noteId = checkbox.getAttribute('data-note-id');
         if (noteId) globalCheckedNoteIds.add(noteId);
       });
@@ -1868,6 +1883,21 @@
         sortedSystems = SYSTEMS;
       }
 
+      // 🚀 PERFORMANCE: Pre-build lookup Maps to avoid O(n³) nested loops
+      const permissionsMap = new Map();
+      permissions.forEach(perm => {
+        const key = `${perm.note_id}_${perm.group_name}`;
+        permissionsMap.set(key, perm);
+      });
+      
+      const freeAccessMap = new Map();
+      freeAccessGrants.forEach(grant => {
+        if (grant.access_type === 'group') {
+          const key = `${grant.note_id}_${grant.group_letter}`;
+          freeAccessMap.set(key, grant);
+        }
+      });
+
       // PERFORMANCE: Use document fragment for batch DOM updates
       const systemsHTML = sortedSystems.map(system => {
         // Flexible column detection - check multiple possible column names
@@ -1877,62 +1907,35 @@
         });
         
         // Apply search filter
-        if (searchInput) {
+        if (searchValue) {
           systemNotes = systemNotes.filter(note => {
             const title = (note.title || '').toLowerCase();
             const description = (note.description || '').toLowerCase();
             const system = (note.group_name || '').toLowerCase();
-            return title.includes(searchInput) || 
-                   description.includes(searchInput) || 
-                   system.includes(searchInput);
+            return title.includes(searchValue) || 
+                   description.includes(searchValue) || 
+                   system.includes(searchValue);
           });
         }
         
         if (systemNotes.length === 0) return '';
 
-        // Count how many notes in this system have FREE access for current group
-        const groupLetter = currentGroup.replace('Group ', '');
+        // 🚀 PERFORMANCE: Use Maps for O(1) lookups instead of .some() loops
         const freeNotesCount = systemNotes.filter(note => 
-          freeAccessGrants.some(grant => 
-            grant.note_id === note.id && 
-            grant.access_type === 'group' && 
-            grant.group_letter === groupLetter
-          )
+          freeAccessMap.has(`${note.id}_${groupLetter}`)
         ).length;
         
-        // Count posted notes = notes shown to current group (via student_note_permissions)
         // Posted (not free) = shown to group AND not free
         const postedNotesCount = systemNotes.filter(note => {
-          // Check if note is shown to current group
-          const isShownToGroup = permissions.some(perm => 
-            perm.note_id === note.id && 
-            perm.group_name === currentGroup
-          );
-          
-          // Check if note is free
-          const isFree = freeAccessGrants.some(grant => 
-            grant.note_id === note.id && 
-            grant.access_type === 'group' && 
-            grant.group_letter === groupLetter
-          );
-          
-          // Posted but not free
+          const isShownToGroup = permissionsMap.has(`${note.id}_${currentGroup}`);
+          const isFree = freeAccessMap.has(`${note.id}_${groupLetter}`);
           return isShownToGroup && !isFree;
         }).length;
         
         // Unposted = NOT shown to current group AND NOT free
         const unpostedNotesCount = systemNotes.filter(note => {
-          const isShownToGroup = permissions.some(perm => 
-            perm.note_id === note.id && 
-            perm.group_name === currentGroup
-          );
-          
-          const isFree = freeAccessGrants.some(grant => 
-            grant.note_id === note.id && 
-            grant.access_type === 'group' && 
-            grant.group_letter === groupLetter
-          );
-          
+          const isShownToGroup = permissionsMap.has(`${note.id}_${currentGroup}`);
+          const isFree = freeAccessMap.has(`${note.id}_${groupLetter}`);
           return !isShownToGroup && !isFree;
         }).length;
 
