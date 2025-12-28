@@ -1507,9 +1507,6 @@
 
     // ===== LOAD DATA =====
     async function loadData(forceRefresh = false) {
-      const startTime = performance.now();
-      console.log('⏱️ loadData() started...');
-      
       const container = getCachedDOM('systemsContainer') || document.getElementById('systemsContainer');
       if (container) setCachedDOM('systemsContainer', container);
       
@@ -1525,11 +1522,7 @@
         const freeAccessCache = forceRefresh ? null : getCachedData('freeAccess');
 
         // 🚀 PERFORMANCE: Parallel fetches if any data missing from cache
-        const fetchStart = performance.now();
-        
         if (!notesCache || !permsCache || !freeAccessCache) {
-          console.log('🔄 Fetching data from Supabase (parallel)...');
-          
           const [notesResult, permsResult, freeAccessResult] = await Promise.all([
             // Fetch notes (if not cached)
             notesCache ? Promise.resolve({ data: notesCache, error: null }) : 
@@ -1553,8 +1546,6 @@
                 .select('note_id, access_type, group_letter, student_id, class_date, created_at')
           ]);
 
-          console.log(`✅ All data fetched in ${Math.round(performance.now() - fetchStart)}ms (parallel)`);
-
           // Handle errors
           if (notesResult.error) throw notesResult.error;
           if (permsResult.error) throw permsResult.error;
@@ -1570,22 +1561,13 @@
           if (!notesCache) setCachedData('notes', allNotes);
           if (!permsCache) setCachedData('permissions', permissions);
           if (!freeAccessCache) setCachedData('freeAccess', freeAccessGrants);
-
-          console.log(`📚 Notes: ${allNotes.length} | 🔑 Permissions: ${permissions.length} | ✨ Free access: ${freeAccessGrants.length}`);
         } else {
-          console.log('✅ All data loaded from cache');
           allNotes = notesCache;
           permissions = permsCache;
           freeAccessGrants = freeAccessCache;
-          console.log(`📚 Notes: ${allNotes.length} | 🔑 Permissions: ${permissions.length} | ✨ Free access: ${freeAccessGrants.length}`);
         }
 
-        const renderStart = performance.now();
-        console.log('🎨 Starting renderSystems()...');
         await renderSystems();
-        console.log(`✅ renderSystems() completed in ${Math.round(performance.now() - renderStart)}ms`);
-        
-        console.log(`⏱️ TOTAL loadData() time: ${Math.round(performance.now() - startTime)}ms`);
 
       } catch (error) {
         console.error('Load data error:', error);
@@ -1849,8 +1831,6 @@
 
     // ===== RENDER SYSTEMS =====
     async function renderSystems() {
-      const renderStartTime = performance.now();
-      
       const container = getCachedDOM('systemsContainer') || document.getElementById('systemsContainer');
       if (container) setCachedDOM('systemsContainer', container);
       
@@ -1898,7 +1878,6 @@
         sortedSystems = SYSTEMS;
       }
 
-      const mapsStartTime = performance.now();
       // 🚀 PERFORMANCE: Pre-build lookup Maps to avoid O(n³) nested loops
       const permissionsMap = new Map();
       permissions.forEach(perm => {
@@ -1913,9 +1892,6 @@
           freeAccessMap.set(key, grant);
         }
       });
-      console.log(`📊 Maps built in ${Math.round(performance.now() - mapsStartTime)}ms`);
-
-      const htmlStartTime = performance.now();
       // PERFORMANCE: Use document fragment for batch DOM updates
       const systemsHTML = sortedSystems.map(system => {
         // Flexible column detection - check multiple possible column names
@@ -2077,15 +2053,11 @@
         }
       });
       
-      console.log(`🎨 HTML generation took ${Math.round(performance.now() - htmlStartTime)}ms`);
-      
       // Update ongoing checkbox states after rendering
       updateOngoingCheckboxes();
       
       // Update selected count to reflect restored checkboxes
       updateSelectedCount();
-      
-      console.log(`⏱️ renderSystems() TOTAL: ${Math.round(performance.now() - renderStartTime)}ms`);
     }
 
     // PERFORMANCE: Debounced version for search input
