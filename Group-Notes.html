@@ -1914,7 +1914,35 @@
         
         if (systemNotes.length === 0) return '';
 
-        // 🚀 PERFORMANCE: Use Maps for O(1) lookups instead of .some() loops
+        // � SORT: Posted notes first (by granted_at date DESC), then unposted notes at the end
+        systemNotes.sort((a, b) => {
+          const aPermission = permissionsMap.get(`${a.id}_${currentGroup}`);
+          const bPermission = permissionsMap.get(`${b.id}_${currentGroup}`);
+          const aIsFree = freeAccessMap.has(`${a.id}_${groupLetter}`);
+          const bIsFree = freeAccessMap.has(`${b.id}_${groupLetter}`);
+          
+          const aIsPosted = (aPermission || aIsFree);
+          const bIsPosted = (bPermission || bIsFree);
+          
+          // Posted notes come first
+          if (aIsPosted && !bIsPosted) return -1;
+          if (!aIsPosted && bIsPosted) return 1;
+          
+          // Both posted or both unposted - sort by date (newest first)
+          if (aIsPosted && bIsPosted) {
+            // Use granted_at for permissions, or class_date for free access
+            const aDate = aPermission?.granted_at || a.class_date || a.created_at;
+            const bDate = bPermission?.granted_at || b.class_date || b.created_at;
+            return new Date(bDate) - new Date(aDate); // Descending
+          }
+          
+          // Both unposted - sort by class_date or created_at
+          const aDate = a.class_date || a.created_at;
+          const bDate = b.class_date || b.created_at;
+          return new Date(bDate) - new Date(aDate); // Descending
+        });
+
+        // �🚀 PERFORMANCE: Use Maps for O(1) lookups instead of .some() loops
         const freeNotesCount = systemNotes.filter(note => 
           freeAccessMap.has(`${note.id}_${groupLetter}`)
         ).length;
