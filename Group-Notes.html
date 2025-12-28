@@ -1198,8 +1198,9 @@
 
     // ===== PERFORMANCE: DATA CACHE =====
     const DATA_CACHE = {
-      notes: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 }, // 5 min
-      permissions: { data: null, timestamp: 0, ttl: 5 * 60 * 1000 }
+      notes: { data: null, timestamp: 0, ttl: 30 * 1000 }, // 🚀 30s TTL (was disabled)
+      permissions: { data: null, timestamp: 0, ttl: 30 * 1000 }, // 🚀 30s TTL
+      freeAccess: { data: null, timestamp: 0, ttl: 30 * 1000 } // 🚀 NEW: Cache free access
     };
 
     function getCachedData(key) {
@@ -1233,6 +1234,21 @@
           DATA_CACHE[k].timestamp = 0;
         });
       }
+    }
+
+    // 🚀 PERFORMANCE: DOM CACHE - Cache frequently accessed elements
+    const domCache = new Map();
+    
+    function getCachedDOM(key) {
+      return domCache.get(key) || null;
+    }
+    
+    function setCachedDOM(key, element) {
+      if (element) domCache.set(key, element);
+    }
+    
+    function clearDOMCache() {
+      domCache.clear();
     }
 
     // ===== PERFORMANCE: DEBOUNCE HELPER =====
@@ -1491,7 +1507,8 @@
 
     // ===== LOAD DATA =====
     async function loadData(forceRefresh = false) {
-      const container = document.getElementById('systemsContainer');
+      const container = getCachedDOM('systemsContainer') || document.getElementById('systemsContainer');
+      if (container) setCachedDOM('systemsContainer', container);
       
       // Only show loading spinner if not a background refresh
       if (!forceRefresh) {
@@ -1499,47 +1516,59 @@
       }
 
       try {
-        // PERFORMANCE FIX: Disable cache for Group Notes - always fetch fresh data
-        // This ensures tags update instantly when notes are posted/hidden
-        if (DEBUG_MODE) console.log('🔄 Fetching fresh data...');
+        // 🚀 PERFORMANCE: Use cache with 30s TTL (was disabled)
+        let notes = forceRefresh ? null : getCachedData('notes');
+        if (!notes) {
+          if (DEBUG_MODE) console.log('🔄 Fetching fresh notes data...');
+          const { data, error: notesError } = await supabaseClient
+            .from('student_notes')
+            .select('*')
+            .order('class_date', { ascending: false })
+            .limit(500); // PERFORMANCE: Limit to 500 most recent notes
 
-        // PERFORMANCE: Add limit to prevent loading thousands of notes
-        // Load all notes (no deleted column, just fetch active notes)
-  const { data: notes, error: notesError } = await supabaseClient
-          .from('student_notes')
-          .select('*')
-          .order('class_date', { ascending: false })
-          .limit(500); // PERFORMANCE: Limit to 500 most recent notes
-
-        if (notesError) throw notesError;
-        allNotes = notes || [];
+          if (notesError) throw notesError;
+          notes = data || [];
+          setCachedData('notes', notes);
+        }
+        allNotes = notes;
 
         if (DEBUG_MODE) console.log('📚 Loaded notes:', allNotes.length);
 
-        // PERFORMANCE: Add limit to permissions query
-        // Load all permissions
-  const { data: perms, error: permsError } = await supabaseClient
-          .from('student_note_permissions')
-          .select('*')
-          .limit(1000); // PERFORMANCE: Limit permissions
+        // 🚀 PERFORMANCE: Use cache for permissions
+        let perms = forceRefresh ? null : getCachedData('permissions');
+        if (!perms) {
+          if (DEBUG_MODE) console.log('🔄 Fetching fresh permissions...');
+          const { data, error: permsError } = await supabaseClient
+            .from('student_note_permissions')
+            .select('*')
+            .limit(1000); // PERFORMANCE: Limit permissions
 
-        if (permsError) throw permsError;
-        permissions = perms || [];
+          if (permsError) throw permsError;
+          perms = data || [];
+          setCachedData('permissions', perms);
+        }
+        permissions = perms;
 
         if (DEBUG_MODE) console.log('🔑 Loaded permissions:', permissions.length);
 
-        // Load free access grants
-  const { data: freeAccess, error: freeError } = await supabaseClient
-          .from('note_free_access')
-          .select('*');
+        // 🚀 PERFORMANCE: Use cache for free access
+        let freeAccess = forceRefresh ? null : getCachedData('freeAccess');
+        if (!freeAccess) {
+          if (DEBUG_MODE) console.log('🔄 Fetching fresh free access...');
+          const { data, error: freeError } = await supabaseClient
+            .from('note_free_access')
+            .select('*');
 
-        if (freeError) {
-          console.warn('⚠️ Could not load free access grants:', freeError);
-          freeAccessGrants = [];
-        } else {
-          freeAccessGrants = freeAccess || [];
-          if (DEBUG_MODE) console.log('✨ Loaded free access grants:', freeAccessGrants.length);
+          if (freeError) {
+            console.warn('⚠️ Could not load free access grants:', freeError);
+            freeAccess = [];
+          } else {
+            freeAccess = data || [];
+            setCachedData('freeAccess', freeAccess);
+          }
         }
+        freeAccessGrants = freeAccess;
+        if (DEBUG_MODE) console.log('✨ Loaded free access grants:', freeAccessGrants.length);
 
         await renderSystems();
 
@@ -1555,14 +1584,25 @@
     }
 
     // ===== SWITCH GROUP =====
+    // 🚀 PERFORMANCE: Cache group tab elements
+    let cachedGroupTabs = null;
+    
     async function switchGroup(group) {
       currentGroup = group;
       
-      // Update tab styling
-      document.querySelectorAll('.group-tab').forEach(tab => {
+      // 🚀 PERFORMANCE: Cache tab elements on first call
+      if (!cachedGroupTabs) {
+        cachedGroupTabs = document.querySelectorAll('.group-tab');
+      }
+      
+      // Update tab styling using cached elements
+      cachedGroupTabs.forEach(tab => {
         tab.classList.toggle('active', tab.dataset.group === group);
       });
 
+      // 🚀 PERFORMANCE: Clear DOM cache on group switch
+      clearDOMCache();
+      
       await renderSystems();
     }
     
@@ -2675,8 +2715,11 @@
       }
     }
 
+    // 🚀 PERFORMANCE: Debounce updateSelectedCount for rapid checkbox clicks
+    const debouncedUpdateSelectedCount = debounce(updateSelectedCount, 100);
+    
     function updateSelectedCount() {
-  const totalSelected = globalCheckedNoteIds.size;
+      const totalSelected = globalCheckedNoteIds.size;
       
       // Count how many different systems have selected notes
       const systemsWithSelections = new Set();
@@ -2688,21 +2731,30 @@
         }
       });
       
-      // Quick update of core UI (batch bar)
-      const batchBar = document.getElementById('batchActionBar');
-      const countSpan = document.getElementById('selectedCount');
-      const systemsCountSpan = document.getElementById('systemsCount');
+      // Quick update of core UI (batch bar) - cached elements
+      const batchBar = getCachedDOM('batchActionBar') || document.getElementById('batchActionBar');
+      if (batchBar) setCachedDOM('batchActionBar', batchBar);
+      
+      const countSpan = getCachedDOM('selectedCount') || document.getElementById('selectedCount');
+      if (countSpan) setCachedDOM('selectedCount', countSpan);
+      
+      const systemsCountSpan = getCachedDOM('systemsCount') || document.getElementById('systemsCount');
+      if (systemsCountSpan) setCachedDOM('systemsCount', systemsCountSpan);
       
       if (totalSelected > 0) {
-        batchBar.style.display = 'flex';
-        countSpan.textContent = `${totalSelected} note${totalSelected !== 1 ? 's' : ''} selected`;
-        systemsCountSpan.textContent = `across ${systemsWithSelections.size} system${systemsWithSelections.size !== 1 ? 's' : ''}`;
+        if (batchBar) batchBar.style.display = 'flex';
+        if (countSpan) countSpan.textContent = `${totalSelected} note${totalSelected !== 1 ? 's' : ''} selected`;
+        if (systemsCountSpan) systemsCountSpan.textContent = `across ${systemsWithSelections.size} system${systemsWithSelections.size !== 1 ? 's' : ''}`;
       } else {
-        batchBar.style.display = 'none';
-        document.getElementById('selectAllCheckbox').checked = false;
+        if (batchBar) batchBar.style.display = 'none';
+        const selectAllCheckbox = getCachedDOM('selectAllCheckbox') || document.getElementById('selectAllCheckbox');
+        if (selectAllCheckbox) {
+          selectAllCheckbox.checked = false;
+          setCachedDOM('selectAllCheckbox', selectAllCheckbox);
+        }
       }
       
-      // PERFORMANCE: Defer heavy updates using requestAnimationFrame
+      // 🚀 PERFORMANCE: Defer heavy updates using requestAnimationFrame
       requestAnimationFrame(() => {
         // Keep selectedNoteIds in sync with ALL selected notes (even hidden ones)
         selectedNoteIds = new Set(Array.from(globalCheckedNoteIds, id => parseInt(id, 10)));
@@ -2716,8 +2768,12 @@
     }
 
     function updateSystemQuickActions() {
-      // Get all systems
-      const systemSections = document.querySelectorAll('.system-section');
+      // 🚀 PERFORMANCE: Cache system sections query
+      let systemSections = getCachedDOM('systemSections');
+      if (!systemSections) {
+        systemSections = document.querySelectorAll('.system-section');
+        setCachedDOM('systemSections', systemSections);
+      }
       
       systemSections.forEach(section => {
         const systemId = section.id.replace('system-', '');
