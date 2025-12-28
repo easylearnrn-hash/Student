@@ -6,12 +6,20 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate, max-age=0" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <title>ARNOMA - Group Manager [Connected to Supabase] v2024-12-24-v4</title>
+    <title>ARNOMA - Group Manager [Connected to Supabase] v2024-12-28-v5</title>
     
     <!-- Supabase Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
     
     <!--
+      v2.26.0 - CRITICAL FIX: PRESERVE ARCHIVED ONE-TIME CLASSES (Dec 28, 2025)
+
+      🐛 BUG FIX:
+      - CRITICAL: Fixed one-time classes disappearing after group edit/save
+      - Issue: parseScheduleSlots() only captured visible UI slots, wiping archived classes
+      - Solution: Merge strategy - preserve ALL existing one_time_schedules + add new ones
+      - Archived classes now persist permanently in Supabase even after edits
+      
       v2.25.0 - ARCHIVED CLASSES HISTORY MODAL (Dec 24, 2025)
 
       DESIGN SYSTEM:
@@ -1573,7 +1581,7 @@
 
     <script>
     // 🔥 VERSION CHECK - Verify this code is loading
-    console.log('🚀 GROUP MANAGER VERSION: 2024-12-24-v4 (Archived Classes History Modal)');
+    console.log('🚀 GROUP MANAGER VERSION: 2024-12-28-v5 (CRITICAL FIX: Preserve Archived Classes)');
     console.log('📅 Loaded at:', new Date().toLocaleString());      // Group colors matching Payment-Records badges (A-F)
       const groupColors = [
         { name: 'Blue (A)', value: '#3b82f6', gradient: 'linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%)' },
@@ -3118,13 +3126,23 @@
           oldSchedule = currentGroup.schedule || '';
           scheduleChanged = oldSchedule !== schedule;
           
-          // Detect new one-time classes
-          const oldOneTimeDates = (currentGroup.one_time_schedules || []).map(ot => ot.date);
-          oneTimeClassesAdded = oneTime.filter(ot => !oldOneTimeDates.includes(ot.date));
+          // CRITICAL FIX: Preserve ALL existing one-time schedules (including past/archived)
+          // Only merge in NEW one-time classes from the UI
+          const existingOneTimeSchedules = currentGroup.one_time_schedules || [];
+          const existingDates = existingOneTimeSchedules.map(ot => ot.date);
+          
+          // Detect truly new one-time classes (not already in database)
+          oneTimeClassesAdded = oneTime.filter(ot => !existingDates.includes(ot.date));
+          
+          // Merge: Keep ALL existing + add new ones from UI
+          const mergedOneTime = [
+            ...existingOneTimeSchedules,
+            ...oneTimeClassesAdded
+          ];
           
           currentGroup.name = name;
           currentGroup.schedule = schedule;
-          currentGroup.one_time_schedules = oneTime;
+          currentGroup.one_time_schedules = mergedOneTime;
           // Keep existing active status
           currentGroup.updated_at = new Date();
           debugLog('Group updated:', currentGroup);
