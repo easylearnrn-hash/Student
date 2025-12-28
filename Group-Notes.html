@@ -1507,6 +1507,9 @@
 
     // ===== LOAD DATA =====
     async function loadData(forceRefresh = false) {
+      const startTime = performance.now();
+      console.log('⏱️ loadData() started...');
+      
       const container = getCachedDOM('systemsContainer') || document.getElementById('systemsContainer');
       if (container) setCachedDOM('systemsContainer', container);
       
@@ -1519,46 +1522,60 @@
         // 🚀 PERFORMANCE: Use cache with 30s TTL (was disabled)
         let notes = forceRefresh ? null : getCachedData('notes');
         if (!notes) {
-          if (DEBUG_MODE) console.log('🔄 Fetching fresh notes data...');
+          const notesStart = performance.now();
+          console.log('🔄 Fetching notes from Supabase...');
+          
           const { data, error: notesError } = await supabaseClient
             .from('student_notes')
-            .select('*')
+            .select('id, title, system, system_category, category, group_name, class_date, description, pdf_url, requires_payment, video_url')
             .order('class_date', { ascending: false })
             .limit(500); // PERFORMANCE: Limit to 500 most recent notes
 
+          console.log(`✅ Notes fetched in ${Math.round(performance.now() - notesStart)}ms`);
+          
           if (notesError) throw notesError;
           notes = data || [];
           setCachedData('notes', notes);
+        } else {
+          console.log('✅ Notes loaded from cache');
         }
         allNotes = notes;
-
-        if (DEBUG_MODE) console.log('📚 Loaded notes:', allNotes.length);
+        console.log(`📚 Notes count: ${allNotes.length}`);
 
         // 🚀 PERFORMANCE: Use cache for permissions
         let perms = forceRefresh ? null : getCachedData('permissions');
         if (!perms) {
-          if (DEBUG_MODE) console.log('🔄 Fetching fresh permissions...');
+          const permsStart = performance.now();
+          console.log('🔄 Fetching permissions from Supabase...');
+          
           const { data, error: permsError } = await supabaseClient
             .from('student_note_permissions')
-            .select('*')
+            .select('note_id, group_name, is_accessible, class_date, created_at')
             .limit(1000); // PERFORMANCE: Limit permissions
 
+          console.log(`✅ Permissions fetched in ${Math.round(performance.now() - permsStart)}ms`);
+          
           if (permsError) throw permsError;
           perms = data || [];
           setCachedData('permissions', perms);
+        } else {
+          console.log('✅ Permissions loaded from cache');
         }
         permissions = perms;
-
-        if (DEBUG_MODE) console.log('🔑 Loaded permissions:', permissions.length);
+        console.log(`🔑 Permissions count: ${permissions.length}`);
 
         // 🚀 PERFORMANCE: Use cache for free access
         let freeAccess = forceRefresh ? null : getCachedData('freeAccess');
         if (!freeAccess) {
-          if (DEBUG_MODE) console.log('🔄 Fetching fresh free access...');
+          const freeStart = performance.now();
+          console.log('🔄 Fetching free access from Supabase...');
+          
           const { data, error: freeError } = await supabaseClient
             .from('note_free_access')
-            .select('*');
+            .select('note_id, access_type, group_letter, student_id, class_date, created_at');
 
+          console.log(`✅ Free access fetched in ${Math.round(performance.now() - freeStart)}ms`);
+          
           if (freeError) {
             console.warn('⚠️ Could not load free access grants:', freeError);
             freeAccess = [];
@@ -1566,11 +1583,18 @@
             freeAccess = data || [];
             setCachedData('freeAccess', freeAccess);
           }
+        } else {
+          console.log('✅ Free access loaded from cache');
         }
         freeAccessGrants = freeAccess;
-        if (DEBUG_MODE) console.log('✨ Loaded free access grants:', freeAccessGrants.length);
+        console.log(`✨ Free access count: ${freeAccessGrants.length}`);
 
+        const renderStart = performance.now();
+        console.log('🎨 Starting renderSystems()...');
         await renderSystems();
+        console.log(`✅ renderSystems() completed in ${Math.round(performance.now() - renderStart)}ms`);
+        
+        console.log(`⏱️ TOTAL loadData() time: ${Math.round(performance.now() - startTime)}ms`);
 
       } catch (error) {
         console.error('Load data error:', error);
@@ -1834,6 +1858,8 @@
 
     // ===== RENDER SYSTEMS =====
     async function renderSystems() {
+      const renderStartTime = performance.now();
+      
       const container = getCachedDOM('systemsContainer') || document.getElementById('systemsContainer');
       if (container) setCachedDOM('systemsContainer', container);
       
@@ -1874,15 +1900,14 @@
       // Sort systems: ongoing first (if exists), then original order
       let sortedSystems;
       if (ongoingSystemName) {
-        // Find the ongoing system and move it to the front
         const ongoingSystem = SYSTEMS.find(s => s.name === ongoingSystemName);
         const otherSystems = SYSTEMS.filter(s => s.name !== ongoingSystemName);
         sortedSystems = ongoingSystem ? [ongoingSystem, ...otherSystems] : SYSTEMS;
       } else {
-        // No ongoing system, use original order
         sortedSystems = SYSTEMS;
       }
 
+      const mapsStartTime = performance.now();
       // 🚀 PERFORMANCE: Pre-build lookup Maps to avoid O(n³) nested loops
       const permissionsMap = new Map();
       permissions.forEach(perm => {
@@ -1897,7 +1922,9 @@
           freeAccessMap.set(key, grant);
         }
       });
+      console.log(`📊 Maps built in ${Math.round(performance.now() - mapsStartTime)}ms`);
 
+      const htmlStartTime = performance.now();
       // PERFORMANCE: Use document fragment for batch DOM updates
       const systemsHTML = sortedSystems.map(system => {
         // Flexible column detection - check multiple possible column names
@@ -2059,11 +2086,15 @@
         }
       });
       
+      console.log(`🎨 HTML generation took ${Math.round(performance.now() - htmlStartTime)}ms`);
+      
       // Update ongoing checkbox states after rendering
       updateOngoingCheckboxes();
       
       // Update selected count to reflect restored checkboxes
       updateSelectedCount();
+      
+      console.log(`⏱️ renderSystems() TOTAL: ${Math.round(performance.now() - renderStartTime)}ms`);
     }
 
     // PERFORMANCE: Debounced version for search input
