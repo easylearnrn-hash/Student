@@ -427,6 +427,26 @@
         opacity: 0;
       }
     }
+    
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
+    }
+    
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
   </style>
 </head>
 <body>
@@ -1276,8 +1296,6 @@
     let activeGroups = ['Group A', 'Group B', 'Group C', 'Group D', 'Group E', 'Group F']; // Default all groups
     async function loadActiveGroups() {
       try {
-        console.log('🔍 Loading active groups (checking schedules and students)...');
-        
         // Step 1: Get groups with schedules from groups table
         const { data: scheduledGroups, error: groupsError } = await supabaseClient
           .from('groups')
@@ -1310,8 +1328,6 @@
           }
         });
         
-        console.log('📊 Groups with active students:', Array.from(groupsWithStudents));
-        
         // Step 4: Filter groups that have BOTH students AND schedules
         const groupsWithSchedules = new Set();
         scheduledGroups?.forEach(group => {
@@ -1322,30 +1338,20 @@
           // Check if group is active (STRICT: must be explicitly true)
           const isActive = group.active === true;
           
-          console.log(`🔍 Group ${group.group_name}: active=${group.active}, hasSchedule=${hasSchedule}, isActive=${isActive}`);
-          
           if (hasSchedule && isActive) {
             // Normalize group name to just the letter
             let groupLetter = group.group_name?.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
             if (groupLetter) {
               groupsWithSchedules.add(groupLetter);
-              console.log(`✅ Group ${groupLetter} qualifies (active=true, has schedule)`);
             }
-          } else {
-            let groupLetter = group.group_name?.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '');
-            console.log(`❌ Group ${groupLetter} filtered out (active=${group.active}, hasSchedule=${hasSchedule})`);
           }
         });
-        
-        console.log('📅 Groups with schedules AND active=true:', Array.from(groupsWithSchedules));
         
         // Step 5: Intersect the two sets - groups must have BOTH students AND schedules
         const validGroups = new Set();
         groupsWithStudents.forEach(groupLetter => {
           if (groupsWithSchedules.has(groupLetter)) {
             validGroups.add(groupLetter);
-          } else {
-            console.log(`⚠️ Group ${groupLetter} has students but NO SCHEDULE - hiding from Group Notes`);
           }
         });
         
@@ -1354,8 +1360,6 @@
           .map(letter => `Group ${letter}`)
           .sort();
         
-        console.log('✅ Final active groups (with students AND schedules):', activeGroups);
-        
         // Step 7: Update group tabs visibility
         document.querySelectorAll('.group-tab').forEach(tab => {
           const groupName = tab.dataset.group;
@@ -1363,7 +1367,6 @@
             tab.style.display = 'inline-block';
           } else {
             tab.style.display = 'none';
-            console.log(`🚫 Hiding tab for ${groupName} - no schedule or no students`);
           }
         });
         
@@ -1375,8 +1378,6 @@
           });
         }
         
-        console.log('✅ Group tabs updated based on Schedule Manager settings');
-        
       } catch (error) {
         console.error('❌ Error in loadActiveGroups:', error);
       }
@@ -1385,8 +1386,6 @@
     // ===== INITIALIZATION =====
     (async function init() {
       try {
-        console.log('🚀 GROUP NOTES INITIALIZATION STARTED');
-        
         // Wait for Supabase to be ready
         if (!window.supabase) {
           console.error('Supabase client not initialized');
@@ -1403,11 +1402,8 @@
           return;
         }
 
-        console.log('✅ Session verified, loading active groups...');
-        await loadActiveGroups(); // Load active groups first
-        console.log('✅ Active groups loaded, loading data...');
+        await loadActiveGroups();
         await loadData();
-        console.log('✅ GROUP NOTES INITIALIZATION COMPLETE');
       } catch (error) {
         console.error('Init error:', error);
         // Don't show alert if AUTH_REQUIRED (redirect is happening)
@@ -1628,20 +1624,580 @@
       }, 3000);
     }
     
+    // Show student selection dialog for ongoing system email notification
+    async function showStudentSelectionDialog(systemName, groupLetter) {
+      return new Promise(async (resolve) => {
+        try {
+          // Fetch ALL students in the system (regardless of status)
+          const { data: allStudents, error } = await supabaseClient
+            .from('students')
+            .select('id, name, email, group_name, status')
+            .not('email', 'is', null)
+            .order('name');
+          
+          if (error) {
+            console.error('❌ Error fetching students:', error);
+            await customAlert('Error', `Failed to load students: ${error.message || 'Unknown error'}`);
+            resolve({ proceed: false, sendEmails: false });
+            return;
+          }
+          
+          if (!allStudents || allStudents.length === 0) {
+            await customAlert('No Students', 'No students found with email addresses.');
+            resolve({ proceed: false, sendEmails: false });
+            return;
+          }
+          
+          // Create modal HTML
+          const modalHTML = `
+            <div id="studentSelectionModal" style="
+              position: fixed;
+              top: 0;
+              left: 0;
+              width: 100%;
+              height: 100%;
+              background: rgba(0, 0, 0, 0.7);
+              backdrop-filter: blur(8px);
+              z-index: 999999;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              animation: fadeIn 0.2s ease;
+            ">
+              <div style="
+                background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
+                border: 1px solid rgba(138, 180, 255, 0.3);
+                border-radius: 16px;
+                padding: 0;
+                min-width: 600px;
+                max-width: 800px;
+                max-height: 85vh;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+                animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                display: flex;
+                flex-direction: column;
+              ">
+                <div style="
+                  padding: 32px 32px 0 32px;
+                  overflow-y: auto;
+                  flex: 1;
+                ">
+                  <h3 style="
+                    color: #8ab4ff;
+                    font-size: 20px;
+                    font-weight: 600;
+                    margin: 0 0 16px 0;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                  ">📧 Send New System Notification</h3>
+                
+                <p style="
+                  color: rgba(255, 255, 255, 0.85);
+                  font-size: 15px;
+                  line-height: 1.6;
+                  margin: 0 0 24px 0;
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                ">
+                  You're about to set <strong style="color: #8ab4ff;">${systemName}</strong> as the ongoing system for <strong style="color: #8ab4ff;">Group ${groupLetter}</strong>.
+                  <br><br>
+                  Select which students should receive an email notification about this new system:
+                </p>
+                
+                <div style="display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap;">
+                  <button id="selectAllStudents" style="
+                    padding: 8px 16px;
+                    background: rgba(138, 180, 255, 0.15);
+                    border: 1px solid rgba(138, 180, 255, 0.3);
+                    border-radius: 8px;
+                    color: #8ab4ff;
+                    font-size: 14px;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                    white-space: nowrap;
+                  ">Select All</button>
+                  <button id="deselectAllStudents" style="
+                    padding: 8px 16px;
+                    background: rgba(255, 107, 107, 0.15);
+                    border: 1px solid rgba(255, 107, 107, 0.3);
+                    border-radius: 8px;
+                    color: #ff6b6b;
+                    font-size: 14px;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                    white-space: nowrap;
+                  ">Deselect All</button>
+                  <input 
+                    type="text" 
+                    id="ongoingStudentSearchInput" 
+                    placeholder="🔍 Search students..." 
+                    style="
+                      flex: 1;
+                      padding: 8px 16px;
+                      background: rgba(255, 255, 255, 0.05);
+                      border: 1px solid rgba(138, 180, 255, 0.3);
+                      border-radius: 8px;
+                      color: white;
+                      font-size: 14px;
+                      outline: none;
+                      transition: all 0.2s ease;
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                      min-width: 200px;
+                    "
+                    onfocus="this.style.borderColor='#8ab4ff'; this.style.background='rgba(138, 180, 255, 0.08)';"
+                    onblur="this.style.borderColor='rgba(138, 180, 255, 0.3)'; this.style.background='rgba(255, 255, 255, 0.05)';">
+                  <span id="selectionCounter" style="
+                    padding: 8px 16px;
+                    background: rgba(34, 197, 94, 0.15);
+                    border: 1px solid rgba(34, 197, 94, 0.3);
+                    border-radius: 8px;
+                    color: #86efac;
+                    font-size: 14px;
+                    font-weight: 600;
+                    white-space: nowrap;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                  ">${allStudents.length} selected</span>
+                </div>
+                
+                <div id="studentCheckboxList" style="
+                  max-height: 400px;
+                  overflow-y: auto;
+                  margin-bottom: 0;
+                  background: rgba(0, 0, 0, 0.3);
+                  border: 1px solid rgba(138, 180, 255, 0.2);
+                  border-radius: 8px;
+                  padding: 16px;
+                ">
+                  ${allStudents.map(student => {
+                    const searchText = `${(student.name || '').toLowerCase()} ${(student.email || '').toLowerCase()} ${(student.group_name || '').toLowerCase()}`;
+                    return `
+                    <label class="student-item" data-search-text="${searchText}" style="
+                      display: flex;
+                      align-items: center;
+                      padding: 10px;
+                      margin-bottom: 8px;
+                      background: rgba(255, 255, 255, 0.03);
+                      border-radius: 8px;
+                      cursor: pointer;
+                      transition: all 0.2s ease;
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                    " onmouseover="this.style.background='rgba(138, 180, 255, 0.1)'" onmouseout="this.style.background='rgba(255, 255, 255, 0.03)'">
+                      <input type="checkbox" 
+                        class="student-email-checkbox" 
+                        data-student-id="${student.id}"
+                        data-student-name="${student.name}"
+                        data-student-email="${student.email}"
+                        checked
+                        style="
+                          width: 18px;
+                          height: 18px;
+                          margin-right: 12px;
+                          cursor: pointer;
+                          accent-color: #8ab4ff;
+                        ">
+                      <div style="flex: 1;">
+                        <div style="color: white; font-size: 15px; font-weight: 500;">${student.name}</div>
+                        <div style="color: rgba(255, 255, 255, 0.6); font-size: 13px;">
+                          ${student.email} • Group ${student.group_name || 'None'} • ${student.status || 'active'}
+                        </div>
+                      </div>
+                    </label>
+                    `;
+                  }).join('')}
+                </div>
+                </div>
+                
+                <!-- Fixed bottom button bar -->
+                <div style="
+                  padding: 24px 32px;
+                  background: linear-gradient(180deg, rgba(15, 20, 25, 0) 0%, rgba(15, 20, 25, 0.95) 20%);
+                  border-top: 1px solid rgba(138, 180, 255, 0.1);
+                  display: flex; 
+                  gap: 12px; 
+                  justify-content: space-between;
+                  border-radius: 0 0 16px 16px;
+                ">
+                  <button id="skipEmailBtn" style="
+                    padding: 12px 24px;
+                    background: rgba(251, 146, 60, 0.15);
+                    border: 1px solid rgba(251, 146, 60, 0.4);
+                    border-radius: 8px;
+                    color: #fdba74;
+                    font-size: 15px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                  ">⏭️ Skip Email & Set Ongoing</button>
+                  <div style="display: flex; gap: 12px;">
+                    <button id="cancelStudentSelection" style="
+                      padding: 12px 24px;
+                      background: rgba(255, 255, 255, 0.05);
+                      border: 1px solid rgba(255, 255, 255, 0.2);
+                      border-radius: 8px;
+                      color: white;
+                      font-size: 15px;
+                      font-weight: 600;
+                      cursor: pointer;
+                      transition: all 0.2s ease;
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                    ">Cancel</button>
+                    <button id="confirmStudentSelection" style="
+                      padding: 12px 24px;
+                      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                      border: none;
+                      border-radius: 8px;
+                      color: white;
+                      font-size: 15px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.2s ease;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                  ">Send Emails & Set as Ongoing</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          `;
+          
+          // Inject modal
+          document.body.insertAdjacentHTML('beforeend', modalHTML);
+          document.body.style.overflow = 'hidden';
+          
+          // Add event listeners
+          const modal = document.getElementById('studentSelectionModal');
+          const selectAllBtn = document.getElementById('selectAllStudents');
+          const deselectAllBtn = document.getElementById('deselectAllStudents');
+          const cancelBtn = document.getElementById('cancelStudentSelection');
+          const confirmBtn = document.getElementById('confirmStudentSelection');
+          const skipBtn = document.getElementById('skipEmailBtn');
+          const checkboxes = document.querySelectorAll('.student-email-checkbox');
+          const searchInput = document.getElementById('ongoingStudentSearchInput');
+          const studentItems = document.querySelectorAll('.student-item');
+          const selectionCounter = document.getElementById('selectionCounter');
+          
+          // Update selection counter
+          function updateSelectionCounter() {
+            const selectedCount = Array.from(checkboxes).filter(cb => cb.checked).length;
+            selectionCounter.textContent = `${selectedCount} selected`;
+            if (selectedCount === 0) {
+              selectionCounter.style.background = 'rgba(239, 68, 68, 0.15)';
+              selectionCounter.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+              selectionCounter.style.color = '#fca5a5';
+            } else {
+              selectionCounter.style.background = 'rgba(34, 197, 94, 0.15)';
+              selectionCounter.style.borderColor = 'rgba(34, 197, 94, 0.3)';
+              selectionCounter.style.color = '#86efac';
+            }
+          }
+          
+          // Add change listener to all checkboxes
+          checkboxes.forEach(cb => {
+            cb.addEventListener('change', updateSelectionCounter);
+          });
+          
+          // Search functionality (matches against visible text content to avoid attribute issues)
+          searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase().trim();
+            let visibleCount = 0;
+            studentItems.forEach(item => {
+              const searchText = item.textContent.toLowerCase();
+              if (!searchTerm || searchText.includes(searchTerm)) {
+                item.style.display = 'flex';
+                visibleCount++;
+              } else {
+                item.style.display = 'none';
+              }
+            });
+          });
+          
+          selectAllBtn.addEventListener('click', () => {
+            // Only select visible students
+            studentItems.forEach(item => {
+              if (item.style.display !== 'none') {
+                const checkbox = item.querySelector('.student-email-checkbox');
+                if (checkbox) checkbox.checked = true;
+              }
+            });
+            updateSelectionCounter();
+          });
+          
+          deselectAllBtn.addEventListener('click', () => {
+            // Only deselect visible students
+            studentItems.forEach(item => {
+              if (item.style.display !== 'none') {
+                const checkbox = item.querySelector('.student-email-checkbox');
+                if (checkbox) checkbox.checked = false;
+              }
+            });
+            updateSelectionCounter();
+          });
+          
+          cancelBtn.addEventListener('click', () => {
+            modal.remove();
+            document.body.style.overflow = '';
+            resolve({ proceed: false, sendEmails: false });
+          });
+          
+          skipBtn.addEventListener('click', () => {
+            modal.remove();
+            document.body.style.overflow = '';
+            resolve({ proceed: true, sendEmails: false });
+          });
+          
+          confirmBtn.addEventListener('click', async () => {
+            const selectedStudents = Array.from(checkboxes)
+              .filter(cb => cb.checked)
+              .map(cb => ({
+                id: cb.dataset.studentId,
+                name: cb.dataset.studentName,
+                email: cb.dataset.studentEmail
+              }));
+            
+            if (selectedStudents.length === 0) {
+              await customAlert('No Students Selected', 'Please select at least one student to notify, or click "Skip Email" to proceed without sending.');
+              return;
+            }
+            
+            // Disable button and show loading
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = '⏳ Sending emails...';
+            
+            // Send emails to selected students
+            await sendOngoingSystemEmails(selectedStudents, systemName, groupLetter);
+            
+            // Clean up
+            modal.remove();
+            document.body.style.overflow = '';
+            resolve({ proceed: true, sendEmails: true });
+          });
+          
+        } catch (error) {
+          console.error('❌ Error in student selection dialog:', error);
+          await customAlert('Error', 'An error occurred while preparing the email notification.');
+          resolve({ proceed: false, sendEmails: false });
+        }
+      });
+    }
+    
+    // Send ongoing system notification emails
+    async function sendOngoingSystemEmails(students, systemName, groupLetter) {
+      const groupFullName = `Group ${groupLetter}`;
+      let successCount = 0;
+      let failCount = 0;
+      
+      for (const student of students) {
+        try {
+          // Email body with exact template text
+          const emailBody = `Dear <strong>${student.name}</strong>,
+
+We would like to inform you that <em><strong>${systemName}</strong></em> is beginning today with <strong>${groupFullName}</strong>.
+
+If you wish to join <strong>${groupFullName}</strong> for this system, please contact your instructor at your earliest convenience so that your enrollment can be arranged.
+
+Kind regards,
+<strong>Armenian College of Nursing & Health Sciences</strong>`;
+
+          // Generate HTML using the ARNOMA email template format
+          const emailHTML = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARNOMA NCLEX-RN Email</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 40px 20px;
+    }
+    .email-wrapper {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .email-container {
+      background-color: #ffffff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    }
+    .email-header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 45px 35px 35px;
+      text-align: center;
+    }
+    .email-header img {
+      width: 140px;
+      height: 140px;
+      margin-bottom: 15px;
+      filter: drop-shadow(0 0 6px rgba(255,255,255,0.7))
+              drop-shadow(0 0 12px rgba(255,255,255,0.4))
+              drop-shadow(0 0 3px rgba(255,255,255,0.8));
+      animation: fadeIn 1.5s ease-in-out;
+    }
+    .email-header h1 {
+      color: #fff;
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: -0.5px;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.9); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .email-body {
+      padding: 35px;
+      color: #333;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+    .email-body p {
+      margin: 0 0 16px 0;
+    }
+    .email-body-content {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
+    .email-footer {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #fff;
+      text-align: center;
+      padding: 30px 20px;
+    }
+    .email-footer img {
+      width: 100px;
+      height: 100px;
+      margin: 10px 0;
+      filter: drop-shadow(0 0 5px rgba(255,255,255,0.6))
+              drop-shadow(0 0 10px rgba(255,255,255,0.3))
+              drop-shadow(0 0 2px rgba(255,255,255,0.8));
+    }
+    .email-footer p {
+      margin: 6px 0;
+      font-size: 13px;
+    }
+    @media (max-width: 600px) {
+      body { padding: 20px 10px; }
+      .email-body { padding: 25px 20px; font-size: 15px; }
+      .email-header img { width: 110px; height: 110px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="email-wrapper">
+    <div class="email-container">
+      <div class="email-header">
+        <img src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png" alt="ARNOMA Logo">
+        <h1>New System Starting</h1>
+      </div>
+
+      <div class="email-body">
+        <div class="email-body-content">${emailBody}</div>
+      </div>
+
+      <div class="email-footer">
+        <img src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png" alt="ARNOMA Logo">
+        <p><strong style="font-size: 18px;">ARNOMA – NCLEX RN</strong></p>
+        <p style="font-size: 14px;">Professional NCLEX Preparation & Medical Education</p>
+        <p style="font-size: 13px;">
+          nclex.rn@arnoma.us<br>
+          richy@arnoma.us<br>
+          909-808-1818
+        </p>
+        <p style="font-size: 12px; color: #95a5a6;">
+          © 2025 ARNOMA. All rights reserved.
+        </p>
+        <p style="font-size: 12px; color: #7f8c8d;">
+          This is an automated notification from your ARNOMA NCLEX prep program.
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({
+              to: student.email,
+              subject: `New System Starting: ${systemName} (${groupFullName})`,
+              html: emailHTML,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to send email to ${student.email}`);
+          }
+
+          const responseData = await response.json();
+          const resendEmailId = responseData?.id || responseData?.emailId || null;
+
+          // Log to sent_emails table
+          await supabaseClient.from('sent_emails').insert({
+            recipient_email: student.email,
+            recipient_name: student.name,
+            subject: `New System Starting: ${systemName} (${groupFullName})`,
+            html_body: emailHTML,
+            sent_at: new Date().toISOString(),
+            email_type: 'system_notification',
+            resend_id: resendEmailId,
+            delivery_status: 'sent',
+            response_data: responseData
+          });
+
+          successCount++;
+          
+        } catch (error) {
+          console.error(`❌ Failed to send email to ${student.name}:`, error);
+          failCount++;
+        }
+      }
+      
+      // Show summary toast
+      if (failCount === 0) {
+        showToast(`✅ Emails sent to ${successCount} student${successCount !== 1 ? 's' : ''}`, 'success');
+      } else {
+        showToast(`⚠️ Sent ${successCount} emails, ${failCount} failed`, 'info');
+      }
+    }
+    
     // Toggle ongoing status for a system in Group Notes
     async function toggleSystemOngoing(systemName, isChecked) {
       const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
-      const ongoingSystemsMap = JSON.parse(localStorage.getItem('arnoma-ongoing-systems') || '{}');
+      let ongoingSystemsMap = JSON.parse(localStorage.getItem('arnoma-ongoing-systems') || '{}');
       
       if (isChecked) {
         // PERFORMANCE: Removed console.log
         
-        // Set this system as ongoing for this group
+        // Show student selection dialog for email confirmation
+        const result = await showStudentSelectionDialog(systemName, groupLetter);
+        
+        if (!result.proceed) {
+          // User cancelled - uncheck the checkbox
+          const checkbox = document.querySelector(`.system-ongoing-checkbox[data-system="${systemName}"]`);
+          if (checkbox) checkbox.checked = false;
+          return;
+        }
+        
+        // Show appropriate toast based on whether emails were sent
+        const actionMessage = result.sendEmails 
+          ? 'Emails sent and system set as ongoing' 
+          : 'System set as ongoing (no emails sent)';
+        
+        // CRITICAL: Set ongoing for THIS GROUP ONLY - each group has its own ongoing system
         ongoingSystemsMap[groupLetter] = systemName;
         
-        // UPDATE DATABASE: Set is_current = TRUE for this folder, FALSE for all others IN THIS GROUP
+        // UPDATE DATABASE: Set is_current = TRUE for this folder, FALSE for others IN THIS GROUP ONLY
         try {
-          // First, unset all folders' is_current for THIS GROUP ONLY
+          // First, unset is_current for all folders IN THIS GROUP (not globally)
           const { error: error1 } = await supabaseClient
             .from('note_folders')
             .update({ is_current: false })
@@ -1741,7 +2297,7 @@
           systemSection.style.background = 'rgba(255, 152, 0, 0.08)'; // Light orange tint
         }
         
-        showToast(`✅ "${systemName}" set as ongoing for Group ${groupLetter}`, 'success');
+        showToast(`✅ ${actionMessage} for Group ${groupLetter}`, 'success');
       } else {
         // Remove ongoing status
         delete ongoingSystemsMap[groupLetter];
@@ -1993,25 +2549,7 @@
           return dateDiff;
         });
 
-        // DEBUG: Log final sorted order with DATE ONLY (not timestamp)
-        console.log('📋 Final sorted order (first 10):', systemNotes.slice(0, 10).map(n => {
-          const perm = permissionsMap.get(`${n.id}_${currentGroup}`);
-          const isFree = freeAccessMap.has(`${n.id}_${groupLetter}`);
-          let dateUsed;
-          if (perm) {
-            dateUsed = perm.class_date || perm.granted_at;
-          } else if (isFree) {
-            const fg = freeAccessGrants.find(g => g.note_id === n.id && g.group_letter === groupLetter);
-            dateUsed = fg?.class_date || fg?.created_at;
-          } else {
-            dateUsed = n.class_date;
-          }
-          // Extract just the date part (YYYY-MM-DD)
-          const dateOnly = dateUsed ? dateUsed.split('T')[0] : 'NO DATE';
-          return `${n.title?.substring(0, 30)} - ${dateOnly}`;
-        }));
-
-        // �🚀 PERFORMANCE: Use Maps for O(1) lookups instead of .some() loops
+        // 🚀 PERFORMANCE: Use Maps for O(1) lookups instead of .some() loops
         const freeNotesCount = systemNotes.filter(note => 
           freeAccessMap.has(`${note.id}_${groupLetter}`)
         ).length;
