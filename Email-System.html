@@ -871,6 +871,30 @@
         border-color: rgba(251, 146, 60, 0.4);
       }
 
+      /* Variable Button Styles */
+      .variable-btn {
+        background: rgba(102, 126, 234, 0.15);
+        border: 1px solid rgba(102, 126, 234, 0.4);
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.9);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-family: 'SF Mono', Monaco, monospace;
+      }
+
+      .variable-btn:hover {
+        background: rgba(102, 126, 234, 0.25);
+        border-color: rgba(102, 126, 234, 0.6);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+      }
+
+      .variable-btn:active {
+        transform: translateY(0);
+      }
+
       .design-dialog-overlay {
         position: fixed;
         inset: 0;
@@ -1023,6 +1047,9 @@
       <div class="header">
         <div class="header-title">📧 ARNOMA Email System</div>
         <div class="header-actions">
+          <button class="btn" onclick="openManualSendModal()">
+            📧 Send Email
+          </button>
           <button class="btn" onclick="openSentEmails()">📨 Sent Emails</button>
           <button class="btn" onclick="openAutomations()">⚙️ Automations</button>
           <button class="btn" onclick="openEditor()">✨ Create Template</button>
@@ -1493,6 +1520,261 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MANUAL SEND EMAIL MODAL -->
+    <div id="manualSendModal" class="modal">
+      <div class="modal-overlay" onclick="closeManualSendModal()"></div>
+      <div class="modal-card" style="max-width: 1400px; width: 95vw;">
+        <div class="modal-header">
+          <div class="modal-title">✉️ Send Email</div>
+          <button class="modal-close" onclick="closeManualSendModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <!-- Two Column Layout: Form + Preview -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; height: calc(90vh - 200px);">
+            
+            <!-- LEFT COLUMN: Email Form -->
+            <div style="overflow-y: auto; padding-right: 12px;">
+              <form onsubmit="sendManualEmail(event); return false;">
+                <!-- Recipient Selection -->
+                <div class="form-group">
+                  <label class="form-label" style="display: block; margin-bottom: 12px;">
+                    Recipient
+                  </label>
+                  
+                  <!-- Combined Search and Selector -->
+                  <div style="position: relative;">
+                    <input 
+                      type="text" 
+                      id="studentSearchInput" 
+                      class="form-input" 
+                      placeholder="🔍 Type to search students OR enter email manually..."
+                      oninput="filterStudentDropdown()"
+                      style="margin-bottom: 12px;"
+                    />
+                    <select 
+                      id="studentSelector" 
+                      class="form-input" 
+                      onchange="onStudentSelected()"
+                      size="5"
+                      style="display: none; position: absolute; z-index: 1000; background: rgba(30, 30, 60, 0.98); border: 2px solid rgba(102,126,234,0.5); box-shadow: 0 8px 32px rgba(0,0,0,0.3); max-height: 250px; overflow-y: auto;"
+                    >
+                      <option value="">Loading students...</option>
+                    </select>
+                  </div>
+
+              <!-- Selected Email Display -->
+              <div id="selectedEmailDisplay" style="margin-top: 12px; padding: 12px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; display: none;">
+                <div style="font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 4px;">Sending to:</div>
+                <div id="selectedEmailText" style="font-size: 14px; color: #10b981; font-weight: 600;"></div>
+              </div>
+              <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 6px;">
+                💡 Type to search students, or enter an email address directly (e.g., name@example.com)
+              </div>
+            </div>
+
+            <!-- Subject -->
+            <div class="form-group">
+              <label class="form-label" for="manualEmailSubject">Subject</label>
+              <input 
+                type="text" 
+                id="manualEmailSubject" 
+                class="form-input" 
+                placeholder="Email subject line"
+                required
+                oninput="updateManualPreview()"
+              />
+            </div>
+
+            <!-- Optional Fields Toggle Button -->
+            <div style="margin-bottom: 16px;">
+              <button 
+                type="button" 
+                id="toggleOptionalFieldsBtn"
+                class="btn" 
+                onclick="toggleOptionalFields()"
+                style="padding: 8px 16px; font-size: 13px; background: rgba(102,126,234,0.1); border: 1px solid rgba(102,126,234,0.3);"
+              >
+                ➕ Add CC / BCC / Title
+              </button>
+            </div>
+
+            <!-- Optional Fields Container (Hidden by default) -->
+            <div id="optionalFieldsContainer" style="display: none;">
+              <!-- Email Title (for template header) - OPTIONAL -->
+              <div class="form-group">
+                <label class="form-label" for="manualEmailTitle">Email Title (Optional)</label>
+                <input 
+                  type="text" 
+                  id="manualEmailTitle" 
+                  class="form-input" 
+                  placeholder="Title shown in email header (e.g., Important Update)"
+                  oninput="updateManualPreview()"
+                />
+                <div style="font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 6px;">
+                  Optional large header text at top of email (separate from subject line)
+                </div>
+              </div>
+
+            <!-- CC Field -->
+            <div class="form-group">
+              <label class="form-label" for="manualEmailCC">CC (Optional)</label>
+              <input 
+                type="text" 
+                id="manualEmailCC" 
+                class="form-input" 
+                placeholder="cc@example.com, another@example.com"
+              />
+              <div style="font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 6px;">
+                Separate multiple emails with commas
+              </div>
+            </div>
+
+            <!-- BCC Field -->
+            <div class="form-group">
+              <label class="form-label" for="manualEmailBCC">BCC (Optional)</label>
+              <input 
+                type="text" 
+                id="manualEmailBCC" 
+                class="form-input" 
+                placeholder="bcc@example.com, hidden@example.com"
+              />
+              <div style="font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 6px;">
+                Separate multiple emails with commas
+              </div>
+            </div>
+            </div>
+
+            <!-- Message Body -->
+            <div class="form-group">
+              <label class="form-label" for="manualEmailBody">Message</label>
+              
+              <!-- Text Formatting Toolbar -->
+              <div style="display: flex; gap: 8px; margin-bottom: 8px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 8px; border: 1px solid rgba(255,255,255,0.1);">
+                <button 
+                  type="button" 
+                  onclick="formatManualEmailText('bold')" 
+                  class="btn"
+                  style="padding: 6px 12px; font-size: 14px; min-width: auto;"
+                  title="Bold"
+                >
+                  <strong>B</strong>
+                </button>
+                <button 
+                  type="button" 
+                  onclick="formatManualEmailText('italic')" 
+                  class="btn"
+                  style="padding: 6px 12px; font-size: 14px; min-width: auto;"
+                  title="Italic"
+                >
+                  <em>I</em>
+                </button>
+                <button 
+                  type="button" 
+                  onclick="formatManualEmailText('underline')" 
+                  class="btn"
+                  style="padding: 6px 12px; font-size: 14px; min-width: auto;"
+                  title="Underline"
+                >
+                  <u>U</u>
+                </button>
+                <button 
+                  type="button" 
+                  onclick="insertManualInfoBox()" 
+                  class="btn"
+                  style="padding: 6px 12px; font-size: 14px; min-width: auto;"
+                  title="Insert Info Box"
+                >
+                  📦 Info
+                </button>
+                <div style="flex: 1;"></div>
+                <div style="font-size: 11px; color: rgba(255,255,255,0.5); display: flex; align-items: center;">
+                  Format text or insert info box
+                </div>
+              </div>
+              
+              <textarea 
+                id="manualEmailBody" 
+                class="form-input" 
+                rows="10"
+                placeholder="Write your message here... (spacing and line breaks will be preserved exactly as you type)"
+                required
+                style="font-family: 'Courier New', Courier, monospace; resize: vertical; white-space: pre-wrap; line-height: 1.5;"
+                oninput="updateManualPreview()"
+              ></textarea>
+              <div style="font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 6px;">
+                💡 All spacing, tabs, and line breaks are preserved exactly. Use formatting buttons for bold/italic/underline.
+              </div>
+            </div>
+
+            <!-- Variable Suggestions -->
+            <div style="margin-bottom: 20px; padding: 16px; background: rgba(102,126,234,0.1); border: 1px solid rgba(102,126,234,0.3); border-radius: 12px;">
+              <div style="font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.9); margin-bottom: 12px;">
+                📋 Available Variables (click to insert)
+              </div>
+              <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+                <button type="button" onclick="insertManualVariable('{{StudentName}}')" class="variable-btn">{{StudentName}}</button>
+                <button type="button" onclick="insertManualVariable('{{StudentEmail}}')" class="variable-btn">{{StudentEmail}}</button>
+                <button type="button" onclick="insertManualVariable('{{Group}}')" class="variable-btn">{{Group}}</button>
+                <button type="button" onclick="insertManualVariable('{{Balance}}')" class="variable-btn">{{Balance}}</button>
+                <button type="button" onclick="insertManualVariable('{{PricePerClass}}')" class="variable-btn">{{PricePerClass}}</button>
+                <button type="button" onclick="insertManualVariable('{{ClassDate}}')" class="variable-btn">{{ClassDate}}</button>
+                <button type="button" onclick="insertManualVariable('{{ClassTime}}')" class="variable-btn">{{ClassTime}}</button>
+                <button type="button" onclick="insertManualVariable('{{TeacherName}}')" class="variable-btn">{{TeacherName}}</button>
+                <button type="button" onclick="insertManualVariable('{{TeacherEmail}}')" class="variable-btn">{{TeacherEmail}}</button>
+              </div>
+              <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 8px;">
+                Variables will be replaced with actual data when email is sent
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; gap: 12px; margin-top: 24px;">
+              <button 
+                type="button" 
+                onclick="closeManualSendModal()" 
+                class="btn"
+                style="flex: 1; background: rgba(239,68,68,0.15); border: 1.5px solid rgba(239,68,68,0.4); color: #f87171;"
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit" 
+                id="sendManualEmailBtn"
+                class="btn-primary"
+                style="flex: 2;"
+              >
+                📤 Send Email
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- RIGHT COLUMN: Live Preview -->
+        <div style="display: flex; flex-direction: column; height: 100%; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 24px;">
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 16px; font-weight: 600; color: rgba(255,255,255,0.9); margin-bottom: 8px;">
+              📧 Live Preview
+            </div>
+            <div style="font-size: 12px; color: rgba(255,255,255,0.5);">
+              Preview updates as you type
+            </div>
+          </div>
+          
+          <!-- Preview Frame -->
+          <div style="flex: 1; background: rgba(255,255,255,0.05); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); overflow: hidden;">
+            <iframe 
+              id="manualEmailPreviewFrame" 
+              style="width: 100%; height: 100%; border: none; background: white;"
+              title="Email Preview"
+            ></iframe>
+          </div>
+        </div>
+
+      </div>
         </div>
       </div>
     </div>
@@ -3378,6 +3660,495 @@
       }
 
       // ============================================================
+      // MANUAL SEND EMAIL FUNCTIONS
+      // ============================================================
+      let manualSendStudents = [];
+
+      async function openManualSendModal() {
+        const modal = document.getElementById('manualSendModal');
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+
+        // Load students for dropdown
+        await loadStudentsForManualSend();
+        
+        // Reset form
+        document.getElementById('manualEmailSubject').value = '';
+        document.getElementById('manualEmailTitle').value = '';
+        document.getElementById('manualEmailBody').value = '';
+        document.getElementById('manualEmailCC').value = '';
+        document.getElementById('manualEmailBCC').value = '';
+        document.getElementById('studentSearchInput').value = '';
+        document.getElementById('selectedEmailDisplay').style.display = 'none';
+        
+        // Hide dropdown initially
+        document.getElementById('studentSelector').style.display = 'none';
+        
+        // Initialize preview with placeholder data
+        updateManualPreview();
+      }
+
+      function closeManualSendModal() {
+        document.getElementById('manualSendModal').classList.remove('active');
+        document.body.style.overflow = '';
+        
+        // Reset optional fields to hidden
+        const container = document.getElementById('optionalFieldsContainer');
+        const btn = document.getElementById('toggleOptionalFieldsBtn');
+        container.style.display = 'none';
+        btn.textContent = '➕ Add CC / BCC / Title';
+        btn.style.background = 'rgba(102,126,234,0.1)';
+        btn.style.borderColor = 'rgba(102,126,234,0.3)';
+      }
+
+      function toggleOptionalFields() {
+        const container = document.getElementById('optionalFieldsContainer');
+        const btn = document.getElementById('toggleOptionalFieldsBtn');
+        
+        if (container.style.display === 'none') {
+          container.style.display = 'block';
+          btn.textContent = '➖ Hide CC / BCC / Title';
+          btn.style.background = 'rgba(251, 146, 60, 0.1)';
+          btn.style.borderColor = 'rgba(251, 146, 60, 0.3)';
+        } else {
+          container.style.display = 'none';
+          btn.textContent = '➕ Add CC / BCC / Title';
+          btn.style.background = 'rgba(102,126,234,0.1)';
+          btn.style.borderColor = 'rgba(102,126,234,0.3)';
+        }
+      }
+
+      async function loadStudentsForManualSend() {
+        const selector = document.getElementById('studentSelector');
+        
+        try {
+          const { data: students, error } = await supabaseClient
+            .from('students')
+            .select('id, name, email, group_name, balance, price_per_class, show_in_grid')
+            .eq('show_in_grid', true)
+            .order('name', { ascending: true });
+
+          if (error) throw error;
+
+          manualSendStudents = students || [];
+
+          // Initially hide dropdown (will show when user types)
+          selector.style.display = 'none';
+          selector.innerHTML = '<option value="">Select a student...</option>';
+
+          debugLog(`✅ Loaded ${manualSendStudents.length} students for manual send`);
+        } catch (error) {
+          console.error('❌ Error loading students:', error);
+          selector.innerHTML = '<option value="">Error loading students</option>';
+          showDesignAlert('Failed to load students. Please try again.', { type: 'error', title: 'Load Error' });
+        }
+      }
+
+      function filterStudentDropdown() {
+        const searchInput = document.getElementById('studentSearchInput');
+        const selector = document.getElementById('studentSelector');
+        const searchTerm = searchInput.value.toLowerCase().trim();
+        
+        // Clear current options
+        selector.innerHTML = '<option value="">Select a student...</option>';
+        
+        // If no search term, hide dropdown
+        if (searchTerm === '') {
+          selector.style.display = 'none';
+          return;
+        }
+        
+        // Check if it looks like an email address
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (emailRegex.test(searchTerm)) {
+          // It's an email address, don't show dropdown
+          selector.style.display = 'none';
+          return;
+        }
+        
+        // Filter and show only matching students
+        const filteredStudents = manualSendStudents.filter(student => {
+          const name = (student.name || '').toLowerCase();
+          const email = (student.email || '').toLowerCase();
+          const group = (student.group_name || '').toLowerCase();
+          
+          return name.includes(searchTerm) || email.includes(searchTerm) || group.includes(searchTerm);
+        });
+        
+        // Add filtered students to dropdown
+        filteredStudents.forEach(student => {
+          const option = document.createElement('option');
+          option.value = student.id;
+          option.textContent = `${student.name} ${student.group_name ? '(Group ' + student.group_name + ')' : ''} - ${student.email || 'No email'}`;
+          option.dataset.email = student.email || '';
+          option.dataset.name = student.name || '';
+          option.dataset.group = student.group_name || '';
+          option.dataset.balance = student.balance ? '$' + student.balance.toFixed(2) : '$0.00';
+          option.dataset.price = student.price_per_class ? '$' + student.price_per_class.toFixed(2) : '';
+          selector.appendChild(option);
+        });
+        
+        // Show or hide dropdown based on results
+        if (filteredStudents.length === 0) {
+          const noResultOption = document.createElement('option');
+          noResultOption.value = '';
+          noResultOption.textContent = `No students match "${searchInput.value}"`;
+          noResultOption.disabled = true;
+          selector.appendChild(noResultOption);
+          selector.style.display = 'block';
+        } else {
+          selector.style.display = 'block';
+        }
+      }
+
+      function formatManualEmailText(command) {
+        const textarea = document.getElementById('manualEmailBody');
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const selectedText = textarea.value.substring(start, end);
+
+        if (!selectedText) {
+          showDesignAlert('Please select some text first!', { type: 'info', title: 'Select Text' });
+          return;
+        }
+
+        let wrappedText = '';
+        switch (command) {
+          case 'bold':
+            wrappedText = `<strong>${selectedText}</strong>`;
+            break;
+          case 'italic':
+            wrappedText = `<em>${selectedText}</em>`;
+            break;
+          case 'underline':
+            wrappedText = `<u>${selectedText}</u>`;
+            break;
+        }
+
+        textarea.value = textarea.value.substring(0, start) + wrappedText + textarea.value.substring(end);
+
+        // Restore focus and adjust selection
+        textarea.focus();
+        textarea.selectionStart = start;
+        textarea.selectionEnd = start + wrappedText.length;
+        
+        // Update preview after formatting
+        updateManualPreview();
+      }
+
+      function insertManualVariable(variable) {
+        const textarea = document.getElementById('manualEmailBody');
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        
+        // Insert variable at cursor position
+        textarea.value = textarea.value.substring(0, start) + variable + textarea.value.substring(end);
+        
+        // Restore focus and move cursor after inserted variable
+        textarea.focus();
+        textarea.selectionStart = start + variable.length;
+        textarea.selectionEnd = start + variable.length;
+        
+        // Update preview after insertion
+        updateManualPreview();
+      }
+
+      function insertManualInfoBox() {
+        const textarea = document.getElementById('manualEmailBody');
+        if (!textarea) {
+          alert('Error: Cannot find email body textarea');
+          console.error('manualEmailBody textarea not found');
+          return;
+        }
+        
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const selectedText = textarea.value.substring(start, end);
+        
+        console.log('InfoBox - Start:', start, 'End:', end, 'Selected:', selectedText);
+        
+        // Use selected text if available, otherwise use placeholder
+        const messageContent = selectedText.trim() || 'Add your important message here...';
+        
+        console.log('InfoBox - Message content:', messageContent);
+        
+        // InfoBox HTML template
+        const infoBoxHTML = `<div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(147, 51, 234, 0.1)); border-left: 4px solid #3b82f6; padding: 16px; margin: 16px 0; border-radius: 8px;"><div style="color: #1e3a8a; line-height: 1.6; font-weight: 600;"><strong>${messageContent}</strong></div></div>`;
+        
+        console.log('InfoBox - HTML length:', infoBoxHTML.length);
+        
+        // Insert at cursor position (replacing selected text if any)
+        const beforeText = textarea.value.substring(0, start);
+        const afterText = textarea.value.substring(end);
+        textarea.value = beforeText + '\n\n' + infoBoxHTML + '\n\n' + afterText;
+        
+        console.log('InfoBox - Inserted successfully');
+        
+        // Restore focus and move cursor after inserted HTML
+        textarea.focus();
+        const newCursorPos = start + infoBoxHTML.length + 4; // +4 for the newlines
+        textarea.selectionStart = newCursorPos;
+        textarea.selectionEnd = newCursorPos;
+        
+        // Update preview after insertion
+        updateManualPreview();
+        
+        console.log('InfoBox - Complete');
+      }
+
+      function updateManualPreview() {
+        const subject = document.getElementById('manualEmailSubject').value.trim();
+        const title = document.getElementById('manualEmailTitle').value.trim();
+        const body = document.getElementById('manualEmailBody').value;
+        
+        // Get selected student data for preview
+        let previewData = {
+          StudentName: 'John Doe',
+          StudentEmail: 'student@example.com',
+          Group: 'A',
+          Balance: '$100.00',
+          PricePerClass: '$50.00',
+          ClassDate: new Date().toLocaleDateString(),
+          ClassTime: '8:00 PM',
+          TeacherName: 'ARNOMA',
+          TeacherEmail: 'info@arnoma.com'
+        };
+        
+        // Try to get actual student data from selected student
+        const selector = document.getElementById('studentSelector');
+        const selectedOption = selector?.options[selector.selectedIndex];
+        if (selectedOption && selectedOption.dataset.name && selectedOption.value) {
+          previewData.StudentName = selectedOption.dataset.name;
+          previewData.StudentEmail = selectedOption.dataset.email || '';
+          previewData.Group = selectedOption.dataset.group || '';
+          previewData.Balance = selectedOption.dataset.balance || '$0.00';
+          previewData.PricePerClass = selectedOption.dataset.price || '';
+        }
+        
+        // Replace variables in body
+        let previewBody = body;
+        Object.keys(previewData).forEach(key => {
+          const regex = new RegExp(`{{${key}}}`, 'g');
+          previewBody = previewBody.replace(regex, previewData[key]);
+        });
+        
+        // Generate preview HTML - use title only if provided
+        const finalTitle = title || '';
+        const previewHTML = generateEmailHTML(finalTitle, previewBody);
+        
+        // Update iframe
+        const iframe = document.getElementById('manualEmailPreviewFrame');
+        if (iframe) {
+          iframe.srcdoc = previewHTML;
+        }
+      }
+
+      function onStudentSelected() {
+        const selector = document.getElementById('studentSelector');
+        const searchInput = document.getElementById('studentSearchInput');
+        
+        // Check if selector exists and has a valid selectedIndex
+        if (!selector || selector.selectedIndex < 0) {
+          return;
+        }
+        
+        const selectedOption = selector.options[selector.selectedIndex];
+        
+        // Check if selectedOption exists and has dataset
+        if (!selectedOption || !selectedOption.dataset || !selectedOption.value) {
+          return;
+        }
+        
+        const email = selectedOption.dataset.email;
+        const name = selectedOption.dataset.name;
+
+        const display = document.getElementById('selectedEmailDisplay');
+        const emailText = document.getElementById('selectedEmailText');
+
+        if (email) {
+          display.style.display = 'block';
+          emailText.textContent = `${name} - ${email}`;
+          
+          // Hide dropdown after selection
+          selector.style.display = 'none';
+          
+          // Update search input to show selected student
+          searchInput.value = name;
+        } else {
+          display.style.display = 'none';
+        }
+        
+        // Update preview when student changes
+        updateManualPreview();
+      }
+
+      async function sendManualEmail(event) {
+        event.preventDefault();
+
+        const sendBtn = document.getElementById('sendManualEmailBtn');
+        const originalText = sendBtn.textContent;
+
+        try {
+          // Get recipient from selected student OR manual email input
+          const searchInput = document.getElementById('studentSearchInput').value.trim();
+          const selector = document.getElementById('studentSelector');
+          const studentId = selector.value;
+          
+          let recipientEmail = '';
+          let recipientName = '';
+
+          // Check if a student is selected
+          if (studentId) {
+            const student = manualSendStudents.find(s => s.id == studentId);
+            if (!student || !student.email) {
+              showDesignAlert('Selected student has no email address', { type: 'error', title: 'No Email' });
+              return;
+            }
+            recipientEmail = student.email;
+            recipientName = student.name;
+          } 
+          // Otherwise check if manual email was entered
+          else if (searchInput) {
+            // Validate email format
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(searchInput)) {
+              showDesignAlert('Please enter a valid email address or select a student', { type: 'error', title: 'Invalid Email' });
+              return;
+            }
+            recipientEmail = searchInput;
+            recipientName = searchInput.split('@')[0];
+          }
+          // No recipient provided
+          else {
+            showDesignAlert('Please select a student or enter an email address', { type: 'warning', title: 'No Recipient' });
+            return;
+          }
+
+          // Get form values
+          const subject = document.getElementById('manualEmailSubject').value.trim();
+          const title = document.getElementById('manualEmailTitle').value.trim();
+          const bodyContent = document.getElementById('manualEmailBody').value.trim();
+          const ccInput = document.getElementById('manualEmailCC').value.trim();
+          const bccInput = document.getElementById('manualEmailBCC').value.trim();
+
+          if (!subject || !bodyContent) {
+            showDesignAlert('Please fill in subject and message', { type: 'warning', title: 'Missing Fields' });
+            return;
+          }
+
+          // Parse CC and BCC emails (comma-separated)
+          const ccEmails = ccInput ? ccInput.split(',').map(e => e.trim()).filter(e => e) : [];
+          const bccEmails = bccInput ? bccInput.split(',').map(e => e.trim()).filter(e => e) : [];
+
+          // Validate CC emails
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          for (const email of ccEmails) {
+            if (!emailRegex.test(email)) {
+              showDesignAlert(`Invalid CC email address: ${email}`, { type: 'error', title: 'Invalid Email' });
+              return;
+            }
+          }
+
+          // Validate BCC emails
+          for (const email of bccEmails) {
+            if (!emailRegex.test(email)) {
+              showDesignAlert(`Invalid BCC email address: ${email}`, { type: 'error', title: 'Invalid Email' });
+              return;
+            }
+          }
+
+          // Show loading state
+          sendBtn.textContent = '⏳ Sending...';
+          sendBtn.disabled = true;
+
+          // Use title only if provided (don't default to subject)
+          const emailTitle = title || '';
+
+          // Preserve all formatting - newlines, spaces, tabs
+          // The CSS in generateEmailHTML uses white-space: pre-wrap to preserve everything
+          const fullHTML = generateEmailHTML(emailTitle, bodyContent);
+
+          // Build request body
+          const emailData = {
+            to: recipientEmail,
+            subject: subject,
+            html: fullHTML,
+          };
+
+          // Add CC if provided
+          if (ccEmails.length > 0) {
+            emailData.cc = ccEmails;
+          }
+
+          // Add BCC if provided
+          if (bccEmails.length > 0) {
+            emailData.bcc = bccEmails;
+          }
+
+          // Send email via Supabase Edge Function
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify(emailData),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || 'Failed to send email');
+          }
+
+          const responseData = await response.json();
+          const resendEmailId = responseData?.id || responseData?.emailId || null;
+
+          debugLog('✅ Manual email sent:', { to: recipientEmail, subject, resendId: resendEmailId });
+
+          // Track sent email
+          emailSystem.addSentEmail({
+            to: recipientEmail,
+            subject: subject,
+            html: fullHTML,
+            status: 'sent',
+            resendId: resendEmailId,
+            deliveryStatus: 'pending',
+            templateName: 'Manual Send',
+            type: 'manual',
+            responseData: responseData,
+          });
+
+          // Build success message
+          let successMsg = `✅ Email sent successfully to ${recipientName || recipientEmail}`;
+          if (ccEmails.length > 0) {
+            successMsg += `\n📋 CC: ${ccEmails.length} recipient${ccEmails.length > 1 ? 's' : ''}`;
+          }
+          if (bccEmails.length > 0) {
+            successMsg += `\n🔒 BCC: ${bccEmails.length} recipient${bccEmails.length > 1 ? 's' : ''}`;
+          }
+
+          // Success notification
+          showCustomNotification(successMsg, 'success');
+
+          // Reset button and close modal
+          sendBtn.textContent = originalText;
+          sendBtn.disabled = false;
+          closeManualSendModal();
+
+        } catch (error) {
+          console.error('❌ Error sending manual email:', error);
+          showCustomNotification(
+            `Failed to send email: ${error.message}`,
+            'error'
+          );
+
+          // Reset button
+          sendBtn.textContent = originalText;
+          sendBtn.disabled = false;
+        }
+      }
+
+      // ============================================================
       // RICH TEXT EDITOR FUNCTIONS
       // ============================================================
       function formatText(command) {
@@ -4171,6 +4942,11 @@
     .email-body p {
       margin: 0 0 16px 0;
     }
+    .email-body-content {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
     .email-body img {
       display: block;
       max-width: 100%;
@@ -4249,7 +5025,7 @@
       </div>
 
       <div class="email-body">
-        ${bodyContent}
+        <div class="email-body-content">${bodyContent}</div>
       </div>
 
       <div class="email-footer">

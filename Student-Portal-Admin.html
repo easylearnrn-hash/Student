@@ -2435,6 +2435,75 @@
           </td>
         </tr>
       `).join('');
+
+      // Re-apply any active search filter after rerendering the table
+      filterNotes();
+    }
+
+    function filterNotes() {
+      const searchInput = document.getElementById('notesSearch');
+      const tbody = document.getElementById('notesTableBody');
+      if (!searchInput || !tbody) return;
+
+      const searchValue = searchInput.value.trim();
+      const searchTerm = searchValue.toLowerCase();
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      if (rows.length === 0) return;
+
+      let dataRowCount = 0;
+      let visibleCount = 0;
+
+      rows.forEach(row => {
+        if (row.classList.contains('notes-no-results')) {
+          return;
+        }
+
+        const hasStateCell = row.querySelector('.empty-state') || row.querySelector('.loading');
+        if (hasStateCell) {
+          return;
+        }
+
+        dataRowCount++;
+        const matches = searchTerm === '' || row.textContent.toLowerCase().includes(searchTerm);
+        row.style.display = matches ? '' : 'none';
+        if (matches) visibleCount++;
+      });
+
+      let noResultsRow = tbody.querySelector('tr.notes-no-results');
+
+      if (dataRowCount === 0) {
+        if (noResultsRow) {
+          noResultsRow.remove();
+        }
+        return;
+      }
+
+      if (visibleCount === 0 && searchTerm !== '') {
+        if (!noResultsRow) {
+          noResultsRow = document.createElement('tr');
+          noResultsRow.className = 'notes-no-results';
+          const cell = document.createElement('td');
+          cell.colSpan = 6;
+          cell.className = 'empty-state';
+          const icon = document.createElement('div');
+          icon.className = 'empty-state-icon';
+          icon.textContent = '🔍';
+          const text = document.createElement('div');
+          text.className = 'notes-no-results-text';
+          cell.appendChild(icon);
+          cell.appendChild(text);
+          noResultsRow.appendChild(cell);
+          tbody.appendChild(noResultsRow);
+        }
+
+        const textNode = noResultsRow.querySelector('.notes-no-results-text');
+        if (textNode) {
+          textNode.textContent = `No notes match "${searchValue}"`;
+        }
+        noResultsRow.style.display = '';
+      } else if (noResultsRow) {
+        noResultsRow.remove();
+      }
     }
     
     // Group Notes now handled by standalone Group-Notes.html page
@@ -3109,7 +3178,9 @@
       });
     }
     
-    // ✅ Debounced versions already created earlier in file (after debounce() function definition)
+    // Debounced search helpers to prevent keystroke flood
+    const debouncedFilterStudents = debounce(filterStudents, 200);
+    const debouncedFilterNotes = debounce(filterNotes, 200);
     
     // Initialize
     document.addEventListener('DOMContentLoaded', async () => {
@@ -3438,6 +3509,8 @@
         existingNoResults.remove();
       }
     }
+    
+    const debouncedFilterStudentList = debounce(filterStudentList, 200);
     
     function toggleQuestionField() {
       const hasQuestion = document.getElementById('hasQuestion').checked;
