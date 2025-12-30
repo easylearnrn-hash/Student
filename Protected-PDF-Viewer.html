@@ -1367,6 +1367,47 @@
     let currentLoadingMessage = 'Loading protected PDF...';
     let isPreparingPrint = false;
 
+    // ============================================================
+    // PRINT DEBUGGING HELPERS (toggle via console)
+    // ============================================================
+    window.ARNOMA_PRINT_DEBUG = window.ARNOMA_PRINT_DEBUG === true;
+    window.enablePrintDebug = () => {
+      window.ARNOMA_PRINT_DEBUG = true;
+      console.info('%cARNOMA print debug ENABLED. The next print job will keep the preview iframe so you can inspect layout.', 'color:#10b981;font-weight:600;');
+    };
+    window.disablePrintDebug = () => {
+      window.ARNOMA_PRINT_DEBUG = false;
+      console.info('%cARNOMA print debug DISABLED. Print flow will clean up as normal.', 'color:#f97316;font-weight:600;');
+    };
+    window.inspectPrintFrame = () => {
+      if (!window.__arnomaLastPrintFrame) {
+        console.error('%c❌ No print frame found. Enable debug mode with window.enablePrintDebug() then print again.', 'color:#ef4444;font-weight:600;');
+        return;
+      }
+      const frameDoc = window.__arnomaLastPrintFrame.contentDocument;
+      const pages = frameDoc.querySelectorAll('.print-page');
+      console.group('%c🔍 Print Frame Inspection', 'color:#f59e0b;font-weight:700;font-size:14px;');
+      pages.forEach((page, i) => {
+        const img = page.querySelector('img');
+        const overlays = page.querySelectorAll('.watermark-overlay');
+        console.log(`\n📄 Page ${i+1}:`);
+        console.log('  Container:', {
+          computedHeight: getComputedStyle(page).height,
+          offsetHeight: page.offsetHeight + 'px',
+          scrollHeight: page.scrollHeight + 'px',
+          clientHeight: page.clientHeight + 'px'
+        });
+        console.log('  Image:', img ? {
+          naturalWidth: img.naturalWidth + 'px',
+          naturalHeight: img.naturalHeight + 'px',
+          displayWidth: img.offsetWidth + 'px',
+          displayHeight: img.offsetHeight + 'px'
+        } : '❌ MISSING');
+        console.log('  Watermarks:', overlays.length, 'overlays found');
+      });
+      console.groupEnd();
+    };
+
     function updateLoadingStatus(message) {
       currentLoadingMessage = message;
       const statusEl = document.getElementById('loadingStatus');
@@ -2179,7 +2220,6 @@
         return;
       }
 
-      // Show custom copyright alert before printing
       await showPrintWarning();
 
       isPreparingPrint = true;
@@ -2191,196 +2231,294 @@
         printButton.innerHTML = 'Preparing…';
       }
 
-      const content = document.getElementById('pdfContent');
-      if (!content) {
-        console.error('Print error: pdfContent container missing');
+      const restoreButtonState = () => {
         if (printButton && originalButtonLabel !== null) {
           printButton.innerHTML = originalButtonLabel;
           printButton.disabled = false;
         }
-        isPreparingPrint = false;
-        return;
-      }
-
-      const placeholder = document.createElement('div');
-      placeholder.className = 'loading-text';
-      placeholder.textContent = 'Preparing secure print version…';
-      content.innerHTML = '';
-      content.appendChild(placeholder);
+      };
 
       const studentNameSafe = escapeHtml(getStudentDisplayName());
       const studentGroupSafe = escapeHtml(getStudentDisplayGroup());
+      let printFrame = null;
 
       try {
-        const pagesFragment = document.createDocumentFragment();
-        const imageElements = [];
-        const printScale = Math.min(3, Math.max(zoomLevel * 2, 2.2));
+        const pixelRatio = window.devicePixelRatio ? Math.min(window.devicePixelRatio, 3) : 1;
+        const renderScale = Math.max(2.4, pixelRatio * 2);
 
-        // Use data URLs instead of blob URLs for better Safari print compatibility
         const canvasToDataUrl = (baseCanvas) => {
           try {
-            // Try PNG first for better quality
-            return baseCanvas.toDataURL('image/png', 0.95);
+            return baseCanvas.toDataURL('image/png', 0.96);
           } catch (error) {
             console.warn('PNG conversion failed, falling back to JPEG:', error);
-            // Fallback to JPEG if PNG fails
             return baseCanvas.toDataURL('image/jpeg', 0.92);
           }
         };
 
+        const pagesData = [];
+        const debugPagesMeta = [];
+
         for (let i = 1; i <= totalPages; i++) {
           const page = await pdfDoc.getPage(i);
-          const viewport = page.getViewport({ scale: printScale });
+          const baseViewport = page.getViewport({ scale: 1 });
+          const widthInches = (baseViewport.width / 72) || 8.5; // PDF units use 72 DPI
+          const heightInches = (baseViewport.height / 72) || 11;
+          const viewport = page.getViewport({ scale: renderScale });
+
           const canvas = document.createElement('canvas');
           const context = canvas.getContext('2d');
-
-          canvas.height = viewport.height;
           canvas.width = viewport.width;
+          canvas.height = viewport.height;
 
-          await page.render({
-            canvasContext: context,
-            viewport
-          }).promise;
+          await page.render({ canvasContext: context, viewport }).promise;
 
-          const screenshotDataUrl = canvasToDataUrl(canvas);
+          pagesData.push({
+            index: i,
+            dataUrl: canvasToDataUrl(canvas),
+            widthInches,
+            heightInches
+          });
 
-          const imageElement = document.createElement('img');
-          imageElement.decoding = 'sync';
-          imageElement.loading = 'eager';
-          imageElement.src = screenshotDataUrl;
-          imageElement.className = 'page-image page-screenshot-image';
-          imageElement.style.width = '100%';
-          imageElement.style.height = 'auto';
-          imageElement.style.display = 'block';
-          imageElement.style.opacity = '1';
-          imageElement.style.visibility = 'visible';
-          imageElement.alt = `Protected ARNOMA note page ${i}`;
-          imageElement.setAttribute('aria-hidden', 'true');
-
-          imageElements.push(imageElement);
-          // No need to track URLs since we're using data URLs
-
-          const printCanvasCopy = document.createElement('canvas');
-          printCanvasCopy.width = canvas.width;
-          printCanvasCopy.height = canvas.height;
-          printCanvasCopy.className = 'page-canvas page-screenshot-canvas';
-          printCanvasCopy.style.width = '100%';
-          printCanvasCopy.style.height = 'auto';
-          const copyContext = printCanvasCopy.getContext('2d');
-          if (copyContext) {
-            copyContext.drawImage(canvas, 0, 0, canvas.width, canvas.height);
+          if (window.ARNOMA_PRINT_DEBUG) {
+            debugPagesMeta.push({
+              page: i,
+              widthInches: widthInches.toFixed(3),
+              heightInches: heightInches.toFixed(3),
+              renderScale: renderScale.toFixed(2),
+              pixelWidth: viewport.width,
+              pixelHeight: viewport.height
+            });
           }
+        }
 
-          const pageContainer = document.createElement('div');
-          pageContainer.className = 'page-container';
+        const defaultWidthIn = pagesData[0]?.widthInches || 8.5;
+        const defaultHeightIn = pagesData[0]?.heightInches || 11;
 
-          const screenshotFrame = document.createElement('div');
-          screenshotFrame.className = 'page-screenshot-frame';
-          screenshotFrame.appendChild(imageElement);
-          screenshotFrame.appendChild(printCanvasCopy);
+  const normalizedMarginIn = 0.25; // Consistent physical margin on all sides
 
-          const screenshotBadge = document.createElement('div');
-          screenshotBadge.className = 'page-screenshot-badge';
-          screenshotBadge.textContent = `Screenshot – Page ${i}`;
-          screenshotFrame.appendChild(screenshotBadge);
+        const printStyles = `
+          <style>
+            @page { 
+              size: letter;
+              margin: 0.5in; 
+            }
+            * { 
+              -webkit-print-color-adjust: exact !important; 
+              print-color-adjust: exact !important; 
+              box-sizing: border-box;
+            }
+            html, body { 
+              margin: 0; 
+              padding: 0;
+              width: 8.5in;
+            }
+            .print-page { 
+              position: relative;
+              width: 7.5in;
+              height: auto;
+              margin: 0 auto;
+              padding: 0;
+              page-break-after: always; 
+              page-break-inside: avoid;
+              display: block;
+            }
+            .print-page:last-child { 
+              page-break-after: auto; 
+            }
+            .page-image { 
+              display: block; 
+              width: 100%;
+              height: auto;
+              margin: 0;
+              padding: 0;
+            }
+            .watermark-overlay { 
+              position: absolute; 
+              top: 0; 
+              left: 0; 
+              right: 0;
+              bottom: 0;
+              width: 100%; 
+              height: 100%; 
+              pointer-events: none;
+              z-index: 10;
+            }
+            .watermark-main { 
+              display: flex; 
+              align-items: center; 
+              justify-content: center; 
+              width: 100%;
+              height: 100%;
+              opacity: 0.22; 
+            }
+            .watermark-logo { 
+              font-size: 140px; 
+              font-weight: 900; 
+              letter-spacing: 12px; 
+              color: rgba(102, 126, 234, 0.35); 
+              margin: 0; 
+              text-align: center; 
+            }
+            .watermark-text { 
+              font-size: 32px; 
+              font-weight: 700; 
+              text-align: center; 
+              color: rgba(102, 126, 234, 0.65); 
+              line-height: 1.5; 
+            }
+            .watermark-corner { 
+              position: absolute;
+              opacity: 0.35; 
+              padding: 18px; 
+              display: flex; 
+              z-index: 11;
+            }
+            .watermark-corner-text { 
+              font-size: 18px; 
+              font-weight: 700; 
+              color: rgba(102, 126, 234, 0.85); 
+              text-align: center; 
+            }
+            .watermark-corner.tl { top: 0; left: 0; }
+            .watermark-corner.tr { top: 0; right: 0; }
+            .watermark-corner.bl { bottom: 0; left: 0; }
+            .watermark-corner.br { bottom: 0; right: 0; }
+          </style>
+        `;
 
-          const watermark = document.createElement('div');
-          watermark.className = 'watermark-overlay';
-          watermark.innerHTML = `
-            <div class="watermark-content">
+        const createMainWatermark = (doc) => {
+          const overlay = doc.createElement('div');
+          overlay.className = 'watermark-overlay watermark-main';
+          overlay.innerHTML = `
+            <div>
               <div class="watermark-logo">ARNOMA</div>
               <div class="watermark-text">
                 ${studentNameSafe}<br>
                 Group ${studentGroupSafe}<br>
-                <span style="font-size: 0.7em; opacity: 0.8;">NOT FOR REDISTRIBUTION</span>
+                <span style="font-size: 0.6em; opacity: 0.8;">NOT FOR REDISTRIBUTION</span>
               </div>
             </div>
           `;
-
-          // Add additional corner watermarks for better coverage
-          const topLeftWatermark = document.createElement('div');
-          topLeftWatermark.className = 'watermark-overlay watermark-corner-tl';
-          topLeftWatermark.innerHTML = `
-            <div class="watermark-content-small">
-              <div style="font-size: 32px; font-weight: 900;">ARNOMA</div>
-              <div style="font-size: 14px; font-weight: 600;">${studentNameSafe}</div>
-            </div>
-          `;
-
-          const topRightWatermark = document.createElement('div');
-          topRightWatermark.className = 'watermark-overlay watermark-corner-tr';
-          topRightWatermark.innerHTML = `
-            <div class="watermark-content-small">
-              <div style="font-size: 32px; font-weight: 900;">ARNOMA</div>
-              <div style="font-size: 14px; font-weight: 600;">${studentNameSafe}</div>
-            </div>
-          `;
-
-          const bottomLeftWatermark = document.createElement('div');
-          bottomLeftWatermark.className = 'watermark-overlay watermark-corner-bl';
-          bottomLeftWatermark.innerHTML = `
-            <div class="watermark-content-small">
-              <div style="font-size: 32px; font-weight: 900;">ARNOMA</div>
-              <div style="font-size: 14px; font-weight: 600;">${studentNameSafe}</div>
-            </div>
-          `;
-
-          const bottomRightWatermark = document.createElement('div');
-          bottomRightWatermark.className = 'watermark-overlay watermark-corner-br';
-          bottomRightWatermark.innerHTML = `
-            <div class="watermark-content-small">
-              <div style="font-size: 32px; font-weight: 900;">ARNOMA</div>
-              <div style="font-size: 14px; font-weight: 600;">${studentNameSafe}</div>
-            </div>
-          `;
-
-          pageContainer.appendChild(screenshotFrame);
-          pageContainer.appendChild(watermark);
-          pageContainer.appendChild(topLeftWatermark);
-          pageContainer.appendChild(topRightWatermark);
-          pageContainer.appendChild(bottomLeftWatermark);
-          pageContainer.appendChild(bottomRightWatermark);
-          pagesFragment.appendChild(pageContainer);
-        }
-
-        content.innerHTML = '';
-        content.appendChild(pagesFragment);
-
-        await Promise.all(imageElements.map(waitForImageLoad));
-
-        let afterPrintHandled = false;
-        const finalizePrint = () => {
-          if (afterPrintHandled) return;
-          afterPrintHandled = true;
-          renderPage(currentPage);
-          if (printButton && originalButtonLabel !== null) {
-            printButton.innerHTML = originalButtonLabel;
-            printButton.disabled = false;
-          }
-          isPreparingPrint = false;
-          // No URL cleanup needed for data URLs
+          return overlay;
         };
 
-        window.addEventListener('afterprint', finalizePrint, { once: true });
+        const createCornerWatermark = (doc, position) => {
+          const overlay = doc.createElement('div');
+          overlay.className = `watermark-overlay watermark-corner ${position}`;
+          overlay.innerHTML = `
+            <div class="watermark-corner-text">
+              ARNOMA<br>
+              ${studentNameSafe}
+            </div>
+          `;
+          return overlay;
+        };
+
+  printFrame = document.createElement('iframe');
+        printFrame.style.position = 'fixed';
+        printFrame.style.left = '-9999px';
+        printFrame.style.top = '0';
+        printFrame.style.width = '8.5in';
+        printFrame.style.height = '11in';
+        printFrame.style.border = '0';
+        printFrame.style.opacity = '0';
+        printFrame.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(printFrame);
+
+        if (window.ARNOMA_PRINT_DEBUG) {
+          window.__arnomaLastPrintFrame = printFrame;
+        }
+
+        const frameDoc = printFrame.contentDocument || printFrame.contentWindow.document;
+        frameDoc.open();
+        frameDoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8">${printStyles}</head><body class="print-body"></body></html>`);
+        frameDoc.close();
+
+        const frameBody = frameDoc.body;
+        const loadPromises = [];
+
+        pagesData.forEach((pageData) => {
+          const pageElement = frameDoc.createElement('div');
+          pageElement.className = 'print-page';
+
+          const image = frameDoc.createElement('img');
+          image.className = 'page-image';
+          image.src = pageData.dataUrl;
+          image.alt = `Protected ARNOMA note page ${pageData.index}`;
+          pageElement.appendChild(image);
+
+          loadPromises.push(new Promise((resolve) => {
+            if (image.complete) {
+              resolve();
+              return;
+            }
+            image.onload = () => resolve();
+            image.onerror = () => resolve();
+          }));
+
+          pageElement.appendChild(createMainWatermark(frameDoc));
+          pageElement.appendChild(createCornerWatermark(frameDoc, 'tl'));
+          pageElement.appendChild(createCornerWatermark(frameDoc, 'tr'));
+          pageElement.appendChild(createCornerWatermark(frameDoc, 'bl'));
+          pageElement.appendChild(createCornerWatermark(frameDoc, 'br'));
+
+          frameBody.appendChild(pageElement);
+        });
+
+        await Promise.all(loadPromises);
+
+        const logFrameMetrics = () => {
+          const metrics = Array.from(frameDoc.querySelectorAll('.print-page')).map((pageEl, idx) => {
+            const imgRect = pageEl.querySelector('img')?.getBoundingClientRect();
+            const pageRect = pageEl.getBoundingClientRect();
+            return {
+              page: idx + 1,
+              pageWidthPx: pageRect?.width?.toFixed(2) ?? 'n/a',
+              pageHeightPx: pageRect?.height?.toFixed(2) ?? 'n/a',
+              imgWidthPx: imgRect?.width?.toFixed(2) ?? 'n/a',
+              imgHeightPx: imgRect?.height?.toFixed(2) ?? 'n/a'
+            };
+          });
+          console.groupCollapsed('%cARNOMA print debug metrics', 'color:#38bdf8;font-weight:600;');
+          if (debugPagesMeta.length) {
+            console.table(debugPagesMeta, ['page', 'widthInches', 'heightInches', 'renderScale', 'pixelWidth', 'pixelHeight']);
+          }
+          if (metrics.length) {
+            console.table(metrics);
+          }
+          console.groupEnd();
+        };
+
+        if (window.ARNOMA_PRINT_DEBUG) {
+          logFrameMetrics();
+        }
+
+        const finalizePrint = () => {
+          if (finalizePrint.handled) return;
+          finalizePrint.handled = true;
+          if (printFrame && printFrame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
+            printFrame.parentNode.removeChild(printFrame);
+          }
+          restoreButtonState();
+          isPreparingPrint = false;
+        };
+
+        const frameWindow = printFrame.contentWindow;
+        frameWindow.addEventListener('afterprint', finalizePrint, { once: true });
 
         setTimeout(() => {
-          window.print();
-          setTimeout(finalizePrint, 400);
+          frameWindow.focus();
+          frameWindow.print();
+          setTimeout(finalizePrint, 1000);
         }, 250);
       } catch (error) {
         console.error('Print error:', error);
         alert('Failed to prepare this note for printing. Please try again.');
-        if (printButton && originalButtonLabel !== null) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
+        if (printFrame && printFrame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
+          printFrame.parentNode.removeChild(printFrame);
         }
+        restoreButtonState();
         isPreparingPrint = false;
-        renderPage(currentPage);
-      }
-
-      function finalizePrintCleanupUrls(urls = []) {
-        // No cleanup needed for data URLs
-        return;
       }
     }
 
@@ -2497,20 +2635,6 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
-    }
-
-    function waitForImageLoad(img) {
-      if (!img) return Promise.resolve();
-      if (typeof img.decode === 'function') {
-        return img.decode().catch(() => {});
-      }
-      if (img.complete) {
-        return Promise.resolve();
-      }
-      return new Promise((resolve) => {
-        img.onload = () => resolve();
-        img.onerror = () => resolve();
-      });
     }
 
     function showError(message) {
