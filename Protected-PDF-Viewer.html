@@ -2243,40 +2243,113 @@
       let printFrame = null;
 
       try {
-        const pixelRatio = window.devicePixelRatio ? Math.min(window.devicePixelRatio, 3) : 1;
-        const renderScale = Math.max(2.4, pixelRatio * 2);
+        // Capture exactly what's displayed on screen
+        const pagesData = [];
+        const debugPagesMeta = [];
+        const viewerCanvas = document.querySelector('.page-canvas');
+        
+        if (!viewerCanvas) {
+          throw new Error('PDF canvas not found. Make sure a page is rendered before printing.');
+        }
+
+        // Store current page to restore later
+        const originalPage = currentPage;
+        const originalZoom = zoomLevel;
 
         const canvasToDataUrl = (baseCanvas) => {
           try {
-            return baseCanvas.toDataURL('image/png', 0.96);
+            return baseCanvas.toDataURL('image/png', 1.0);
           } catch (error) {
             console.warn('PNG conversion failed, falling back to JPEG:', error);
-            return baseCanvas.toDataURL('image/jpeg', 0.92);
+            return baseCanvas.toDataURL('image/jpeg', 0.95);
           }
         };
 
-        const pagesData = [];
-        const debugPagesMeta = [];
-
+        // Capture each page exactly as displayed
         for (let i = 1; i <= totalPages; i++) {
-          const page = await pdfDoc.getPage(i);
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = (baseViewport.width / 72) || 8.5; // PDF units use 72 DPI
-          const heightInches = (baseViewport.height / 72) || 11;
-          const viewport = page.getViewport({ scale: renderScale });
+          // Render page at current zoom level (what user sees)
+          await renderPage(i);
+          
+          // Wait for render to complete
+          await new Promise(resolve => setTimeout(resolve, 150));
 
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
+          // Get the freshly rendered canvas
+          const currentCanvas = document.querySelector('.page-canvas');
+          if (!currentCanvas) {
+            console.warn(`Skipping page ${i} - canvas not found`);
+            continue;
+          }
 
-          await page.render({ canvasContext: context, viewport }).promise;
+          // Clone the exact canvas that's displayed
+          const displayCanvas = document.createElement('canvas');
+          displayCanvas.width = currentCanvas.width;
+          displayCanvas.height = currentCanvas.height;
+          const ctx = displayCanvas.getContext('2d');
+          
+          // Draw the PDF content
+          ctx.drawImage(currentCanvas, 0, 0);
+
+          // Draw watermarks DIRECTLY on the canvas (no CSS overlays)
+          const canvasWidth = displayCanvas.width;
+          const canvasHeight = displayCanvas.height;
+          
+          // Center watermark
+          ctx.save();
+          ctx.globalAlpha = 0.22;
+          ctx.fillStyle = 'rgba(102, 126, 234, 0.35)';
+          ctx.font = 'bold 140px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('ARNOMA', canvasWidth / 2, canvasHeight / 2 - 80);
+          
+          ctx.fillStyle = 'rgba(102, 126, 234, 0.65)';
+          ctx.font = 'bold 32px sans-serif';
+          ctx.fillText(studentNameSafe, canvasWidth / 2, canvasHeight / 2 + 20);
+          ctx.fillText(`Group ${studentGroupSafe}`, canvasWidth / 2, canvasHeight / 2 + 60);
+          ctx.font = 'bold 20px sans-serif';
+          ctx.fillText('NOT FOR REDISTRIBUTION', canvasWidth / 2, canvasHeight / 2 + 100);
+          ctx.restore();
+          
+          // Corner watermarks
+          ctx.save();
+          ctx.globalAlpha = 0.35;
+          ctx.fillStyle = 'rgba(102, 126, 234, 0.85)';
+          ctx.font = 'bold 18px sans-serif';
+          ctx.textAlign = 'left';
+          
+          // Top-left
+          ctx.fillText('ARNOMA', 20, 30);
+          ctx.fillText(studentNameSafe, 20, 55);
+          
+          // Top-right
+          ctx.textAlign = 'right';
+          ctx.fillText('ARNOMA', canvasWidth - 20, 30);
+          ctx.fillText(studentNameSafe, canvasWidth - 20, 55);
+          
+          // Bottom-left
+          ctx.textAlign = 'left';
+          ctx.fillText('ARNOMA', 20, canvasHeight - 45);
+          ctx.fillText(studentNameSafe, 20, canvasHeight - 20);
+          
+          // Bottom-right
+          ctx.textAlign = 'right';
+          ctx.fillText('ARNOMA', canvasWidth - 20, canvasHeight - 45);
+          ctx.fillText(studentNameSafe, canvasWidth - 20, canvasHeight - 20);
+          ctx.restore();
+
+          // Calculate dimensions based on actual displayed size
+          const displayWidth = currentCanvas.offsetWidth;
+          const displayHeight = currentCanvas.offsetHeight;
+          const widthInches = displayWidth / 96; // Screen DPI
+          const heightInches = displayHeight / 96;
 
           pagesData.push({
             index: i,
-            dataUrl: canvasToDataUrl(canvas),
+            dataUrl: canvasToDataUrl(displayCanvas),
             widthInches,
-            heightInches
+            heightInches,
+            pixelWidth: displayCanvas.width,
+            pixelHeight: displayCanvas.height
           });
 
           if (window.ARNOMA_PRINT_DEBUG) {
@@ -2284,22 +2357,20 @@
               page: i,
               widthInches: widthInches.toFixed(3),
               heightInches: heightInches.toFixed(3),
-              renderScale: renderScale.toFixed(2),
-              pixelWidth: viewport.width,
-              pixelHeight: viewport.height
+              zoomLevel: (zoomLevel * 100).toFixed(0) + '%',
+              pixelWidth: displayCanvas.width,
+              pixelHeight: displayCanvas.height
             });
           }
         }
 
-        const defaultWidthIn = pagesData[0]?.widthInches || 8.5;
-        const defaultHeightIn = pagesData[0]?.heightInches || 11;
-
-  const normalizedMarginIn = 0.25; // Consistent physical margin on all sides
+        // Restore original page
+        await renderPage(originalPage);
 
         const printStyles = `
           <style>
             @page { 
-              size: letter;
+              size: auto;
               margin: 0.5in; 
             }
             * { 
@@ -2310,13 +2381,11 @@
             html, body { 
               margin: 0; 
               padding: 0;
-              width: 8.5in;
             }
             .print-page { 
-              position: relative;
-              width: 7.5in;
+              width: 100%;
               height: auto;
-              margin: 0 auto;
+              margin: 0;
               padding: 0;
               page-break-after: always; 
               page-break-inside: avoid;
@@ -2327,99 +2396,20 @@
             }
             .page-image { 
               display: block; 
-              width: 100%;
+              max-width: 100%;
               height: auto;
               margin: 0;
               padding: 0;
             }
-            .watermark-overlay { 
-              position: absolute; 
-              top: 0; 
-              left: 0; 
-              right: 0;
-              bottom: 0;
-              width: 100%; 
-              height: 100%; 
-              pointer-events: none;
-              z-index: 10;
-            }
-            .watermark-main { 
-              display: flex; 
-              align-items: center; 
-              justify-content: center; 
-              width: 100%;
-              height: 100%;
-              opacity: 0.22; 
-            }
-            .watermark-logo { 
-              font-size: 140px; 
-              font-weight: 900; 
-              letter-spacing: 12px; 
-              color: rgba(102, 126, 234, 0.35); 
-              margin: 0; 
-              text-align: center; 
-            }
-            .watermark-text { 
-              font-size: 32px; 
-              font-weight: 700; 
-              text-align: center; 
-              color: rgba(102, 126, 234, 0.65); 
-              line-height: 1.5; 
-            }
-            .watermark-corner { 
-              position: absolute;
-              opacity: 0.35; 
-              padding: 18px; 
-              display: flex; 
-              z-index: 11;
-            }
-            .watermark-corner-text { 
-              font-size: 18px; 
-              font-weight: 700; 
-              color: rgba(102, 126, 234, 0.85); 
-              text-align: center; 
-            }
-            .watermark-corner.tl { top: 0; left: 0; }
-            .watermark-corner.tr { top: 0; right: 0; }
-            .watermark-corner.bl { bottom: 0; left: 0; }
-            .watermark-corner.br { bottom: 0; right: 0; }
           </style>
         `;
 
-        const createMainWatermark = (doc) => {
-          const overlay = doc.createElement('div');
-          overlay.className = 'watermark-overlay watermark-main';
-          overlay.innerHTML = `
-            <div>
-              <div class="watermark-logo">ARNOMA</div>
-              <div class="watermark-text">
-                ${studentNameSafe}<br>
-                Group ${studentGroupSafe}<br>
-                <span style="font-size: 0.6em; opacity: 0.8;">NOT FOR REDISTRIBUTION</span>
-              </div>
-            </div>
-          `;
-          return overlay;
-        };
-
-        const createCornerWatermark = (doc, position) => {
-          const overlay = doc.createElement('div');
-          overlay.className = `watermark-overlay watermark-corner ${position}`;
-          overlay.innerHTML = `
-            <div class="watermark-corner-text">
-              ARNOMA<br>
-              ${studentNameSafe}
-            </div>
-          `;
-          return overlay;
-        };
-
-  printFrame = document.createElement('iframe');
+        printFrame = document.createElement('iframe');
         printFrame.style.position = 'fixed';
         printFrame.style.left = '-9999px';
         printFrame.style.top = '0';
-        printFrame.style.width = '8.5in';
-        printFrame.style.height = '11in';
+        printFrame.style.width = '100vw';
+        printFrame.style.height = '100vh';
         printFrame.style.border = '0';
         printFrame.style.opacity = '0';
         printFrame.setAttribute('aria-hidden', 'true');
@@ -2455,12 +2445,6 @@
             image.onload = () => resolve();
             image.onerror = () => resolve();
           }));
-
-          pageElement.appendChild(createMainWatermark(frameDoc));
-          pageElement.appendChild(createCornerWatermark(frameDoc, 'tl'));
-          pageElement.appendChild(createCornerWatermark(frameDoc, 'tr'));
-          pageElement.appendChild(createCornerWatermark(frameDoc, 'bl'));
-          pageElement.appendChild(createCornerWatermark(frameDoc, 'br'));
 
           frameBody.appendChild(pageElement);
         });
