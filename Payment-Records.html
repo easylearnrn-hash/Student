@@ -7694,11 +7694,20 @@ ORDER BY timestamp DESC;</pre>
           if (fromMatch) {
             senderName = fromMatch[1].trim();
           } else {
-            // Pattern 2: "from Name was deposited" (HTML format)
-            fromMatch = bodyText.match(/from\s+([^\s].*?)(?:\s+was\s+deposited|\n|$)/i);
+            // Pattern 2: "from Name was deposited" (HTML format) - limit capture
+            fromMatch = bodyText.match(/from\s+([A-Z][A-Za-z\s'-]{0,100})(?:\s+was\s+deposited|\s+in\s+your|\n|$)/i);
             if (fromMatch) {
               senderName = fromMatch[1].trim();
             }
+          }
+
+          // Clean up any HTML tags or special characters that might have leaked through
+          senderName = senderName.replace(/<[^>]*>/g, '').trim();
+
+          // Limit sender name to 255 characters to avoid database index errors
+          if (senderName.length > 255) {
+            console.warn('⚠️ Sender name too long, truncating:', senderName.substring(0, 100) + '...');
+            senderName = senderName.substring(0, 255);
           }
 
           // Parse memo/message - ONLY for display, NEVER use as student name
@@ -7736,6 +7745,11 @@ ORDER BY timestamp DESC;</pre>
           // Final check: if memo contains footer keywords, clear it
           if (memo && /(?:if you'd|pay it forward|the money is ready|view transaction)/i.test(memo)) {
             memo = '';
+          }
+
+          // Limit memo to 500 characters to avoid database issues
+          if (memo.length > 500) {
+            memo = memo.substring(0, 500);
           }
 
           if (!amount || !senderName) return null;
