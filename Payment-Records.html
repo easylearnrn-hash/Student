@@ -5065,7 +5065,16 @@ ORDER BY timestamp DESC;</pre>
 
         function getDateLabel(dateKey) {
           if (formatCache.dateLabel.has(dateKey)) {
-            return formatCache.dateLabel.get(dateKey);
+            const cached = formatCache.dateLabel.get(dateKey);
+            if (typeof cached === 'string') {
+              const fallback = {
+                html: cached,
+                text: cached.replace(/<[^>]+>/g, '').trim()
+              };
+              formatCache.dateLabel.set(dateKey, fallback);
+              return fallback;
+            }
+            return cached;
           }
           const [year, month, day] = dateKey.split('-').map(Number);
           const date = new Date(year, month - 1, day);
@@ -5077,9 +5086,11 @@ ORDER BY timestamp DESC;</pre>
           const dayFormatter = new Intl.DateTimeFormat('en-US', {
             weekday: 'long'
           });
-          const label = `${dateFormatter.format(date)} - <span style="color: #60a5fa;">${dayFormatter.format(date)}</span>`;
-          formatCache.dateLabel.set(dateKey, label);
-          return label;
+          const html = `${dateFormatter.format(date)} - <span style="color: #60a5fa;">${dayFormatter.format(date)}</span>`;
+          const text = `${dateFormatter.format(date)} - ${dayFormatter.format(date)}`;
+          const parts = { html, text };
+          formatCache.dateLabel.set(dateKey, parts);
+          return parts;
         }
 
         function getTimeLabel(timestampMs) {
@@ -5472,6 +5483,7 @@ ORDER BY timestamp DESC;</pre>
           const iso = raw.email_date || raw.emaildate || raw.created_at || raw.date || new Date().toISOString();
           const timestampMs = Date.parse(iso);
           const dateKey = formatDateKey(timestampMs);
+          const dateLabelParts = getDateLabel(dateKey);
 
           const studentNameHint = raw.student_name || raw.resolved_student_name || raw.studentname || raw.studentNameFromMessage;
           const studentIdCandidate = raw.linked_student_id || raw.student_id || raw.derived_student_id || null;
@@ -5517,7 +5529,8 @@ ORDER BY timestamp DESC;</pre>
             timestampMs,
             isoTimestamp: iso,
             dateKey,
-            dateLabel: getDateLabel(dateKey),
+            dateLabel: dateLabelParts.html,
+            dateLabelText: dateLabelParts.text,
             timeLabel: getTimeLabel(timestampMs),
             amountUSD,
             amountAMD,
@@ -8226,7 +8239,8 @@ ORDER BY timestamp DESC;</pre>
         document.getElementById('payerSummaryName').textContent = record?.payerName || paymentData.payer || '—';
         document.getElementById('payerSummaryAmountUSD').textContent = `${Math.round(amountUsd)} $`;
         document.getElementById('payerSummaryAmountAMD').textContent = `${Math.round(amountAmd).toLocaleString()} ֏`;
-        document.getElementById('payerSummaryDate').textContent = record?.dateLabel || paymentData.date || '—';
+  const dateLabelText = record?.dateLabelText || (record?.dateLabel ? record.dateLabel.replace(/<[^>]+>/g, '').trim() : null);
+  document.getElementById('payerSummaryDate').textContent = dateLabelText || paymentData.date || '—';
         document.getElementById('payerSummaryMessage').textContent = record?.memo || paymentData.message || 'No message';
 
         // Show popup
@@ -8434,6 +8448,16 @@ ORDER BY timestamp DESC;</pre>
         return prefersPipes ? list.join('|||') : list.join(', ');
       }
 
+      function sanitizeAliasForStorage(value) {
+        if (!value) return '';
+        return value
+          .toString()
+          .replace(/&/g, ' and ')
+          .replace(/[^A-Za-z0-9\s'-]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
       function normalizeAliasKey(value) {
         return value
           ? value
@@ -8461,6 +8485,12 @@ ORDER BY timestamp DESC;</pre>
         const normalizedAlias = normalizeAliasKey(aliasRaw);
         if (!normalizedAlias) return false;
 
+        const sanitizedAlias = sanitizeAliasForStorage(aliasRaw);
+        if (!sanitizedAlias) {
+          console.warn('⚠️ Alias sanitized to empty, skipping alias save for', aliasRaw);
+          return false;
+        }
+
         const studentsMap = PaymentRecordsEngine?.state?.students;
         let studentRecord = null;
         if (studentsMap) {
@@ -8477,7 +8507,7 @@ ORDER BY timestamp DESC;</pre>
           return false;
         }
 
-        existingAliases = [...existingAliases, aliasRaw];
+        existingAliases = [...existingAliases, sanitizedAlias];
         const aliasPayload = joinAliasList(existingAliases, studentRecord?.aliases || '');
 
         const { data, error } = await supabaseClient
