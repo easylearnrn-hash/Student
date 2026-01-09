@@ -2003,6 +2003,12 @@
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
       }
 
+      .dot-underpaid {
+        background: #065f46; /* Dark green - Paid less than class price */
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(6, 95, 70, 0.8);
+      }
+
       .dot-absent {
         background: #ffffff; /* White - Absent */
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -3862,6 +3868,10 @@
           <div class="legend-item">
             <div class="legend-dot dot-payment"></div>
             <span>Paid</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-dot dot-underpaid"></div>
+            <span>Underpaid (cash &lt; class price)</span>
           </div>
           <div class="legend-item">
             <div class="legend-dot dot-credit"></div>
@@ -6043,12 +6053,18 @@
           const paymentMatch = findPaymentMatchForClass(student, dateStr, validPrice);
           if (paymentMatch && paymentMatch.amount > 0) {
             const paidAmount = paymentMatch.amount;
-            const overpayAmount = validPrice > 0 ? paidAmount - validPrice : 0;
+            const isUnderpaid = validPrice > 0 && paidAmount > 0 && paidAmount < validPrice;
+            const shortfallAmount = isUnderpaid ? Math.max(0, validPrice - paidAmount) : 0;
+            const overpayAmount = !isUnderpaid && validPrice > 0 ? paidAmount - validPrice : 0;
             const labelBase = `Paid ${formatCurrency(paidAmount)} $`;
-            const label = overpayAmount > 0
-              ? `${labelBase} (${formatCurrency(overpayAmount)} $ overpaid)`
-              : labelBase;
+            let label = labelBase;
             
+            if (isUnderpaid && shortfallAmount > 0) {
+              label = `${labelBase} (short ${formatCurrency(shortfallAmount)} $)`;
+            } else if (overpayAmount > 0) {
+              label = `${labelBase} (${formatCurrency(overpayAmount)} $ overpaid)`;
+            }
+
             return {
               status: 'paid',
               label,
@@ -6056,6 +6072,8 @@
               paidAmount,
               paymentDate: paymentMatch.dateStr,
               paymentTime: paymentMatch.timeStr || '',  // Include payment time
+              isUnderpaid,
+              shortfallAmount,
             };
           }
 
@@ -6386,6 +6404,18 @@
                 
                 if (!paymentStatus) return; // Hidden due to visibility rules
                 
+                const pricePerClassValue = Number(student.price_per_class || student.pricePerClass || 0);
+                const paidAmountValue = Number(paymentStatus.paidAmount) || 0;
+                const isUnderpaid = Boolean(
+                  paymentStatus.isUnderpaid ?? (
+                    paymentStatus.status === 'paid' &&
+                    pricePerClassValue > 0 &&
+                    paidAmountValue > 0 &&
+                    paidAmountValue < pricePerClassValue
+                  )
+                );
+                const underpaidAmount = isUnderpaid ? Math.max(0, pricePerClassValue - paidAmountValue) : 0;
+
                 // Add student entry with payment info
                 classEntry.students.push({
                   id: studentId,
@@ -6394,9 +6424,11 @@
                   label: paymentStatus.label,
                   paid: paymentStatus.status === 'paid',
                   absent: paymentStatus.status === 'absent',
-                  paidAmount: paymentStatus.paidAmount || 0,
+                  paidAmount: paidAmountValue,
                   balance: paymentStatus.balance,
-                  pricePerClass: student.price_per_class || student.pricePerClass || 0,
+                  pricePerClass: pricePerClassValue,
+                  isUnderpaid,
+                  underpaidAmount,
                   paymentDate: paymentStatus.paymentDate,
                   paymentTime: paymentStatus.paymentTime,
                   groupCode: groupCode, // Add groupCode for search functionality
@@ -6686,6 +6718,18 @@
                 
                 if (!paymentStatus) return; // Hidden due to visibility rules
                 
+                const pricePerClassValue = Number(student.price_per_class || student.pricePerClass || 0);
+                const paidAmountValue = Number(paymentStatus.paidAmount) || 0;
+                const isUnderpaid = Boolean(
+                  paymentStatus.isUnderpaid ?? (
+                    paymentStatus.status === 'paid' &&
+                    pricePerClassValue > 0 &&
+                    paidAmountValue > 0 &&
+                    paidAmountValue < pricePerClassValue
+                  )
+                );
+                const underpaidAmount = isUnderpaid ? Math.max(0, pricePerClassValue - paidAmountValue) : 0;
+
                 classEntry.students.push({
                   id: studentId,
                   name: studentName,
@@ -6693,9 +6737,11 @@
                   label: paymentStatus.label,
                   paid: paymentStatus.status === 'paid',
                   absent: paymentStatus.status === 'absent',
-                  paidAmount: paymentStatus.paidAmount || 0,
+                  paidAmount: paidAmountValue,
                   balance: paymentStatus.balance,
-                  pricePerClass: student.price_per_class || student.pricePerClass || 0,
+                  pricePerClass: pricePerClassValue,
+                  isUnderpaid,
+                  underpaidAmount,
                   paymentDate: paymentStatus.paymentDate,
                   paymentTime: paymentStatus.paymentTime,
                   groupCode: groupCode, // Add groupCode for search functionality
@@ -10862,17 +10908,27 @@
             dot.classList.add(dotClass);
             
             // Set tooltip based on status
-            const statusLabel = {
-              'paid': 'Paid',
-              'unpaid': 'Unpaid',
-              'credit': 'Paid via Credit',
-              'absent': 'Absent',
-              'canceled': 'Canceled',
-              'skipped': 'Skipped',
-              'partial': 'Partial Payment',
-              'upcoming': 'Upcoming'
-            }[student.status] || 'Scheduled';
-            
+            const statusLabelMap = {
+              paid: 'Paid',
+              unpaid: 'Unpaid',
+              credit: 'Paid via Credit',
+              absent: 'Absent',
+              canceled: 'Canceled',
+              skipped: 'Skipped',
+              partial: 'Partial Payment',
+              upcoming: 'Upcoming'
+            };
+            let statusLabel = statusLabelMap[student.status] || 'Scheduled';
+
+            if (student.status === 'paid' && student.isUnderpaid) {
+              const pricePerClassValue = Number(student.pricePerClass || student.price_per_class || 0);
+              const paidAmountValue = Number(student.paidAmount || 0);
+              const shortfall = pricePerClassValue > 0 ? Math.max(0, pricePerClassValue - paidAmountValue) : 0;
+              statusLabel = shortfall > 0
+                ? `Paid ${formatCurrency(paidAmountValue)} $ (short ${formatCurrency(shortfall)} $)`
+                : 'Underpaid';
+            }
+
             dot.setAttribute('data-tooltip', `${student.name} – ${statusLabel}`);
             
             // Store student data for click modal
@@ -10962,7 +11018,10 @@
         if (student.status === 'skipped') return 'dot-skipped';
         if (student.absent || student.status === 'absent') return 'dot-absent';
         if (student.status === 'credit') return 'dot-credit';
-        if (student.paid || student.status === 'paid') return 'dot-paid';
+        if (student.paid || student.status === 'paid') {
+          if (student.isUnderpaid) return 'dot-underpaid';
+          return 'dot-paid';
+        }
         if (student.status === 'partial') return 'dot-partial';
         if (student.status === 'upcoming') return 'dot-future';
         if (student.status === 'unpaid') return 'dot-unpaid';
@@ -11021,7 +11080,10 @@
           skipped: { icon: '⏭', class: 'upcoming', label: 'Skipped' }
         };
 
-        const status = statusMap[student.status] || statusMap.unpaid;
+        let status = statusMap[student.status] || statusMap.unpaid;
+        if (student.status === 'paid' && student.isUnderpaid) {
+          status = { icon: '💸', class: 'paid', label: 'Underpaid Payment' };
+        }
         const safeName = student.name.replace(/'/g, "\\'");
 
         // Build action buttons
@@ -11170,6 +11232,13 @@
                   <div class="dot-info-card">
                     <div class="dot-info-label">Amount Paid</div>
                     <div class="dot-info-value highlight-cyan">$${formatCurrency(student.paidAmount)}</div>
+                  </div>
+                ` : ''}
+
+                ${student.status === 'paid' && student.isUnderpaid ? `
+                  <div class="dot-info-card">
+                    <div class="dot-info-label">Still Owed</div>
+                    <div class="dot-info-value highlight-red">$${formatCurrency(student.underpaidAmount || Math.max(0, (student.pricePerClass || 0) - (student.paidAmount || 0)))}</div>
                   </div>
                 ` : ''}
                 
