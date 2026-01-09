@@ -7631,6 +7631,34 @@ ORDER BY timestamp DESC;</pre>
         }
       }
 
+      function decodeBase64Unicode(raw = '') {
+        try {
+          if (!raw) return '';
+          const normalized = raw.replace(/-/g, '+').replace(/_/g, '/');
+          const binary = atob(normalized);
+          const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+          return new TextDecoder('utf-8').decode(bytes);
+        } catch (error) {
+          console.warn('⚠️ Failed to decode base64 email body:', error);
+          return '';
+        }
+      }
+
+      function cleanEmailBody(text = '') {
+        if (!text) return '';
+        return text
+          .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+          .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+          .replace(/<[^>]*>/g, ' ')
+          .replace(/&nbsp;/gi, ' ')
+          .replace(/&amp;/gi, '&')
+          .replace(/&quot;/gi, '"')
+          .replace(/&apos;/gi, "'")
+          .replace(/&#39;/g, "'")
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
       function parseZelleEmail(messageData) {
         try {
           const headers = messageData.payload.headers;
@@ -7648,17 +7676,17 @@ ORDER BY timestamp DESC;</pre>
 
           let bodyText = '';
           if (messageData.payload.body && messageData.payload.body.data) {
-            bodyText = atob(messageData.payload.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+            bodyText = decodeBase64Unicode(messageData.payload.body.data);
           } else if (messageData.payload.parts) {
             // Try to get text/plain first
             const textPart = messageData.payload.parts.find(p => p.mimeType === 'text/plain');
             if (textPart && textPart.body && textPart.body.data) {
-              bodyText = atob(textPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+              bodyText = decodeBase64Unicode(textPart.body.data);
             } else {
               // Fallback to text/html if no plain text available
               const htmlPart = messageData.payload.parts.find(p => p.mimeType === 'text/html');
               if (htmlPart && htmlPart.body && htmlPart.body.data) {
-                bodyText = atob(htmlPart.body.data.replace(/-/g, '+').replace(/_/g, '/'));
+                bodyText = decodeBase64Unicode(htmlPart.body.data);
               }
             }
           }
@@ -7672,8 +7700,8 @@ ORDER BY timestamp DESC;</pre>
             return null;
           }
 
-          // Strip ALL HTML tags from body text
-          bodyText = bodyText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+          // Strip ALL HTML tags and normalize whitespace/entities
+          bodyText = cleanEmailBody(bodyText);
 
           const bodyTextLower = bodyText.toLowerCase();
 
@@ -7692,50 +7720,54 @@ ORDER BY timestamp DESC;</pre>
             return null;
           }
 
-          // Parse amount - universal pattern
-          const amountMatch = bodyText.match(/\$[\d,]+\.\d{2}/);
-          const amount = amountMatch ? parseFloat(amountMatch[0].replace(/[$,]/g, '')) : 0;
-
-          // Parse sender name - try multiple patterns (American Express format)
-          let senderName = 'Unknown';
-
-          // Pattern 1: "From: Name" (most common in plain text emails)
-          let fromMatch = bodyText.match(/From:\s*([A-Z][A-Za-z\s'-]+?)(?=\s*(?:Account|Transaction|\$|Amount|\n\n|$))/i);
-          if (fromMatch) {
-            senderName = fromMatch[1].trim();
+          // Parse amount - prefer explicit "Amount:" line
+          let amount = 0;
+          const explicitAmount = bodyText.match(/Amount:\s*\$([\d,]+\.\d{2})/i);
+          if (explicitAmount) {
+            amount = parseFloat(explicitAmount[1].replace(/[,]/g, ''));
           } else {
-            // Pattern 2: "payment in your" - look backwards for name before it
-            const paymentMatch = bodyText.match(/payment\s+in\s+your/i);
-            if (paymentMatch) {
-              const beforePayment = bodyText.substring(0, paymentMatch.index);
-              const nameMatch = beforePayment.match(/([A-Z][A-Za-z\s'-]+)\s+payment\s+in\s+your$/i);
-              if (nameMatch) {
-                senderName = nameMatch[1].trim();
-              }
-            }
+            const amountMatch = bodyText.match(/\$[\d,]+\.\d{2}/);
+            amount = amountMatch ? parseFloat(amountMatch[0].replace(/[$,]/g, '')) : 0;
           }
 
-          // Fallback: if still Unknown, try to find name after "from" keyword
+          // Parse sender name - AmEx emails have "From: NAME" section
+          let senderName = 'Unknown';
+          const fromLineMatch = bodyText.match(/From:\s*([^:]+?)(?=\s+(?:Account:|Transaction|Amount|Message|Note|Here|This|\$|$))/i);
+          if (fromLineMatch) {
+            senderName = fromLineMatch[1].trim();
+          }
+
           if (senderName === 'Unknown') {
-            fromMatch = bodyText.match(/from\s+([A-Z][A-Za-z\s'-]{2,50}?)(?=\s+(?:was|has been|in your|Account|\$|Transaction))/i);
-            if (fromMatch) {
-              senderName = fromMatch[1].trim();
+            // Fallback: search for "From NAME" without colon
+            const fallbackMatch = bodyText.match(/From\s+([A-Z][A-Za-z\s'\.\-]{1,80})(?=\s+(?:Account|Transaction|Amount|Here|This|$))/i);
+            if (fallbackMatch) {
+              senderName = fallbackMatch[1].trim();
             }
           }
 
-          // Clean up - remove any remaining special chars or extra whitespace
-          senderName = senderName.replace(/\s+/g, ' ').trim();
+          // Remove trailing descriptors that sometimes stick to the name
+          senderName = senderName
+            .replace(/Account.*$/i, '')
+            .replace(/Transaction.*$/i, '')
+            .replace(/Here.*$/i, '')
+            .replace(/Log.*$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
 
-          // Validation: if name looks like garbage (contains numbers, special chars), log and reject
-          if (senderName !== 'Unknown' && (senderName.length < 2 || /[<>{}[\]\\\/]/.test(senderName))) {
+          if (!senderName || senderName.length < 2) {
+            console.warn('⚠️ Unable to parse sender name from email:', messageData.id, 'Body preview:', bodyText.slice(0, 120));
+            return null;
+          }
+
+          if (/[<>{}[\]\\\/]/.test(senderName)) {
             console.warn('⚠️ Invalid sender name detected, skipping email:', messageData.id, 'Name:', senderName);
             return null;
           }
 
-          // Limit sender name to 255 characters to avoid database index errors
-          if (senderName.length > 255) {
-            console.warn('⚠️ Sender name too long, truncating:', senderName.substring(0, 100) + '...');
-            senderName = senderName.substring(0, 255);
+          // Keep names comfortably below index limits
+          if (senderName.length > 120) {
+            console.warn('⚠️ Sender name too long, truncating:', senderName.substring(0, 80) + '...');
+            senderName = senderName.substring(0, 120).trim();
           }
 
           // Parse memo/message - ONLY for display, NEVER use as student name
@@ -7778,6 +7810,11 @@ ORDER BY timestamp DESC;</pre>
           // Limit memo to 500 characters to avoid database issues
           if (memo.length > 500) {
             memo = memo.substring(0, 500);
+          }
+
+          // Keep memo concise for UI (avoid storing entire emails)
+          if (memo.length > 240) {
+            memo = memo.substring(0, 240).trim();
           }
 
           if (!amount || !senderName) return null;
