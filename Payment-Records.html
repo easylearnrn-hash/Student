@@ -5494,7 +5494,8 @@ ORDER BY timestamp DESC;</pre>
           const student = (studentLookupId ? state.students.get(studentLookupId) : null) ||
             resolveStudentFromAlias(raw.payer_name || raw.payer, studentNameHint) || null;
 
-          const payerName = (raw.payer_name || raw.payer || raw.payer_name_raw || raw.payername || 'Unknown Payer').trim();
+          const payerOriginal = (raw.payer_name || raw.payer || raw.payer_name_raw || raw.payername || 'Unknown Payer').trim() || 'Unknown Payer';
+          const payerName = formatPayerDisplayName(payerOriginal) || payerOriginal;
           const studentName = student?.name || raw.student_name || raw.resolved_student_name || raw.studentname || '';
           const amountUSD = Number(raw.amount || 0);
           const amountAMD = Math.round(amountUSD * state.usdToAmdRate);
@@ -5520,6 +5521,7 @@ ORDER BY timestamp DESC;</pre>
             paymentId: raw.id || '',
             gmailId: raw.gmail_id || raw.gmailid || '',
             payerName,
+            payerNameRaw: payerOriginal,
             studentName: studentName || '—',
             studentId: student?.id || numericStudentId || studentIdCandidate || raw.studentid || '',
             status: raw.status || 'unmatched',
@@ -5551,6 +5553,7 @@ ORDER BY timestamp DESC;</pre>
               paymentKey: uniqueKey,
               paymentId: raw.id || '',
               payer: payerName,
+              payerRaw: payerOriginal,
               amount: amountUSD,
               amountAmd: amountAMD,
               message: memo || 'No message',
@@ -7832,10 +7835,12 @@ ORDER BY timestamp DESC;</pre>
 
           if (!amount || !senderName) return null;
 
+          const payerDisplayName = formatPayerDisplayName(senderName) || senderName;
+
           return {
             id: messageData.id,
             gmailId: messageData.id,
-            payer: senderName,
+            payer: payerDisplayName,
             amount: amount,
             date: dateStr,
             timestamp: timestampStr,
@@ -8231,12 +8236,16 @@ ORDER BY timestamp DESC;</pre>
           ? PaymentRecordsEngine.state.paymentLookup.get(paymentData.paymentKey)
           : null;
 
-        currentPaymentData = record || paymentData;
+        currentPaymentData = record || { ...paymentData };
 
         const amountUsd = record?.amountUSD ?? Number(paymentData.amount || paymentData.amountUsd || 0);
         const amountAmd = record?.amountAMD ?? Number(paymentData.amountAmd || (amountUsd * PaymentRecordsEngine.state.usdToAmdRate));
 
-        document.getElementById('payerSummaryName').textContent = record?.payerName || paymentData.payer || '—';
+        const payerDisplayName = record?.payerName || paymentData.payer || '—';
+        const payerRaw = record?.payerNameRaw || paymentData.payerRaw || payerDisplayName;
+        currentPaymentData.payerRaw = payerRaw;
+        currentPaymentData.payerName = payerDisplayName;
+        document.getElementById('payerSummaryName').textContent = payerDisplayName;
         document.getElementById('payerSummaryAmountUSD').textContent = `${Math.round(amountUsd)} $`;
         document.getElementById('payerSummaryAmountAMD').textContent = `${Math.round(amountAmd).toLocaleString()} ֏`;
   const dateLabelText = record?.dateLabelText || (record?.dateLabel ? record.dateLabel.replace(/<[^>]+>/g, '').trim() : null);
@@ -8448,6 +8457,17 @@ ORDER BY timestamp DESC;</pre>
         return prefersPipes ? list.join('|||') : list.join(', ');
       }
 
+      function formatPayerDisplayName(value = '') {
+        if (!value) return '';
+        const normalized = value
+          .toString()
+          .replace(/\s+/g, ' ')
+          .trim()
+          .toLowerCase();
+        if (!normalized) return '';
+        return normalized.replace(/\b([a-z])/g, (char) => char.toUpperCase());
+      }
+
       function sanitizeAliasForStorage(value) {
         if (!value) return '';
         return value
@@ -8632,9 +8652,10 @@ ORDER BY timestamp DESC;</pre>
         
         debugLog(`✅ Loaded ${students.length} students`);
 
-        // Get payer and amount info
-        const payerName = payment.payerName || payment.payer || 'Unknown';
-        const amount = payment.amountUSD || payment.amount || 0;
+  // Get payer and amount info
+  const payerRaw = payment.payerNameRaw || payment.payerRaw || payment.payerName || payment.payer || 'Unknown';
+  const payerName = formatPayerDisplayName(payerRaw) || payerRaw || 'Unknown';
+  const amount = payment.amountUSD || payment.amount || 0;
 
         // Show searchable student selector modal
         const overlay = document.getElementById('customAlertOverlay');
@@ -8722,7 +8743,7 @@ ORDER BY timestamp DESC;</pre>
                 // Bulk assign ALL payments from this payer to the student
                 const bulkUpdated = await bulkAssignPayerPaymentsToStudent(
                   selectedStudentId,
-                  payerName,
+                  payerRaw,
                   studentRecord?.name || '',
                   studentRecord?.group_name || ''
                 );
@@ -8730,7 +8751,7 @@ ORDER BY timestamp DESC;</pre>
                 debugLog('✅ Bulk assignment complete. Updated:', bulkUpdated, 'payments');
 
                 // Also ensure the payer alias is linked
-                await ensurePayerAliasLinked(selectedStudentId, payerName);
+                await ensurePayerAliasLinked(selectedStudentId, payerRaw);
 
                 const totalLinked = bulkUpdated || 1;
                 debugLog('✅ Total linked:', totalLinked);
