@@ -4831,6 +4831,21 @@
       }
       
       
+      // Check if user is an admin FIRST (before student lookup)
+      debugLog('🔍 Checking if user is admin:', session.user.email);
+      const { data: adminCheck, error: adminError } = await supabaseClient
+        .from('admin_accounts')
+        .select('email, role')
+        .eq('email', session.user.email)
+        .maybeSingle();
+      
+      if (adminCheck) {
+        console.log('👑 Admin detected, redirecting to Student Manager:', adminCheck.email);
+        alert('Admin accounts cannot access the student portal.\n\nRedirecting to Student Manager...');
+        window.location.href = 'Student-Manager.html';
+        return null;
+      }
+      
       // Get student data with detailed error logging
       debugLog('🔍 Looking up student with auth_user_id:', session.user.id);
       const { data: studentData, error } = await supabaseClient
@@ -4848,23 +4863,6 @@
           authUserId: session.user.id,
           userEmail: session.user.email
         });
-
-        // ⚡️ Admin fallback: admins can log in without a student profile
-        try {
-          const { data: adminRecord, error: adminLookupError } = await supabaseClient
-            .from('admin_accounts')
-            .select('auth_user_id, email')
-            .eq('auth_user_id', session.user.id)
-            .maybeSingle();
-
-          if (adminRecord && !adminLookupError) {
-            console.warn('🔐 Admin account detected without student record. Redirecting to admin portal.');
-            window.location.href = 'Student-Portal-Admin.html';
-            return null;
-          }
-        } catch (adminLookupErr) {
-          console.error('Admin lookup failed:', adminLookupErr);
-        }
         
         // Check if admin chat mode before showing error
         const adminChatCheck = localStorage.getItem('admin_chat_token') || sessionStorage.getItem('admin_chat_token');
@@ -6703,7 +6701,7 @@
             .from('students')
             .select('*')
             .eq('email', currentEmail)
-            .maybeSingle(); // Use maybeSingle() to avoid error when no record exists
+            .single();
           
           // Check if admin by verifying against admin_accounts table
           const { data: adminAccounts, error: adminError } = await supabaseClient
