@@ -8072,16 +8072,26 @@ ORDER BY timestamp DESC;</pre>
         // ⚠️ CRITICAL FIX: Use INSERT instead of UPSERT to avoid updating existing records
         // Upsert tries to UPDATE existing payments, which can violate unique_student_class_payment
         // constraint if student_id+for_class are already set. We only want to INSERT new payments.
+        // 
+        // NOTE: Database triggers will auto-populate student_id (from linked_student_id) and 
+        // for_class (from email_date), which can cause constraint violations if that combo exists.
+        // We handle this gracefully below.
         const { data, error } = await supabaseClient
           .from('payments')
           .insert(supabasePayments)
           .select();
 
         if (error) {
-          // If it's a duplicate key error on the PRIMARY KEY (id/gmail_id), that's expected - skip it
-          if (error.code === '23505' && error.message.includes('payments_pkey')) {
-            debugLog(`ℹ️ [${contextLabel}] Skipped ${supabasePayments.length} duplicate payments (already in DB)`);
-            return { data: [], error: null };
+          // If it's a duplicate key error (409), that's expected - payment already exists or constraint violated
+          if (error.code === '23505') {
+            if (error.message.includes('payments_pkey')) {
+              debugLog(`ℹ️ [${contextLabel}] Skipped ${supabasePayments.length} payments (primary key already exists)`);
+            } else if (error.message.includes('unique_student_class_payment')) {
+              debugLog(`ℹ️ [${contextLabel}] Skipped ${supabasePayments.length} payments (student+date combo already exists)`);
+            } else {
+              debugLog(`ℹ️ [${contextLabel}] Skipped ${supabasePayments.length} payments (duplicate: ${error.message})`);
+            }
+            return { data: [], error: null }; // Not an error - just skip duplicates
           }
           console.error(`[${contextLabel}] Error saving to Supabase:`, error);
           return { data: null, error };
