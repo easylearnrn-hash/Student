@@ -7631,9 +7631,18 @@ ORDER BY timestamp DESC;</pre>
             // console.log(`✅ [${silent ? 'Auto-Refresh' : 'Manual'}] Parsed ${payments.length} NEW payments (after filtering known IDs)`);
             debugLog(`✅ [${silent ? 'Auto-Refresh' : 'Manual'}] Parsed ${payments.length} payments:`, payments);
 
-            const { error } = await savePaymentsToSupabase(payments, 'Auto-Refresh');
+            const { data, error } = await savePaymentsToSupabase(payments, 'Auto-Refresh');
             if (error) {
               console.error('[Auto-Refresh] Supabase save failed');
+              return; // Don't reload if save failed
+            }
+
+            // ⚡ CRITICAL: Clear payment cache BEFORE reloading to ensure fresh data
+            if (PaymentRecordsEngine?.state) {
+              PaymentRecordsEngine.state.paymentsCache = null;
+              PaymentRecordsEngine.state.referenceCache = null;
+              PaymentRecordsEngine.state.totalsCache = null;
+              debugLog('🧹 Cleared payment cache before reload');
             }
 
             // Always force reload to refresh student emails AND payment data
