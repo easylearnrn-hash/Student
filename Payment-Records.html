@@ -8060,17 +8060,20 @@ ORDER BY timestamp DESC;</pre>
           };
         });
 
-        // Use ignoreDuplicates to skip payments that would violate unique constraints
-        // This prevents 409 errors when existing payments already have student_id+for_class set
+        // ⚠️ CRITICAL FIX: Use INSERT instead of UPSERT to avoid updating existing records
+        // Upsert tries to UPDATE existing payments, which can violate unique_student_class_payment
+        // constraint if student_id+for_class are already set. We only want to INSERT new payments.
         const { data, error } = await supabaseClient
           .from('payments')
-          .upsert(supabasePayments, { 
-            onConflict: 'id',
-            ignoreDuplicates: true  // Skip updates that would violate unique constraints
-          })
+          .insert(supabasePayments)
           .select();
 
         if (error) {
+          // If it's a duplicate key error on the PRIMARY KEY (id/gmail_id), that's expected - skip it
+          if (error.code === '23505' && error.message.includes('payments_pkey')) {
+            debugLog(`ℹ️ [${contextLabel}] Skipped ${supabasePayments.length} duplicate payments (already in DB)`);
+            return { data: [], error: null };
+          }
           console.error(`[${contextLabel}] Error saving to Supabase:`, error);
           return { data: null, error };
         }
