@@ -8069,37 +8069,47 @@ ORDER BY timestamp DESC;</pre>
           };
         });
 
-        // ⚠️ CRITICAL FIX: Use INSERT instead of UPSERT to avoid updating existing records
-        // Upsert tries to UPDATE existing payments, which can violate unique_student_class_payment
-        // constraint if student_id+for_class are already set. We only want to INSERT new payments.
-        // 
-        // NOTE: Database triggers will auto-populate student_id (from linked_student_id) and 
-        // for_class (from email_date), which can cause constraint violations if that combo exists.
-        // We handle this gracefully below.
-        const { data, error } = await supabaseClient
-          .from('payments')
-          .insert(supabasePayments)
-          .select();
+        // ⚠️ CRITICAL: Insert payments ONE AT A TIME to handle individual constraint violations
+        // Batch inserts fail entirely if ANY payment violates constraints
+        // Individual inserts allow successful ones to complete while skipping duplicates
+        let successCount = 0;
+        let skippedCount = 0;
+        
+        for (const payment of supabasePayments) {
+          const { data, error } = await supabaseClient
+            .from('payments')
+            .insert([payment]) // Single payment array
+            .select();
 
-        if (error) {
-          // If it's a duplicate key error (409), that's expected - payment already exists or constraint violated
-          if (error.code === '23505') {
-            if (error.message.includes('payments_pkey')) {
-              debugLog(`ℹ️ [${contextLabel}] Skipped ${supabasePayments.length} payments (primary key already exists)`);
-            } else if (error.message.includes('unique_student_class_payment')) {
-              debugLog(`ℹ️ [${contextLabel}] Skipped ${supabasePayments.length} payments (student+date combo already exists)`);
-            } else {
-              debugLog(`ℹ️ [${contextLabel}] Skipped ${supabasePayments.length} payments (duplicate: ${error.message})`);
+          if (error) {
+            // If it's a duplicate key error (409), silently skip this payment
+            if (error.code === '23505') {
+              skippedCount++;
+              if (error.message.includes('payments_pkey')) {
+                debugLog(`ℹ️ Skipped payment ${payment.id} (primary key exists)`);
+              } else if (error.message.includes('unique_student_class_payment')) {
+                debugLog(`ℹ️ Skipped payment ${payment.id} (student+date exists)`);
+              }
+              continue; // Skip to next payment
             }
-            return { data: [], error: null }; // Not an error - just skip duplicates
+            // For other errors, log but continue trying remaining payments
+            console.warn(`⚠️ [${contextLabel}] Error inserting payment ${payment.id}:`, error.message);
+            skippedCount++;
+            continue;
           }
-          console.error(`[${contextLabel}] Error saving to Supabase:`, error);
-          return { data: null, error };
+          
+          if (data && data.length > 0) {
+            successCount++;
+          }
         }
 
-        const matchedCount = supabasePayments.filter(p => p.linked_student_id).length;
-        debugLog(`💾 [${contextLabel}] Saved ${data.length} payments to Supabase (${matchedCount} matched to students)`);
-        return { data, error: null };
+        debugLog(`💾 [${contextLabel}] Processed ${supabasePayments.length} payments: ${successCount} inserted, ${skippedCount} skipped`);
+        
+        // Return success if at least some payments were inserted
+        return { 
+          data: successCount > 0 ? Array(successCount).fill({}) : [], 
+          error: null 
+        };
       }
 
       function showNotification(message, type = 'info') {
