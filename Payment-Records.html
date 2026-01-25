@@ -7631,18 +7631,9 @@ ORDER BY timestamp DESC;</pre>
             // console.log(`✅ [${silent ? 'Auto-Refresh' : 'Manual'}] Parsed ${payments.length} NEW payments (after filtering known IDs)`);
             debugLog(`✅ [${silent ? 'Auto-Refresh' : 'Manual'}] Parsed ${payments.length} payments:`, payments);
 
-            const { data, error } = await savePaymentsToSupabase(payments, 'Auto-Refresh');
+            const { error } = await savePaymentsToSupabase(payments, 'Auto-Refresh');
             if (error) {
               console.error('[Auto-Refresh] Supabase save failed');
-              return; // Don't reload if save failed
-            }
-
-            // ⚡ CRITICAL: Clear payment cache BEFORE reloading to ensure fresh data
-            if (PaymentRecordsEngine?.state) {
-              PaymentRecordsEngine.state.paymentsCache = null;
-              PaymentRecordsEngine.state.referenceCache = null;
-              PaymentRecordsEngine.state.totalsCache = null;
-              debugLog('🧹 Cleared payment cache before reload');
             }
 
             // Always force reload to refresh student emails AND payment data
@@ -8051,9 +8042,6 @@ ORDER BY timestamp DESC;</pre>
             }
           }
           
-          // ⚠️ CRITICAL: Do NOT set student_id or for_class during initial import
-          // These fields have a unique constraint and should only be set when user manually assigns
-          // Setting them here causes constraint violations during auto-refresh
           return {
             id: p.gmailId,
             gmail_id: p.gmailId,
@@ -8065,51 +8053,22 @@ ORDER BY timestamp DESC;</pre>
             student_name: matched_student_name, // Only set if matched, otherwise null
             linked_student_id: linked_student_id,
             status: linked_student_id ? 'matched' : 'unmatched'
-            // NOTE: student_id and for_class intentionally omitted to avoid constraint violations
           };
         });
 
-        // ⚠️ CRITICAL: Insert payments ONE AT A TIME to handle individual constraint violations
-        // Batch inserts fail entirely if ANY payment violates constraints
-        // Individual inserts allow successful ones to complete while skipping duplicates
-        let successCount = 0;
-        let skippedCount = 0;
-        
-        for (const payment of supabasePayments) {
-          const { data, error } = await supabaseClient
-            .from('payments')
-            .insert([payment]) // Single payment array
-            .select();
+        const { data, error } = await supabaseClient
+          .from('payments')
+          .upsert(supabasePayments, { onConflict: 'id' })
+          .select();
 
-          if (error) {
-            // If it's a duplicate key error (409), silently skip this payment
-            if (error.code === '23505') {
-              skippedCount++;
-              if (error.message.includes('payments_pkey')) {
-                debugLog(`ℹ️ Skipped payment ${payment.id} (primary key exists)`);
-              } else if (error.message.includes('unique_student_class_payment')) {
-                debugLog(`ℹ️ Skipped payment ${payment.id} (student+date exists)`);
-              }
-              continue; // Skip to next payment
-            }
-            // For other errors, log but continue trying remaining payments
-            console.warn(`⚠️ [${contextLabel}] Error inserting payment ${payment.id}:`, error.message);
-            skippedCount++;
-            continue;
-          }
-          
-          if (data && data.length > 0) {
-            successCount++;
-          }
+        if (error) {
+          console.error(`[${contextLabel}] Error saving to Supabase:`, error);
+          return { data: null, error };
         }
 
-        debugLog(`💾 [${contextLabel}] Processed ${supabasePayments.length} payments: ${successCount} inserted, ${skippedCount} skipped`);
-        
-        // Return success if at least some payments were inserted
-        return { 
-          data: successCount > 0 ? Array(successCount).fill({}) : [], 
-          error: null 
-        };
+        const matchedCount = supabasePayments.filter(p => p.linked_student_id).length;
+        debugLog(`💾 [${contextLabel}] Saved ${data.length} payments to Supabase (${matchedCount} matched to students)`);
+        return { data, error: null };
       }
 
       function showNotification(message, type = 'info') {
