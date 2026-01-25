@@ -382,6 +382,40 @@
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    // 🔒 ADMIN AUTHENTICATION - Check on page load
+    async function requireAdminSession() {
+      try {
+        const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+        
+        if (sessionError || !session) {
+          alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+          window.location.href = 'student-portal.html';
+          return false;
+        }
+
+        // Check if user is in admin_accounts table
+        const { data: adminAccount, error: adminError } = await supabaseClient
+          .from('admin_accounts')
+          .select('*')
+          .eq('auth_user_id', session.user.id)
+          .single();
+
+        if (adminError || !adminAccount) {
+          alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+          window.location.href = 'student-portal.html';
+          return false;
+        }
+
+        console.log('✅ Admin access verified:', adminAccount.email);
+        return true;
+      } catch (error) {
+        console.error('❌ Admin auth error:', error);
+        alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+        window.location.href = 'student-portal.html';
+        return false;
+      }
+    }
+
     // Data cache
     let studentsCache = [];
     let groupsCache = [];
@@ -713,7 +747,15 @@
 
     // Initialize
     async function init() {
-      console.log('💰 Loading Earning Forecast...');
+      console.log('� Checking admin access...');
+      
+      // 🔒 CRITICAL: Verify admin access BEFORE loading any data
+      const isAdmin = await requireAdminSession();
+      if (!isAdmin) {
+        return; // Stop execution - user will be redirected
+      }
+
+      console.log('�💰 Loading Earning Forecast...');
       
       await Promise.all([
         loadStudents(),

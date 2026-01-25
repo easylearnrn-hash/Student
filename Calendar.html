@@ -17,6 +17,42 @@
       const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       
       // ============================================================
+      // 🔒 ADMIN AUTHENTICATION
+      // ============================================================
+      async function requireAdminSession() {
+        try {
+          const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+          
+          if (sessionError || !session) {
+            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+            window.location.href = 'student-portal.html';
+            return false;
+          }
+
+          // Check if user is in admin_accounts table
+          const { data: adminAccount, error: adminError } = await supabaseClient
+            .from('admin_accounts')
+            .select('*')
+            .eq('auth_user_id', session.user.id)
+            .single();
+
+          if (adminError || !adminAccount) {
+            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+            window.location.href = 'student-portal.html';
+            return false;
+          }
+
+          console.log('✅ Admin access verified:', adminAccount.email);
+          return true;
+        } catch (error) {
+          console.error('❌ Admin auth error:', error);
+          alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+          window.location.href = 'student-portal.html';
+          return false;
+        }
+      }
+      
+      // ============================================================
       // NOTIFICATION SYSTEM
       // ============================================================
       async function createNotification(type, studentName = '') {
@@ -9571,6 +9607,14 @@
       // Initialize Calendar
       async function initCalendar() {
         try {
+          console.log('🔒 Checking admin access...');
+          
+          // 🔒 CRITICAL: Verify admin access BEFORE loading any data
+          const isAdmin = await requireAdminSession();
+          if (!isAdmin) {
+            return; // Stop execution - user will be redirected
+          }
+
           if (DEBUG_MODE) console.time('⏱️ Total Calendar Init');
           if (DEBUG_MODE) console.time('⏱️ DOM Cache Init');
           

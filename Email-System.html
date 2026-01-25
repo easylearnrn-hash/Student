@@ -2425,6 +2425,42 @@
       let supabaseClient = null;
       
       // ============================================================
+      // 🔒 ADMIN AUTHENTICATION
+      // ============================================================
+      async function requireAdminSession() {
+        try {
+          const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+          
+          if (sessionError || !session) {
+            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+            window.location.href = 'student-portal.html';
+            return false;
+          }
+
+          // Check if user is in admin_accounts table
+          const { data: adminAccount, error: adminError } = await supabaseClient
+            .from('admin_accounts')
+            .select('*')
+            .eq('auth_user_id', session.user.id)
+            .single();
+
+          if (adminError || !adminAccount) {
+            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+            window.location.href = 'student-portal.html';
+            return false;
+          }
+
+          console.log('✅ Admin access verified:', adminAccount.email);
+          return true;
+        } catch (error) {
+          console.error('❌ Admin auth error:', error);
+          alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+          window.location.href = 'student-portal.html';
+          return false;
+        }
+      }
+      
+      // ============================================================
       // ⚡ PERFORMANCE UTILITIES
       // ============================================================
       
@@ -2485,13 +2521,23 @@
           window.supabase_client = supabaseClient;
         }
         
-        // Verify session on load
-        supabaseClient.auth.getSession().then(({ data: { session } }) => {
-          if (session) {
-            debugLog('✅ User session active:', session.user.email);
-          } else {
-            debugLog('⚠️ No active session - user may need to login');
+        // Verify session on load and check admin access
+        supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
+          if (!session) {
+            debugLog('❌ No active session - redirecting to login');
+            window.location.href = 'index.html';
+            return;
           }
+          
+          debugLog('🔒 Checking admin access...');
+          
+          // 🔒 CRITICAL: Verify admin access BEFORE loading any data
+          const isAdmin = await requireAdminSession();
+          if (!isAdmin) {
+            return; // Stop execution - user will be redirected
+          }
+          
+          debugLog('✅ Admin access verified, loading email system...');
         });
       } else {
         console.error('❌ Supabase library not loaded');

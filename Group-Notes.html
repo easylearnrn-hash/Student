@@ -761,6 +761,40 @@
     // Debug mode
     const DEBUG_MODE = false;
 
+    // ===== 🔒 ADMIN AUTHENTICATION =====
+    async function requireAdminSession() {
+      try {
+        const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+        
+        if (sessionError || !session) {
+          alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+          window.location.href = 'student-portal.html';
+          return false;
+        }
+
+        // Check if user is in admin_accounts table
+        const { data: adminAccount, error: adminError } = await supabaseClient
+          .from('admin_accounts')
+          .select('*')
+          .eq('auth_user_id', session.user.id)
+          .single();
+
+        if (adminError || !adminAccount) {
+          alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+          window.location.href = 'student-portal.html';
+          return false;
+        }
+
+        console.log('✅ Admin access verified:', adminAccount.email);
+        return true;
+      } catch (error) {
+        console.error('❌ Admin auth error:', error);
+        alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+        window.location.href = 'student-portal.html';
+        return false;
+      }
+    }
+
     // ===== NOTIFICATION SYSTEM =====
     async function createNotification(type, title, message, category, payload = {}) {
       try {
@@ -1393,24 +1427,21 @@
           return;
         }
         
-        const session = window.ArnomaAuth
-          ? await window.ArnomaAuth.ensureSession(supabaseClient, { redirectToLogin: true })
-          : (await supabaseClient.auth.getSession()).data.session;
-
-        if (!session) {
-          window.location.href = 'index.html';
-          return;
+        console.log('🔒 Checking admin access...');
+        
+        // 🔒 CRITICAL: Verify admin access BEFORE loading any data
+        const isAdmin = await requireAdminSession();
+        if (!isAdmin) {
+          return; // Stop execution - user will be redirected
         }
+
+        console.log('✅ Admin access verified, loading Group Notes...');
 
         await loadActiveGroups();
         await loadData();
       } catch (error) {
         console.error('Init error:', error);
-        // Don't show alert if AUTH_REQUIRED (redirect is happening)
-        if (error.message !== 'AUTH_REQUIRED') {
-          alert('Failed to initialize: ' + error.message);
-        }
-        // If AUTH_REQUIRED, redirect should already be happening via ensureSession
+        alert('Failed to initialize: ' + error.message);
       }
     })();
 

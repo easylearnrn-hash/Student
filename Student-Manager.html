@@ -2593,12 +2593,48 @@
       window.students = students;
       window.filteredStudents = filteredStudents;
 
+      // ============================================================
+      // 🔒 ADMIN AUTHENTICATION
+      // ============================================================
+      async function requireAdminSession() {
+        try {
+          const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+          
+          if (sessionError || !session) {
+            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+            window.location.href = 'student-portal.html';
+            return false;
+          }
+
+          // Check if user is in admin_accounts table
+          const { data: adminAccount, error: adminError } = await supabaseClient
+            .from('admin_accounts')
+            .select('*')
+            .eq('auth_user_id', session.user.id)
+            .single();
+
+          if (adminError || !adminAccount) {
+            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+            window.location.href = 'student-portal.html';
+            return false;
+          }
+
+          console.log('✅ Admin access verified:', adminAccount.email);
+          return true;
+        } catch (error) {
+          console.error('❌ Admin auth error:', error);
+          alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
+          window.location.href = 'student-portal.html';
+          return false;
+        }
+      }
+
       // Initialize Supabase client
       if (window.supabase && window.supabase.createClient) {
         supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         debugLog('✅ Supabase client initialized');
         
-        // AUTHENTICATION CHECK - Require login for admin access
+        // 🔒 AUTHENTICATION CHECK - Require admin access
         supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
           if (!session) {
             // No session - redirect to login
@@ -2607,36 +2643,15 @@
             return;
           }
           
-          debugLog('✅ User session active:', session.user.email);
+          debugLog('🔒 Checking admin access...');
           
-          // Check if this is the hardcoded admin email
-          const ADMIN_EMAIL = 'hrachfilm@gmail.com';
-          
-          if (session.user.email === ADMIN_EMAIL) {
-            // Admin email - grant access without checking students table
-            debugLog('✅ Admin access granted (hardcoded admin email)');
-            loadStudents();
-            return;
+          // 🔒 CRITICAL: Verify admin access BEFORE loading any data
+          const isAdmin = await requireAdminSession();
+          if (!isAdmin) {
+            return; // Stop execution - user will be redirected
           }
           
-          // Otherwise, check if user has admin role in students table
-          const { data: studentData, error } = await supabaseClient
-            .from('students')
-            .select('role, name')
-            .eq('auth_user_id', session.user.id)
-            .single();
-          
-          if (error || !studentData || studentData.role !== 'admin') {
-            // Not an admin - redirect to student portal
-            debugLog('❌ User is not admin - redirecting to student portal');
-            alert('Access denied. This area is for administrators only.');
-            window.location.href = 'student-portal.html';
-            return;
-          }
-          
-          debugLog('✅ Admin access granted:', studentData.name);
-          
-          // Load students after auth check passes
+          debugLog('✅ Admin access verified, loading students...');
           loadStudents();
         });
       } else {
