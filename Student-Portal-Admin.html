@@ -1264,6 +1264,99 @@
       border: none;
     }
 
+    /* Student Selector Modal */
+    .student-selector-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(10px);
+      z-index: 9998;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 40px;
+    }
+
+    .student-selector-modal.active {
+      display: flex;
+    }
+
+    .student-selector-content {
+      background: linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 80, 0.95));
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 24px;
+      box-shadow: 0 25px 60px rgba(13, 16, 35, 0.7);
+      width: 100%;
+      max-width: 800px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .student-selector-header {
+      padding: 32px 40px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .student-selector-header h2 {
+      font-size: 28px;
+      font-weight: 700;
+      color: white;
+      margin: 0;
+    }
+
+    .student-selector-close {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.2);
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+    }
+
+    .student-selector-close:hover {
+      background: rgba(255,255,255,0.15);
+      transform: rotate(90deg);
+    }
+
+    .student-selector-body {
+      padding: 32px 40px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .student-selector-card {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 12px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .student-selector-card:hover {
+      background: rgba(102,126,234,0.15);
+      border-color: rgba(102,126,234,0.3);
+      transform: translateX(8px);
+    }
+
     /* Fullscreen Impersonation Modal */
     .impersonation-modal {
       position: fixed;
@@ -2363,7 +2456,7 @@
                   <line x1="12" y1="8" x2="12.01" y2="8"></line>
                 </svg>
               </button>
-              <button class="action-btn view" onclick="impersonateStudent(${student.id}, '${student.name?.replace(/'/g, "\\'") || 'Unknown'}')">👁️ View as Student</button>
+              <button class="action-btn view" onclick="showStudentSelectorModal()">👁️ View as Student</button>
               <button class="action-btn edit" onclick="editStudent(${student.id})">Edit</button>
               <button class="action-btn delete" onclick="deleteStudent(${student.id})">Delete</button>
             </td>
@@ -2840,6 +2933,94 @@
 
     async function impersonateStudent(studentId, studentName) {
       try {
+        // Show student selector modal first
+        showStudentSelectorModal();
+        
+      } catch (error) {
+        console.error('Error starting impersonation:', error);
+        alert('Failed to start impersonation mode: ' + error.message);
+      }
+    }
+    
+    // New function to show student selector
+    async function showStudentSelectorModal() {
+      const modal = document.getElementById('studentSelectorModal');
+      modal.classList.add('active');
+      
+      // Populate student list
+      const studentList = document.getElementById('studentSelectorList');
+      studentList.innerHTML = '<div style="text-align: center; padding: 40px; color: rgba(255,255,255,0.6);">Loading students...</div>';
+      
+      try {
+        const { data: students, error } = await supabaseClient
+          .from('students')
+          .select('id, name, group_name, email')
+          .eq('status', 'active')
+          .order('name');
+        
+        if (error) throw error;
+        
+        if (!students || students.length === 0) {
+          studentList.innerHTML = '<div style="text-align: center; padding: 40px; color: rgba(255,255,255,0.6);">No students found</div>';
+          return;
+        }
+        
+        // Group students by group_name
+        const groupedStudents = {};
+        students.forEach(s => {
+          const group = s.group_name || 'No Group';
+          if (!groupedStudents[group]) groupedStudents[group] = [];
+          groupedStudents[group].push(s);
+        });
+        
+        // Render grouped students
+        studentList.innerHTML = '';
+        Object.keys(groupedStudents).sort().forEach(groupName => {
+          const groupSection = document.createElement('div');
+          groupSection.style.marginBottom = '24px';
+          
+          const groupHeader = document.createElement('div');
+          groupHeader.style.cssText = 'font-size: 14px; font-weight: 700; color: #a5b4fc; margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px;';
+          groupHeader.textContent = `Group ${groupName}`;
+          groupSection.appendChild(groupHeader);
+          
+          groupedStudents[groupName].forEach(student => {
+            const studentCard = document.createElement('div');
+            studentCard.className = 'student-selector-card';
+            studentCard.onclick = () => startImpersonation(student.id, student.name);
+            
+            studentCard.innerHTML = `
+              <div style="flex: 1;">
+                <div style="font-size: 16px; font-weight: 600; color: white; margin-bottom: 4px;">${student.name}</div>
+                <div style="font-size: 13px; color: rgba(255,255,255,0.6);">${student.email || 'No email'}</div>
+              </div>
+              <div style="padding: 8px 16px; background: rgba(102,126,234,0.2); border-radius: 8px; color: #a5b4fc; font-size: 13px; font-weight: 600;">
+                View Portal
+              </div>
+            `;
+            
+            groupSection.appendChild(studentCard);
+          });
+          
+          studentList.appendChild(groupSection);
+        });
+        
+      } catch (error) {
+        console.error('Error loading students:', error);
+        studentList.innerHTML = '<div style="text-align: center; padding: 40px; color: #ef4444;">Error loading students</div>';
+      }
+    }
+    
+    function closeStudentSelector() {
+      const modal = document.getElementById('studentSelectorModal');
+      modal.classList.remove('active');
+    }
+    
+    async function startImpersonation(studentId, studentName) {
+      try {
+        // Close selector modal
+        closeStudentSelector();
+        
         // Ensure studentId is a number (not string)
         const numericStudentId = parseInt(studentId);
         if (isNaN(numericStudentId)) {
@@ -2847,12 +3028,12 @@
           return;
         }
         
-        // Generate impersonation token (valid for 10 minutes)
+        // Generate impersonation token (never expires)
         const impersonationToken = {
           studentId: numericStudentId,  // Store as number
           studentName: studentName,
           timestamp: Date.now(),
-          expiresAt: Date.now() + (10 * 60 * 1000), // 10 minutes
+          expiresAt: Date.now() + (365 * 24 * 60 * 60 * 1000), // Never expires
           adminEmail: currentEmail || 'admin',
           isMasterAccess: true  // Required for student-portal.html to recognize impersonation
         };
@@ -2864,7 +3045,7 @@
         // Small delay to ensure storage write completes
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        // Open in fullscreen modal instead of navigation
+        // Open in fullscreen modal
         const modal = document.getElementById('impersonationModal');
         const iframe = document.getElementById('impersonationIframe');
         
@@ -4226,6 +4407,19 @@
       });
     }
   </script>
+
+  <!-- Student Selector Modal -->
+  <div id="studentSelectorModal" class="student-selector-modal">
+    <div class="student-selector-content">
+      <div class="student-selector-header">
+        <h2>👁️ Choose Student to View</h2>
+        <button class="student-selector-close" onclick="closeStudentSelector()">×</button>
+      </div>
+      <div class="student-selector-body">
+        <div id="studentSelectorList"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- Fullscreen Impersonation Modal -->
   <div id="impersonationModal" class="impersonation-modal">
