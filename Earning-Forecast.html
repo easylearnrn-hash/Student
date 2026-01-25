@@ -385,9 +385,20 @@
     // 🔒 ADMIN AUTHENTICATION - Check on page load
     async function requireAdminSession() {
       try {
+        // FORCE CACHE CLEAR for students trying to access admin pages
+        if (localStorage.getItem('student_cache_cleared') !== 'true') {
+          localStorage.clear();
+          sessionStorage.clear();
+          localStorage.setItem('student_cache_cleared', 'true');
+          console.log('🧹 Cache cleared for security');
+        }
+
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
         
         if (sessionError || !session) {
+          // Clear all caches before redirect
+          localStorage.clear();
+          sessionStorage.clear();
           alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
           window.location.href = 'student-portal.html';
           return false;
@@ -401,15 +412,23 @@
           .single();
 
         if (adminError || !adminAccount) {
+          // Clear all caches before redirect
+          localStorage.clear();
+          sessionStorage.clear();
           alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
           window.location.href = 'student-portal.html';
           return false;
         }
 
+        // Admin verified - allow cache for admins
+        localStorage.removeItem('student_cache_cleared');
         console.log('✅ Admin access verified:', adminAccount.email);
         return true;
       } catch (error) {
         console.error('❌ Admin auth error:', error);
+        // Clear all caches before redirect
+        localStorage.clear();
+        sessionStorage.clear();
         alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
         window.location.href = 'student-portal.html';
         return false;
