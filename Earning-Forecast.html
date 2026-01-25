@@ -8,18 +8,28 @@
   <meta http-equiv="Expires" content="0">
   <title>💰 Earning Forecast</title>
   
+  <style>
+    /* Hide ENTIRE page until admin verified */
+    body {
+      display: none !important;
+      visibility: hidden !important;
+    }
+    
+    body.admin-verified {
+      display: block !important;
+      visibility: visible !important;
+    }
+  </style>
+  
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
   
   <script>
-    // 🚨 EMERGENCY: Immediate redirect if not admin - RUNS BEFORE PAGE LOADS
+    // 🚨 EMERGENCY: Block page COMPLETELY until admin verified
     (async function() {
       // Nuke cache immediately
-      if (localStorage.getItem('emergency_cache_cleared_v2') !== 'true') {
-        localStorage.clear();
-        sessionStorage.clear();
-        localStorage.setItem('emergency_cache_cleared_v2', 'true');
-      }
+      localStorage.clear();
+      sessionStorage.clear();
       
       // Check auth IMMEDIATELY
       const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
@@ -27,38 +37,38 @@
       
       try {
         const tempClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        if (!tempClient) throw new Error('Supabase not loaded');
-        
-        const { data: { session } } = await tempClient.auth.getSession();
-        if (!session?.user?.id) {
-          localStorage.clear();
-          sessionStorage.clear();
-          alert('⛔ Access Denied\n\nThis page is for administrators only.');
+        if (!tempClient) {
+          alert('⛔ Access Denied - Configuration Error');
           window.location.href = 'student-portal.html';
-          throw new Error('NO_SESSION');
+          return;
         }
         
-        const { data: admin } = await tempClient
+        const { data: { session }, error: sessionError } = await tempClient.auth.getSession();
+        if (sessionError || !session?.user?.id) {
+          alert('⛔ Access Denied\n\nThis page is for administrators only.');
+          window.location.href = 'student-portal.html';
+          return;
+        }
+        
+        const { data: admin, error: adminError } = await tempClient
           .from('admin_accounts')
           .select('email')
           .eq('auth_user_id', session.user.id)
           .maybeSingle();
           
-        if (!admin) {
-          localStorage.clear();
-          sessionStorage.clear();
-          alert('⛔ Access Denied\n\nThis page is for administrators only.');
+        if (adminError || !admin) {
+          alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nEmail: ' + session.user.email);
           window.location.href = 'student-portal.html';
-          throw new Error('NOT_ADMIN');
+          return;
         }
         
-        // Admin verified - remove emergency flag
-        localStorage.removeItem('emergency_cache_cleared_v2');
+        // Admin verified - show page
+        console.log('✅ Admin verified:', admin.email);
+        document.body.classList.add('admin-verified');
       } catch (e) {
-        if (e.message === 'NO_SESSION' || e.message === 'NOT_ADMIN') {
-          return; // Already redirecting
-        }
-        console.error('Emergency auth check failed:', e);
+        console.error('Auth check failed:', e);
+        alert('⛔ Access Denied - Authentication Error');
+        window.location.href = 'student-portal.html';
       }
     })();
   </script>
