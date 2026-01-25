@@ -4692,7 +4692,6 @@ ORDER BY timestamp DESC;</pre>
         window.ArnomaAuth.attachAuthListener(supabaseClient);
       }
 
-      const ADMIN_ALLOWED_EMAILS = ['hrachfilm@gmail.com'];
       let currentAdminSession = null;
       let adminSessionPromise = null;
 
@@ -4705,25 +4704,34 @@ ORDER BY timestamp DESC;</pre>
                 : (await supabaseClient.auth.getSession()).data.session;
 
               if (!session?.user?.email) {
-                throw new Error('Missing authenticated user email');
+                console.error('❌ No authenticated session');
+                window.location.href = 'index.html';
+                throw new Error('NO_SESSION');
               }
 
-              if (
-                Array.isArray(ADMIN_ALLOWED_EMAILS) &&
-                ADMIN_ALLOWED_EMAILS.length > 0 &&
-                !ADMIN_ALLOWED_EMAILS.includes(session.user.email)
-              ) {
-                console.error('Access denied for user', session.user.email);
+              // Check if user is in admin_accounts table
+              const { data: adminCheck, error: adminError } = await supabaseClient
+                .from('admin_accounts')
+                .select('email')
+                .eq('email', session.user.email)
+                .maybeSingle();
+
+              if (adminError || !adminCheck) {
+                console.error('❌ Access denied - not an admin:', session.user.email);
+                alert('Access Denied\n\nThis page is for administrators only.\n\nRedirecting to student portal...');
                 await supabaseClient.auth.signOut();
-                window.location.href = 'index.html';
+                window.location.href = 'student-portal.html';
                 throw new Error('ACCESS_DENIED');
               }
 
               currentAdminSession = session;
-              debugLog('🔐 Admin session verified for', session.user.email);
+              debugLog('✅ Admin access verified for', session.user.email);
               return session;
             } catch (error) {
-              console.error('Failed to verify admin session', error);
+              console.error('❌ Admin session verification failed:', error);
+              if (error.message !== 'ACCESS_DENIED' && error.message !== 'NO_SESSION') {
+                window.location.href = 'index.html';
+              }
               throw error;
             }
           })();
