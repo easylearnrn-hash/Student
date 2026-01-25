@@ -4691,6 +4691,9 @@ ORDER BY timestamp DESC;</pre>
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
 
       const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      
+      // Make supabaseClient globally accessible
+      window.supabaseClient = supabaseClient;
 
       if (window.ArnomaAuth?.attachAuthListener) {
         window.ArnomaAuth.attachAuthListener(supabaseClient);
@@ -11598,7 +11601,24 @@ ORDER BY timestamp DESC;</pre>
       // Update notification badge count
       async function updateNotificationBadge() {
         try {
-          const { data, error } = await supabaseClient
+          // Safety check: ensure supabaseClient is initialized
+          if (!window.supabaseClient && !window.supabase) {
+            console.warn('⚠️ Supabase not initialized yet, skipping notification update');
+            return;
+          }
+          
+          // Use global supabaseClient or create temporary one
+          const client = window.supabaseClient || window.supabase?.createClient(
+            'https://zlvnxvrzotamhpezqedr.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38'
+          );
+          
+          if (!client) {
+            console.warn('⚠️ Could not initialize Supabase client');
+            return;
+          }
+          
+          const { data, error } = await client
             .from('notifications')
             .select('id, read, is_read')
             .or('read.is.null,read.eq.false')
