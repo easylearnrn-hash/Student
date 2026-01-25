@@ -4706,22 +4706,12 @@ ORDER BY timestamp DESC;</pre>
         if (!adminSessionPromise) {
           adminSessionPromise = (async () => {
             try {
-              // FORCE CACHE CLEAR for non-admins
-              if (localStorage.getItem('student_cache_cleared') !== 'true') {
-                localStorage.clear();
-                sessionStorage.clear();
-                localStorage.setItem('student_cache_cleared', 'true');
-                console.log('🧹 Cache cleared for security');
-              }
-
               const session = window.ArnomaAuth
                 ? await window.ArnomaAuth.ensureSession(supabaseClient, { redirectToLogin: true })
                 : (await supabaseClient.auth.getSession()).data.session;
 
               if (!session?.user?.email) {
                 console.error('❌ No authenticated session');
-                localStorage.clear();
-                sessionStorage.clear();
                 window.location.href = 'index.html';
                 throw new Error('NO_SESSION');
               }
@@ -4735,24 +4725,19 @@ ORDER BY timestamp DESC;</pre>
 
               if (adminError || !adminCheck) {
                 console.error('❌ Access denied - not an admin:', session.user.email);
-                localStorage.clear();
-                sessionStorage.clear();
                 alert('Access Denied\n\nThis page is for administrators only.\n\nRedirecting to student portal...');
                 await supabaseClient.auth.signOut();
                 window.location.href = 'student-portal.html';
                 throw new Error('ACCESS_DENIED');
               }
 
-              // Admin verified - allow cache
-              localStorage.removeItem('student_cache_cleared');
+              // Admin verified
               document.body.classList.add('admin-verified');
               currentAdminSession = session;
               debugLog('✅ Admin access verified for', session.user.email);
               return session;
             } catch (error) {
               console.error('❌ Admin session verification failed:', error);
-              localStorage.clear();
-              sessionStorage.clear();
               if (error.message !== 'ACCESS_DENIED' && error.message !== 'NO_SESSION') {
                 window.location.href = 'index.html';
               }
