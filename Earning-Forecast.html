@@ -3,11 +3,65 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>💰 Earning Forecast</title>
   
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
   
+  <script>
+    // 🚨 EMERGENCY: Immediate redirect if not admin - RUNS BEFORE PAGE LOADS
+    (async function() {
+      // Nuke cache immediately
+      if (localStorage.getItem('emergency_cache_cleared_v2') !== 'true') {
+        localStorage.clear();
+        sessionStorage.clear();
+        localStorage.setItem('emergency_cache_cleared_v2', 'true');
+      }
+      
+      // Check auth IMMEDIATELY
+      const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+      
+      try {
+        const tempClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        if (!tempClient) throw new Error('Supabase not loaded');
+        
+        const { data: { session } } = await tempClient.auth.getSession();
+        if (!session?.user?.id) {
+          localStorage.clear();
+          sessionStorage.clear();
+          alert('⛔ Access Denied\n\nThis page is for administrators only.');
+          window.location.href = 'student-portal.html';
+          throw new Error('NO_SESSION');
+        }
+        
+        const { data: admin } = await tempClient
+          .from('admin_accounts')
+          .select('email')
+          .eq('auth_user_id', session.user.id)
+          .maybeSingle();
+          
+        if (!admin) {
+          localStorage.clear();
+          sessionStorage.clear();
+          alert('⛔ Access Denied\n\nThis page is for administrators only.');
+          window.location.href = 'student-portal.html';
+          throw new Error('NOT_ADMIN');
+        }
+        
+        // Admin verified - remove emergency flag
+        localStorage.removeItem('emergency_cache_cleared_v2');
+      } catch (e) {
+        if (e.message === 'NO_SESSION' || e.message === 'NOT_ADMIN') {
+          return; // Already redirecting
+        }
+        console.error('Emergency auth check failed:', e);
+      }
+    })();
+  </script>
   <style>
     * {
       margin: 0;
