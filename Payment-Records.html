@@ -7304,8 +7304,8 @@ ORDER BY timestamp DESC;</pre>
   const GMAIL_CLIENT_ID = '67231383915-4kpdv0k6u517admvhl7jlejku7qtbsjj.apps.googleusercontent.com';
   const GMAIL_SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send';
   const GMAIL_CONNECTION_KEY = 'gmail-connection';
-  const GMAIL_SEARCH_SENDER = 'AmericanExpress@welcome.americanexpress.com';
-  const GMAIL_SEARCH_SUBJECT = "You've received a Zelle® payment";
+  const GMAIL_SEARCH_SENDER = 'alerts@notify.wellsfargo.com';
+  const GMAIL_SEARCH_SUBJECT = "sent you";
   const GMAIL_LOOKBACK_HOURS = 48; // Default lookback window
 
       let gmailAccessToken = localStorage.getItem('gmail_access_token');
@@ -7749,52 +7749,22 @@ ORDER BY timestamp DESC;</pre>
 
           const bodyTextLower = bodyText.toLowerCase();
 
-          // ✅ FILTER: Only fetch messages credited to account 1937
-          const isCreditedTo1937 = bodyTextLower.includes('credited to account ending in: 1937') || 
-                                    bodyTextLower.includes('account ending: 1937') ||
-                                    bodyTextLower.includes('*1937');
+          // ✅ Wells Fargo Zelle payment pattern: "SENDER NAME sent you $AMOUNT"
+          // Look for pattern in body text
+          const wellsFargoPattern = /([A-Z][A-Za-z\s]+)\s+sent\s+you\s+\$?([\d,]+\.\d{2})/i;
+          const patternMatch = bodyText.match(wellsFargoPattern);
 
-          // ❌ FILTER: Exclude all these
-          const isSentFrom1937 = bodyTextLower.includes('sent from account ending in: 1937');
-          const isGenericDeposit = bodyTextLower.includes('your deposit of');
-          const isGenericTransaction = bodyTextLower.includes('your transaction of');
-
-          // Apply filters
-          if (!isCreditedTo1937 || isSentFrom1937 || isGenericDeposit || isGenericTransaction) {
+          if (!patternMatch) {
+            console.warn('⚠️ Wells Fargo payment pattern not found in email:', messageData.id);
             return null;
           }
 
-          // Parse amount - prefer explicit "Amount:" line
-          let amount = 0;
-          const explicitAmount = bodyText.match(/Amount:\s*\$([\d,]+\.\d{2})/i);
-          if (explicitAmount) {
-            amount = parseFloat(explicitAmount[1].replace(/[,]/g, ''));
-          } else {
-            const amountMatch = bodyText.match(/\$[\d,]+\.\d{2}/);
-            amount = amountMatch ? parseFloat(amountMatch[0].replace(/[$,]/g, '')) : 0;
-          }
+          // Extract sender name and amount from the pattern
+          let senderName = patternMatch[1].trim();
+          const amount = parseFloat(patternMatch[2].replace(/[,]/g, ''));
 
-          // Parse sender name - AmEx emails have "From: NAME" section
-          let senderName = 'Unknown';
-          const fromLineMatch = bodyText.match(/From:\s*([^:]+?)(?=\s+(?:Account:|Transaction|Amount|Message|Note|Here|This|\$|$))/i);
-          if (fromLineMatch) {
-            senderName = fromLineMatch[1].trim();
-          }
-
-          if (senderName === 'Unknown') {
-            // Fallback: search for "From NAME" without colon
-            const fallbackMatch = bodyText.match(/From\s+([A-Z][A-Za-z\s'\.\-]{1,80})(?=\s+(?:Account|Transaction|Amount|Here|This|$))/i);
-            if (fallbackMatch) {
-              senderName = fallbackMatch[1].trim();
-            }
-          }
-
-          // Remove trailing descriptors that sometimes stick to the name
+          // Clean up sender name
           senderName = senderName
-            .replace(/Account.*$/i, '')
-            .replace(/Transaction.*$/i, '')
-            .replace(/Here.*$/i, '')
-            .replace(/Log.*$/i, '')
             .replace(/\s+/g, ' ')
             .trim();
 
@@ -7814,51 +7784,29 @@ ORDER BY timestamp DESC;</pre>
             senderName = senderName.substring(0, 120).trim();
           }
 
-          // Parse memo/message - ONLY for display, NEVER use as student name
-          let memo = '';
-
-          // Pattern 1: "Message from [Payer]: [Text]" (US Bank specific)
-          let messageFromMatch = bodyText.match(
-            /Message\s+from\s+[^:]+:\s*([A-Za-z\s,'"\-]+?)(?=\s*(?:The money|Pay it forward|If you'd|Thanks|You can add|View transaction|\*\s*If you|\n\n|$))/i
-          );
-          if (messageFromMatch) {
-            let messageText = messageFromMatch[1].trim();
-
-            // Clean footer fragments and special characters
-            messageText = messageText
-              .replace(/(The money.*|Pay it forward.*|If you'd.*|Thanks.*|You can add.*|View transaction.*|\*\s*If you.*)/i, '')
-              .replace(/[⚠️*]/g, '')
-              .trim();
-
-            if (messageText.length > 0) {
-              memo = messageText;
-            }
-          } else {
-            // Pattern 2: "Memo:" or "Message:" or "Note:" (text/plain format)
-            let memoMatch = bodyText.match(/(?:Memo|Message|Note):\s*([^\n]+)/i);
-            if (memoMatch) {
-              memo = memoMatch[1].trim();
-              // Clean footer from memo as well
-              memo = memo
-                .replace(/(The money.*|Pay it forward.*|If you'd.*|Thanks.*|You can add.*|View transaction.*|\*\s*If you.*)/i, '')
-                .replace(/[⚠️*]/g, '')
-                .trim();
-            }
+          // Parse date from Wells Fargo email - look for "Date: MM/DD/YYYY" pattern
+          let emailDate = dateStr; // Default to email received date
+          const datePattern = /Date:\s*(\d{2}\/\d{2}\/\d{4})/i;
+          const dateMatch = bodyText.match(datePattern);
+          
+          if (dateMatch) {
+            // Parse MM/DD/YYYY format
+            const [month, day, year] = dateMatch[1].split('/');
+            emailDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
           }
 
-          // Final check: if memo contains footer keywords, clear it
-          if (memo && /(?:if you'd|pay it forward|the money is ready|view transaction)/i.test(memo)) {
-            memo = '';
+          // Parse confirmation number as memo
+          let memo = '';
+          const confirmationPattern = /Confirmation:\s*([A-Z0-9]+)/i;
+          const confirmationMatch = bodyText.match(confirmationPattern);
+          
+          if (confirmationMatch) {
+            memo = `Confirmation: ${confirmationMatch[1]}`;
           }
 
           // Limit memo to 500 characters to avoid database issues
           if (memo.length > 500) {
             memo = memo.substring(0, 500);
-          }
-
-          // Keep memo concise for UI (avoid storing entire emails)
-          if (memo.length > 240) {
-            memo = memo.substring(0, 240).trim();
           }
 
           if (!amount || !senderName) return null;
@@ -7870,14 +7818,14 @@ ORDER BY timestamp DESC;</pre>
             gmailId: messageData.id,
             payer: payerDisplayName,
             amount: amount,
-            date: dateStr,
+            date: emailDate, // Use parsed date from email body
             timestamp: timestampStr,
             email_date: timestampStr,
             memo: memo,
             status: 'unmatched'
           };
         } catch (error) {
-          console.error('Error parsing Zelle email:', error);
+          console.error('Error parsing Wells Fargo Zelle email:', error);
           return null;
         }
       }
@@ -9094,7 +9042,7 @@ ORDER BY timestamp DESC;</pre>
         showNotification(`🔍 Syncing payments from ${formatDateForDisplay(datePickerState.fromDate)} to ${formatDateForDisplay(datePickerState.toDate)}...`, 'info');
 
         try {
-          const query = `from:usbank@notifications.usbank.com subject:Zelle after:${fromTimestamp} before:${toTimestamp}`;
+          const query = `from:alerts@notify.wellsfargo.com subject:"sent you" after:${fromTimestamp} before:${toTimestamp}`;
           debugLog('🔍 Gmail query:', query);
 
           // Fetch ALL messages using pagination (no maxResults limit)
