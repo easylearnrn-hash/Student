@@ -1,3 +1,6 @@
+-- Drop existing table if it has wrong type
+DROP TABLE IF EXISTS ignored_fuchsia_payments CASCADE;
+
 -- Create table to track ignored fuchsia payments
 CREATE TABLE IF NOT EXISTS ignored_fuchsia_payments (
   id BIGSERIAL PRIMARY KEY,

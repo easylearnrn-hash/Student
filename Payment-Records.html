@@ -5387,9 +5387,14 @@ ORDER BY timestamp DESC;</pre>
             const rangeEnd = rangeStart + config.pageSize - 1;
             // console.log(`📥 Fetching range ${rangeStart}-${rangeEnd}...`);
             // ⚡ Optimized query: Uses indexed columns for fastest possible retrieval
+            // Exclude ignored payments by checking ignored_fuchsia_payments table
             const { data, error } = await supabaseClient
               .from('payments')
-              .select('*')
+              .select(`
+                *,
+                ignored:ignored_fuchsia_payments!payment_id(id)
+              `)
+              .is('ignored.id', null)
               .order('email_date', { ascending: false, nullsLast: false })
               .order('created_at', { ascending: false, nullsLast: false })
               .range(rangeStart, rangeEnd);
@@ -8380,7 +8385,7 @@ ORDER BY timestamp DESC;</pre>
           const { error } = await supabaseClient
             .from('ignored_fuchsia_payments')
             .insert({
-              payment_id: currentPaymentData.paymentId,
+              payment_id: String(currentPaymentData.paymentId),
               student_id: currentPaymentData.studentId || null,
               ignored_by: 'admin'
             });
