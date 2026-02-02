@@ -8055,9 +8055,28 @@ ORDER BY timestamp DESC;</pre>
           };
         });
 
+        // Filter out payments that are already ignored
+        const paymentIds = supabasePayments.map(p => p.id);
+        const { data: ignoredPayments } = await supabaseClient
+          .from('ignored_fuchsia_payments')
+          .select('payment_id')
+          .in('payment_id', paymentIds);
+        
+        const ignoredIds = new Set((ignoredPayments || []).map(p => p.payment_id));
+        const paymentsToInsert = supabasePayments.filter(p => !ignoredIds.has(p.id));
+        
+        if (paymentsToInsert.length === 0) {
+          debugLog(`⏭️ [${contextLabel}] All ${supabasePayments.length} payments are already ignored, skipping insert`);
+          return { data: [], error: null };
+        }
+        
+        if (ignoredIds.size > 0) {
+          debugLog(`⏭️ [${contextLabel}] Skipping ${ignoredIds.size} ignored payments, inserting ${paymentsToInsert.length}`);
+        }
+
         const { data, error } = await supabaseClient
           .from('payments')
-          .upsert(supabasePayments, { onConflict: 'id' })
+          .upsert(paymentsToInsert, { onConflict: 'id' })
           .select();
 
         if (error) {
