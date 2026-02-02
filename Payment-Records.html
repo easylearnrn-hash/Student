@@ -5381,20 +5381,23 @@ ORDER BY timestamp DESC;</pre>
 
           debugLog('🔄 Fetching fresh payments from Supabase...');
           // console.log('🔍 Starting payment fetch...'); 
+          
+          // First, get list of ignored payment IDs
+          const { data: ignoredPayments } = await supabaseClient
+            .from('ignored_fuchsia_payments')
+            .select('payment_id');
+          const ignoredIds = new Set((ignoredPayments || []).map(p => p.payment_id));
+          debugLog(`📛 Found ${ignoredIds.size} ignored payments`);
+          
           const payments = [];
           let rangeStart = 0;
           while (payments.length < config.maxRecords) {
             const rangeEnd = rangeStart + config.pageSize - 1;
             // console.log(`📥 Fetching range ${rangeStart}-${rangeEnd}...`);
             // ⚡ Optimized query: Uses indexed columns for fastest possible retrieval
-            // Exclude ignored payments by checking ignored_fuchsia_payments table
             const { data, error } = await supabaseClient
               .from('payments')
-              .select(`
-                *,
-                ignored:ignored_fuchsia_payments!payment_id(id)
-              `)
-              .is('ignored.id', null)
+              .select('*')
               .order('email_date', { ascending: false, nullsLast: false })
               .order('created_at', { ascending: false, nullsLast: false })
               .range(rangeStart, rangeEnd);
@@ -5411,13 +5414,15 @@ ORDER BY timestamp DESC;</pre>
             }
 
             // console.log(`✅ Received ${data.length} payments in this batch`);
-            payments.push(...data);
+            // Filter out ignored payments
+            const filtered = data.filter(p => !ignoredIds.has(p.id));
+            payments.push(...filtered);
             if (data.length < config.pageSize) break;
             rangeStart += config.pageSize;
           }
           
           // console.log(`✅ TOTAL: Fetched ${payments.length} payments from Supabase`);
-          debugLog(`✅ Fetched ${payments.length} payments from Supabase`);
+          debugLog(`✅ Fetched ${payments.length} payments (${ignoredIds.size} ignored) from Supabase`);
           
           // Cache the results
           state.paymentsCache = { ts: Date.now(), data: payments };
