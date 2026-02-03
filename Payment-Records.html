@@ -9791,6 +9791,69 @@ ORDER BY timestamp DESC;</pre>
       })();
 
       // ============================================================
+      // SUPABASE NAVBAR SETTINGS SYNC
+      // ============================================================
+      const navSupabaseSync = {
+        async saveToSupabase(settings) {
+          try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (!session) {
+              console.warn('⚠️ No session, skipping Supabase navbar sync');
+              return false;
+            }
+
+            const { error } = await supabaseClient
+              .from('user_preferences')
+              .upsert({
+                user_id: session.user.id,
+                navbar_settings: settings,
+                updated_at: new Date().toISOString()
+              }, { onConflict: 'user_id' });
+
+            if (error) {
+              console.error('❌ Failed to save navbar settings to Supabase:', error);
+              return false;
+            }
+
+            debugLog('✅ Navbar settings saved to Supabase');
+            return true;
+          } catch (err) {
+            console.error('❌ Error saving navbar settings to Supabase:', err);
+            return false;
+          }
+        },
+
+        async loadFromSupabase() {
+          try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (!session) {
+              debugLog('⚠️ No session, using localStorage navbar settings');
+              return null;
+            }
+
+            const { data, error } = await supabaseClient
+              .from('user_preferences')
+              .select('navbar_settings')
+              .eq('user_id', session.user.id)
+              .single();
+
+            if (error) {
+              if (error.code !== 'PGRST116') { // Not found is OK
+                console.error('❌ Failed to load navbar settings from Supabase:', error);
+              }
+              return null;
+            }
+
+            debugLog('✅ Navbar settings loaded from Supabase');
+            return data?.navbar_settings || null;
+          } catch (err) {
+            console.error('❌ Error loading navbar settings from Supabase:', err);
+            return null;
+          }
+        }
+      };
+
+      // ============================================================
       // NAVIGATION CONTEXT MENU & SETTINGS
       // ============================================================
       function setupNavContextMenu() {
@@ -9822,19 +9885,51 @@ ORDER BY timestamp DESC;</pre>
 
         debugLog('⚙️ Setting up navbar context menu...');
 
-    // Load saved settings (DEFAULT VALUES FROM SCREENSHOT)
-    const savedSize = Number(navStorageHelper.getItem('navBtnSize')) || 40;
-    const savedOpacity = Number(navStorageHelper.getItem('navOpacity')) || 1; // 1% opacity
-    const savedPosition = Number(navStorageHelper.getItem('navPosition')) || 20; // 20px position
-    const savedHandleSize = Number(navStorageHelper.getItem('navHandleSize')) || 14; // 14px handle
-    const savedLocation = navStorageHelper.getItem('navLocation') || 'right-bottom';
-    
-    // Auto-hide: explicitly check for 'false' string, default to OFF (user-friendly)
-    const autoHideValue = navStorageHelper.getItem('navAutoHide');
-    const savedAutoHide = autoHideValue === null ? false : autoHideValue === 'true';
-    
-    const savedStayExpanded = navStorageHelper.getItem('navStayExpanded') === 'true'; // Stay expanded OFF by default
-    const savedButtonsLocked = navStorageHelper.getItem('navButtonsLocked') === 'true'; // Buttons unlocked by default
+        // Load saved settings from Supabase first, then localStorage
+        async function loadNavbarSettings() {
+          const supabaseSettings = await navSupabaseSync.loadFromSupabase();
+          
+          let savedSize, savedOpacity, savedPosition, savedHandleSize, savedLocation, savedAutoHide, savedStayExpanded, savedButtonsLocked;
+          
+          if (supabaseSettings) {
+            // Use Supabase settings
+            savedSize = supabaseSettings.btnSize || 40;
+            savedOpacity = supabaseSettings.opacity || 1;
+            savedPosition = supabaseSettings.position || 20;
+            savedHandleSize = supabaseSettings.handleSize || 14;
+            savedLocation = supabaseSettings.location || 'right-bottom';
+            savedAutoHide = supabaseSettings.autoHide || false;
+            savedStayExpanded = supabaseSettings.stayExpanded || false;
+            savedButtonsLocked = supabaseSettings.buttonsLocked || false;
+            
+            // Also restore button order and module assignments
+            if (supabaseSettings.buttonOrder) {
+              navStorageHelper.setItem(NAV_ORDER_STORAGE_KEY, JSON.stringify(supabaseSettings.buttonOrder));
+            }
+            if (supabaseSettings.moduleAssignments) {
+              navStorageHelper.setItem('navModuleAssignments', JSON.stringify(supabaseSettings.moduleAssignments));
+            }
+            
+            debugLog('✅ Loaded navbar settings from Supabase');
+          } else {
+            // Fall back to localStorage
+            savedSize = Number(navStorageHelper.getItem('navBtnSize')) || 40;
+            savedOpacity = Number(navStorageHelper.getItem('navOpacity')) || 1;
+            savedPosition = Number(navStorageHelper.getItem('navPosition')) || 20;
+            savedHandleSize = Number(navStorageHelper.getItem('navHandleSize')) || 14;
+            savedLocation = navStorageHelper.getItem('navLocation') || 'right-bottom';
+            const autoHideValue = navStorageHelper.getItem('navAutoHide');
+            savedAutoHide = autoHideValue === null ? false : autoHideValue === 'true';
+            savedStayExpanded = navStorageHelper.getItem('navStayExpanded') === 'true';
+            savedButtonsLocked = navStorageHelper.getItem('navButtonsLocked') === 'true';
+            debugLog('✅ Loaded navbar settings from localStorage');
+          }
+
+          return { savedSize, savedOpacity, savedPosition, savedHandleSize, savedLocation, savedAutoHide, savedStayExpanded, savedButtonsLocked };
+        }
+
+        // Load settings asynchronously
+        loadNavbarSettings().then(({ savedSize, savedOpacity, savedPosition, savedHandleSize, savedLocation, savedAutoHide, savedStayExpanded, savedButtonsLocked }) => {
 
         sizeSlider.value = savedSize;
         opacitySlider.value = savedOpacity;
@@ -9961,6 +10056,25 @@ ORDER BY timestamp DESC;</pre>
         // Close on overlay click
         overlay.addEventListener('click', closeContextMenu);
 
+        // Helper function to save settings to both localStorage and Supabase
+        async function saveAllSettings() {
+          const settings = {
+            btnSize: Number(sizeSlider.value),
+            opacity: Number(opacitySlider.value),
+            position: Number(positionSlider.value),
+            handleSize: Number(handleSizeSlider.value),
+            location: locationSelect.value,
+            autoHide: autoHideToggle.checked,
+            stayExpanded: stayExpandedToggle.checked,
+            buttonsLocked: lockButtonsToggle.checked,
+            buttonOrder: JSON.parse(navStorageHelper.getItem(NAV_ORDER_STORAGE_KEY) || 'null'),
+            moduleAssignments: JSON.parse(navStorageHelper.getItem('navModuleAssignments') || '{}')
+          };
+          
+          // Save to Supabase (async, non-blocking)
+          navSupabaseSync.saveToSupabase(settings);
+        }
+
         // Close on outside click
         document.addEventListener('click', e => {
           if (!contextMenu.contains(e.target) && !nav.contains(e.target)) {
@@ -9981,6 +10095,7 @@ ORDER BY timestamp DESC;</pre>
           sizeValue.textContent = `${size}px`;
           applyNavSettings(size, opacitySlider.value, positionSlider.value, handleSizeSlider.value, locationSelect.value, autoHideToggle.checked, stayExpandedToggle.checked);
           navStorageHelper.setItem('navBtnSize', size);
+          saveAllSettings();
         });
 
         // Opacity slider
@@ -9989,6 +10104,7 @@ ORDER BY timestamp DESC;</pre>
           opacityValue.textContent = `${opacity}%`;
           applyNavSettings(sizeSlider.value, opacity, positionSlider.value, handleSizeSlider.value, locationSelect.value, autoHideToggle.checked, stayExpandedToggle.checked);
           navStorageHelper.setItem('navOpacity', opacity);
+          saveAllSettings();
         });
 
         // Position slider
@@ -9999,12 +10115,22 @@ ORDER BY timestamp DESC;</pre>
           navStorageHelper.setItem('navPosition', position);
         });
 
+        // Position slider
+        positionSlider.addEventListener('input', e => {
+          const position = e.target.value;
+          positionValue.textContent = `${position}px`;
+          applyNavSettings(sizeSlider.value, opacitySlider.value, position, handleSizeSlider.value, locationSelect.value, autoHideToggle.checked, stayExpandedToggle.checked);
+          navStorageHelper.setItem('navPosition', position);
+          saveAllSettings();
+        });
+
         // Handle size slider
         handleSizeSlider.addEventListener('input', e => {
           const handleSize = e.target.value;
           handleSizeValue.textContent = `${handleSize}px`;
           applyNavSettings(sizeSlider.value, opacitySlider.value, positionSlider.value, handleSize, locationSelect.value, autoHideToggle.checked, stayExpandedToggle.checked);
           navStorageHelper.setItem('navHandleSize', handleSize);
+          saveAllSettings();
         });
 
         // Location select
@@ -10014,6 +10140,7 @@ ORDER BY timestamp DESC;</pre>
           locationValue.textContent = locationText;
           applyNavSettings(sizeSlider.value, opacitySlider.value, positionSlider.value, handleSizeSlider.value, location, autoHideToggle.checked, stayExpandedToggle.checked);
           navStorageHelper.setItem('navLocation', location);
+          saveAllSettings();
         });
 
         // Auto-hide toggle
@@ -10021,6 +10148,7 @@ ORDER BY timestamp DESC;</pre>
           const autoHide = e.target.checked;
           applyNavSettings(sizeSlider.value, opacitySlider.value, positionSlider.value, handleSizeSlider.value, locationSelect.value, autoHide, stayExpandedToggle.checked);
           navStorageHelper.setItem('navAutoHide', autoHide);
+          saveAllSettings();
         });
 
         // Stay expanded toggle
@@ -10028,6 +10156,7 @@ ORDER BY timestamp DESC;</pre>
           const stayExpanded = e.target.checked;
           applyNavSettings(sizeSlider.value, opacitySlider.value, positionSlider.value, handleSizeSlider.value, locationSelect.value, autoHideToggle.checked, stayExpanded);
           navStorageHelper.setItem('navStayExpanded', stayExpanded);
+          saveAllSettings();
         });
 
         // Lock buttons toggle
@@ -10042,6 +10171,7 @@ ORDER BY timestamp DESC;</pre>
           });
 
           navStorageHelper.setItem('navButtonsLocked', isLocked);
+          saveAllSettings();
         });
 
         // Add New Button handler
@@ -10180,6 +10310,7 @@ ORDER BY timestamp DESC;</pre>
         }
 
         debugLog('✅ Navbar context menu setup complete');
+        }); // Close the loadNavbarSettings().then()
       }
 
       // Add spin animation for refresh button
@@ -10255,6 +10386,8 @@ ORDER BY timestamp DESC;</pre>
 
           try {
             navStorageHelper.setItem('navModuleAssignments', JSON.stringify(savedAssignments));
+            // Also save to Supabase
+            saveAllSettings();
           } catch (err) {
             console.error('❌ Failed to save nav module assignments:', err);
           }
@@ -10483,6 +10616,8 @@ ORDER BY timestamp DESC;</pre>
           const persisted = navStorageHelper.setItem(NAV_ORDER_STORAGE_KEY, JSON.stringify(order));
           if (persisted) {
             console.log('💾 Nav button order saved:', order);
+            // Also save to Supabase
+            saveAllSettings();
           } else {
             console.warn('⚠️ Nav button order could not be saved (storage unavailable).');
           }
