@@ -7751,7 +7751,7 @@ ORDER BY timestamp DESC;</pre>
 
           // ✅ Wells Fargo Zelle payment pattern: "SENDER NAME sent you $AMOUNT"
           // Look for pattern in body text - match only capital letter words before "sent you"
-          const wellsFargoPattern = /([A-Z][A-Z\s]+?)\s+sent\s+you\s+\$?([\d,]+\.\d{2})/;
+          const wellsFargoPattern = /([A-Za-z][A-Za-z\s]+?)\s+sent\s+you\s+\$?([\d,]+\.\d{2})/;
           const patternMatch = bodyText.match(wellsFargoPattern);
 
           console.log('📧 Parsing email body:', bodyText.substring(0, 300));
@@ -8086,11 +8086,12 @@ ORDER BY timestamp DESC;</pre>
 
         // CRITICAL FIX: Check for existing (student_id, for_class) combinations to avoid unique constraint violation
         // Note: New payment objects use 'linked_student_id', but database uses 'student_id'
-        const paymentsWithStudent = paymentsToInsert.filter(p => (p.linked_student_id || p.student_id) && p.for_class);
+        const getForClassCandidate = (payment) => payment.for_class || payment.date || null;
+        const paymentsWithStudent = paymentsToInsert.filter(p => (p.linked_student_id || p.student_id) && getForClassCandidate(p));
         if (paymentsWithStudent.length > 0) {
           // Build a list of all student_ids and for_class dates
           const studentIds = [...new Set(paymentsWithStudent.map(p => p.linked_student_id || p.student_id))];
-          const forClassDates = [...new Set(paymentsWithStudent.map(p => p.for_class))];
+          const forClassDates = [...new Set(paymentsWithStudent.map(p => getForClassCandidate(p)))];
           
           debugLog(`🔍 [${contextLabel}] Checking ${paymentsWithStudent.length} payments for duplicate (student_id, for_class) pairs`);
           debugLog(`📊 [${contextLabel}] Student IDs: ${studentIds.join(', ')}`);
@@ -8117,11 +8118,12 @@ ORDER BY timestamp DESC;</pre>
             const beforeFilterCount = paymentsToInsert.length;
             const filteredPayments = paymentsToInsert.filter(p => {
               const studentId = p.linked_student_id || p.student_id;
-              if (!studentId || !p.for_class) return true; // Keep payments without both fields
-              const pairKey = `${studentId}|${p.for_class}`;
+              const forClassCandidate = getForClassCandidate(p);
+              if (!studentId || !forClassCandidate) return true; // Keep payments without both fields
+              const pairKey = `${studentId}|${forClassCandidate}`;
               const isDuplicate = existingPairs.has(pairKey);
               if (isDuplicate) {
-                debugLog(`🚫 [${contextLabel}] Filtering duplicate: student_id=${studentId}, for_class=${p.for_class}`);
+                debugLog(`🚫 [${contextLabel}] Filtering duplicate: student_id=${studentId}, for_class=${forClassCandidate}`);
               }
               return !isDuplicate; // Only keep if pair doesn't exist
             });
