@@ -1,0 +1,2472 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
+    <title>📅 Calendar - ARNOMA Admin</title>
+    <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png">
+    
+    <!-- Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+    
+    <style>
+      /* ============================================================
+         🎨 GLASSMORPHISM DESIGN SYSTEM
+         ============================================================ */
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      :root {
+        --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        --panel-blur: 8px;
+        --modal-blur: 14px;
+        --list-blur: 0px;
+        --accent-cyan: #26ffe6;
+        --accent-magenta: #ff00ff;
+        --accent-gold: #ffd700;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', sans-serif;
+        background: linear-gradient(135deg, #0b0b10 0%, #1a1a2e 100%);
+        min-height: 100vh;
+        padding: 12px;
+        color: rgba(255, 255, 255, 0.9);
+        overflow-x: hidden;
+      }
+
+      /* Calendar Container */
+      .calendar-container {
+        max-width: 1600px;
+        margin: 0 auto;
+        height: calc(100vh - 24px);
+      }
+
+      /* Main Calendar Area */
+      .calendar-main {
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(var(--panel-blur));
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        padding: 30px;
+        overflow-y: auto;
+        height: 100%;
+      }
+
+      /* Calendar Header */
+      .calendar-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+        padding-bottom: 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .calendar-nav {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .nav-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.2s;
+      }
+
+      .nav-btn:hover {
+        background: rgba(255, 255, 255, 0.15);
+        border-color: var(--accent-cyan);
+        box-shadow: 0 0 15px rgba(38, 255, 230, 0.3);
+      }
+
+      .month-display {
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--accent-cyan);
+        text-shadow: 0 0 20px rgba(38, 255, 230, 0.4);
+      }
+
+      /* Elite Refresh Button */
+      .refresh-btn {
+        position: relative;
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        border: 1px solid rgba(38, 255, 230, 0.3);
+        background: linear-gradient(135deg, rgba(38, 255, 230, 0.15), rgba(138, 77, 255, 0.15));
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                    border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        margin-left: 12px;
+        overflow: hidden;
+      }
+
+      .refresh-btn::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: var(--primary-gradient);
+        opacity: 0;
+        transition: opacity 0.3s ease;
+      }
+
+      .refresh-btn:hover::before {
+        opacity: 0.2;
+      }
+
+      .refresh-btn:hover {
+        border-color: rgba(38, 255, 230, 0.6);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(38, 255, 230, 0.3);
+      }
+
+      .refresh-btn:active {
+        transform: translateY(0);
+      }
+
+      .refresh-btn.loading {
+        pointer-events: none;
+      }
+
+      .refresh-btn.loading .refresh-icon {
+        animation: spin 0.8s linear infinite;
+      }
+
+      .refresh-icon {
+        width: 20px;
+        height: 20px;
+        fill: none;
+        stroke: #26ffe6;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        transition: filter 0.3s ease;
+        position: relative;
+        z-index: 1;
+      }
+
+      .refresh-btn:hover .refresh-icon {
+        stroke: #26ffe6;
+        filter: drop-shadow(0 0 8px rgba(38, 255, 230, 0.6));
+      }
+
+      /* Calendar Grid */
+      .calendar-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 10px;
+        margin-top: 20px;
+      }
+
+      .day-header-cell {
+        text-align: center;
+        padding: 10px;
+        font-weight: 600;
+        color: var(--accent-cyan);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      .day-cell {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 12px;
+        min-height: 120px;
+        cursor: pointer;
+        transition: all 0.2s;
+        position: relative;
+      }
+
+      .day-cell:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: var(--accent-cyan);
+        box-shadow: 0 0 20px rgba(38, 255, 230, 0.2);
+        transform: translateY(-2px);
+      }
+
+      .day-cell.today {
+        border: 2px solid var(--accent-cyan);
+        box-shadow: 0 0 25px rgba(38, 255, 230, 0.4);
+      }
+
+      .day-cell.other-month {
+        opacity: 0.3;
+        pointer-events: none;
+      }
+
+      .day-number {
+        font-size: 18px;
+        font-weight: 700;
+        margin-bottom: 8px;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      /* Dot Indicators */
+      .day-dots {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .group-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .group-label {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--accent-cyan);
+        min-width: 15px;
+        text-shadow: 0 0 8px rgba(38, 255, 230, 0.5);
+      }
+
+      .group-dots-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .group-separator {
+        width: 100%;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(38, 255, 230, 0.3), transparent);
+        margin: 2px 0;
+      }
+
+      .indicator-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+
+      .indicator-dot:hover {
+        transform: scale(1.5);
+        box-shadow: 0 0 10px currentColor;
+      }
+
+      .dot-paid {
+        background: linear-gradient(135deg, #00ff41 0%, #00cc33 100%);
+        box-shadow: 0 0 6px rgba(0, 255, 65, 0.5);
+      }
+
+      .dot-unpaid {
+        background: linear-gradient(135deg, #ff1744 0%, #cc1133 100%);
+        box-shadow: 0 0 6px rgba(255, 23, 68, 0.5);
+      }
+
+      .dot-absent {
+        background: linear-gradient(135deg, #9e9e9e 0%, #666666 100%);
+        box-shadow: 0 0 6px rgba(158, 158, 158, 0.5);
+      }
+
+      .dot-credit {
+        background: linear-gradient(135deg, #ffeb3b 0%, #ffc107 100%);
+        box-shadow: 0 0 6px rgba(255, 235, 59, 0.5);
+      }
+
+      .dot-skipped {
+        background: linear-gradient(135deg, #757575 0%, #424242 100%);
+        box-shadow: 0 0 6px rgba(117, 117, 117, 0.5);
+      }
+
+      .dot-gray {
+        background: linear-gradient(135deg, #9e9e9e 0%, #757575 100%);
+        box-shadow: 0 0 6px rgba(158, 158, 158, 0.3);
+      }
+
+      .dot-canceled {
+        background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+        box-shadow: 0 0 6px rgba(107, 114, 128, 0.5);
+        opacity: 0.6;
+      }
+
+      /* Filters */
+      /* Modal Overlay */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        backdrop-filter: blur(10px);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+
+      .modal-overlay.active {
+        display: flex;
+      }
+
+      .modal {
+        background: rgba(30, 30, 50, 0.95);
+        backdrop-filter: blur(var(--modal-blur));
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 20px;
+        padding: 30px;
+        max-width: 800px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+      }
+
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 15px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .modal-title {
+        font-size: 24px;
+        color: var(--accent-cyan);
+      }
+
+      .close-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        color: white;
+        font-size: 24px;
+        cursor: pointer;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+      }
+
+      .close-btn:hover {
+        background: rgba(255, 255, 255, 0.2);
+        transform: rotate(90deg);
+      }
+
+      /* Modal Tabs */
+      .modal-tabs {
+        display: flex;
+        gap: 8px;
+        margin: 18px 0;
+        padding: 0;
+        border-bottom: none;
+        overflow-x: auto;
+        flex-shrink: 0;
+      }
+
+      .modal-tabs::-webkit-scrollbar {
+        height: 0;
+      }
+
+      .modal-tab {
+        padding: 8px 16px;
+        border-radius: 10px;
+        border: 1px solid rgba(255,255,255,0.12);
+        background: rgba(255,255,255,0.04);
+        color: rgba(255,255,255,0.7);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 500;
+        white-space: nowrap;
+        transition: all 0.2s ease;
+      }
+
+      .modal-tab:hover {
+        background: rgba(255,255,255,0.08);
+      }
+
+      .modal-tab.active {
+        background: linear-gradient(135deg, rgba(102,126,234,0.3), rgba(139,92,246,0.3));
+        border-color: rgba(139,92,246,0.6);
+        color: white;
+      }
+
+      .modal-tab-content {
+        padding: 0;
+        overflow-y: visible;
+        flex: 1;
+      }
+
+      .tab-panel {
+        display: none;
+      }
+
+      .tab-panel.active {
+        display: block;
+      }
+
+      /* Student Info Modal */
+      .student-modal {
+        background: linear-gradient(135deg, rgba(30, 30, 50, 0.98) 0%, rgba(20, 20, 35, 0.98) 100%);
+        backdrop-filter: blur(var(--modal-blur));
+        border: 1px solid rgba(138, 180, 255, 0.3);
+        border-radius: 20px;
+        padding: 0;
+        max-width: 420px;
+        width: 90%;
+        max-height: 85vh;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      }
+
+      .student-modal-header {
+        background: linear-gradient(135deg, rgba(38, 255, 230, 0.1) 0%, rgba(138, 77, 255, 0.1) 100%);
+        padding: 16px 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: relative;
+      }
+
+      .student-header-content {
+        flex: 1;
+      }
+
+      .student-name-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(38, 255, 230, 0.15);
+        color: var(--accent-cyan);
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+        border: 1px solid rgba(38, 255, 230, 0.3);
+      }
+
+      .student-counter {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.5);
+      }
+
+      .student-name-title {
+        font-size: 22px;
+        font-weight: 700;
+        color: white;
+        margin: 0;
+        text-shadow: 0 0 20px rgba(38, 255, 230, 0.3);
+      }
+
+      .student-group-label {
+        color: rgba(255, 255, 255, 0.5);
+        font-size: 12px;
+        margin-top: 2px;
+      }
+
+      .nav-arrows {
+        display: flex;
+        gap: 6px;
+        position: absolute;
+        right: 60px;
+        top: 50%;
+        transform: translateY(-50%);
+      }
+
+      .nav-arrow {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        color: white;
+        font-size: 16px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+      }
+
+      .nav-arrow:hover:not(:disabled) {
+        background: rgba(38, 255, 230, 0.2);
+        border-color: var(--accent-cyan);
+        box-shadow: 0 0 15px rgba(38, 255, 230, 0.3);
+      }
+
+      .nav-arrow:disabled {
+        opacity: 0.3;
+        cursor: not-allowed;
+      }
+
+      .student-modal-body {
+        padding: 16px 20px;
+      }
+
+      .info-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .info-card {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+
+      .info-card.full-width {
+        grid-column: 1 / -1;
+      }
+
+      .info-label {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.5);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 4px;
+      }
+
+      .info-value {
+        font-size: 18px;
+        font-weight: 600;
+        color: white;
+      }
+
+      .balance-card {
+        cursor: pointer;
+        transition: all 0.2s;
+        position: relative;
+      }
+
+      .balance-card:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: var(--accent-cyan);
+        box-shadow: 0 0 15px rgba(38, 255, 230, 0.2);
+      }
+
+      .balance-card .info-value {
+        color: var(--accent-cyan);
+        font-size: 24px;
+      }
+
+      .balance-input {
+        background: transparent;
+        border: none;
+        outline: none;
+        color: var(--accent-cyan);
+        font-size: 24px;
+        font-weight: 600;
+        font-family: inherit;
+        width: 100%;
+        cursor: pointer;
+        padding: 0;
+        text-align: left;
+      }
+
+      .balance-input:focus {
+        cursor: text;
+        border-bottom: 2px solid var(--accent-cyan);
+        padding-bottom: 2px;
+      }
+
+      .click-to-edit {
+        font-size: 9px;
+        color: rgba(255, 255, 255, 0.4);
+        margin-top: 2px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .quick-actions {
+        margin-top: 12px;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+
+      .action-btn {
+        padding: 10px 8px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 10px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+      }
+
+      .action-btn-icon {
+        font-size: 18px;
+      }
+
+      .action-btn.email {
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(37, 99, 235, 0.15));
+        border-color: rgba(59, 130, 246, 0.3);
+        color: #60a5fa;
+      }
+
+      .action-btn.email:hover {
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(37, 99, 235, 0.25));
+        border-color: rgba(59, 130, 246, 0.5);
+        box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+      }
+
+      .action-btn.absent {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.15));
+        border-color: rgba(239, 68, 68, 0.3);
+        color: #f87171;
+      }
+
+      .action-btn.absent:hover {
+        background: linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(220, 38, 38, 0.25));
+        border-color: rgba(239, 68, 68, 0.5);
+        box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+      }
+
+      .action-btn.credit {
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(22, 163, 74, 0.15));
+        border-color: rgba(34, 197, 94, 0.3);
+        color: #4ade80;
+      }
+
+      .action-btn.credit:hover {
+        background: linear-gradient(135deg, rgba(34, 197, 94, 0.25), rgba(22, 163, 74, 0.25));
+        border-color: rgba(34, 197, 94, 0.5);
+        box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+      }
+
+      /* Stats Bar */
+      .stats-bar {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 15px;
+        margin-bottom: 20px;
+      }
+
+      .stat-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 15px;
+        text-align: center;
+      }
+
+      .stat-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--accent-cyan);
+        margin-bottom: 5px;
+      }
+
+      #statUnpaid {
+        color: #ef4444;
+      }
+
+      .stat-label {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.6);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+
+      /* Loading State */
+      #calendarGrid .loading {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 400px;
+        font-size: 18px;
+        color: var(--accent-cyan);
+      }
+
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border: 4px solid rgba(38, 255, 230, 0.2);
+        border-top-color: var(--accent-cyan);
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      /* Scrollbar Styling */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: rgba(38, 255, 230, 0.3);
+        border-radius: 4px;
+      }
+
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(38, 255, 230, 0.5);
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Main Container -->
+    <div class="calendar-container">
+      <!-- Main Calendar -->
+      <div class="calendar-main">
+        <!-- Header -->
+        <div class="calendar-header">
+          <div class="calendar-nav">
+            <button class="nav-btn" id="prevMonth">◀ Previous</button>
+            <button class="nav-btn" id="todayBtn">Today</button>
+            <button class="nav-btn" id="nextMonth">Next ▶</button>
+          </div>
+          <div class="month-display">
+            <span id="currentMonth">January</span> <span id="currentYear">2025</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <!-- Status Filter Dropdown -->
+            <div style="position: relative;">
+              <button 
+                id="statusFilterBtn" 
+                style="padding: 10px 16px; background: rgba(255,255,255,0.08); border: 1px solid rgba(138,180,255,0.3); border-radius: 10px; color: white; outline: none; font-size: 14px; cursor: pointer; transition: all 0.2s ease; display: flex; align-items: center; gap: 8px;"
+                onclick="toggleStatusDropdown(event)"
+              >
+                <span id="statusFilterLabel">All Statuses</span>
+                <span style="font-size: 10px;">▼</span>
+              </button>
+              <div 
+                id="statusFilterDropdown" 
+                style="position: fixed; background: rgba(255,255,255,0.04); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,0.15); border-radius: 14px; padding: 8px; min-width: 220px; z-index: 9999999; box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(138,180,255,0.15); opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.2s ease, transform 0.2s ease;"
+                onclick="event.stopPropagation()"
+              >
+                <label style="display: flex; align-items: center; padding: 10px 12px; cursor: pointer; border-radius: 10px; transition: all 0.2s ease; font-size: 14px; color: white;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
+                  <input type="checkbox" value="paid" style="margin-right: 12px; width: 16px; height: 16px; cursor: pointer; accent-color: #22c55e;" onchange="updateStatusFilter()">
+                  <span style="color: #22c55e; font-weight: 500;">✅ Paid</span>
+                </label>
+                <label style="display: flex; align-items: center; padding: 10px 12px; cursor: pointer; border-radius: 10px; transition: all 0.2s ease; font-size: 14px; color: white;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
+                  <input type="checkbox" value="unpaid" style="margin-right: 12px; width: 16px; height: 16px; cursor: pointer; accent-color: #ef4444;" onchange="updateStatusFilter()">
+                  <span style="color: #ef4444; font-weight: 500;">❌ Unpaid</span>
+                </label>
+                <label style="display: flex; align-items: center; padding: 10px 12px; cursor: pointer; border-radius: 10px; transition: all 0.2s ease; font-size: 14px; color: white;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
+                  <input type="checkbox" value="credit" style="margin-right: 12px; width: 16px; height: 16px; cursor: pointer; accent-color: #3b82f6;" onchange="updateStatusFilter()">
+                  <span style="color: #3b82f6; font-weight: 500;">💳 Credit</span>
+                </label>
+                <label style="display: flex; align-items: center; padding: 10px 12px; cursor: pointer; border-radius: 10px; transition: all 0.2s ease; font-size: 14px; color: white;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
+                  <input type="checkbox" value="absent" style="margin-right: 12px; width: 16px; height: 16px; cursor: pointer; accent-color: #f59e0b;" onchange="updateStatusFilter()">
+                  <span style="color: #f59e0b; font-weight: 500;">🚫 Absent</span>
+                </label>
+                <label style="display: flex; align-items: center; padding: 10px 12px; cursor: pointer; border-radius: 10px; transition: all 0.2s ease; font-size: 14px; color: white;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
+                  <input type="checkbox" value="canceled" style="margin-right: 12px; width: 16px; height: 16px; cursor: pointer; accent-color: #6b7280;" onchange="updateStatusFilter()">
+                  <span style="color: #9ca3af; font-weight: 500;">⭕ Canceled</span>
+                </label>
+                <label style="display: flex; align-items: center; padding: 10px 12px; cursor: pointer; border-radius: 10px; transition: all 0.2s ease; font-size: 14px; color: white;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
+                  <input type="checkbox" value="partial" style="margin-right: 12px; width: 16px; height: 16px; cursor: pointer; accent-color: #eab308;" onchange="updateStatusFilter()">
+                  <span style="color: #eab308; font-weight: 500;">⚠️ Partial</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Student Search -->
+            <div style="position: relative; display: flex; align-items: center;">
+              <svg viewBox="0 0 24 24" style="position: absolute; left: 12px; width: 18px; height: 18px; fill: none; stroke: rgba(138,180,255,0.6); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; pointer-events: none;">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+              </svg>
+              <input 
+                type="text" 
+                id="studentSearchInput" 
+                placeholder="Search students..." 
+                style="padding: 10px 16px 10px 40px; background: rgba(255,255,255,0.08); border: 1px solid rgba(138,180,255,0.3); border-radius: 10px; color: white; outline: none; font-size: 14px; width: 220px; transition: all 0.2s ease;"
+                onfocus="this.style.background='rgba(255,255,255,0.12)'; this.style.borderColor='rgba(138,180,255,0.5)'; this.previousElementSibling.style.stroke='rgba(138,180,255,1)';"
+                onblur="this.style.background='rgba(255,255,255,0.08)'; this.style.borderColor='rgba(138,180,255,0.3)'; this.previousElementSibling.style.stroke='rgba(138,180,255,0.6)';"
+              />
+            </div>
+
+            <!-- Refresh Button -->
+            <button class="refresh-btn" id="refreshBtn" title="Refresh calendar data">
+              <svg viewBox="0 0 24 24" class="refresh-icon">
+                <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Stats Bar -->
+        <div class="stats-bar">
+          <div class="stat-card">
+            <div class="stat-value" id="statClasses">0</div>
+            <div class="stat-label">Classes</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statPaid">$0</div>
+            <div class="stat-label">Paid</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statUnpaid">$0</div>
+            <div class="stat-label">Unpaid</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statAbsences">0</div>
+            <div class="stat-label">Absences</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="statCanceled">0</div>
+            <div class="stat-label">Canceled</div>
+          </div>
+        </div>
+
+        <!-- Calendar Grid -->
+        <div class="calendar-grid" id="calendarGrid">
+          <!-- Day headers -->
+          <div class="day-header-cell">Sun</div>
+          <div class="day-header-cell">Mon</div>
+          <div class="day-header-cell">Tue</div>
+          <div class="day-header-cell">Wed</div>
+          <div class="day-header-cell">Thu</div>
+          <div class="day-header-cell">Fri</div>
+          <div class="day-header-cell">Sat</div>
+          <!-- Days will be inserted here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Day Details Modal -->
+    <div class="modal-overlay" id="dayModal">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title" id="modalDate">Loading...</div>
+          <button class="close-btn" id="closeModal">×</button>
+        </div>
+        <div id="modalBody">
+          <!-- Modal content will be inserted here -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Student Info Modal -->
+    <div class="modal-overlay" id="studentModal" style="display: none;">
+      <div class="modal student-modal">
+        <div class="student-modal-header">
+          <div class="student-header-content">
+            <div class="student-name-badge">
+              <span>STUDENT</span>
+              <span class="student-counter" id="studentCounter">1/1</span>
+            </div>
+            <h2 class="student-name-title" id="studentNameTitle">Loading...</h2>
+            <div class="student-group-label" id="studentGroupLabel">Group: ─</div>
+          </div>
+          
+          <!-- Navigation Arrows -->
+          <div class="nav-arrows">
+            <button class="nav-arrow" id="prevStudentBtn" onclick="navigateStudent(-1)">◄</button>
+            <button class="nav-arrow" id="nextStudentBtn" onclick="navigateStudent(1)">►</button>
+          </div>
+          
+          <button class="close-btn" onclick="closeStudentModal()">✕</button>
+        </div>
+        
+        <div class="student-modal-body">
+          <!-- Info Grid (2 columns) -->
+          <div class="info-grid">
+            <!-- Class Date -->
+            <div class="info-card full-width">
+              <div class="info-label">Class Date</div>
+              <div class="info-value" id="studentClassDate">─</div>
+            </div>
+
+            <!-- Price Per Class -->
+            <div class="info-card">
+              <div class="info-label">Price</div>
+              <div class="info-value" id="studentPrice">─</div>
+            </div>
+
+            <!-- Balance (Editable) -->
+            <div class="info-card balance-card" id="balanceCard">
+              <div class="info-label">Balance</div>
+              <input 
+                type="text" 
+                class="info-value balance-input" 
+                id="studentBalance" 
+                value="0"
+                onfocus="this.select()"
+                onblur="saveBalance()"
+                onkeydown="if(event.key==='Enter') this.blur()"
+              />
+              <div class="click-to-edit">
+                <span>✏️</span>
+                <span>Click to edit</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Quick Actions (3 columns) -->
+          <div class="quick-actions">
+            <button class="action-btn email" onclick="sendEmailReminder()">
+              <span class="action-btn-icon">📧</span>
+              <span>Email</span>
+            </button>
+            <button class="action-btn absent" onclick="markAsAbsent()">
+              <span class="action-btn-icon">🚫</span>
+              <span>Absent</span>
+            </button>
+            <button class="action-btn credit" onclick="addCredit()">
+              <span class="action-btn-icon">💳</span>
+              <span>Credit</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ============================================================
+      // 🔧 SUPABASE CLIENT INITIALIZATION
+      // ============================================================
+      const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+      const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      // ============================================================
+      // 🔒 ADMIN AUTHENTICATION
+      // ============================================================
+      async function requireAdminSession() {
+        try {
+          const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+          
+          if (sessionError || !session) {
+            alert('⛔ Access Denied - Admin Only\nRedirecting to student portal...');
+            window.location.href = 'student-portal.html';
+            return false;
+          }
+
+          const { data: adminAccount, error: adminError } = await supabaseClient
+            .from('admin_accounts')
+            .select('*')
+            .eq('auth_user_id', session.user.id)
+            .single();
+
+          if (adminError || !adminAccount) {
+            alert('⛔ Access Denied - Admin Only\nRedirecting to student portal...');
+            window.location.href = 'student-portal.html';
+            return false;
+          }
+
+          return true;
+        } catch (error) {
+          console.error('❌ Admin auth error:', error);
+          alert('⛔ Access Denied - Admin Only');
+          window.location.href = 'student-portal.html';
+          return false;
+        }
+      }
+
+      // ============================================================
+      // 📊 DATA MANAGEMENT
+      // ============================================================
+      
+  const LA_TIMEZONE = 'America/Los_Angeles';
+  window.CALENDAR_DEBUG = false; // Set to true in console to debug specific students
+  const DEBUG_STUDENT_NAME = 'sona husikyan';
+  const DEBUG_TARGET_DATE = '2026-01-29'; // Focus on problematic date
+      const laDateFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: LA_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+
+      function getLATodayISO() {
+        return laDateFormatter.format(new Date());
+      }
+
+      function getLATodayDate() {
+        const parts = laDateFormatter.formatToParts(new Date());
+        const year = Number(parts.find(part => part.type === 'year')?.value);
+        const month = Number(parts.find(part => part.type === 'month')?.value);
+        const day = Number(parts.find(part => part.type === 'day')?.value);
+        return new Date(year, month - 1, day);
+      }
+
+      function getLAWeekday(dateStr) {
+        const normalized = normalizeDateString(dateStr);
+        if (!normalized) return '';
+        const date = new Date(`${normalized}T12:00:00Z`);
+        return new Intl.DateTimeFormat('en-US', {
+          timeZone: LA_TIMEZONE,
+          weekday: 'long'
+        }).format(date);
+      }
+
+      // Global data stores
+      let currentDate = getLATodayDate();
+      let studentsData = [];
+      let groupsData = [];
+      let paymentsData = [];
+      let paymentRecordsData = [];
+      let absencesData = [];
+      let skippedClassesData = [];
+      let creditPaymentsData = [];
+
+      // Performance: Cache payment matching results
+      let paymentCache = new Map(); // Key: "studentId-date", Value: boolean
+      
+      // Performance: Pre-parsed student aliases
+      let studentAliasesCache = new Map(); // Key: studentId, Value: aliases array
+      
+      // Performance: Indexed data structures
+      let absencesByDateStudent = new Map(); // Key: "date-studentId", Value: true
+      let skippedClassesByDateGroup = new Map(); // Key: "date-groupName", Value: true
+
+      function clearAllCaches() {
+        // Only clear payment cache on navigation
+        // Don't clear data indexes - they're rebuilt on data refresh only
+        paymentCache.clear();
+      }
+
+      function clearPaymentCache() {
+        paymentCache.clear();
+      }
+      
+      function rebuildAllIndexes() {
+        // Clear and rebuild ALL caches - used on data refresh
+        paymentCache.clear();
+        studentAliasesCache.clear();
+        absencesByDateStudent.clear();
+        skippedClassesByDateGroup.clear();
+        buildIndexes();
+      }
+      
+      function buildIndexes() {
+        // Index absences for O(1) lookup
+        absencesByDateStudent.clear();
+        absencesData.forEach(a => {
+          const date = (a.class_date || '').split('T')[0];
+          const key = `${date}-${a.student_id}`;
+          absencesByDateStudent.set(key, true);
+        });
+        
+        // Index skipped classes for O(1) lookup
+        skippedClassesByDateGroup.clear();
+        skippedClassesData.forEach(s => {
+          const date = (s.class_date || '').split('T')[0];
+          const key = `${date}-${s.group_name}`;
+          skippedClassesByDateGroup.set(key, true);
+        });
+        
+        // Pre-parse all student aliases
+        studentAliasesCache.clear();
+        studentsData.forEach(student => {
+          let aliases = [];
+          
+          if (Array.isArray(student.aliases)) {
+            aliases = student.aliases;
+          } else if (typeof student.aliases === 'string' && student.aliases.trim()) {
+            try {
+              const parsed = JSON.parse(student.aliases);
+              
+              if (Array.isArray(parsed)) {
+                aliases = parsed;
+              } else {
+                aliases = [];
+              }
+            } catch (e) {
+              aliases = student.aliases.split(',').map(a => a.trim()).filter(a => a);
+            }
+          }
+          
+          studentAliasesCache.set(student.id, aliases);
+        });
+      }
+      
+      function getStudentAliases(studentId) {
+        return studentAliasesCache.get(studentId) || [];
+      }
+      
+      function isAbsentCached(dateStr, studentId) {
+        const key = `${dateStr}-${studentId}`;
+        return absencesByDateStudent.has(key);
+      }
+      
+      function isClassSkippedCached(dateStr, groupName) {
+        const key = `${dateStr}-${groupName}`;
+        return skippedClassesByDateGroup.has(key);
+      }
+
+      function hasPaymentCached(studentId, dateStr, student) {
+        const cacheKey = `${studentId}-${dateStr}`;
+        
+        if (paymentCache.has(cacheKey)) {
+          return paymentCache.get(cacheKey);
+        }
+
+        const normalizedDateStr = normalizeDateString(dateStr);
+        
+        // Get pre-parsed aliases from cache
+        const aliases = getStudentAliases(studentId);
+        
+        // Check payments
+        const hasPayment = paymentsData.some(p => {
+          const forClassDates = extractForClassDates(p, p.date);
+          const hasMatchingDate = forClassDates.some(classDate => classDate === normalizedDateStr);
+          
+          if (!hasMatchingDate) return false; // Early exit if date doesn't match
+          
+          const paymentStudentId = p.student_id || p.linked_student_id || p.derived_student_id || 
+                                  p.resolved_student_id || p.studentid || null;
+          
+          // Check student ID first (fastest)
+          if (paymentStudentId && String(paymentStudentId) === String(studentId)) {
+            return true;
+          }
+          
+          // Check aliases
+          if (aliases.length > 0) {
+            if (aliases.some(alias => namesMatch(p.payer_name, alias))) {
+              return true;
+            }
+          }
+          
+          // Check name fields
+          return namesMatch(p.resolved_student_name, student.name) ||
+            namesMatch(p.student_name, student.name) ||
+            namesMatch(p.student_full_name, student.name) ||
+            namesMatch(p.studentname, student.name) ||
+            namesMatch(p.studentNameFromMessage, student.name) ||
+            namesMatch(p.studentNameHint, student.name) ||
+            namesMatch(p.student_name_hint, student.name) ||
+            namesMatch(p.studentName, student.name) ||
+            namesMatch(p.student_display_name, student.name) ||
+            namesMatch(p.student_name_display, student.name) ||
+            namesMatch(p.student, student.name);
+        }) || paymentRecordsData.some(pr => {
+          const forClassDates = extractForClassDates(pr, pr.date);
+          const hasMatchingDate = forClassDates.some(classDate => classDate === normalizedDateStr);
+          
+          if (!hasMatchingDate) return false; // Early exit
+          
+          return String(pr.student_id) === String(studentId) ||
+                namesMatch(pr.student_name, student.name) ||
+                namesMatch(pr.student_full_name, student.name) ||
+                namesMatch(pr.student, student.name);
+        });
+        
+        paymentCache.set(cacheKey, hasPayment);
+        return hasPayment;
+      }
+
+      // Active filters
+      const filters = {
+        classes: true,
+        payments: true,
+        absences: true,
+        skipped: true
+      };
+
+      // Month names
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'];
+
+      // ============================================================
+      // 🔄 DATA LOADING FUNCTIONS
+      // ============================================================
+
+      async function loadStudents() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('students')
+            .select('*')
+            .order('name', { ascending: true });
+
+          if (error) throw error;
+          studentsData = data || [];
+          
+          return studentsData;
+        } catch (error) {
+          console.error('❌ Error loading students:', error);
+          return [];
+        }
+      }
+
+      async function loadGroups() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('groups')
+            .select('*')
+            .eq('active', true)
+            .order('group_name', { ascending: true });
+
+          if (error) throw error;
+          groupsData = data || [];
+          return groupsData;
+        } catch (error) {
+          console.error('❌ Error loading groups:', error);
+          return [];
+        }
+      }
+
+      async function loadPayments() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('payments')
+            .select('*')
+            .order('date', { ascending: false });
+
+          if (error) throw error;
+          paymentsData = data || [];
+          
+          return paymentsData;
+        } catch (error) {
+          console.error('❌ Error loading payments:', error);
+          return [];
+        }
+      }
+
+      async function loadPaymentRecords() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('payment_records')
+            .select('*')
+            .eq('status', 'paid')
+            .order('date', { ascending: false });
+
+          if (error) throw error;
+          paymentRecordsData = data || [];
+          
+          return paymentRecordsData;
+        } catch (error) {
+          console.error('❌ Error loading payment records:', error);
+          return [];
+        }
+      }
+
+      async function loadAbsences() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('student_absences')
+            .select('*')
+            .order('class_date', { ascending: false });
+
+          if (error) throw error;
+          absencesData = data || [];
+          return absencesData;
+        } catch (error) {
+          console.error('❌ Error loading absences:', error);
+          return [];
+        }
+      }
+
+      async function loadSkippedClasses() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('skipped_classes')
+            .select('*')
+            .order('class_date', { ascending: false });
+
+          if (error) throw error;
+          skippedClassesData = data || [];
+          return skippedClassesData;
+        } catch (error) {
+          console.error('❌ Error loading skipped classes:', error);
+          return [];
+        }
+      }
+
+      async function loadCreditPayments() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('credit_payments')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (error) throw error;
+          creditPaymentsData = data || [];
+          return creditPaymentsData;
+        } catch (error) {
+          console.error('❌ Error loading credit payments:', error);
+          return [];
+        }
+      }
+
+      async function loadAllData() {
+        const loadingEl = document.createElement('div');
+        loadingEl.className = 'loading';
+        loadingEl.innerHTML = '<div class="spinner"></div> <span style="margin-left: 15px;">Loading calendar data...</span>';
+        
+        const grid = document.getElementById('calendarGrid');
+        const originalContent = grid.innerHTML;
+        grid.innerHTML = '';
+        grid.appendChild(loadingEl);
+
+        try {
+          await Promise.all([
+            loadStudents(),
+            loadGroups(),
+            loadPayments(),
+            loadPaymentRecords(),
+            loadAbsences(),
+            loadSkippedClasses(),
+            loadCreditPayments()
+          ]);
+
+          // Build indexes for optimized lookups
+          buildIndexes();
+        } catch (error) {
+          console.error('❌ Error loading data:', error);
+          alert('Failed to load calendar data. Please refresh the page.');
+        } finally {
+          grid.innerHTML = originalContent;
+        }
+      }
+
+      // ============================================================
+      // 📅 CALENDAR RENDERING
+      // ============================================================
+
+      // Parse schedule string (e.g., "Mon 8:00 PM, Wed 8:00 PM")
+      function parseScheduleString(scheduleStr) {
+        if (!scheduleStr || typeof scheduleStr !== 'string') return [];
+        
+        const rawInput = scheduleStr.trim();
+        if (!rawInput || /^[-–—]+$/.test(rawInput) || /^(?:n[\/\.\s]?a|none|null|tbd|tba)$/i.test(rawInput)) {
+          return [];
+        }
+
+        const sessions = [];
+        const normalizedSchedule = rawInput
+          .replace(/\s*;\s*/g, ',')
+          .replace(/\s+/g, ' ');
+          
+        const parts = normalizedSchedule.split(',').map(p => p.trim()).filter(Boolean);
+        if (!parts.length) return [];
+
+        const normalizeDay = day => {
+          if (!day) return '';
+          const cleaned = day.trim().toLowerCase().replace(/[^a-z]/g, '');
+          const map = {
+            sun: 'Sunday', sunday: 'Sunday',
+            mon: 'Monday', monday: 'Monday',
+            tue: 'Tuesday', tues: 'Tuesday', tuesday: 'Tuesday',
+            wed: 'Wednesday', weds: 'Wednesday', wednesday: 'Wednesday',
+            thu: 'Thursday', thur: 'Thursday', thurs: 'Thursday', thursday: 'Thursday',
+            fri: 'Friday', friday: 'Friday',
+            sat: 'Saturday', saturday: 'Saturday',
+          };
+          return map[cleaned] || '';
+        };
+
+        parts.forEach(part => {
+          const match = part.match(/^([A-Za-z/]+)\s+(.+)$/);
+          if (!match) return;
+
+          const daySegment = match[1];
+          const timeSegment = match[2];
+
+          daySegment.split('/').forEach(day => {
+            const fullDay = normalizeDay(day);
+            if (fullDay) {
+              sessions.push({ day: fullDay, time: timeSegment });
+            }
+          });
+        });
+
+        return sessions;
+      }
+
+      // Check if a date matches a group's schedule
+      function isScheduledClassDate(dateStr, group) {
+        if (!group || !group.schedule) return false;
+        
+        const sessions = parseScheduleString(group.schedule);
+        if (sessions.length === 0) return false;
+
+        const dayName = getLAWeekday(dateStr);
+
+        return sessions.some(session => session.day === dayName);
+      }
+
+      // Check if a class is skipped/canceled
+      function isClassSkipped(dateStr, groupName) {
+        return skippedClassesData.some(skip => {
+          const skipDate = skip.class_date?.split('T')[0] || skip.class_date;
+          return skipDate === dateStr && skip.group_name === groupName;
+        });
+      }
+
+      function normalizeDateString(value) {
+        if (!value) return '';
+
+        if (value instanceof Date) {
+          return value.toISOString().split('T')[0];
+        }
+
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          const millis = value > 1e12 ? value : value * 1000;
+          return new Date(millis).toISOString().split('T')[0];
+        }
+
+        const raw = String(value).trim();
+        if (!raw) return '';
+
+        if (/^\d{10,}$/.test(raw)) {
+          const numericValue = Number(raw);
+          if (Number.isFinite(numericValue)) {
+            const millis = raw.length >= 13 ? numericValue : numericValue * 1000;
+            return new Date(millis).toISOString().split('T')[0];
+          }
+        }
+
+        const datePart = raw.split('T')[0];
+        const separator = datePart.includes('/') ? '/' : '-';
+        const parts = datePart.split(separator).map(part => part.trim());
+
+        if (parts.length !== 3) return datePart;
+
+        if (parts[0].length === 4) {
+          return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        }
+
+        if (parts[2].length === 4) {
+          return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+        }
+
+        return datePart;
+      }
+
+      function normalizeName(value) {
+        return String(value || '')
+          .toLowerCase()
+          .replace(/[.,'"()]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      function namesMatch(nameA, nameB) {
+        const normalizedA = normalizeName(nameA);
+        const normalizedB = normalizeName(nameB);
+
+        if (!normalizedA || !normalizedB) return false;
+        if (normalizedA === normalizedB) return true;
+
+        const tokensA = normalizedA.match(/[a-z0-9]+/g) || [];
+        const tokensB = normalizedB.match(/[a-z0-9]+/g) || [];
+
+        if (tokensA.length === 0 || tokensB.length === 0) return false;
+
+        const [shorter, longer] = tokensA.length <= tokensB.length
+          ? [tokensA, tokensB]
+          : [tokensB, tokensA];
+
+        return shorter.every(token => longer.includes(token));
+      }
+
+      function isDebugStudent(studentName) {
+        return normalizeName(studentName) === DEBUG_STUDENT_NAME;
+      }
+
+      function shouldDebugStudent(studentName, dateStr) {
+        if (!window.CALENDAR_DEBUG || !isDebugStudent(studentName)) return false;
+        if (!DEBUG_TARGET_DATE) return true;
+        return normalizeDateString(dateStr) === DEBUG_TARGET_DATE;
+      }
+
+      function extractForClassDates(record, fallbackDate) {
+        if (!record) return [];
+
+        let rawDates = record.for_class_dates ?? record.for_class ?? [];
+
+        // CRITICAL: Handle PostgreSQL array notation like {value1,value2}
+        if (typeof rawDates === 'string') {
+          const trimmed = rawDates.trim();
+          if (!trimmed || trimmed === '[]' || trimmed === '{}' || trimmed === 'null') {
+            rawDates = [];
+          } else if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+            // PostgreSQL array format: {2026-01-29,2026-02-05}
+            const inner = trimmed.slice(1, -1);
+            rawDates = inner.split(',').map(d => d.trim()).filter(d => d && d !== 'null');
+          } else {
+            try {
+              rawDates = JSON.parse(trimmed);
+            } catch (e) {
+              rawDates = trimmed.split(',').map(d => d.trim());
+            }
+          }
+        }
+
+        // Handle non-array objects
+        if (rawDates && !Array.isArray(rawDates) && typeof rawDates === 'object') {
+          rawDates = Object.values(rawDates);
+        }
+
+        // Ensure we have an array at this point
+        if (!Array.isArray(rawDates)) {
+          rawDates = rawDates ? [rawDates] : [];
+        }
+
+        const normalizedDates = rawDates
+          .map(entry => {
+            // Skip null/undefined/empty
+            if (!entry || entry === 'null' || entry === 'NULL') return '';
+            
+            // Handle nested objects
+            if (typeof entry === 'object') {
+              return entry.class_date || entry.date || entry.for_class || entry.classDate || entry.value || '';
+            }
+            
+            // Handle direct values
+            return String(entry).trim();
+          })
+          .map(entry => normalizeDateString(entry))
+          .filter(Boolean); // Remove empty strings
+
+        // Fallback to payment date if no for_class dates exist
+        if (normalizedDates.length === 0 && fallbackDate) {
+          const fallback = normalizeDateString(fallbackDate);
+          return fallback ? [fallback] : [];
+        }
+
+        return normalizedDates;
+      }
+
+      function renderCalendar() {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+
+        // Update header
+        document.getElementById('currentMonth').textContent = monthNames[month];
+        document.getElementById('currentYear').textContent = year;
+
+        // Get first day of month and total days
+        const firstDay = new Date(year, month, 1).getDay();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+        const grid = document.getElementById('calendarGrid');
+        
+        // Clear existing days (keep headers)
+        while (grid.children.length > 7) {
+          grid.removeChild(grid.lastChild);
+        }
+
+        // Add previous month days
+        for (let i = firstDay - 1; i >= 0; i--) {
+          const day = daysInPrevMonth - i;
+          const cell = createDayCell(day, true);
+          grid.appendChild(cell);
+        }
+
+        // Add current month days
+  const today = getLATodayDate();
+  const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
+
+        for (let day = 1; day <= daysInMonth; day++) {
+          const isToday = isCurrentMonth && today.getDate() === day;
+          const cell = createDayCell(day, false, isToday, year, month);
+          grid.appendChild(cell);
+        }
+
+        // Add next month days to fill grid
+        const totalCells = firstDay + daysInMonth;
+        const remainingCells = 42 - totalCells; // 6 rows × 7 days
+        for (let day = 1; day <= remainingCells; day++) {
+          const cell = createDayCell(day, true);
+          grid.appendChild(cell);
+        }
+
+        updateStats();
+      }
+
+      function createDayCell(day, isOtherMonth, isToday = false, year = null, month = null) {
+        const cell = document.createElement('div');
+        cell.className = 'day-cell';
+        
+        if (isOtherMonth) {
+          cell.classList.add('other-month');
+        }
+        if (isToday) {
+          cell.classList.add('today');
+        }
+
+        const dayNumber = document.createElement('div');
+        dayNumber.className = 'day-number';
+        dayNumber.textContent = day;
+        cell.appendChild(dayNumber);
+
+        if (!isOtherMonth && year !== null && month !== null) {
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          cell.dataset.date = dateStr;
+
+          // Add dots based on data
+          const dots = createDots(dateStr);
+          if (dots) {
+            cell.appendChild(dots);
+          }
+
+          // Add click handler
+          cell.addEventListener('click', () => openDayModal(dateStr));
+        }
+
+        return cell;
+      }
+
+      function createDots(dateStr) {
+        const container = document.createElement('div');
+        container.className = 'day-dots';
+
+        const normalizedCellDate = normalizeDateString(dateStr);
+
+        const events = [];
+
+        // 🎨 GRAY DOTS - Scheduled classes from Group Manager
+        groupsData.forEach(group => {
+          if (isScheduledClassDate(dateStr, group)) {
+            // Check if class is skipped/canceled using cached lookup
+            const isSkipped = isClassSkippedCached(dateStr, group.group_name);
+            
+            // Get active students in this group
+            const groupStudents = studentsData.filter(s => 
+              s.group_name === group.group_name && s.show_in_grid !== false
+            );
+
+            // Add a dot for each active student in the scheduled class
+            groupStudents.forEach(student => {
+              // Get pre-parsed aliases from cache
+              const aliases = getStudentAliases(student.id);
+
+              const normalizedSearch = searchQuery.trim();
+              const matchesSearch = !normalizedSearch ||
+                student.name.toLowerCase().includes(normalizedSearch) ||
+                aliases.some(alias => String(alias).toLowerCase().includes(normalizedSearch));
+
+              if (!matchesSearch) {
+                return;
+              }
+
+              // Check payment status using cached function
+              const hasPayment = hasPaymentCached(student.id, dateStr, student);
+
+              // Check absence using indexed lookup
+              const isAbsent = isAbsentCached(dateStr, student.id);
+
+              // Determine dot type and label
+              let dotType = 'gray'; // Default scheduled class
+              let dotLabel = `${group.group_name}: ${student.name}`;
+
+              if (isSkipped) {
+                dotType = 'canceled';
+                dotLabel += ' (Canceled)';
+              } else if (isAbsent) {
+                dotType = 'absent';
+                dotLabel += ' (Absent)';
+              } else if (hasPayment) {
+                dotType = 'paid';
+                dotLabel += ' (Paid)';
+              } else if (dateStr <= getLATodayISO()) {
+                dotType = 'unpaid';
+                dotLabel += ' (Unpaid)';
+              }
+
+              events.push({
+                type: dotType,
+                label: dotLabel,
+                studentName: student.name,
+                groupName: group.group_name,
+                classDate: dateStr,
+                studentId: student.id,
+                price: student.price_per_class || 0,
+                balance: student.balance || 0
+              });
+            });
+          }
+        });
+
+        // Group events by group name
+        const eventsByGroup = {};
+        events.forEach(event => {
+          const groupKey = event.groupName || 'Other';
+          if (!eventsByGroup[groupKey]) {
+            eventsByGroup[groupKey] = [];
+          }
+          eventsByGroup[groupKey].push(event);
+        });
+
+        // Sort groups alphabetically
+        const sortedGroups = Object.keys(eventsByGroup).sort();
+
+        // Build grouped display with separators
+        if (sortedGroups.length > 0) {
+          sortedGroups.forEach((groupName, index) => {
+            const groupEvents = eventsByGroup[groupName];
+            
+            // Create group row container
+            const groupRow = document.createElement('div');
+            groupRow.className = 'group-row';
+
+            // Add group label (e.g., "A:")
+            const label = document.createElement('div');
+            label.className = 'group-label';
+            label.textContent = `${groupName}:`;
+            groupRow.appendChild(label);
+
+            // Add dots container for this group
+            const dotsContainer = document.createElement('div');
+            dotsContainer.className = 'group-dots-container';
+
+            groupEvents.forEach(event => {
+              const dot = document.createElement('div');
+              dot.className = `indicator-dot dot-${event.type}`;
+              dot.title = event.label;
+              
+              // Store student data for modal
+              dot.dataset.studentData = JSON.stringify({
+                studentName: event.studentName,
+                groupName: event.groupName,
+                classDate: event.classDate,
+                studentId: event.studentId,
+                price: event.price,
+                balance: event.balance
+              });
+              
+              // Add click handler to open student modal
+              dot.addEventListener('click', (e) => {
+                e.stopPropagation(); // Prevent day modal from opening
+                openStudentModal(JSON.parse(dot.dataset.studentData));
+              });
+              
+              dotsContainer.appendChild(dot);
+            });
+
+            groupRow.appendChild(dotsContainer);
+            container.appendChild(groupRow);
+
+            // Add separator between groups (but not after the last group)
+            if (index < sortedGroups.length - 1) {
+              const separator = document.createElement('div');
+              separator.className = 'group-separator';
+              container.appendChild(separator);
+            }
+          });
+        }
+
+        return container.children.length > 0 ? container : null;
+      }
+
+      // ============================================================
+      // 📊 STATS UPDATE
+      // ============================================================
+
+      // Format currency with thousand separators
+      function formatCurrency(amount) {
+        const num = Math.round(amount);
+        return num.toLocaleString('en-US');
+      }
+
+      function updateStats() {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth();
+        const monthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+        let classCount = 0; // Count of CLASSES (not student enrollments)
+        let paidTotal = 0;
+        let unpaidTotal = 0;
+        let absenceCount = 0;
+        let canceledCount = 0;
+
+        // Clear payment cache before recalculating
+        clearPaymentCache();
+
+        // Count scheduled classes for the month
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          
+          groupsData.forEach(group => {
+            if (isScheduledClassDate(dateStr, group)) {
+              // Count the CLASS itself (not each student)
+              const isSkipped = isClassSkippedCached(dateStr, group.group_name);
+              
+              if (isSkipped) {
+                canceledCount++; // Count canceled classes (not student enrollments)
+              } else {
+                classCount++; // Count scheduled classes (not student enrollments)
+              }
+            }
+          });
+        }
+
+        // Calculate paid/unpaid totals
+        const today = getLATodayISO();
+        for (let day = 1; day <= daysInMonth; day++) {
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          
+          groupsData.forEach(group => {
+            if (isScheduledClassDate(dateStr, group) && !isClassSkippedCached(dateStr, group.group_name)) {
+              studentsData.forEach(student => {
+                if (student.group_name === group.group_name && student.show_in_grid !== false) {
+                  const hasPayment = hasPaymentCached(student.id, dateStr, student);
+                  
+                  if (hasPayment) {
+                    paidTotal += parseFloat(student.price_per_class || 0);
+                  } else if (dateStr <= today) {
+                    // Only count unpaid for past/today dates - using cached lookup for performance
+                    const isAbsent = isAbsentCached(dateStr, student.id);
+                    
+                    if (!isAbsent) {
+                      unpaidTotal += parseFloat(student.price_per_class || 0);
+                    }
+                  }
+                }
+              });
+            }
+          });
+        }
+
+        // Count absences for current month
+        absenceCount = absencesData.filter(a => {
+          const absenceDate = (a.class_date || '').split('T')[0];
+          return absenceDate.startsWith(monthStr);
+        }).length;
+
+        // Update UI
+        document.getElementById('statClasses').textContent = classCount;
+        document.getElementById('statPaid').textContent = `${formatCurrency(paidTotal)} $`;
+        document.getElementById('statUnpaid').textContent = `${formatCurrency(unpaidTotal)} $`;
+        document.getElementById('statAbsences').textContent = absenceCount;
+        document.getElementById('statCanceled').textContent = canceledCount;
+      }
+
+      // ============================================================
+      // 🎯 MODAL FUNCTIONS
+      // ============================================================
+
+      function openDayModal(dateStr) {
+        const modal = document.getElementById('dayModal');
+        const modalDate = document.getElementById('modalDate');
+        const modalBody = document.getElementById('modalBody');
+
+        // Format the date for display
+        const dateObj = new Date(dateStr + 'T12:00:00');
+        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        const formattedDate = dateObj.toLocaleDateString('en-US', options);
+        
+        modalDate.textContent = formattedDate;
+
+        // Get all students who have classes on this date
+        const studentsOnDate = [];
+        
+        studentsData.forEach(student => {
+          if (!student.show_in_grid || !student.group_name) return;
+          
+          const group = groupsData.find(g => g.group_name === student.group_name);
+          if (!group) return;
+          
+          // Check if this group has class on this date
+          if (hasClassOnDate(group, dateStr)) {
+            // Check payment status
+            const hasPayment = checkPaymentStatus(student.id, dateStr, student);
+            const hasAbsence = checkAbsence(student.id, dateStr);
+            const isSkipped = checkSkippedClass(group.group_name, dateStr);
+            
+            let status = 'upcoming';
+            if (isSkipped) {
+              status = 'canceled';
+            } else if (hasAbsence) {
+              status = 'absent';
+            } else if (hasPayment) {
+              status = 'paid';
+            } else {
+              status = 'unpaid';
+            }
+            
+            studentsOnDate.push({
+              ...student,
+              groupName: group.group_name,
+              status: status,
+              hasPayment: hasPayment,
+              hasAbsence: hasAbsence,
+              isSkipped: isSkipped
+            });
+          }
+        });
+
+        // Group students by their group_name
+        const groupedStudents = {};
+        studentsOnDate.forEach(student => {
+          if (!groupedStudents[student.groupName]) {
+            groupedStudents[student.groupName] = [];
+          }
+          groupedStudents[student.groupName].push(student);
+        });
+
+        // Build tabs and content
+        let tabsHtml = '';
+        let tabPanelsHtml = '';
+        
+        if (studentsOnDate.length === 0) {
+          modalBody.innerHTML = `
+            <div class="modal-tab-content">
+              <div style="padding: 40px 20px; text-align: center; color: rgba(255,255,255,0.5);">
+                <div style="font-size: 48px; margin-bottom: 10px;">📅</div>
+                <div style="font-size: 16px;">No classes scheduled for this date</div>
+              </div>
+            </div>
+          `;
+          modal.classList.add('active');
+          return;
+        }
+
+        // Create "Unpaid" tab first
+        const unpaidStudents = studentsOnDate.filter(s => s.status === 'unpaid');
+        tabsHtml += `<div class="modal-tab active" onclick="switchModalTab(event, 'unpaid')">Unpaid (${unpaidStudents.length})</div>`;
+        
+        let unpaidContent = '';
+        if (unpaidStudents.length > 0) {
+          unpaidContent = unpaidStudents.map(student => `
+            <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px; margin-bottom: 10px; cursor: pointer;" onclick='openStudentModal({studentId: ${student.id}, classDate: "${dateStr}", studentName: "${student.name.replace(/'/g, "\\'")}", groupName: "${student.groupName}", balance: ${student.balance || 0}, status: "${student.status}"})'>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="color: white; font-weight: 500; margin-bottom: 4px;">${student.name}</div>
+                  <div style="color: rgba(255,255,255,0.5); font-size: 12px;">Group ${student.groupName} • Balance: $${student.balance || 0}</div>
+                </div>
+                <div style="padding: 4px 12px; background: rgba(248,113,113,0.2); border: 1px solid rgba(248,113,113,0.5); border-radius: 8px; color: #f87171; font-size: 12px; font-weight: 500;">UNPAID</div>
+              </div>
+            </div>
+          `).join('');
+        } else {
+          unpaidContent = `
+            <div style="padding: 40px 20px; text-align: center; color: rgba(255,255,255,0.5);">
+              <div style="font-size: 48px; margin-bottom: 10px;">✅</div>
+              <div style="font-size: 16px;">All students are paid! 🎉</div>
+            </div>
+          `;
+        }
+        
+        tabPanelsHtml += `<div class="tab-panel active" data-tab="unpaid">${unpaidContent}</div>`;
+
+        // Create tabs for each group
+        let groupIndex = 0;
+        for (const groupName in groupedStudents) {
+          const groupStudents = groupedStudents[groupName];
+          const tabId = `group-${groupIndex}`;
+          
+          tabsHtml += `<div class="modal-tab" onclick="switchModalTab(event, '${tabId}')">${groupName} (${groupStudents.length})</div>`;
+          
+          const groupContent = groupStudents.map(student => {
+            let statusBadge = '';
+            let statusColor = '';
+            let statusBg = '';
+            let statusBorder = '';
+            
+            if (student.status === 'paid') {
+              statusBadge = 'PAID';
+              statusColor = '#4ade80';
+              statusBg = 'rgba(74,222,128,0.2)';
+              statusBorder = 'rgba(74,222,128,0.5)';
+            } else if (student.status === 'unpaid') {
+              statusBadge = 'UNPAID';
+              statusColor = '#f87171';
+              statusBg = 'rgba(248,113,113,0.2)';
+              statusBorder = 'rgba(248,113,113,0.5)';
+            } else if (student.status === 'absent') {
+              statusBadge = 'ABSENT';
+              statusColor = '#fbbf24';
+              statusBg = 'rgba(251,191,36,0.2)';
+              statusBorder = 'rgba(251,191,36,0.5)';
+            } else if (student.status === 'canceled') {
+              statusBadge = 'CANCELED';
+              statusColor = '#94a3b8';
+              statusBg = 'rgba(148,163,184,0.2)';
+              statusBorder = 'rgba(148,163,184,0.5)';
+            }
+            
+            return `
+              <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px; margin-bottom: 10px; cursor: pointer;" onclick='openStudentModal({studentId: ${student.id}, classDate: "${dateStr}", studentName: "${student.name.replace(/'/g, "\\'")}", groupName: "${student.groupName}", balance: ${student.balance || 0}, status: "${student.status}"})'>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <div>
+                    <div style="color: white; font-weight: 500; margin-bottom: 4px;">${student.name}</div>
+                    <div style="color: rgba(255,255,255,0.5); font-size: 12px;">Balance: $${student.balance || 0}</div>
+                  </div>
+                  <div style="padding: 4px 12px; background: ${statusBg}; border: 1px solid ${statusBorder}; border-radius: 8px; color: ${statusColor}; font-size: 12px; font-weight: 500;">${statusBadge}</div>
+                </div>
+              </div>
+            `;
+          }).join('');
+          
+          tabPanelsHtml += `<div class="tab-panel" data-tab="${tabId}">${groupContent}</div>`;
+          groupIndex++;
+        }
+
+        // Build final modal structure
+        modalBody.innerHTML = `
+          <div class="modal-tabs">
+            ${tabsHtml}
+          </div>
+          <div class="modal-tab-content">
+            ${tabPanelsHtml}
+          </div>
+        `;
+
+        modal.classList.add('active');
+      }
+
+      function switchModalTab(event, tabId) {
+        // Remove active class from all tabs and panels
+        const tabs = document.querySelectorAll('.modal-tab');
+        const panels = document.querySelectorAll('.tab-panel');
+        
+        tabs.forEach(tab => tab.classList.remove('active'));
+        panels.forEach(panel => panel.classList.remove('active'));
+        
+        // Add active class to clicked tab and corresponding panel
+        event.currentTarget.classList.add('active');
+        const targetPanel = document.querySelector(`[data-tab="${tabId}"]`);
+        if (targetPanel) {
+          targetPanel.classList.add('active');
+        }
+      }
+
+      function closeDayModal() {
+        document.getElementById('dayModal').classList.remove('active');
+      }
+
+      // ============================================================
+      // � FILTER FUNCTIONS
+      // ============================================================
+
+      let activeStatusFilters = new Set();
+      let searchQuery = '';
+
+      function toggleStatusDropdown(event) {
+        event.stopPropagation();
+        const dropdown = document.getElementById('statusFilterDropdown');
+        const button = document.getElementById('statusFilterBtn');
+        const rect = button.getBoundingClientRect();
+        
+        const isVisible = dropdown.style.opacity === '1';
+        
+        if (isVisible) {
+          dropdown.style.opacity = '0';
+          dropdown.style.visibility = 'hidden';
+          dropdown.style.pointerEvents = 'none';
+        } else {
+          dropdown.style.left = rect.left + 'px';
+          dropdown.style.top = (rect.bottom + 8) + 'px';
+          dropdown.style.opacity = '1';
+          dropdown.style.visibility = 'visible';
+          dropdown.style.pointerEvents = 'auto';
+        }
+      }
+
+      function updateStatusFilter() {
+        const checkboxes = document.querySelectorAll('#statusFilterDropdown input[type="checkbox"]');
+        activeStatusFilters.clear();
+        
+        checkboxes.forEach(checkbox => {
+          if (checkbox.checked) {
+            activeStatusFilters.add(checkbox.value);
+          }
+        });
+
+        // Update button label
+        const label = document.getElementById('statusFilterLabel');
+        if (activeStatusFilters.size === 0) {
+          label.textContent = 'All Statuses';
+        } else if (activeStatusFilters.size === 1) {
+          const status = Array.from(activeStatusFilters)[0];
+          const statusLabels = {
+            paid: '✅ Paid',
+            unpaid: '❌ Unpaid',
+            credit: '💳 Credit',
+            absent: '🚫 Absent',
+            canceled: '⭕ Canceled',
+            partial: '⚠️ Partial'
+          };
+          label.textContent = statusLabels[status] || status;
+        } else {
+          label.textContent = `${activeStatusFilters.size} Statuses`;
+        }
+
+        renderCalendar();
+      }
+
+      // Close dropdown when clicking outside
+      document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('statusFilterDropdown');
+        const button = document.getElementById('statusFilterBtn');
+        if (dropdown && button && !dropdown.contains(e.target) && !button.contains(e.target)) {
+          dropdown.style.opacity = '0';
+          dropdown.style.visibility = 'hidden';
+          dropdown.style.pointerEvents = 'none';
+        }
+      });
+
+      // Student search handler
+      function handleStudentSearch() {
+        searchQuery = document.getElementById('studentSearchInput').value.toLowerCase();
+        renderCalendar();
+      }
+
+      // ============================================================
+      // �🎬 EVENT LISTENERS
+      // ============================================================
+
+      function attachEventListeners() {
+        // Navigation
+        document.getElementById('prevMonth').addEventListener('click', () => {
+          currentDate.setMonth(currentDate.getMonth() - 1);
+          clearAllCaches(); // Clear all caches when month changes
+          renderCalendar();
+        });
+
+        document.getElementById('nextMonth').addEventListener('click', () => {
+          currentDate.setMonth(currentDate.getMonth() + 1);
+          clearAllCaches(); // Clear all caches when month changes
+          renderCalendar();
+        });
+
+        document.getElementById('todayBtn').addEventListener('click', () => {
+          currentDate = getLATodayDate();
+          clearAllCaches(); // Clear all caches when jumping to today
+          renderCalendar();
+        });
+
+        document.getElementById('refreshBtn').addEventListener('click', async () => {
+          const btn = document.getElementById('refreshBtn');
+          const icon = btn.querySelector('.refresh-icon');
+          
+          // Reset animation by removing and re-adding class
+          btn.classList.remove('loading');
+          void btn.offsetWidth; // Force reflow
+          btn.classList.add('loading');
+          
+          // Clear all caches first, then reload data (which will rebuild indexes)
+          paymentCache.clear();
+          studentAliasesCache.clear();
+          absencesByDateStudent.clear();
+          skippedClassesByDateGroup.clear();
+          
+          await loadAllData();
+          renderCalendar();
+          
+          // Remove loading class after animation completes
+          setTimeout(() => {
+            btn.classList.remove('loading');
+          }, 500);
+        });
+
+        // Student search
+        document.getElementById('studentSearchInput').addEventListener('input', handleStudentSearch);
+
+        // Modal close
+        document.getElementById('closeModal').addEventListener('click', closeDayModal);
+        document.getElementById('dayModal').addEventListener('click', (e) => {
+          if (e.target.id === 'dayModal') {
+            closeDayModal();
+          }
+        });
+      }
+
+      // ============================================================
+      // � STUDENT MODAL FUNCTIONS
+      // ============================================================
+
+      let currentStudentData = null;
+      let allStudentsOnDate = [];
+      let currentStudentIndex = 0;
+
+      function openStudentModal(studentData) {
+        // Find all students on this date
+        const dateStr = studentData.classDate;
+        allStudentsOnDate = [];
+        
+        // Collect all student data for this date from the dots
+        const dayCell = document.querySelector(`[data-date="${dateStr}"]`);
+        if (dayCell) {
+          const dots = dayCell.querySelectorAll('.indicator-dot');
+          dots.forEach(dot => {
+            if (dot.dataset.studentData) {
+              allStudentsOnDate.push(JSON.parse(dot.dataset.studentData));
+            }
+          });
+        }
+        
+        // Find current student index
+        currentStudentIndex = allStudentsOnDate.findIndex(s => 
+          s.studentId === studentData.studentId
+        );
+        
+        if (currentStudentIndex === -1) {
+          currentStudentIndex = 0;
+        }
+        
+        // Display the student
+        displayStudent(currentStudentIndex);
+        
+        // Show modal
+        document.getElementById('studentModal').style.display = 'flex';
+      }
+
+      function displayStudent(index) {
+        if (index < 0 || index >= allStudentsOnDate.length) return;
+        
+        currentStudentIndex = index;
+        currentStudentData = allStudentsOnDate[index];
+        
+        // Update counter
+        document.getElementById('studentCounter').textContent = `${index + 1}/${allStudentsOnDate.length}`;
+        
+        // Populate modal
+        document.getElementById('studentNameTitle').textContent = currentStudentData.studentName;
+        document.getElementById('studentGroupLabel').textContent = `Group: ${currentStudentData.groupName || 'No Group'}`;
+        document.getElementById('studentClassDate').textContent = new Date(currentStudentData.classDate).toLocaleDateString('en-US', { 
+          timeZone: LA_TIMEZONE,
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+        document.getElementById('studentPrice').textContent = formatCurrency(currentStudentData.price) + ' $';
+        
+        // Set balance input value (just the number, formatted)
+        const balanceInput = document.getElementById('studentBalance');
+        balanceInput.value = formatCurrency(currentStudentData.balance) + ' $';
+        balanceInput.dataset.originalValue = currentStudentData.balance;
+        
+        // Update navigation buttons
+        document.getElementById('prevStudentBtn').disabled = (index === 0);
+        document.getElementById('nextStudentBtn').disabled = (index === allStudentsOnDate.length - 1);
+      }
+
+      function navigateStudent(direction) {
+        const newIndex = currentStudentIndex + direction;
+        if (newIndex >= 0 && newIndex < allStudentsOnDate.length) {
+          displayStudent(newIndex);
+        }
+      }
+
+      function closeStudentModal() {
+        document.getElementById('studentModal').style.display = 'none';
+        currentStudentData = null;
+        allStudentsOnDate = [];
+        currentStudentIndex = 0;
+      }
+
+      async function saveBalance() {
+        if (!currentStudentData) return;
+        
+        const balanceInput = document.getElementById('studentBalance');
+        const inputValue = balanceInput.value.replace(/[^0-9.-]/g, ''); // Remove $ and commas
+        const newBalance = parseFloat(inputValue);
+        const originalBalance = parseFloat(balanceInput.dataset.originalValue);
+        
+        // If no change or invalid, revert to original
+        if (isNaN(newBalance) || newBalance === originalBalance) {
+          balanceInput.value = formatCurrency(originalBalance) + ' $';
+          return;
+        }
+        
+        try {
+          // Update in database
+          const { error } = await supabaseClient
+            .from('students')
+            .update({ balance: newBalance })
+            .eq('id', currentStudentData.studentId);
+          
+          if (error) throw error;
+          
+          // Update current data
+          currentStudentData.balance = newBalance;
+          balanceInput.dataset.originalValue = newBalance;
+          balanceInput.value = formatCurrency(newBalance) + ' $';
+          
+          // Update the student in the array
+          allStudentsOnDate[currentStudentIndex].balance = newBalance;
+          
+          // Reload students data to update calendar
+          await loadStudents();
+          renderCalendar();
+        } catch (error) {
+          console.error('❌ Error updating balance:', error);
+          alert('❌ Failed to update balance. Please try again.');
+          // Revert to original
+          balanceInput.value = formatCurrency(originalBalance) + ' $';
+        }
+      }
+
+      async function sendEmailReminder() {
+        if (!currentStudentData) return;
+        alert(`📧 Email reminder feature\n\nSending payment reminder to ${currentStudentData.studentName}\nfor class on ${currentStudentData.classDate}\n\n(Feature coming soon...)`);
+      }
+
+      async function markAsAbsent() {
+        if (!currentStudentData) return;
+        
+        const confirm = window.confirm(`Mark ${currentStudentData.studentName} as absent for ${currentStudentData.classDate}?`);
+        if (!confirm) return;
+        
+        try {
+          // Check if absence already exists
+          const { data: existing } = await supabaseClient
+            .from('student_absences')
+            .select('id')
+            .eq('student_id', currentStudentData.studentId)
+            .eq('class_date', currentStudentData.classDate)
+            .single();
+          
+          if (existing) {
+            alert('⚠️ This student is already marked absent for this date.');
+            return;
+          }
+          
+          // Insert absence record
+          const { error } = await supabaseClient
+            .from('student_absences')
+            .insert({
+              student_id: currentStudentData.studentId,
+              class_date: currentStudentData.classDate,
+              created_at: new Date().toISOString()
+            });
+          
+          if (error) throw error;
+          
+          // Reload data
+          await loadAbsences();
+          renderCalendar();
+          closeStudentModal();
+          
+          alert('✅ Student marked as absent!');
+        } catch (error) {
+          console.error('❌ Error marking absent:', error);
+          alert('❌ Failed to mark absence. Please try again.');
+        }
+      }
+
+      async function addCredit() {
+        if (!currentStudentData) return;
+        
+        const creditAmount = prompt(`Add credit for ${currentStudentData.studentName}\n\nEnter credit amount:`, currentStudentData.price);
+        if (creditAmount === null) return;
+        
+        const amount = parseFloat(creditAmount);
+        if (isNaN(amount) || amount <= 0) {
+          alert('❌ Invalid amount. Please enter a positive number.');
+          return;
+        }
+        
+        try {
+          // Add credit payment
+          const { error } = await supabaseClient
+            .from('credit_payments')
+            .insert({
+              student_id: currentStudentData.studentId,
+              class_date: currentStudentData.classDate,
+              amount: amount,
+              applied_class_date: null,
+              created_at: new Date().toISOString()
+            });
+          
+          if (error) throw error;
+          
+          // Update student balance
+          const newBalance = currentStudentData.balance + amount;
+          await supabaseClient
+            .from('students')
+            .update({ balance: newBalance })
+            .eq('id', currentStudentData.studentId);
+          
+          // Reload data
+          await loadCreditPayments();
+          await loadStudents();
+          renderCalendar();
+          
+          currentStudentData.balance = newBalance;
+          document.getElementById('studentBalance').textContent = formatCurrency(newBalance) + ' $';
+          
+          alert(`✅ Credit of ${formatCurrency(amount)} $ added!\nNew balance: ${formatCurrency(newBalance)} $`);
+        } catch (error) {
+          console.error('❌ Error adding credit:', error);
+          alert('❌ Failed to add credit. Please try again.');
+        }
+      }
+
+      // Close student modal when clicking outside & keyboard navigation
+      document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('studentModal')?.addEventListener('click', (e) => {
+          if (e.target.id === 'studentModal') {
+            closeStudentModal();
+          }
+        });
+        
+        // Keyboard navigation for student modal
+        document.addEventListener('keydown', (e) => {
+          const modal = document.getElementById('studentModal');
+          if (modal && modal.style.display === 'flex') {
+            if (e.key === 'ArrowLeft') {
+              e.preventDefault();
+              navigateStudent(-1);
+            } else if (e.key === 'ArrowRight') {
+              e.preventDefault();
+              navigateStudent(1);
+            } else if (e.key === 'Escape') {
+              closeStudentModal();
+            }
+          }
+        });
+      });
+
+      // ============================================================
+      // 🚀 INITIALIZATION
+      // ============================================================
+
+      async function init() {
+        // Check admin auth
+        const hasAccess = await requireAdminSession();
+        if (!hasAccess) return;
+
+        // Load all data
+        await loadAllData();
+
+        // Render calendar
+        renderCalendar();
+
+        // Attach event listeners
+        attachEventListeners();
+      }
+
+      // Start when DOM is ready
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+      } else {
+        init();
+      }
+    </script>
+  </body>
+</html>
