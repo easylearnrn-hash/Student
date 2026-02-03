@@ -270,6 +270,11 @@
         box-shadow: 0 0 6px rgba(0, 255, 65, 0.5);
       }
 
+      .dot-cash {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+      }
+
       .dot-unpaid {
         background: linear-gradient(135deg, #ff1744 0%, #cc1133 100%);
         box-shadow: 0 0 6px rgba(255, 23, 68, 0.5);
@@ -1465,6 +1470,62 @@
         return hasPayment;
       }
 
+      // Get payment type: 'cash', 'record', or null
+      function getPaymentType(studentId, dateStr, student) {
+        const normalizedDateStr = normalizeDateString(dateStr);
+        const aliases = getStudentAliases(studentId);
+        
+        // Check payment_records first (automated/Zelle/Venmo) - BRIGHT GREEN
+        const hasPaymentRecord = paymentRecordsData.some(pr => {
+          const forClassDates = extractForClassDates(pr, pr.date);
+          const hasMatchingDate = forClassDates.some(classDate => classDate === normalizedDateStr);
+          
+          if (!hasMatchingDate) return false;
+          
+          return String(pr.student_id) === String(studentId) ||
+                namesMatch(pr.student_name, student.name) ||
+                namesMatch(pr.student_full_name, student.name) ||
+                namesMatch(pr.student, student.name);
+        });
+        
+        if (hasPaymentRecord) return 'record';
+        
+        // Check payments table (manual cash) - DIFFERENT GREEN
+        const hasCashPayment = paymentsData.some(p => {
+          const forClassDates = extractForClassDates(p, p.date);
+          const hasMatchingDate = forClassDates.some(classDate => classDate === normalizedDateStr);
+          
+          if (!hasMatchingDate) return false;
+          
+          const paymentStudentId = p.student_id || p.linked_student_id || p.derived_student_id || 
+                                  p.resolved_student_id || p.studentid || null;
+          
+          if (paymentStudentId && String(paymentStudentId) === String(studentId)) {
+            return true;
+          }
+          
+          if (aliases.length > 0 && aliases.some(alias => namesMatch(p.payer_name, alias))) {
+            return true;
+          }
+          
+          return namesMatch(p.resolved_student_name, student.name) ||
+            namesMatch(p.student_name, student.name) ||
+            namesMatch(p.student_full_name, student.name) ||
+            namesMatch(p.studentname, student.name) ||
+            namesMatch(p.studentNameFromMessage, student.name) ||
+            namesMatch(p.studentNameHint, student.name) ||
+            namesMatch(p.student_name_hint, student.name) ||
+            namesMatch(p.studentName, student.name) ||
+            namesMatch(p.student_display_name, student.name) ||
+            namesMatch(p.student_name_display, student.name) ||
+            namesMatch(p.student, student.name);
+        });
+        
+        if (hasCashPayment) return 'cash';
+        
+        return null;
+      }
+
       // Active filters
       const filters = {
         classes: true,
@@ -1974,8 +2035,8 @@
                 return;
               }
 
-              // Check payment status using cached function
-              const hasPayment = hasPaymentCached(student.id, dateStr, student);
+              // Check payment type (record, cash, or none)
+              const paymentType = getPaymentType(student.id, dateStr, student);
 
               // Check absence using indexed lookup
               const isAbsent = isAbsentCached(dateStr, student.id);
@@ -1990,9 +2051,12 @@
               } else if (isAbsent) {
                 dotType = 'absent';
                 dotLabel += ' (Absent)';
-              } else if (hasPayment) {
+              } else if (paymentType === 'record') {
                 dotType = 'paid';
-                dotLabel += ' (Paid)';
+                dotLabel += ' (Paid - Auto)';
+              } else if (paymentType === 'cash') {
+                dotType = 'cash';
+                dotLabel += ' (Paid - Cash)';
               } else if (dateStr <= getLATodayISO()) {
                 dotType = 'unpaid';
                 dotLabel += ' (Unpaid)';
