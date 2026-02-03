@@ -8097,11 +8097,43 @@ ORDER BY timestamp DESC;</pre>
         // CRITICAL FIX: Check for existing gmail_ids in payments table to prevent re-insertion
         const { data: existingGmailPayments } = await supabaseClient
           .from('payments')
-          .select('gmail_id')
+          .select('gmail_id, memo')
           .in('gmail_id', paymentIds);
         
         const existingGmailIds = new Set((existingGmailPayments || []).map(p => p.gmail_id));
+        const existingMemoById = new Map((existingGmailPayments || []).map(p => [p.gmail_id, p.memo || '']));
         console.log(`📋 Existing gmail_ids in payments table: ${existingGmailIds.size} found`);
+        
+        const isMeaningfulMemo = (value = '') => {
+          const trimmed = String(value || '').trim();
+          if (!trimmed) return false;
+          return !/^confirmation:/i.test(trimmed);
+        };
+        
+        const memoUpdates = supabasePayments
+          .filter(p => existingGmailIds.has(p.id))
+          .map(p => {
+            const newMemo = String(p.memo || '').trim();
+            const existingMemo = String(existingMemoById.get(p.id) || '').trim();
+            if (!newMemo || newMemo === existingMemo) return null;
+            if (isMeaningfulMemo(newMemo) && !isMeaningfulMemo(existingMemo)) {
+              return { gmail_id: p.id, memo: newMemo };
+            }
+            return null;
+          })
+          .filter(Boolean);
+        
+        if (memoUpdates.length > 0) {
+          console.log(`📝 Updating memo for ${memoUpdates.length} existing payments`);
+          await Promise.all(
+            memoUpdates.map(update =>
+              supabaseClient
+                .from('payments')
+                .update({ memo: update.memo })
+                .eq('gmail_id', update.gmail_id)
+            )
+          );
+        }
         
         const paymentsToInsert = supabasePayments.filter(p => !ignoredIds.has(p.id) && !existingGmailIds.has(p.id));
         console.log(`✅ Payments to insert after filtering: ${paymentsToInsert.length} out of ${supabasePayments.length} (${ignoredIds.size} ignored, ${existingGmailIds.size} already exist)`);
