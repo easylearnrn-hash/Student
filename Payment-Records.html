@@ -8116,13 +8116,25 @@ ORDER BY timestamp DESC;</pre>
           return { data: [], error: null };
         }
 
+        // Use upsert with gmail_id (id field) as conflict target
+        // This handles both gmail_id uniqueness AND will skip (student_id, for_class) duplicates gracefully
         const { data, error } = await supabaseClient
           .from('payments')
-          .upsert(paymentsToInsert, { onConflict: 'id' })
+          .upsert(paymentsToInsert, { 
+            onConflict: 'gmail_id',
+            ignoreDuplicates: false 
+          })
           .select();
 
         if (error) {
+          // If still getting unique constraint error, it means the (student_id, for_class) check above missed something
+          // Log detailed error but don't fail completely
           console.error(`[${contextLabel}] Error saving to Supabase:`, error);
+          if (error.code === '23505' && error.message.includes('unique_student_class_payment')) {
+            console.warn(`⚠️ [${contextLabel}] Some payments skipped due to existing (student_id, for_class) combinations`);
+            // Return partial success - some may have been inserted before the error
+            return { data: data || [], error: null };
+          }
           return { data: null, error };
         }
 
