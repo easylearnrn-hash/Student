@@ -1155,6 +1155,9 @@
       let absencesData = [];
       let skippedClassesData = [];
       let creditPaymentsData = [];
+      
+      // Note names cache for tag search autocomplete
+      window.noteNamesCache = [];
 
       // Performance: Cache payment matching results
       let paymentCache = new Map(); // Key: "studentId-date", Value: boolean
@@ -1436,6 +1439,25 @@
         }
       }
 
+      // Load note names for tag autocomplete
+      async function loadNoteNames() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('student_notes')
+            .select('title')
+            .order('title');
+          
+          if (error) {
+            console.error('❌ Error loading note names:', error);
+            return;
+          }
+          
+          window.noteNamesCache = data.map(note => note.title).filter(Boolean);
+        } catch (err) {
+          console.error('❌ Error loading note names:', err);
+        }
+      }
+
       async function loadAllData() {
         const loadingEl = document.createElement('div');
         loadingEl.className = 'loading';
@@ -1454,7 +1476,8 @@
             loadPaymentRecords(),
             loadAbsences(),
             loadSkippedClasses(),
-            loadCreditPayments()
+            loadCreditPayments(),
+            loadNoteNames() // Load note names for tag autocomplete
           ]);
 
           // Build indexes for optimized lookups
@@ -2183,6 +2206,18 @@
         `;
 
         modal.classList.add('active');
+        
+        // Initialize tag search for each group after DOM is ready
+        setTimeout(() => {
+          let idx = 0;
+          for (const groupName in groupedStudents) {
+            const searchId = `tag-search-${idx}`;
+            const resultsId = `tag-results-${idx}`;
+            const tagsId = `tags-${groupName}-${dateStr}`;
+            initializeTagSearch(groupName, dateStr, searchId, resultsId, tagsId);
+            idx++;
+          }
+        }, 100);
       }
 
       function switchModalTab(event, tabId) {
@@ -2206,7 +2241,204 @@
       }
 
       // ============================================================
-      // � FILTER FUNCTIONS
+      // 🏷️ NOTE TAGS FUNCTIONS
+      // ============================================================
+
+      function initializeTagSearch(groupName, dateStr, searchInputId, resultsId, tagsContainerId) {
+        const searchInput = document.getElementById(searchInputId);
+        const resultsContainer = document.getElementById(resultsId);
+        const tagsContainer = document.getElementById(tagsContainerId);
+        
+        if (!searchInput || !resultsContainer || !tagsContainer) {
+          console.error('❌ Tag elements not found:', { searchInputId, resultsId, tagsContainerId });
+          return;
+        }
+        
+        // Load existing tags
+        loadTagsForGroup(groupName, dateStr, tagsContainer);
+        
+        // Handle search input
+        searchInput.addEventListener('input', () => {
+          const query = searchInput.value.toLowerCase().trim();
+          resultsContainer.innerHTML = '';
+          
+          if (!query) {
+            resultsContainer.style.display = 'none';
+            return;
+          }
+          
+          // Get existing tags to filter them out
+          const existingTags = getTagsFromLocalStorage(groupName, dateStr);
+          
+          // Filter note names
+          const filteredNotes = (window.noteNamesCache || [])
+            .filter(name => 
+              name.toLowerCase().includes(query) && 
+              !existingTags.includes(name)
+            )
+            .slice(0, 10); // Limit to 10 results
+          
+          if (filteredNotes.length === 0) {
+            resultsContainer.style.display = 'none';
+            return;
+          }
+          
+          // Display results
+          filteredNotes.forEach(noteName => {
+            const item = document.createElement('div');
+            item.className = 'search-item';
+            item.textContent = noteName;
+            item.onclick = () => addTag(groupName, dateStr, noteName, tagsContainer, searchInput, resultsContainer);
+            resultsContainer.appendChild(item);
+          });
+          
+          resultsContainer.style.display = 'flex';
+        });
+        
+        // Close results when clicking outside
+        document.addEventListener('click', (e) => {
+          if (!searchInput.contains(e.target) && !resultsContainer.contains(e.target)) {
+            resultsContainer.style.display = 'none';
+          }
+        });
+      }
+      
+      // Add a tag
+      async function addTag(groupName, dateStr, noteName, tagsContainer, searchInput, resultsContainer) {
+        try {
+          // Save to localStorage
+          const tags = getTagsFromLocalStorage(groupName, dateStr);
+          if (tags.includes(noteName)) {
+            return;
+          }
+          
+          tags.push(noteName);
+          saveTagsToLocalStorage(groupName, dateStr, tags);
+          
+          // Save to database
+          const { error } = await supabaseClient
+            .from('class_tags')
+            .insert([{
+              class_date: dateStr,
+              group_name: groupName,
+              note_name: noteName
+            }]);
+          
+          if (error) {
+            console.error('❌ Error saving tag to database:', error);
+          }
+          
+          // Update UI
+          renderTags(groupName, dateStr, tagsContainer);
+          searchInput.value = '';
+          resultsContainer.style.display = 'none';
+          
+        } catch (err) {
+          console.error('❌ Error adding tag:', err);
+        }
+      }
+      
+      // Remove a tag
+      async function removeTag(groupName, dateStr, noteName, tagsContainer) {
+        try {
+          // Remove from localStorage
+          let tags = getTagsFromLocalStorage(groupName, dateStr);
+          tags = tags.filter(t => t !== noteName);
+          saveTagsToLocalStorage(groupName, dateStr, tags);
+          
+          // Remove from database
+          const { error } = await supabaseClient
+            .from('class_tags')
+            .delete()
+            .eq('class_date', dateStr)
+            .eq('group_name', groupName)
+            .eq('note_name', noteName);
+          
+          if (error) {
+            console.error('❌ Error removing tag from database:', error);
+          }
+          
+          // Update UI
+          renderTags(groupName, dateStr, tagsContainer);
+          
+        } catch (err) {
+          console.error('❌ Error removing tag:', err);
+        }
+      }
+      
+      // Load tags from database and localStorage
+      async function loadTagsForGroup(groupName, dateStr, tagsContainer) {
+        try {
+          // Try to load from database first
+          const { data, error } = await supabaseClient
+            .from('class_tags')
+            .select('note_name')
+            .eq('class_date', dateStr)
+            .eq('group_name', groupName);
+          
+          if (error) {
+            console.error('❌ Error loading tags from database:', error);
+          } else if (data && data.length > 0) {
+            // Save to localStorage and render
+            const tagNames = data.map(t => t.note_name);
+            saveTagsToLocalStorage(groupName, dateStr, tagNames);
+            renderTags(groupName, dateStr, tagsContainer);
+            return;
+          }
+          
+          // Fallback to localStorage
+          renderTags(groupName, dateStr, tagsContainer);
+          
+        } catch (err) {
+          console.error('❌ Error loading tags:', err);
+          renderTags(groupName, dateStr, tagsContainer);
+        }
+      }
+      
+      // Render tags in the UI
+      function renderTags(groupName, dateStr, tagsContainer) {
+        const tags = getTagsFromLocalStorage(groupName, dateStr);
+        tagsContainer.innerHTML = '';
+        
+        if (tags.length === 0) {
+          const placeholder = document.createElement('div');
+          placeholder.className = 'tags-placeholder';
+          placeholder.textContent = 'No notes assigned yet';
+          tagsContainer.appendChild(placeholder);
+          return;
+        }
+        
+        tags.forEach(tagName => {
+          const tagEl = document.createElement('span');
+          tagEl.className = 'class-tag';
+          tagEl.innerHTML = `
+            ${tagName}
+            <span class="remove-tag" onclick="removeTag('${groupName}', '${dateStr}', '${tagName.replace(/'/g, "\\'")}', document.getElementById('tags-${groupName}-${dateStr}'))">×</span>
+          `;
+          tagsContainer.appendChild(tagEl);
+        });
+      }
+      
+      // LocalStorage helpers
+      function getTagsFromLocalStorage(groupName, dateStr) {
+        const key = `class-tags:${dateStr}:${groupName}`;
+        const stored = localStorage.getItem(key);
+        return stored ? JSON.parse(stored) : [];
+      }
+      
+      function saveTagsToLocalStorage(groupName, dateStr, tags) {
+        const key = `class-tags:${dateStr}:${groupName}`;
+        localStorage.setItem(key, JSON.stringify(tags));
+      }
+      
+      // Make functions globally available
+      window.initializeTagSearch = initializeTagSearch;
+      window.addTag = addTag;
+      window.removeTag = removeTag;
+      window.loadTagsForGroup = loadTagsForGroup;
+
+      // ============================================================
+      // 🔍 FILTER FUNCTIONS
       // ============================================================
 
       let activeStatusFilters = new Set();
