@@ -8036,9 +8036,9 @@ ORDER BY timestamp DESC;</pre>
           };
         });
 
-        // Filter out payments that are already ignored
+        // Filter out payments that are already ignored OR already exist in payments table
         const paymentIds = supabasePayments.map(p => p.id);
-        console.log('💾 Payment IDs to check:', paymentIds);
+        console.log('💾 Payment IDs (gmail_ids) to check:', paymentIds);
         
         // Check for ignored payments
         const { data: ignoredPayments } = await supabaseClient
@@ -8051,16 +8051,25 @@ ORDER BY timestamp DESC;</pre>
         const ignoredIds = new Set((ignoredPayments || []).map(p => p.payment_id));
         console.log('🚫 Ignored IDs Set:', Array.from(ignoredIds));
         
-        const paymentsToInsert = supabasePayments.filter(p => !ignoredIds.has(p.id));
-        console.log(`✅ Payments to insert after ignore filter: ${paymentsToInsert.length} out of ${supabasePayments.length}`);
+        // CRITICAL FIX: Check for existing gmail_ids in payments table to prevent re-insertion
+        const { data: existingGmailPayments } = await supabaseClient
+          .from('payments')
+          .select('gmail_id')
+          .in('gmail_id', paymentIds);
+        
+        const existingGmailIds = new Set((existingGmailPayments || []).map(p => p.gmail_id));
+        console.log(`📋 Existing gmail_ids in payments table: ${existingGmailIds.size} found`);
+        
+        const paymentsToInsert = supabasePayments.filter(p => !ignoredIds.has(p.id) && !existingGmailIds.has(p.id));
+        console.log(`✅ Payments to insert after filtering: ${paymentsToInsert.length} out of ${supabasePayments.length} (${ignoredIds.size} ignored, ${existingGmailIds.size} already exist)`);
         
         if (paymentsToInsert.length === 0) {
-          debugLog(`⏭️ [${contextLabel}] All ${supabasePayments.length} payments are already ignored, skipping insert`);
+          debugLog(`⏭️ [${contextLabel}] All ${supabasePayments.length} payments are already ignored or exist in DB, skipping insert`);
           return { data: [], error: null };
         }
         
-        if (ignoredIds.size > 0) {
-          debugLog(`⏭️ [${contextLabel}] Skipping ${ignoredIds.size} ignored payments, inserting ${paymentsToInsert.length}`);
+        if (ignoredIds.size > 0 || existingGmailIds.size > 0) {
+          debugLog(`⏭️ [${contextLabel}] Skipping ${ignoredIds.size} ignored + ${existingGmailIds.size} existing payments, inserting ${paymentsToInsert.length}`);
         }
 
         // CRITICAL FIX: Check for existing (student_id, for_class) combinations to avoid unique constraint violation
