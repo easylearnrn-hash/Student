@@ -801,7 +801,7 @@
 
       .date-group-header {
         display: grid;
-        grid-template-columns: 140px 1fr 1fr 80px 200px 1fr 40px;
+        grid-template-columns: 140px 1fr 1fr 80px 200px 160px 1fr 40px;
         gap: 12px;
         padding: 12px 20px;
         background: rgba(255, 255, 255, 0.03);
@@ -824,7 +824,7 @@
 
       .payments-table-header {
         display: grid;
-        grid-template-columns: 140px 1fr 1fr 80px 200px 1fr 40px;
+        grid-template-columns: 140px 1fr 1fr 80px 200px 160px 1fr 40px;
         gap: 12px;
         padding: 16px 20px;
         background: rgba(255, 255, 255, 0.03);
@@ -865,7 +865,7 @@
 
       .payment-card-row {
         display: grid;
-        grid-template-columns: 140px 1fr 1fr 80px 200px 1fr 40px;
+        grid-template-columns: 140px 1fr 1fr 80px 200px 160px 1fr 40px;
         gap: 12px;
         padding: 12px 20px;
         align-items: center;
@@ -998,21 +998,85 @@
       .payment-menu-btn {
         width: 32px;
         height: 32px;
-        background: transparent;
-        border: none;
+        background: rgba(138, 180, 255, 0.1);
+        border: 1px solid rgba(138, 180, 255, 0.3);
         border-radius: 8px;
-        color: rgba(255, 255, 255, 0.5);
+        color: rgba(138, 180, 255, 0.9);
         font-size: 18px;
         cursor: pointer;
+        transition: all 0.2s;
         display: flex;
         align-items: center;
         justify-content: center;
-        transition: all 0.2s;
       }
 
       .payment-menu-btn:hover {
-        background: rgba(255, 255, 255, 0.1);
+        background: rgba(138, 180, 255, 0.2);
+        border-color: rgba(138, 180, 255, 0.5);
+        transform: scale(1.1);
+      }
+
+      /* ============================================================
+         FOR CLASS DATE PICKERS STYLING
+         ============================================================ */
+      .payment-for-class {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: flex-start;
+      }
+
+      .for-class-date-input {
+        width: 140px;
+        padding: 6px 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(138, 180, 255, 0.3);
+        border-radius: 8px;
         color: rgba(255, 255, 255, 0.9);
+        font-size: 13px;
+        font-weight: 500;
+        font-family: inherit;
+        outline: none;
+        transition: all 0.2s ease;
+        cursor: pointer;
+      }
+
+      .for-class-date-input:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(138, 180, 255, 0.5);
+      }
+
+      .for-class-date-input:focus {
+        background: rgba(255, 255, 255, 0.1);
+        border-color: rgba(138, 180, 255, 0.7);
+        box-shadow: 0 0 0 3px rgba(138, 180, 255, 0.1);
+      }
+
+      .for-class-date-input::-webkit-calendar-picker-indicator {
+        filter: invert(0.7) brightness(1.2);
+        cursor: pointer;
+        opacity: 0.6;
+        transition: opacity 0.2s;
+      }
+
+      .for-class-date-input::-webkit-calendar-picker-indicator:hover {
+        opacity: 1;
+      }
+
+      .for-class-date-input::placeholder {
+        color: rgba(255, 255, 255, 0.4);
+      }
+
+      .for-class-date-input:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background: rgba(255, 255, 255, 0.02);
+      }
+
+      .for-class-empty {
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 13px;
+        font-style: italic;
       }
 
       .payment-card::before {
@@ -2255,6 +2319,7 @@
         .payment-student,
         .payment-amount,
         .payment-group,
+        .payment-for-class,
         .payment-message {
           white-space: normal;
           text-overflow: clip;
@@ -2281,6 +2346,20 @@
 
         .amount-usd {
           font-size: 18px;
+        }
+
+        /* For Class date pickers - mobile responsive */
+        .payment-for-class {
+          margin-top: 8px;
+          padding-top: 8px;
+          border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .for-class-date-input {
+          width: 100%;
+          max-width: 200px;
+          font-size: 14px;
+          padding: 8px 12px;
         }
 
         .payment-group {
@@ -5013,6 +5092,7 @@ ORDER BY timestamp DESC;</pre>
                   <span class="amount-separator">—</span>
                   <span class="amount-amd" data-field="amountAmd"></span>
                 </div>
+                <div class="payment-cell payment-for-class" data-field="forClass"></div>
                 <div class="payment-cell payment-message" data-field="message"></div>
                 <div class="payment-cell payment-actions">
                   <button class="payment-menu-btn" data-role="action-menu" type="button">⋮</button>
@@ -5042,6 +5122,7 @@ ORDER BY timestamp DESC;</pre>
                   <div>STUDENT NAME</div>
                   <div>GROUP</div>
                   <div>AMOUNT (USD — AMD)</div>
+                  <div>FOR CLASS</div>
                   <div>MESSAGE</div>
                   <div>⋮</div>
                 </div>
@@ -5553,6 +5634,13 @@ ORDER BY timestamp DESC;</pre>
           })();
           const uniqueKey = raw.id ? `supabase:${raw.id}` : `gmail:${raw.gmail_id || raw.gmailid || iso}`;
 
+          // ⚡ NEW: Calculate for_class_dates based on payment amount and student's price per class
+          const studentPricePerClass = Number(student?.price_per_class || 0);
+          const forClassDates = raw.for_class_dates || [];
+          const calculatedClassCount = studentPricePerClass > 0 
+            ? Math.floor(amountUSD / studentPricePerClass)
+            : 0;
+
           return {
             id: raw.id || null,
             uniqueKey,
@@ -5579,6 +5667,9 @@ ORDER BY timestamp DESC;</pre>
             amountAMDLabel: formatAmd(amountAMD),
             groupLetter: groupLetter || '—',
             paymentMethodSlug: paymentMethod,
+            studentPricePerClass,
+            forClassDates,
+            calculatedClassCount,
             tokens: {
               payer: tokenize(payerName),
               student: tokenize(studentName),
@@ -5872,6 +5963,193 @@ ORDER BY timestamp DESC;</pre>
           return wrapper;
         }
 
+        /**
+         * Renders date picker inputs for the "For Class" column
+         * @param {HTMLElement} container - The cell container element
+         * @param {Object} record - The payment record
+         */
+        function renderForClassDatePickers(container, record) {
+          if (!container) return;
+          
+          // Clear existing content
+          container.innerHTML = '';
+          
+          const classCount = record.calculatedClassCount || 0;
+          
+          // If no classes can be calculated (no student price or amount too small), show empty state
+          if (classCount === 0) {
+            const emptySpan = document.createElement('span');
+            emptySpan.className = 'for-class-empty';
+            emptySpan.textContent = '—';
+            container.appendChild(emptySpan);
+            return;
+          }
+          
+          // Parse existing dates from record (JSONB array)
+          let existingDates = [];
+          try {
+            if (Array.isArray(record.forClassDates)) {
+              existingDates = record.forClassDates;
+            } else if (typeof record.forClassDates === 'string') {
+              existingDates = JSON.parse(record.forClassDates);
+            }
+          } catch (e) {
+            debugLog('⚠️ Failed to parse for_class_dates:', e);
+            existingDates = [];
+          }
+          
+          // Ensure array length matches calculated class count (preserve existing, pad with empty strings)
+          while (existingDates.length < classCount) {
+            existingDates.push('');
+          }
+          if (existingDates.length > classCount) {
+            existingDates = existingDates.slice(0, classCount);
+          }
+          
+          // Render date picker inputs
+          existingDates.forEach((dateValue, index) => {
+            const input = document.createElement('input');
+            input.type = 'date';
+            input.className = 'for-class-date-input';
+            input.value = dateValue || '';
+            input.dataset.paymentId = record.paymentId || '';
+            input.dataset.dateIndex = index;
+            
+            // Add change event listener to update Supabase
+            input.addEventListener('change', async (e) => {
+              await handleForClassDateChange(e.target, record);
+            });
+            
+            // Prevent event bubbling to avoid triggering card click
+            input.addEventListener('click', (e) => {
+              e.stopPropagation();
+            });
+            
+            container.appendChild(input);
+          });
+        }
+
+        /**
+         * Handles date picker change and updates Supabase
+         * @param {HTMLInputElement} input - The date input element
+         * @param {Object} record - The payment record
+         */
+        async function handleForClassDateChange(input, record) {
+          const paymentId = input.dataset.paymentId;
+          const dateIndex = parseInt(input.dataset.dateIndex, 10);
+          const newDate = input.value;
+          
+          if (!paymentId) {
+            debugLog('⚠️ Cannot update for_class_dates: missing payment ID');
+            return;
+          }
+          
+          debugLog(`📅 Updating for_class_dates[${dateIndex}] = "${newDate}" for payment ${paymentId}`);
+          
+          // Get all date inputs for this payment
+          const container = input.parentElement;
+          const allInputs = container.querySelectorAll('.for-class-date-input');
+          const updatedDates = Array.from(allInputs).map(inp => inp.value || '');
+          
+          try {
+            // Update Supabase with new dates array
+            // ALSO update old for_class column with first date (for Calendar backward compatibility)
+            const firstDate = updatedDates.find(d => d) || null;
+            const { error } = await supabaseClient
+              .from('payments')
+              .update({ 
+                for_class_dates: updatedDates,
+                for_class: firstDate  // Keep old column synced for Calendar
+              })
+              .eq('id', paymentId);
+            
+            if (error) {
+              debugLog('❌ Failed to update for_class_dates:', error);
+              customAlert('Update Failed', `Could not save class date: ${error.message}`);
+              // Revert input value on error
+              input.value = record.forClassDates[dateIndex] || '';
+              return;
+            }
+            
+            // Update local record
+            record.forClassDates = updatedDates;
+            
+            // Update lookup map
+            if (state.paymentLookup.has(record.uniqueKey)) {
+              state.paymentLookup.get(record.uniqueKey).forClassDates = updatedDates;
+            }
+            
+            // Clear Calendar cache if it exists (forces reload)
+            if (window.paymentsCache) {
+              window.paymentsCache = null;
+              debugLog('🔄 Cleared Calendar payment cache to force reload');
+            }
+            
+            debugLog('✅ Successfully updated for_class_dates');
+            
+          } catch (err) {
+            debugLog('❌ Exception updating for_class_dates:', err);
+            customAlert('Update Failed', `An error occurred: ${err.message}`);
+            // Revert input value on error
+            input.value = record.forClassDates[dateIndex] || '';
+          }
+        }
+
+        /**
+         * Recalculates for_class_dates array when payment amount or student price changes
+         * Preserves existing dates when possible, trims or pads as needed
+         * @param {string} paymentId - The payment ID
+         * @param {number} newAmount - The new payment amount
+         * @param {number} studentPricePerClass - Student's price per class
+         * @param {Array<string>} existingDates - Existing for_class_dates array
+         * @returns {Array<string>} Updated dates array
+         */
+        async function recalculateForClassDates(paymentId, newAmount, studentPricePerClass, existingDates = []) {
+          const newClassCount = studentPricePerClass > 0 
+            ? Math.floor(newAmount / studentPricePerClass)
+            : 0;
+          
+          debugLog(`🔄 Recalculating for_class_dates: ${existingDates.length} dates → ${newClassCount} classes`);
+          
+          let updatedDates = [...existingDates];
+          
+          // If reduced: trim excess dates
+          if (updatedDates.length > newClassCount) {
+            updatedDates = updatedDates.slice(0, newClassCount);
+            debugLog(`✂️ Trimmed ${existingDates.length - newClassCount} excess dates`);
+          }
+          
+          // If increased: pad with empty strings
+          while (updatedDates.length < newClassCount) {
+            updatedDates.push('');
+          }
+          
+          // Update Supabase
+          if (paymentId) {
+            try {
+              // ALSO update old for_class column with first date (for Calendar backward compatibility)
+              const firstDate = updatedDates.find(d => d) || null;
+              const { error } = await supabaseClient
+                .from('payments')
+                .update({ 
+                  for_class_dates: updatedDates,
+                  for_class: firstDate  // Keep old column synced for Calendar
+                })
+                .eq('id', paymentId);
+              
+              if (error) {
+                debugLog('❌ Failed to recalculate for_class_dates:', error);
+              } else {
+                debugLog('✅ Successfully recalculated for_class_dates');
+              }
+            } catch (err) {
+              debugLog('❌ Exception recalculating for_class_dates:', err);
+            }
+          }
+          
+          return updatedDates;
+        }
+
         function buildPaymentCard(record) {
           const card = templates.paymentCard.content.firstElementChild.cloneNode(true);
           card.dataset.paymentKey = record.uniqueKey;
@@ -5886,6 +6164,7 @@ ORDER BY timestamp DESC;</pre>
             group: card.querySelector('[data-field="group"]'),
             amountUsd: card.querySelector('[data-field="amountUsd"]'),
             amountAmd: card.querySelector('[data-field="amountAmd"]'),
+            forClass: card.querySelector('[data-field="forClass"]'),
             message: card.querySelector('[data-field="message"]'),
             payerButton: card.querySelector('[data-role="payer-button"]')
           };
@@ -5899,6 +6178,9 @@ ORDER BY timestamp DESC;</pre>
           fields.amountAmd.textContent = record.amountAMDLabel;
           fields.message.textContent = record.memo || '—';
           fields.payerButton.textContent = record.payerName;
+          
+          // ⚡ NEW: Render For Class date pickers
+          renderForClassDatePickers(fields.forClass, record);
           
           // Assign payer button dataset
           Object.entries(record.dataset).forEach(([key, value]) => {
@@ -6444,6 +6726,7 @@ ORDER BY timestamp DESC;</pre>
           updateMonthTotals,
           handleMonthSelectorChange,
           loadMoreRecords,
+          recalculateForClassDates,
           state
         };
       })();
