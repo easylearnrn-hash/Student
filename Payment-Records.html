@@ -5436,8 +5436,18 @@ ORDER BY timestamp DESC;</pre>
             : '';
         }
 
+        function normalizeWellsFargoPayerName(name = '') {
+          return String(name)
+            .replace(/^\s*wells\s+fargo\s+home\s+page\s*/i, '')
+            .replace(/^\s*wells\s+fargo\s*/i, '')
+            .replace(/\s+sent\s+you.*$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
+
         function resolveStudentFromAlias(payerName, studentNameHint) {
-          const candidates = [payerName, studentNameHint]
+          const normalizedPayer = normalizeWellsFargoPayerName(payerName);
+          const candidates = [payerName, normalizedPayer, studentNameHint]
             .flat()
             .filter(Boolean)
             .map(normalizeNameKey)
@@ -5458,6 +5468,13 @@ ORDER BY timestamp DESC;</pre>
           }
 
           return null;
+        }
+
+        function extractWellsFargoMemo(text = '') {
+          if (!text) return '';
+          const memoPattern = /Memo:\s*([^\n\r]+?)(?:We\s+deposited|Go\s+to\s+accounts|Have\s+any\s+questions|$)/i;
+          const memoMatch = String(text).match(memoPattern);
+          return memoMatch ? memoMatch[1].trim() : '';
         }
 
         function cleanPaymentMemo(text) {
@@ -5509,17 +5526,21 @@ ORDER BY timestamp DESC;</pre>
             ? Number(studentIdCandidate)
             : null;
           const studentLookupId = numericStudentId ?? studentIdCandidate;
+          const payerRawInput = raw.payer_name || raw.payer || raw.payer_name_raw || raw.payername || '';
           const student = (studentLookupId ? state.students.get(studentLookupId) : null) ||
-            resolveStudentFromAlias(raw.payer_name || raw.payer, studentNameHint) || null;
+            resolveStudentFromAlias(payerRawInput, studentNameHint) || null;
 
-          const payerOriginal = (raw.payer_name || raw.payer || raw.payer_name_raw || raw.payername || 'Unknown Payer').trim() || 'Unknown Payer';
-          const payerName = formatPayerDisplayName(payerOriginal) || payerOriginal;
+          const payerOriginal = (payerRawInput || 'Unknown Payer').trim() || 'Unknown Payer';
+          const payerNormalized = normalizeWellsFargoPayerName(payerOriginal) || payerOriginal;
+          const payerName = formatPayerDisplayName(payerNormalized) || payerNormalized;
           const studentName = student?.name || raw.student_name || raw.resolved_student_name || raw.studentname || '';
           const amountUSD = Number(raw.amount || 0);
           const amountAMD = Math.round(amountUSD * state.usdToAmdRate);
           
           // Clean memo - prioritize memo field, fallback to message, then clean it
-          const memo = cleanPaymentMemo(raw.memo || raw.message || '');
+          const memoSource = raw.memo || raw.message || '';
+          const memoFromBody = extractWellsFargoMemo(memoSource);
+          const memo = cleanPaymentMemo(memoFromBody || memoSource);
           
           const groupHint = student?.group_name || raw.derived_student_group || raw.group_id || raw.groupid || '';
           const paymentMethod = (raw.payment_method || raw.method || 'unspecified').toLowerCase();
