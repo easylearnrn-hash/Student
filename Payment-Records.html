@@ -7769,6 +7769,8 @@ ORDER BY timestamp DESC;</pre>
 
           // Clean up sender name
           senderName = senderName
+            .replace(/^Wells\s+Fargo\s+home\s+page\s*/i, '')
+            .replace(/^Wells\s+Fargo\s*/i, '')
             .replace(/\s+/g, ' ')
             .trim();
 
@@ -7799,13 +7801,21 @@ ORDER BY timestamp DESC;</pre>
             emailDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
           }
 
-          // Parse confirmation number as memo
+          // Parse memo/message from Wells Fargo email
           let memo = '';
-          const confirmationPattern = /Confirmation:\s*([A-Z0-9]+)/i;
-          const confirmationMatch = bodyText.match(confirmationPattern);
-          
-          if (confirmationMatch) {
-            memo = `Confirmation: ${confirmationMatch[1]}`;
+          const memoPattern = /Memo:\s*([^\n\r]+?)(?:We\s+deposited|Go\s+to\s+accounts|Have\s+any\s+questions|$)/i;
+          const memoMatch = bodyText.match(memoPattern);
+          if (memoMatch) {
+            memo = memoMatch[1].trim();
+          }
+
+          // Fallback: use confirmation number if memo is missing
+          if (!memo) {
+            const confirmationPattern = /Confirmation:\s*([A-Z0-9]+)/i;
+            const confirmationMatch = bodyText.match(confirmationPattern);
+            if (confirmationMatch) {
+              memo = `Confirmation: ${confirmationMatch[1]}`;
+            }
           }
 
           // Limit memo to 500 characters to avoid database issues
