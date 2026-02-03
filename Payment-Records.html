@@ -1026,9 +1026,15 @@
         align-items: flex-start;
       }
 
+      .for-class-input-row {
+        position: relative;
+        display: inline-block;
+        margin-bottom: 6px;
+      }
+
       .for-class-date-input {
         width: 140px;
-        padding: 6px 10px;
+        padding: 6px 40px 6px 10px; /* Extra right padding for buttons */
         background: rgba(255, 255, 255, 0.05);
         border: 1px solid rgba(138, 180, 255, 0.3);
         border-radius: 8px;
@@ -1039,6 +1045,11 @@
         outline: none;
         transition: all 0.2s ease;
         cursor: pointer;
+      }
+
+      .for-class-date-input.is-dirty {
+        border-color: rgba(74, 222, 128, 0.6);
+        box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.12);
       }
 
       .for-class-date-input:hover {
@@ -1071,6 +1082,54 @@
         opacity: 0.5;
         cursor: not-allowed;
         background: rgba(255, 255, 255, 0.02);
+      }
+
+      .for-class-actions {
+        position: absolute;
+        right: 4px;
+        top: 50%;
+        transform: translateY(-50%);
+        display: inline-flex;
+        gap: 2px;
+        pointer-events: none; /* Allow calendar picker to work */
+      }
+
+      .for-class-action-btn {
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(4px);
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 11px;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s ease;
+        pointer-events: all; /* Re-enable for buttons */
+      }
+
+      .for-class-action-btn:disabled {
+        opacity: 0.35;
+        cursor: not-allowed;
+      }
+
+      .for-class-action-btn.save {
+        color: #22c55e;
+        border-color: rgba(34, 197, 94, 0.45);
+      }
+
+      .for-class-action-btn.cancel {
+        color: #f87171;
+        border-color: rgba(248, 113, 113, 0.45);
+      }
+
+      .for-class-action-btn:not(:disabled):hover {
+        transform: translateY(-1px);
+        background: rgba(255, 255, 255, 0.1);
       }
 
       .for-class-empty {
@@ -2360,6 +2419,12 @@
           max-width: 200px;
           font-size: 14px;
           padding: 8px 12px;
+        }
+
+        .for-class-action-btn {
+          width: 26px;
+          height: 26px;
+          font-size: 13px;
         }
 
         .payment-group {
@@ -6008,24 +6073,64 @@ ORDER BY timestamp DESC;</pre>
           
           // Render date picker inputs
           existingDates.forEach((dateValue, index) => {
+            const row = document.createElement('div');
+            row.className = 'for-class-input-row';
+
             const input = document.createElement('input');
             input.type = 'date';
             input.className = 'for-class-date-input';
             input.value = dateValue || '';
             input.dataset.paymentId = record.paymentId || '';
             input.dataset.dateIndex = index;
-            
-            // Add change event listener to update Supabase
-            input.addEventListener('change', async (e) => {
-              await handleForClassDateChange(e.target, record);
+            input.dataset.originalValue = input.value;
+
+            const actions = document.createElement('div');
+            actions.className = 'for-class-actions';
+
+            const saveBtn = document.createElement('button');
+            saveBtn.type = 'button';
+            saveBtn.className = 'for-class-action-btn save';
+            saveBtn.textContent = '✓';
+            saveBtn.disabled = true;
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.type = 'button';
+            cancelBtn.className = 'for-class-action-btn cancel';
+            cancelBtn.textContent = '✕';
+            cancelBtn.disabled = true;
+
+            const setDirtyState = (isDirty) => {
+              saveBtn.disabled = !isDirty;
+              cancelBtn.disabled = !isDirty;
+              input.classList.toggle('is-dirty', isDirty);
+            };
+
+            input.addEventListener('input', () => {
+              setDirtyState(input.value !== input.dataset.originalValue);
             });
-            
+
+            saveBtn.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              await handleForClassDateChange(input, record);
+            });
+
+            cancelBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              input.value = input.dataset.originalValue || '';
+              setDirtyState(false);
+            });
+
             // Prevent event bubbling to avoid triggering card click
             input.addEventListener('click', (e) => {
               e.stopPropagation();
             });
-            
-            container.appendChild(input);
+
+            // Assemble: row contains input, then actions overlay on top
+            actions.appendChild(saveBtn);
+            actions.appendChild(cancelBtn);
+            row.appendChild(input);
+            row.appendChild(actions);
+            container.appendChild(row);
           });
         }
 
@@ -6077,6 +6182,15 @@ ORDER BY timestamp DESC;</pre>
             // Update lookup map
             if (state.paymentLookup.has(record.uniqueKey)) {
               state.paymentLookup.get(record.uniqueKey).forClassDates = updatedDates;
+            }
+
+            input.dataset.originalValue = newDate || '';
+            input.classList.remove('is-dirty');
+            const actionWrap = input.parentElement?.querySelector('.for-class-actions');
+            if (actionWrap) {
+              actionWrap.querySelectorAll('button').forEach(btn => {
+                btn.disabled = true;
+              });
             }
             
             // Clear Calendar cache if it exists (forces reload)
