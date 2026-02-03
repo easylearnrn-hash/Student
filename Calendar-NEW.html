@@ -419,6 +419,125 @@
         display: block;
       }
 
+      /* Note Tags Section */
+      .class-tags-section {
+        margin-bottom: 18px;
+      }
+
+      .tag-search {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(255, 255, 255, 0.05);
+        color: white;
+        margin-bottom: 8px;
+        font-size: 13px;
+        font-family: inherit;
+        transition: all 0.2s ease;
+      }
+
+      .tag-search::placeholder {
+        color: rgba(255, 255, 255, 0.4);
+      }
+
+      .tag-search:focus {
+        outline: none;
+        border-color: rgba(255, 255, 255, 0.3);
+        background: rgba(255, 255, 255, 0.08);
+      }
+
+      .search-results {
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 10px;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      .search-results::-webkit-scrollbar {
+        width: 6px;
+      }
+
+      .search-results::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 3px;
+      }
+
+      .search-results::-webkit-scrollbar-thumb {
+        background: rgba(138, 180, 255, 0.3);
+        border-radius: 3px;
+      }
+
+      .search-item {
+        padding: 8px 12px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.06);
+        cursor: pointer;
+        font-size: 13px;
+        transition: all 0.2s ease;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .search-item:hover {
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .class-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-height: 28px;
+      }
+
+      .class-tag {
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.35), rgba(139, 92, 246, 0.35));
+        border: 1px solid rgba(139, 92, 246, 0.5);
+        color: white;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.2s ease;
+        cursor: pointer;
+      }
+
+      .class-tag:hover {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.5), rgba(139, 92, 246, 0.5));
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+      }
+
+      .class-tag .remove-tag {
+        cursor: pointer;
+        opacity: 0.7;
+        transition: opacity 0.2s ease;
+        font-size: 14px;
+        line-height: 1;
+      }
+
+      .class-tag .remove-tag:hover {
+        opacity: 1;
+      }
+
+      .tags-placeholder {
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.3);
+        font-style: italic;
+      }
+
+      .group-section {
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 18px;
+        padding: 16px;
+        margin-bottom: 20px;
+      }
+
       /* Student Info Modal */
       .student-modal {
         background: linear-gradient(135deg, rgba(30, 30, 50, 0.98) 0%, rgba(20, 20, 35, 0.98) 100%);
@@ -1890,11 +2009,11 @@
           if (!group) return;
           
           // Check if this group has class on this date
-          if (hasClassOnDate(group, dateStr)) {
+          if (isScheduledClassDate(dateStr, group)) {
             // Check payment status
-            const hasPayment = checkPaymentStatus(student.id, dateStr, student);
-            const hasAbsence = checkAbsence(student.id, dateStr);
-            const isSkipped = checkSkippedClass(group.group_name, dateStr);
+            const hasPayment = hasPaymentCached(student.id, dateStr, student);
+            const hasAbsence = isAbsentCached(dateStr, student.id);
+            const isSkipped = isClassSkippedCached(dateStr, group.group_name);
             
             let status = 'upcoming';
             if (isSkipped) {
@@ -1977,10 +2096,13 @@
         for (const groupName in groupedStudents) {
           const groupStudents = groupedStudents[groupName];
           const tabId = `group-${groupIndex}`;
+          const searchId = `tag-search-${groupIndex}`;
+          const resultsId = `tag-results-${groupIndex}`;
+          const tagsId = `tags-${groupName}-${dateStr}`;
           
           tabsHtml += `<div class="modal-tab" onclick="switchModalTab(event, '${tabId}')">${groupName} (${groupStudents.length})</div>`;
           
-          const groupContent = groupStudents.map(student => {
+          const studentsHtml = groupStudents.map(student => {
             let statusBadge = '';
             let statusColor = '';
             let statusBg = '';
@@ -2020,6 +2142,31 @@
               </div>
             `;
           }).join('');
+          
+          const groupContent = `
+            <div class="group-section">
+              <div style="margin-bottom: 16px;">
+                <h3 style="color: var(--accent-cyan); margin-bottom: 8px; font-size: 16px;">Group ${groupName}</h3>
+              </div>
+              
+              <!-- CLASS TAGS SECTION -->
+              <div class="class-tags-section">
+                <input 
+                  class="tag-search" 
+                  id="${searchId}"
+                  placeholder="Search note names…" 
+                  autocomplete="off">
+                <div class="search-results" id="${resultsId}"></div>
+                <div class="class-tags" id="${tagsId}">
+                  <span class="tags-placeholder">No notes assigned yet</span>
+                </div>
+              </div>
+              
+              <div class="students-list">
+                ${studentsHtml}
+              </div>
+            </div>
+          `;
           
           tabPanelsHtml += `<div class="tab-panel" data-tab="${tabId}">${groupContent}</div>`;
           groupIndex++;
