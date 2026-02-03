@@ -7840,13 +7840,17 @@ ORDER BY timestamp DESC;</pre>
 
         // Check if already syncing
         if (btn.classList.contains('syncing')) {
+          console.log('⏭️ Already syncing recent Gmail payments');
           debugLog('⏭️ Already syncing recent Gmail payments');
           return;
         }
 
         // Check Gmail connection
         const isValid = await ensureGmailTokenValid();
+        console.log('🔐 Gmail token valid:', isValid, 'gmailAccessToken exists:', !!gmailAccessToken);
+        
         if (!isValid || !gmailAccessToken) {
+          console.warn('⚠️ Gmail not connected - isValid:', isValid, 'token:', !!gmailAccessToken);
           showNotification('⚠️ Please connect Gmail first', 'warning');
           return;
         }
@@ -7855,16 +7859,20 @@ ORDER BY timestamp DESC;</pre>
         btn.classList.add('syncing');
         const startTime = Date.now();
         const { query, afterDate, lookbackHours } = buildGmailSearchQuery();
+        console.log(`☁️ Syncing Gmail payments from last ${lookbackHours}h...`);
+        console.log(`📧 Gmail search query: "${query}"`);
+        console.log(`📧 After timestamp: ${afterDate} (${new Date(afterDate * 1000).toLocaleString()}) | Lookback window: last ${lookbackHours}h`);
         debugLog(`☁️ Syncing Gmail payments from last ${lookbackHours}h...`);
 
         try {
           const searchUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=100`;
-          // console.log(`📧 Sync Today Gmail query: "${query}"`);
-          // console.log(`📧 After timestamp: ${afterDate} (${new Date(afterDate * 1000).toLocaleString()}) | Lookback window: last ${lookbackHours}h`);
+          console.log(`🌐 Fetching from Gmail API: ${searchUrl}`);
 
           const searchResponse = await fetch(searchUrl, {
             headers: { 'Authorization': `Bearer ${gmailAccessToken}` }
           });
+
+          console.log(`📬 Gmail API response status: ${searchResponse.status}`);
 
           if (!searchResponse.ok) {
             if (searchResponse.status === 401) {
@@ -7876,14 +7884,18 @@ ORDER BY timestamp DESC;</pre>
           }
 
           const searchData = await searchResponse.json();
+          console.log(`📧 Gmail API returned ${searchData.messages?.length || 0} messages`);
+          console.log('📧 Raw search data:', searchData);
 
           if (!searchData.messages || searchData.messages.length === 0) {
+            console.log(`📭 No payments found in last ${lookbackHours}h`);
             showNotification(`📭 No payments found in last ${lookbackHours}h`, 'info');
             btn.classList.remove('syncing');
             btn.title = `Sync recent payments (last ${lookbackHours}h)`;
             return;
           }
 
+          console.log(`📧 Found ${searchData.messages.length} messages (last ${lookbackHours}h), parsing...`);
           debugLog(`📧 Found ${searchData.messages.length} messages (last ${lookbackHours}h), parsing...`);
           const { payments } = await fetchAndParseGmailMessages(searchData.messages, {
             onProgress: (current, total) => {
