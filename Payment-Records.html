@@ -6763,30 +6763,35 @@ ORDER BY timestamp DESC;</pre>
           // ⚡ GRAND TOTALS: Fetch true totals from ALL payments in database
           // This is separate from the paginated display data
           try {
-            const { data, error } = await supabaseClient
+            // Use count and sum aggregation instead of fetching all records
+            const { count, error: countError } = await supabaseClient
               .from('payments')
-              .select('amount, email_date');
+              .select('*', { count: 'exact', head: true });
 
-            if (error) throw error;
+            if (countError) throw countError;
 
-            let count = 0;
+            const { data: sumData, error: sumError } = await supabaseClient
+              .from('payments')
+              .select('amount');
+
+            if (sumError) throw sumError;
+
             let usd = 0;
             let amd = 0;
 
-            if (data && data.length > 0) {
-              data.forEach(record => {
+            if (sumData && sumData.length > 0) {
+              sumData.forEach(record => {
                 const amountUSD = Number(record.amount) || 0;
-                count += 1;
                 usd += amountUSD;
                 amd += amountUSD * state.usdToAmdRate;
               });
             }
 
             // Cache the results
-            state.totalsCache = { count, usd, amd };
+            state.totalsCache = { count: count || 0, usd, amd };
             state.totalsCacheTime = now;
 
-            if (dom.monthTotalCount) dom.monthTotalCount.textContent = count.toString();
+            if (dom.monthTotalCount) dom.monthTotalCount.textContent = (count || 0).toString();
             if (dom.monthTotalUSD) dom.monthTotalUSD.textContent = formatUsd(usd);
             if (dom.monthTotalAMD) dom.monthTotalAMD.textContent = formatAmd(amd);
 
