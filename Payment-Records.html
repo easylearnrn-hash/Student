@@ -8142,27 +8142,31 @@ ORDER BY timestamp DESC;</pre>
           return { data: [], error: null };
         }
 
-        // Use upsert with gmail_id (id field) as conflict target
-        // This handles both gmail_id uniqueness AND will skip (student_id, for_class) duplicates gracefully
+        // CRITICAL: Use ignoreDuplicates=true to skip updates of existing gmail_id records
+        // This prevents overwriting manually-assigned student_id/for_class values
+        // which would violate the unique_student_class_payment constraint
+        console.log(`💾 [${contextLabel}] Inserting ${paymentsToInsert.length} payment(s) with ignoreDuplicates=true`);
+        
         const { data, error } = await supabaseClient
           .from('payments')
           .upsert(paymentsToInsert, { 
             onConflict: 'gmail_id',
-            ignoreDuplicates: false 
+            ignoreDuplicates: true  // Skip updates if gmail_id already exists
           })
           .select();
 
         if (error) {
-          // If still getting unique constraint error, it means the (student_id, for_class) check above missed something
-          // Log detailed error but don't fail completely
           console.error(`[${contextLabel}] Error saving to Supabase:`, error);
-          if (error.code === '23505' && error.message.includes('unique_student_class_payment')) {
-            console.warn(`⚠️ [${contextLabel}] Some payments skipped due to existing (student_id, for_class) combinations`);
-            // Return partial success - some may have been inserted before the error
+          if (error.code === '23505') {
+            // This should not happen with ignoreDuplicates=true, but handle gracefully
+            console.warn(`⚠️ [${contextLabel}] Constraint violation - skipping duplicate`);
             return { data: data || [], error: null };
           }
           return { data: null, error };
         }
+        
+        console.log(`✅ [${contextLabel}] Successfully processed ${paymentsToInsert.length} payment(s), ${data?.length || 0} inserted`);
+
 
         const matchedCount = supabasePayments.filter(p => p.linked_student_id).length;
         debugLog(`💾 [${contextLabel}] Saved ${data.length} payments to Supabase (${matchedCount} matched to students)`);
