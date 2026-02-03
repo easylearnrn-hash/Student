@@ -2418,10 +2418,17 @@
             `;
           }).join('');
           
+          // Check if this group's class is skipped/canceled
+          const isSkipped = isClassSkippedCached(dateStr, groupName);
+          const cancelButton = isSkipped
+            ? `<button class="quick-action-btn secondary" onclick="event.stopPropagation(); uncancelClass('${groupName}', '${dateStr}')" style="padding: 8px 16px; font-size: 12px; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); color: #22c55e; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;">↩️ Uncancel</button>`
+            : `<button class="quick-action-btn tertiary" onclick="event.stopPropagation(); cancelClass('${groupName}', '${dateStr}')" style="padding: 8px 16px; font-size: 12px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s;">🚫 Cancel Class</button>`;
+          
           const groupContent = `
             <div class="group-section">
-              <div style="margin-bottom: 16px;">
-                <h3 style="color: var(--accent-cyan); margin-bottom: 8px; font-size: 16px;">Group ${groupName}</h3>
+              <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="color: var(--accent-cyan); margin: 0; font-size: 16px;">Group ${groupName}</h3>
+                ${cancelButton}
               </div>
               
               <!-- CLASS TAGS SECTION -->
@@ -3100,6 +3107,202 @@
           console.error('❌ Error applying credit:', err);
           alert('❌ Error applying credit. Please try again.');
         }
+      }
+
+      // ============================================================
+      // 🚫 CLASS CANCELLATION FUNCTIONS
+      // ============================================================
+
+      async function cancelClass(groupName, dateStr) {
+        try {
+          // Get students in this group
+          const groupStudents = studentsData.filter(s => s.group_name === groupName && s.show_in_grid !== false);
+          
+          // Show confirmation dialog
+          const confirmed = await showConfirmDialog(
+            'Cancel Class?',
+            `
+              <div style="text-align: left; line-height: 1.6;">
+                <div style="margin-bottom: 12px;"><strong>Group:</strong> ${groupName}</div>
+                <div style="margin-bottom: 12px;"><strong>Date:</strong> ${dateStr}</div>
+                <div style="margin-bottom: 12px;"><strong>Students:</strong> ${groupStudents.length}</div>
+                <div style="margin-top: 16px; padding: 12px; background: rgba(239,68,68,0.2); border-radius: 8px; font-size: 13px; color: rgba(255,255,255,0.8);">
+                  📧 Cancellation emails will be sent to all students in this class
+                </div>
+              </div>
+            `
+          );
+
+          if (!confirmed) return;
+
+          // Save to Supabase
+          const { error: insertError } = await supabaseClient
+            .from('skipped_classes')
+            .insert({
+              group_name: groupName,
+              class_date: dateStr,
+              skip_type: 'class-canceled',
+              note: 'Class canceled'
+            });
+
+          if (insertError) {
+            throw new Error(`Failed to cancel class: ${insertError.message}`);
+          }
+
+          alert('✅ Class canceled successfully');
+
+          // Close the modal
+          closeDayModal();
+
+          // Reload skipped classes and refresh calendar
+          await loadSkippedClasses();
+          renderCalendar();
+        } catch (error) {
+          console.error('❌ Failed to cancel class:', error);
+          alert('❌ Failed to cancel class: ' + error.message);
+        }
+      }
+
+      async function uncancelClass(groupName, dateStr) {
+        try {
+          // Show confirmation dialog
+          const confirmed = await showConfirmDialog(
+            'Restore Class?',
+            `
+              <div style="text-align: left; line-height: 1.6;">
+                <div style="margin-bottom: 12px;"><strong>Group:</strong> ${groupName}</div>
+                <div style="margin-bottom: 12px;"><strong>Date:</strong> ${dateStr}</div>
+                <div style="margin-top: 16px; padding: 12px; background: rgba(34,197,94,0.2); border-radius: 8px; font-size: 13px; color: rgba(255,255,255,0.8);">
+                  The class will be restored to the schedule
+                </div>
+              </div>
+            `
+          );
+
+          if (!confirmed) return;
+
+          // Delete from Supabase
+          const { error: deleteError } = await supabaseClient
+            .from('skipped_classes')
+            .delete()
+            .eq('group_name', groupName)
+            .eq('class_date', dateStr);
+
+          if (deleteError) {
+            throw new Error(`Failed to restore class: ${deleteError.message}`);
+          }
+
+          alert('✅ Class restored to schedule');
+
+          // Close the modal
+          closeDayModal();
+
+          // Reload skipped classes and refresh calendar
+          await loadSkippedClasses();
+          renderCalendar();
+        } catch (error) {
+          console.error('❌ Failed to restore class:', error);
+          alert('❌ Failed to restore class: ' + error.message);
+        }
+      }
+
+      // Custom Confirm Dialog
+      function showConfirmDialog(title, message) {
+        return new Promise((resolve) => {
+          // Create overlay
+          const overlay = document.createElement('div');
+          overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 9999999;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+          `;
+
+          // Create dialog
+          const dialog = document.createElement('div');
+          dialog.style.cssText = `
+            background: linear-gradient(135deg, rgba(30,30,46,0.98) 0%, rgba(42,42,62,0.98) 100%);
+            border: 2px solid rgba(138,180,255,0.3);
+            border-radius: 16px;
+            padding: 24px;
+            min-width: 400px;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+            pointer-events: auto;
+          `;
+
+          dialog.innerHTML = `
+            <h3 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 900; color: white;">${title}</h3>
+            <div style="margin-bottom: 24px; color: rgba(255,255,255,0.9); font-size: 14px;">
+              ${message}
+            </div>
+            <div style="display: flex; gap: 12px; justify-content: flex-end;">
+              <button id="confirmCancel" style="
+                padding: 10px 20px;
+                background: rgba(255,255,255,0.05);
+                border: 1px solid rgba(255,255,255,0.2);
+                border-radius: 8px;
+                color: white;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+              ">Cancel</button>
+              <button id="confirmOk" style="
+                padding: 10px 20px;
+                background: #22c55e;
+                border: 1px solid #22c55e;
+                border-radius: 8px;
+                color: white;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+              ">Confirm</button>
+            </div>
+          `;
+
+          overlay.appendChild(dialog);
+          document.body.appendChild(overlay);
+
+          // Add hover effects
+          const cancelBtn = dialog.querySelector('#confirmCancel');
+          const okBtn = dialog.querySelector('#confirmOk');
+          
+          cancelBtn.addEventListener('mouseover', () => {
+            cancelBtn.style.background = 'rgba(255,255,255,0.1)';
+          });
+          cancelBtn.addEventListener('mouseout', () => {
+            cancelBtn.style.background = 'rgba(255,255,255,0.05)';
+          });
+          
+          okBtn.addEventListener('mouseover', () => {
+            okBtn.style.background = '#16a34a';
+          });
+          okBtn.addEventListener('mouseout', () => {
+            okBtn.style.background = '#22c55e';
+          });
+
+          // Handle responses
+          const cleanup = (result) => {
+            overlay.remove();
+            resolve(result);
+          };
+
+          cancelBtn.addEventListener('click', () => cleanup(false));
+          okBtn.addEventListener('click', () => cleanup(true));
+          overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) cleanup(false);
+          });
+        });
       }
 
       async function saveBalance() {
