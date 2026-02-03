@@ -8040,6 +8040,7 @@ ORDER BY timestamp DESC;</pre>
         const paymentIds = supabasePayments.map(p => p.id);
         console.log('💾 Payment IDs to check:', paymentIds);
         
+        // Check for ignored payments
         const { data: ignoredPayments } = await supabaseClient
           .from('ignored_fuchsia_payments')
           .select('payment_id')
@@ -8051,7 +8052,7 @@ ORDER BY timestamp DESC;</pre>
         console.log('🚫 Ignored IDs Set:', Array.from(ignoredIds));
         
         const paymentsToInsert = supabasePayments.filter(p => !ignoredIds.has(p.id));
-        console.log(`✅ Payments to insert: ${paymentsToInsert.length} out of ${supabasePayments.length}`);
+        console.log(`✅ Payments to insert after ignore filter: ${paymentsToInsert.length} out of ${supabasePayments.length}`);
         
         if (paymentsToInsert.length === 0) {
           debugLog(`⏭️ [${contextLabel}] All ${supabasePayments.length} payments are already ignored, skipping insert`);
@@ -8060,6 +8061,50 @@ ORDER BY timestamp DESC;</pre>
         
         if (ignoredIds.size > 0) {
           debugLog(`⏭️ [${contextLabel}] Skipping ${ignoredIds.size} ignored payments, inserting ${paymentsToInsert.length}`);
+        }
+
+        // CRITICAL FIX: Check for existing (student_id, for_class) combinations to avoid unique constraint violation
+        const paymentsWithStudent = paymentsToInsert.filter(p => p.student_id && p.for_class);
+        if (paymentsWithStudent.length > 0) {
+          // Build a list of all student_ids and for_class dates
+          const studentIds = [...new Set(paymentsWithStudent.map(p => p.student_id))];
+          const forClassDates = [...new Set(paymentsWithStudent.map(p => p.for_class))];
+          
+          // Query for all existing payments with these student_ids and dates
+          const { data: existingPayments } = await supabaseClient
+            .from('payments')
+            .select('id, student_id, for_class')
+            .in('student_id', studentIds)
+            .in('for_class', forClassDates)
+            .not('student_id', 'is', null)
+            .not('for_class', 'is', null);
+          
+          if (existingPayments && existingPayments.length > 0) {
+            // Create a Set of existing (student_id, for_class) combinations
+            const existingPairs = new Set(
+              existingPayments.map(p => `${p.student_id}|${p.for_class}`)
+            );
+            
+            // Filter out payments that would violate the unique constraint
+            const beforeFilterCount = paymentsToInsert.length;
+            const filteredPayments = paymentsToInsert.filter(p => {
+              if (!p.student_id || !p.for_class) return true; // Keep payments without both fields
+              const pairKey = `${p.student_id}|${p.for_class}`;
+              return !existingPairs.has(pairKey); // Only keep if pair doesn't exist
+            });
+            
+            const duplicateCount = beforeFilterCount - filteredPayments.length;
+            if (duplicateCount > 0) {
+              console.log(`⚠️ [${contextLabel}] Filtered out ${duplicateCount} duplicate (student_id, for_class) pairs`);
+              paymentsToInsert.length = 0;
+              paymentsToInsert.push(...filteredPayments);
+            }
+          }
+        }
+
+        if (paymentsToInsert.length === 0) {
+          debugLog(`⏭️ [${contextLabel}] All payments are duplicates or ignored, skipping insert`);
+          return { data: [], error: null };
         }
 
         const { data, error } = await supabaseClient
