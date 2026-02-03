@@ -8073,11 +8073,16 @@ ORDER BY timestamp DESC;</pre>
         }
 
         // CRITICAL FIX: Check for existing (student_id, for_class) combinations to avoid unique constraint violation
-        const paymentsWithStudent = paymentsToInsert.filter(p => p.student_id && p.for_class);
+        // Note: New payment objects use 'linked_student_id', but database uses 'student_id'
+        const paymentsWithStudent = paymentsToInsert.filter(p => (p.linked_student_id || p.student_id) && p.for_class);
         if (paymentsWithStudent.length > 0) {
           // Build a list of all student_ids and for_class dates
-          const studentIds = [...new Set(paymentsWithStudent.map(p => p.student_id))];
+          const studentIds = [...new Set(paymentsWithStudent.map(p => p.linked_student_id || p.student_id))];
           const forClassDates = [...new Set(paymentsWithStudent.map(p => p.for_class))];
+          
+          debugLog(`🔍 [${contextLabel}] Checking ${paymentsWithStudent.length} payments for duplicate (student_id, for_class) pairs`);
+          debugLog(`📊 [${contextLabel}] Student IDs: ${studentIds.join(', ')}`);
+          debugLog(`📅 [${contextLabel}] for_class dates: ${forClassDates.join(', ')}`);
           
           // Query for all existing payments with these student_ids and dates
           const { data: existingPayments } = await supabaseClient
@@ -8089,6 +8094,8 @@ ORDER BY timestamp DESC;</pre>
             .not('for_class', 'is', null);
           
           if (existingPayments && existingPayments.length > 0) {
+            debugLog(`📋 [${contextLabel}] Found ${existingPayments.length} existing (student_id, for_class) pairs in database`);
+            
             // Create a Set of existing (student_id, for_class) combinations
             const existingPairs = new Set(
               existingPayments.map(p => `${p.student_id}|${p.for_class}`)
@@ -8097,17 +8104,24 @@ ORDER BY timestamp DESC;</pre>
             // Filter out payments that would violate the unique constraint
             const beforeFilterCount = paymentsToInsert.length;
             const filteredPayments = paymentsToInsert.filter(p => {
-              if (!p.student_id || !p.for_class) return true; // Keep payments without both fields
-              const pairKey = `${p.student_id}|${p.for_class}`;
-              return !existingPairs.has(pairKey); // Only keep if pair doesn't exist
+              const studentId = p.linked_student_id || p.student_id;
+              if (!studentId || !p.for_class) return true; // Keep payments without both fields
+              const pairKey = `${studentId}|${p.for_class}`;
+              const isDuplicate = existingPairs.has(pairKey);
+              if (isDuplicate) {
+                debugLog(`🚫 [${contextLabel}] Filtering duplicate: student_id=${studentId}, for_class=${p.for_class}`);
+              }
+              return !isDuplicate; // Only keep if pair doesn't exist
             });
             
             const duplicateCount = beforeFilterCount - filteredPayments.length;
             if (duplicateCount > 0) {
-              console.log(`⚠️ [${contextLabel}] Filtered out ${duplicateCount} duplicate (student_id, for_class) pairs`);
+              console.log(`⚠️ [${contextLabel}] Filtered out ${duplicateCount} duplicate (student_id, for_class) pairs BEFORE insert`);
               paymentsToInsert.length = 0;
               paymentsToInsert.push(...filteredPayments);
             }
+          } else {
+            debugLog(`✅ [${contextLabel}] No existing (student_id, for_class) pairs found - safe to insert`);
           }
         }
 
