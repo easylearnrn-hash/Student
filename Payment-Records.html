@@ -4352,7 +4352,7 @@
         <button id="loadOlderPaymentsBtn" class="load-older-btn" type="button">
           <span class="load-older-icon">📅</span>
           <span class="load-older-text">Showing last 1 week</span>
-          <span class="load-older-action">Load 30 more days</span>
+          <span class="load-older-action">Load ALL Payments</span>
         </button>
       </div>
 
@@ -7176,21 +7176,18 @@ ORDER BY timestamp DESC;</pre>
         }
 
         async function loadOlderPayments() {
-          // ⚡ Load 30 more days of older payments
-          const previousDays = state.daysLoaded;
-          const newDays = previousDays + 30;
-          
-          debugLog(`📅 Loading older payments (extending from ${previousDays} to ${newDays} days)...`);
+          // ⚡ Load ALL payments (no date restriction)
+          debugLog(`📅 Loading ALL payments...`);
           
           try {
             showLoading(true);
             
-            // Fetch payments with extended date range
-            const olderPayments = await fetchPayments(true, newDays);
+            // Fetch ALL payments by using a very large number of days (10 years)
+            const allPayments = await fetchPayments(true, 3650);
             
             // Update state
-            state.daysLoaded = newDays;
-            state.payments = preparePayments(olderPayments);
+            state.daysLoaded = 3650; // Mark as "all loaded"
+            state.payments = preparePayments(allPayments);
             rebuildIndexes(state.payments);
             
             // Reapply filters and render
@@ -7198,15 +7195,17 @@ ORDER BY timestamp DESC;</pre>
             renderInitialWindow();
             updateMonthTotals();
             
-            // Update button state
-            updateLoadOlderButton();
+            // Hide the button after loading all
+            if (dom.loadOlderBtn) {
+              dom.loadOlderBtn.style.display = 'none';
+            }
             
-            showNotification(`✅ Loaded ${olderPayments.length} payments from last ${newDays} days`, 'success');
+            showNotification(`✅ Loaded all ${allPayments.length} payments`, 'success');
             
-            return { success: true, totalDays: newDays, paymentsCount: olderPayments.length };
+            return { success: true, paymentsCount: allPayments.length };
           } catch (error) {
-            console.error('❌ Error loading older payments:', error);
-            showNotification('❌ Failed to load older payments', 'error');
+            console.error('❌ Error loading all payments:', error);
+            showNotification('❌ Failed to load all payments', 'error');
             return { success: false, error };
           } finally {
             showLoading(false);
@@ -7216,15 +7215,10 @@ ORDER BY timestamp DESC;</pre>
         function updateLoadOlderButton() {
           if (!dom.loadOlderBtn) return;
           
-          const daysText = state.daysLoaded === 7 ? '1 week' : 
-                          state.daysLoaded === 30 ? '1 month' :
-                          state.daysLoaded === 60 ? '2 months' :
-                          state.daysLoaded === 90 ? '3 months' :
-                          `${state.daysLoaded} days`;
-          
+          // Always show "last 1 week" on initial load
           const btnText = dom.loadOlderBtn.querySelector('.load-older-text');
           if (btnText) {
-            btnText.textContent = `Showing last ${daysText}`;
+            btnText.textContent = `Showing last 1 week`;
           }
         }
 
@@ -10456,7 +10450,7 @@ ORDER BY timestamp DESC;</pre>
             loadOlderBtn.dataset.loading = 'true';
             
             const actionSpan = loadOlderBtn.querySelector('.load-older-action');
-            const originalText = actionSpan ? actionSpan.textContent : 'Load 30 more days';
+            const originalText = actionSpan ? actionSpan.textContent : 'Load ALL Payments';
             if (actionSpan) {
               actionSpan.textContent = 'Loading...';
             }
