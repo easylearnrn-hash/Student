@@ -1501,10 +1501,12 @@
       
       // Performance: Pre-parsed student aliases
       let studentAliasesCache = new Map(); // Key: studentId, Value: aliases array
+      let nameToStudentIds = new Map(); // Key: normalized name/alias, Value: Set(studentIds) for payment index
       
       // Performance: Indexed data structures
       let absencesByDateStudent = new Map(); // Key: "date-studentId", Value: true
       let skippedClassesByDateGroup = new Map(); // Key: "date-groupName", Value: true
+      let studentsByGroup = new Map(); // Key: groupName, Value: students[] (precomputed filter)
       
       // ⚡ PERFORMANCE: Payment index for O(1) lookups instead of O(n) scans
       // Structure: paymentIndex[date] = Set(studentIds)
@@ -1525,8 +1527,10 @@
         // Clear and rebuild ALL caches - used on data refresh
         paymentCache.clear();
         studentAliasesCache.clear();
+        nameToStudentIds.clear();
         absencesByDateStudent.clear();
         skippedClassesByDateGroup.clear();
+        studentsByGroup.clear();
         paymentIndex.clear();
         buildIndexes();
       }
@@ -1554,6 +1558,44 @@
           }
           
           studentAliasesCache.set(student.id, aliases);
+        });
+        
+        // ⚡ PERFORMANCE: Build name → studentIds lookup for O(1) payment matching
+        // Converts O(payments × students) to O(1) during payment index build
+        nameToStudentIds.clear();
+        studentsData.forEach(student => {
+          // Add student name
+          const normalizedName = (student.name || '').toLowerCase().trim();
+          if (normalizedName) {
+            if (!nameToStudentIds.has(normalizedName)) {
+              nameToStudentIds.set(normalizedName, new Set());
+            }
+            nameToStudentIds.get(normalizedName).add(String(student.id));
+          }
+          
+          // Add all aliases
+          const aliases = getStudentAliases(student.id);
+          aliases.forEach(alias => {
+            const normalizedAlias = (alias || '').toLowerCase().trim();
+            if (normalizedAlias) {
+              if (!nameToStudentIds.has(normalizedAlias)) {
+                nameToStudentIds.set(normalizedAlias, new Set());
+              }
+              nameToStudentIds.get(normalizedAlias).add(String(student.id));
+            }
+          });
+        });
+        
+        // ⚡ PERFORMANCE: Precompute students by group (avoid repeated filters)
+        studentsByGroup.clear();
+        studentsData.forEach(student => {
+          const groupName = student.group_name;
+          if (!groupName) return;
+          
+          if (!studentsByGroup.has(groupName)) {
+            studentsByGroup.set(groupName, []);
+          }
+          studentsByGroup.get(groupName).push(student);
         });
         
         // Index absences for O(1) lookup
@@ -1595,18 +1637,30 @@
               studentIds.add(String(paymentStudentId));
             }
             
-            // Also map by payer name to student IDs (for alias matching)
-            if (p.payer_name) {
-              studentsData.forEach(student => {
-                const aliases = getStudentAliases(student.id);
-                if (aliases.some(alias => namesMatch(p.payer_name, alias)) ||
-                    namesMatch(p.payer_name, student.name) ||
-                    namesMatch(p.resolved_student_name, student.name) ||
-                    namesMatch(p.student_name, student.name)) {
-                  studentIds.add(String(student.id));
-                }
-              });
-            }
+            // ⚡ OPTIMIZED: Use name lookup instead of scanning all students
+            // Match by payer_name, resolved_student_name, student_name
+            const namesToCheck = [
+              p.payer_name,
+              p.resolved_student_name,
+              p.student_name,
+              p.student_full_name,
+              p.studentname,
+              p.studentNameFromMessage,
+              p.studentNameHint,
+              p.student_name_hint,
+              p.studentName,
+              p.student_display_name,
+              p.student_name_display,
+              p.student
+            ].filter(Boolean);
+            
+            namesToCheck.forEach(name => {
+              const normalizedName = (name || '').toLowerCase().trim();
+              if (normalizedName && nameToStudentIds.has(normalizedName)) {
+                const matchedIds = nameToStudentIds.get(normalizedName);
+                matchedIds.forEach(id => studentIds.add(id));
+              }
+            });
           });
         });
         
@@ -1626,12 +1680,18 @@
               studentIds.add(String(pr.student_id));
             }
             
-            // Also match by name
-            studentsData.forEach(student => {
-              if (namesMatch(pr.student_name, student.name) ||
-                  namesMatch(pr.student_full_name, student.name) ||
-                  namesMatch(pr.student, student.name)) {
-                studentIds.add(String(student.id));
+            // ⚡ OPTIMIZED: Use name lookup instead of scanning all students
+            const namesToCheck = [
+              pr.student_name,
+              pr.student_full_name,
+              pr.student
+            ].filter(Boolean);
+            
+            namesToCheck.forEach(name => {
+              const normalizedName = (name || '').toLowerCase().trim();
+              if (normalizedName && nameToStudentIds.has(normalizedName)) {
+                const matchedIds = nameToStudentIds.get(normalizedName);
+                matchedIds.forEach(id => studentIds.add(id));
               }
             });
           });
@@ -2226,10 +2286,9 @@
             // Check if class is skipped/canceled using cached lookup
             const isSkipped = isClassSkippedCached(dateStr, group.group_name);
             
-            // Get active students in this group
-            const groupStudents = studentsData.filter(s => 
-              s.group_name === group.group_name && s.show_in_grid !== false
-            );
+            // ⚡ OPTIMIZED: Use precomputed studentsByGroup instead of filtering every time
+            const groupStudents = (studentsByGroup.get(group.group_name) || [])
+              .filter(s => s.show_in_grid !== false);
 
             // Add a dot for each active student in the scheduled class
             groupStudents.forEach(student => {
@@ -3083,7 +3142,6 @@
 
         document.getElementById('refreshBtn').addEventListener('click', async () => {
           const btn = document.getElementById('refreshBtn');
-          const icon = btn.querySelector('.refresh-icon');
           
           // Reset animation by removing and re-adding class
           btn.classList.remove('loading');
@@ -3093,8 +3151,10 @@
           // Clear all caches and indexes before data refresh (will be rebuilt in loadAllData)
           paymentCache.clear();
           studentAliasesCache.clear();
+          nameToStudentIds.clear();
           absencesByDateStudent.clear();
           skippedClassesByDateGroup.clear();
+          studentsByGroup.clear();
           paymentIndex.clear();
           
           await loadAllData();
@@ -3744,8 +3804,9 @@
 
       async function cancelClass(groupName, dateStr) {
         try {
-          // Get students in this group
-          const groupStudents = studentsData.filter(s => s.group_name === groupName && s.show_in_grid !== false);
+          // ⚡ OPTIMIZED: Use precomputed studentsByGroup
+          const groupStudents = (studentsByGroup.get(groupName) || [])
+            .filter(s => s.show_in_grid !== false);
           
           // Show confirmation dialog
           const confirmed = await showConfirmDialog(
