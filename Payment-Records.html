@@ -5780,36 +5780,58 @@ ORDER BY timestamp DESC;</pre>
           const ignoredIds = new Set((ignoredPayments || []).map(p => p.payment_id));
           debugLog(`📛 Found ${ignoredIds.size} ignored payments`);
           
-          const payments = [];
-          let rangeStart = 0;
-          const maxLimit = loadAll ? 999999 : config.maxRecords; // No limit when loading all
+          let payments = [];
           
-          while (payments.length < maxLimit) {
-            const rangeEnd = rangeStart + config.pageSize - 1;
-            // ⚡ Optimized query: Date-filtered for faster initial loads
+          if (loadAll) {
+            // ⚡ Load ALL payments in a single query (no batching, no limits)
+            debugLog('🚀 Fetching ALL payments in single query...');
             const { data, error } = await supabaseClient
               .from('payments')
               .select('*')
-              .gte('email_date', cutoffISO) // Only fetch payments from last X days
+              .gte('email_date', cutoffISO)
               .order('email_date', { ascending: false, nullsLast: false })
-              .order('created_at', { ascending: false, nullsLast: false })
-              .range(rangeStart, rangeEnd);
+              .order('created_at', { ascending: false, nullsLast: false });
 
             if (error) {
-              console.error('❌ Error fetching payments:', error);
-              alert(`❌ Failed to fetch payments: ${error.message}`); // ALERT USER
+              console.error('❌ Error fetching all payments:', error);
+              alert(`❌ Failed to fetch all payments: ${error.message}`);
               throw error;
             }
             
-            if (!data || data.length === 0) {
-              break;
-            }
-
             // Filter out ignored payments
-            const filtered = data.filter(p => !ignoredIds.has(p.id));
-            payments.push(...filtered);
-            if (data.length < config.pageSize) break;
-            rangeStart += config.pageSize;
+            payments = (data || []).filter(p => !ignoredIds.has(p.id));
+            
+          } else {
+            // ⚡ Batched loading for initial 7-day load (performance)
+            let rangeStart = 0;
+            const maxLimit = config.maxRecords; // 300 limit for initial load
+            
+            while (payments.length < maxLimit) {
+              const rangeEnd = rangeStart + config.pageSize - 1;
+              const { data, error } = await supabaseClient
+                .from('payments')
+                .select('*')
+                .gte('email_date', cutoffISO)
+                .order('email_date', { ascending: false, nullsLast: false })
+                .order('created_at', { ascending: false, nullsLast: false })
+                .range(rangeStart, rangeEnd);
+
+              if (error) {
+                console.error('❌ Error fetching payments:', error);
+                alert(`❌ Failed to fetch payments: ${error.message}`);
+                throw error;
+              }
+              
+              if (!data || data.length === 0) {
+                break;
+              }
+
+              // Filter out ignored payments
+              const filtered = data.filter(p => !ignoredIds.has(p.id));
+              payments.push(...filtered);
+              if (data.length < config.pageSize) break;
+              rangeStart += config.pageSize;
+            }
           }
           
           debugLog(`✅ Fetched ${payments.length} payments from last ${days} days (${ignoredIds.size} ignored)`);
