@@ -5756,7 +5756,7 @@ ORDER BY timestamp DESC;</pre>
           return [];
         }
 
-        async function fetchPayments(force = false, daysToLoad = null) {
+        async function fetchPayments(force = false, daysToLoad = null, loadAll = false) {
           // ⚡ Use cache if available and fresh (5 minutes TTL for lightning speed)
           if (!force && state.paymentsCache && Date.now() - state.paymentsCache.ts < config.cacheTTL) {
             debugLog('⚡ Using cached payments (age: ' + Math.round((Date.now() - state.paymentsCache.ts) / 1000) + 's) 🚀');
@@ -5782,7 +5782,9 @@ ORDER BY timestamp DESC;</pre>
           
           const payments = [];
           let rangeStart = 0;
-          while (payments.length < config.maxRecords) {
+          const maxLimit = loadAll ? 999999 : config.maxRecords; // No limit when loading all
+          
+          while (payments.length < maxLimit) {
             const rangeEnd = rangeStart + config.pageSize - 1;
             // ⚡ Optimized query: Date-filtered for faster initial loads
             const { data, error } = await supabaseClient
@@ -7182,8 +7184,8 @@ ORDER BY timestamp DESC;</pre>
           try {
             showLoading(true);
             
-            // Fetch ALL payments by using a very large number of days (10 years)
-            const allPayments = await fetchPayments(true, 3650);
+            // Fetch ALL payments by using a very large number of days (10 years) AND loadAll flag
+            const allPayments = await fetchPayments(true, 3650, true);
             
             // Update state
             state.daysLoaded = 3650; // Mark as "all loaded"
