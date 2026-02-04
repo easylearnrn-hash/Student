@@ -55,9 +55,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     
-  <!-- jsPDF for PDF Export - DEFERRED: Only needed when user clicks Export PDF button -->
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <!-- jsPDF: Loaded dynamically when Export PDF is clicked (true lazy loading) -->
 
     <style>
       /* 🔒 SECURITY & BASE LAYOUT: Combined body styles */
@@ -12239,6 +12237,34 @@ ORDER BY timestamp DESC;</pre>
       // ============================================================
       // PDF EXPORT FUNCTIONALITY
       // ============================================================
+      async function loadJsPDFIfNeeded() {
+        // Check if jsPDF is already loaded
+        if (window.jspdf && window.jspdf.jsPDF) {
+          return true;
+        }
+
+        // Lazy load jsPDF scripts
+        try {
+          await new Promise((resolve, reject) => {
+            const script1 = document.createElement('script');
+            script1.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+            script1.onload = () => {
+              const script2 = document.createElement('script');
+              script2.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+              script2.onload = resolve;
+              script2.onerror = reject;
+              document.head.appendChild(script2);
+            };
+            script1.onerror = reject;
+            document.head.appendChild(script1);
+          });
+          return true;
+        } catch (error) {
+          console.error('❌ Failed to load jsPDF:', error);
+          return false;
+        }
+      }
+
       async function exportToPDF() {
         const exportBtn = document.getElementById('exportPdfBtn');
         if (!exportBtn) return;
@@ -12247,6 +12273,13 @@ ORDER BY timestamp DESC;</pre>
           // Add loading state
           exportBtn.classList.add('exporting');
           exportBtn.disabled = true;
+
+          // Lazy load jsPDF if not already loaded
+          const loaded = await loadJsPDFIfNeeded();
+          if (!loaded) {
+            alert('Failed to load PDF export library. Please try again.');
+            return;
+          }
 
           // Get the filtered records from PaymentRecordsEngine
           const searchTerm = PaymentRecordsEngine.state.filters.search.trim();
