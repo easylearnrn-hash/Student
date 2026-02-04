@@ -733,6 +733,72 @@
         font-weight: 600;
       }
 
+      /* ⚡ Load Older Payments Button */
+      .load-older-wrapper {
+        text-align: center;
+        margin: 24px 0 32px;
+      }
+
+      .load-older-btn {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        padding: 16px 40px;
+        border-radius: 16px;
+        border: 2px solid rgba(251, 146, 60, 0.4);
+        background: linear-gradient(135deg, rgba(251, 146, 60, 0.15), rgba(234, 88, 12, 0.15));
+        color: rgba(255, 255, 255, 0.95);
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 8px 24px rgba(251, 146, 60, 0.2);
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .load-older-btn::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+        transition: left 0.5s ease;
+      }
+
+      .load-older-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 32px rgba(251, 146, 60, 0.35);
+        border-color: rgba(251, 146, 60, 0.6);
+      }
+
+      .load-older-btn:hover::before {
+        left: 100%;
+      }
+
+      .load-older-btn:active {
+        transform: translateY(0);
+      }
+
+      .load-older-icon {
+        font-size: 24px;
+      }
+
+      .load-older-text {
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.7);
+        font-weight: 500;
+      }
+
+      .load-older-action {
+        font-size: 15px;
+        color: rgb(251, 146, 60);
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
       .payment-groups-wrapper {
         display: flex;
         flex-direction: column;
@@ -4281,6 +4347,15 @@
         <div class="grid-pagination-hint" id="gridLoadMoreHint">Showing latest payments</div>
       </div>
 
+      <!-- ⚡ Load Older Payments Button -->
+      <div class="load-older-wrapper" style="text-align: center; margin: 20px 0;">
+        <button id="loadOlderPaymentsBtn" class="load-older-btn" type="button">
+          <span class="load-older-icon">📅</span>
+          <span class="load-older-text">Showing last 1 week</span>
+          <span class="load-older-action">Load 30 more days</span>
+        </button>
+      </div>
+
       <!-- EMPTY STATE (hidden by default) -->
       <div class="empty-state" id="emptyState" style="display: none">
         <div class="empty-state-icon">🔍</div>
@@ -5235,7 +5310,8 @@ ORDER BY timestamp DESC;</pre>
           searchInput: null,
           loadMoreWrapper: null,
           loadMoreBtn: null,
-          loadMoreHint: null
+          loadMoreHint: null,
+          loadOlderBtn: null // ⚡ New: Button to load older payments
         };
 
         const formatCache = {
@@ -5264,6 +5340,7 @@ ORDER BY timestamp DESC;</pre>
           studentNameMap: new Map(),
           creditPaymentsByStudent: new Map(),
           usdToAmdRate: Number(localStorage.getItem('paymentRecords:usdToAmdRate')) || config.defaultUsdToAmd,
+          daysLoaded: 7, // ⚡ Track how many days of payments loaded (start with 7)
           filters: {
             search: '',
             methods: new Set(),
@@ -5314,6 +5391,7 @@ ORDER BY timestamp DESC;</pre>
           dom.loadMoreWrapper = document.getElementById('gridLoadMoreWrapper');
           dom.loadMoreBtn = document.getElementById('gridLoadMoreBtn');
           dom.loadMoreHint = document.getElementById('gridLoadMoreHint');
+          dom.loadOlderBtn = document.getElementById('loadOlderPaymentsBtn');
         }
 
         function ensureTemplates() {
@@ -5678,15 +5756,22 @@ ORDER BY timestamp DESC;</pre>
           return [];
         }
 
-        async function fetchPayments(force = false) {
+        async function fetchPayments(force = false, daysToLoad = null) {
           // ⚡ Use cache if available and fresh (5 minutes TTL for lightning speed)
           if (!force && state.paymentsCache && Date.now() - state.paymentsCache.ts < config.cacheTTL) {
             debugLog('⚡ Using cached payments (age: ' + Math.round((Date.now() - state.paymentsCache.ts) / 1000) + 's) 🚀');
             return state.paymentsCache.data;
           }
 
-          debugLog('🔄 Fetching fresh payments from Supabase...');
-          // console.log('🔍 Starting payment fetch...'); 
+          // Use provided daysToLoad or state.daysLoaded
+          const days = daysToLoad !== null ? daysToLoad : state.daysLoaded;
+          
+          // Calculate cutoff date (days ago from now)
+          const cutoffDate = new Date();
+          cutoffDate.setDate(cutoffDate.getDate() - days);
+          const cutoffISO = cutoffDate.toISOString();
+
+          debugLog(`� Fetching payments from last ${days} days (since ${cutoffDate.toLocaleDateString()})...`);
           
           // First, get list of ignored payment IDs
           const { data: ignoredPayments } = await supabaseClient
@@ -5699,11 +5784,11 @@ ORDER BY timestamp DESC;</pre>
           let rangeStart = 0;
           while (payments.length < config.maxRecords) {
             const rangeEnd = rangeStart + config.pageSize - 1;
-            // console.log(`📥 Fetching range ${rangeStart}-${rangeEnd}...`);
-            // ⚡ Optimized query: Uses indexed columns for fastest possible retrieval
+            // ⚡ Optimized query: Date-filtered for faster initial loads
             const { data, error } = await supabaseClient
               .from('payments')
               .select('*')
+              .gte('email_date', cutoffISO) // Only fetch payments from last X days
               .order('email_date', { ascending: false, nullsLast: false })
               .order('created_at', { ascending: false, nullsLast: false })
               .range(rangeStart, rangeEnd);
@@ -5715,11 +5800,9 @@ ORDER BY timestamp DESC;</pre>
             }
             
             if (!data || data.length === 0) {
-              // console.log('✅ No more data to fetch');
               break;
             }
 
-            // console.log(`✅ Received ${data.length} payments in this batch`);
             // Filter out ignored payments
             const filtered = data.filter(p => !ignoredIds.has(p.id));
             payments.push(...filtered);
@@ -5727,8 +5810,7 @@ ORDER BY timestamp DESC;</pre>
             rangeStart += config.pageSize;
           }
           
-          // console.log(`✅ TOTAL: Fetched ${payments.length} payments from Supabase`);
-          debugLog(`✅ Fetched ${payments.length} payments (${ignoredIds.size} ignored) from Supabase`);
+          debugLog(`✅ Fetched ${payments.length} payments from last ${days} days (${ignoredIds.size} ignored)`);
           
           // Cache the results
           state.paymentsCache = { ts: Date.now(), data: payments };
@@ -7093,6 +7175,59 @@ ORDER BY timestamp DESC;</pre>
           return count;
         }
 
+        async function loadOlderPayments() {
+          // ⚡ Load 30 more days of older payments
+          const previousDays = state.daysLoaded;
+          const newDays = previousDays + 30;
+          
+          debugLog(`📅 Loading older payments (extending from ${previousDays} to ${newDays} days)...`);
+          
+          try {
+            showLoading(true);
+            
+            // Fetch payments with extended date range
+            const olderPayments = await fetchPayments(true, newDays);
+            
+            // Update state
+            state.daysLoaded = newDays;
+            state.payments = preparePayments(olderPayments);
+            rebuildIndexes(state.payments);
+            
+            // Reapply filters and render
+            applyFilters();
+            renderInitialWindow();
+            updateMonthTotals();
+            
+            // Update button state
+            updateLoadOlderButton();
+            
+            showNotification(`✅ Loaded ${olderPayments.length} payments from last ${newDays} days`, 'success');
+            
+            return { success: true, totalDays: newDays, paymentsCount: olderPayments.length };
+          } catch (error) {
+            console.error('❌ Error loading older payments:', error);
+            showNotification('❌ Failed to load older payments', 'error');
+            return { success: false, error };
+          } finally {
+            showLoading(false);
+          }
+        }
+
+        function updateLoadOlderButton() {
+          if (!dom.loadOlderBtn) return;
+          
+          const daysText = state.daysLoaded === 7 ? '1 week' : 
+                          state.daysLoaded === 30 ? '1 month' :
+                          state.daysLoaded === 60 ? '2 months' :
+                          state.daysLoaded === 90 ? '3 months' :
+                          `${state.daysLoaded} days`;
+          
+          const btnText = dom.loadOlderBtn.querySelector('.load-older-text');
+          if (btnText) {
+            btnText.textContent = `Showing last ${daysText}`;
+          }
+        }
+
         return {
           init,
           load,
@@ -7105,6 +7240,8 @@ ORDER BY timestamp DESC;</pre>
           updateMonthTotals,
           handleMonthSelectorChange,
           loadMoreRecords,
+          loadOlderPayments,
+          updateLoadOlderButton,
           recalculateForClassDates,
           state
         };
@@ -7970,6 +8107,8 @@ ORDER BY timestamp DESC;</pre>
       async function loadData(force = false, options = {}) {
   debugLog('📊 Loading payments via PaymentRecordsEngine...');
         await PaymentRecordsEngine.init(force, options);
+        // Update the load older button text on initial load
+        PaymentRecordsEngine.updateLoadOlderButton();
       }
 
       // ============================================================
@@ -10302,6 +10441,35 @@ ORDER BY timestamp DESC;</pre>
             }
           });
         });
+
+        // ⚡ Load Older Payments button
+        const loadOlderBtn = document.getElementById('loadOlderPaymentsBtn');
+        if (loadOlderBtn && loadOlderBtn.dataset.bound !== 'true') {
+          loadOlderBtn.dataset.bound = 'true';
+          
+          loadOlderBtn.addEventListener('click', async () => {
+            if (loadOlderBtn.disabled || loadOlderBtn.dataset.loading === 'true') {
+              return;
+            }
+
+            loadOlderBtn.disabled = true;
+            loadOlderBtn.dataset.loading = 'true';
+            
+            const actionSpan = loadOlderBtn.querySelector('.load-older-action');
+            const originalText = actionSpan ? actionSpan.textContent : 'Load 30 more days';
+            if (actionSpan) {
+              actionSpan.textContent = 'Loading...';
+            }
+
+            await PaymentRecordsEngine.loadOlderPayments();
+
+            loadOlderBtn.disabled = false;
+            loadOlderBtn.dataset.loading = 'false';
+            if (actionSpan) {
+              actionSpan.textContent = originalText;
+            }
+          });
+        }
       }
 
       // ============================================================
