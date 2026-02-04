@@ -1505,6 +1505,10 @@
       // Performance: Indexed data structures
       let absencesByDateStudent = new Map(); // Key: "date-studentId", Value: true
       let skippedClassesByDateGroup = new Map(); // Key: "date-groupName", Value: true
+      
+      // ⚡ PERFORMANCE: Payment index for O(1) lookups instead of O(n) scans
+      // Structure: paymentIndex[date] = Set(studentIds)
+      let paymentIndex = new Map(); // Key: "date", Value: Set of student IDs who paid
 
       function clearAllCaches() {
         // Only clear payment cache on navigation
@@ -1522,27 +1526,12 @@
         studentAliasesCache.clear();
         absencesByDateStudent.clear();
         skippedClassesByDateGroup.clear();
+        paymentIndex.clear();
         buildIndexes();
       }
       
       function buildIndexes() {
-        // Index absences for O(1) lookup
-        absencesByDateStudent.clear();
-        absencesData.forEach(a => {
-          const date = (a.class_date || '').split('T')[0];
-          const key = `${date}-${a.student_id}`;
-          absencesByDateStudent.set(key, true);
-        });
-        
-        // Index skipped classes for O(1) lookup
-        skippedClassesByDateGroup.clear();
-        skippedClassesData.forEach(s => {
-          const date = (s.class_date || '').split('T')[0];
-          const key = `${date}-${s.group_name}`;
-          skippedClassesByDateGroup.set(key, true);
-        });
-        
-        // Pre-parse all student aliases
+        // Pre-parse all student aliases FIRST (needed by payment index)
         studentAliasesCache.clear();
         studentsData.forEach(student => {
           let aliases = [];
@@ -1564,6 +1553,87 @@
           }
           
           studentAliasesCache.set(student.id, aliases);
+        });
+        
+        // Index absences for O(1) lookup
+        absencesByDateStudent.clear();
+        absencesData.forEach(a => {
+          const date = (a.class_date || '').split('T')[0];
+          const key = `${date}-${a.student_id}`;
+          absencesByDateStudent.set(key, true);
+        });
+        
+        // Index skipped classes for O(1) lookup
+        skippedClassesByDateGroup.clear();
+        skippedClassesData.forEach(s => {
+          const date = (s.class_date || '').split('T')[0];
+          const key = `${date}-${s.group_name}`;
+          skippedClassesByDateGroup.set(key, true);
+        });
+        
+        // ⚡ PERFORMANCE: Build payment index for O(1) lookups
+        paymentIndex.clear();
+        
+        // Index payments table
+        paymentsData.forEach(p => {
+          const forClassDates = extractForClassDates(p, p.date);
+          forClassDates.forEach(dateStr => {
+            const normalizedDate = normalizeDateString(dateStr);
+            
+            if (!paymentIndex.has(normalizedDate)) {
+              paymentIndex.set(normalizedDate, new Set());
+            }
+            
+            const studentIds = paymentIndex.get(normalizedDate);
+            
+            // Add all possible student IDs from this payment
+            const paymentStudentId = p.student_id || p.linked_student_id || p.derived_student_id || 
+                                    p.resolved_student_id || p.studentid || null;
+            
+            if (paymentStudentId) {
+              studentIds.add(String(paymentStudentId));
+            }
+            
+            // Also map by payer name to student IDs (for alias matching)
+            if (p.payer_name) {
+              studentsData.forEach(student => {
+                const aliases = getStudentAliases(student.id);
+                if (aliases.some(alias => namesMatch(p.payer_name, alias)) ||
+                    namesMatch(p.payer_name, student.name) ||
+                    namesMatch(p.resolved_student_name, student.name) ||
+                    namesMatch(p.student_name, student.name)) {
+                  studentIds.add(String(student.id));
+                }
+              });
+            }
+          });
+        });
+        
+        // Index payment_records table
+        paymentRecordsData.forEach(pr => {
+          const forClassDates = extractForClassDates(pr, pr.date);
+          forClassDates.forEach(dateStr => {
+            const normalizedDate = normalizeDateString(dateStr);
+            
+            if (!paymentIndex.has(normalizedDate)) {
+              paymentIndex.set(normalizedDate, new Set());
+            }
+            
+            const studentIds = paymentIndex.get(normalizedDate);
+            
+            if (pr.student_id) {
+              studentIds.add(String(pr.student_id));
+            }
+            
+            // Also match by name
+            studentsData.forEach(student => {
+              if (namesMatch(pr.student_name, student.name) ||
+                  namesMatch(pr.student_full_name, student.name) ||
+                  namesMatch(pr.student, student.name)) {
+                studentIds.add(String(student.id));
+              }
+            });
+          });
         });
       }
       
@@ -1590,54 +1660,9 @@
 
         const normalizedDateStr = normalizeDateString(dateStr);
         
-        // Get pre-parsed aliases from cache
-        const aliases = getStudentAliases(studentId);
-        
-        // Check payments
-        const hasPayment = paymentsData.some(p => {
-          const forClassDates = extractForClassDates(p, p.date);
-          const hasMatchingDate = forClassDates.some(classDate => classDate === normalizedDateStr);
-          
-          if (!hasMatchingDate) return false; // Early exit if date doesn't match
-          
-          const paymentStudentId = p.student_id || p.linked_student_id || p.derived_student_id || 
-                                  p.resolved_student_id || p.studentid || null;
-          
-          // Check student ID first (fastest)
-          if (paymentStudentId && String(paymentStudentId) === String(studentId)) {
-            return true;
-          }
-          
-          // Check aliases
-          if (aliases.length > 0) {
-            if (aliases.some(alias => namesMatch(p.payer_name, alias))) {
-              return true;
-            }
-          }
-          
-          // Check name fields
-          return namesMatch(p.resolved_student_name, student.name) ||
-            namesMatch(p.student_name, student.name) ||
-            namesMatch(p.student_full_name, student.name) ||
-            namesMatch(p.studentname, student.name) ||
-            namesMatch(p.studentNameFromMessage, student.name) ||
-            namesMatch(p.studentNameHint, student.name) ||
-            namesMatch(p.student_name_hint, student.name) ||
-            namesMatch(p.studentName, student.name) ||
-            namesMatch(p.student_display_name, student.name) ||
-            namesMatch(p.student_name_display, student.name) ||
-            namesMatch(p.student, student.name);
-        }) || paymentRecordsData.some(pr => {
-          const forClassDates = extractForClassDates(pr, pr.date);
-          const hasMatchingDate = forClassDates.some(classDate => classDate === normalizedDateStr);
-          
-          if (!hasMatchingDate) return false; // Early exit
-          
-          return String(pr.student_id) === String(studentId) ||
-                namesMatch(pr.student_name, student.name) ||
-                namesMatch(pr.student_full_name, student.name) ||
-                namesMatch(pr.student, student.name);
-        });
+        // ⚡ OPTIMIZED: Use payment index for O(1) lookup instead of O(n) scan
+        const hasPayment = paymentIndex.has(normalizedDateStr) && 
+                          paymentIndex.get(normalizedDateStr).has(String(studentId));
         
         paymentCache.set(cacheKey, hasPayment);
         return hasPayment;
@@ -3012,14 +3037,27 @@
         }
       });
 
-      // Student search handler
+      // Student search handler with debounce
+      let searchDebounceTimer = null;
+      
       function handleStudentSearch() {
-        searchQuery = document.getElementById('studentSearchInput').value.toLowerCase();
-        renderCalendar();
+        const input = document.getElementById('studentSearchInput');
+        const newQuery = input.value.toLowerCase();
+        
+        // Clear existing timer
+        if (searchDebounceTimer) {
+          clearTimeout(searchDebounceTimer);
+        }
+        
+        // ⚡ PERFORMANCE: Debounce search to prevent re-render on every keystroke
+        searchDebounceTimer = setTimeout(() => {
+          searchQuery = newQuery;
+          renderCalendar();
+        }, 250); // Wait 250ms after user stops typing
       }
 
       // ============================================================
-      // �🎬 EVENT LISTENERS
+      // 🎬 EVENT LISTENERS
       // ============================================================
 
       function attachEventListeners() {
