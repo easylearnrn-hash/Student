@@ -1047,6 +1047,12 @@
         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
       }
 
+      /* 🎨 Default (unchanged) date styling - grayish color */
+      input.for-class-date-input.is-default {
+        color: rgba(156, 163, 175, 0.8) !important; /* Gray-400 */
+        font-style: italic;
+      }
+
       .for-class-date-input.is-dirty {
         border-color: rgba(74, 222, 128, 0.6);
         box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.12);
@@ -6239,7 +6245,8 @@ ORDER BY timestamp DESC;</pre>
           
           // Ensure array length matches calculated class count (preserve existing, pad with empty strings)
           while (existingDates.length < classCount) {
-            existingDates.push('');
+            // 🎯 DEFAULT: Use payment date for new/empty for_class dates
+            existingDates.push(record.dateKey || '');
           }
           if (existingDates.length > classCount) {
             existingDates = existingDates.slice(0, classCount);
@@ -6253,12 +6260,22 @@ ORDER BY timestamp DESC;</pre>
             const input = document.createElement('input');
             input.type = 'text'; // Changed from 'date' to 'text' for Flatpickr
             input.className = 'for-class-date-input';
-            input.value = dateValue || '';
-            input.placeholder = 'Select date...';
+            const normalizedPaymentDate = (record.dateKey || '').split('T')[0];
+            const normalizedDateValue = (dateValue || '').split('T')[0];
+            const displayValue = normalizedDateValue || normalizedPaymentDate;
+            input.value = displayValue;
+            input.placeholder = normalizedPaymentDate || 'Select date...'; // 🎯 Show payment date as placeholder
             input.dataset.paymentId = record.paymentId || '';
             input.dataset.dateIndex = index;
-            input.dataset.originalValue = input.value;
+            input.dataset.originalValue = displayValue;
+            input.dataset.paymentDate = normalizedPaymentDate; // Store normalized payment date for comparison
             input.readOnly = true; // Prevent keyboard input, only allow picker selection
+
+            // 🎨 Mark as default if date equals payment date (not user-modified)
+            const isDefaultDate = displayValue && displayValue === normalizedPaymentDate;
+            if (isDefaultDate) {
+              input.classList.add('is-default');
+            }
 
             const actions = document.createElement('div');
             actions.className = 'for-class-actions';
@@ -6284,9 +6301,14 @@ ORDER BY timestamp DESC;</pre>
             // Initialize Flatpickr on this input
             const fp = flatpickr(input, {
               dateFormat: 'Y-m-d',
-              defaultDate: dateValue || null,
+              defaultDate: displayValue || null,  // 🎯 DEFAULT to payment date if empty
               onChange: (selectedDates, dateStr) => {
                 setDirtyState(dateStr !== input.dataset.originalValue);
+                
+                // 🎨 Update default styling based on whether date matches payment date
+                const normalizedChange = (dateStr || '').split('T')[0];
+                const isNowDefault = normalizedChange === input.dataset.paymentDate;
+                input.classList.toggle('is-default', isNowDefault);
               },
               onClose: () => {
                 // Auto-focus save button when picker closes if dirty
@@ -6299,12 +6321,19 @@ ORDER BY timestamp DESC;</pre>
                 const resetBtn = document.createElement('button');
                 resetBtn.type = 'button';
                 resetBtn.className = 'flatpickr-reset-btn';
-                resetBtn.textContent = 'Reset';
+                resetBtn.textContent = 'Reset to Default';
                 resetBtn.addEventListener('click', (e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  instance.clear();
-                  setDirtyState('' !== input.dataset.originalValue);
+                  // Reset to payment date (default) instead of clearing
+                  const paymentDate = input.dataset.paymentDate || '';
+                  instance.setDate(paymentDate, true); // Trigger onChange
+                  setDirtyState(paymentDate !== input.dataset.originalValue);
+                  
+                  // 🎨 Set default styling since we're resetting to payment date
+                  if (paymentDate) {
+                    input.classList.add('is-default');
+                  }
                 });
                 instance.calendarContainer.appendChild(resetBtn);
               }
@@ -6317,14 +6346,22 @@ ORDER BY timestamp DESC;</pre>
               input.dataset.originalValue = input.value;
               setDirtyState(false);
               fp.setDate(input.value, false); // Update Flatpickr without triggering onChange
+              
+              // 🎨 Update default styling after save
+              const isNowDefault = (input.value || '').split('T')[0] === input.dataset.paymentDate;
+              input.classList.toggle('is-default', isNowDefault);
             });
 
             cancelBtn.addEventListener('click', (e) => {
               e.stopPropagation();
-              const originalValue = input.dataset.originalValue || '';
+              const originalValue = (input.dataset.originalValue || '').split('T')[0];
               input.value = originalValue;
               fp.setDate(originalValue, false); // Revert Flatpickr without triggering onChange
               setDirtyState(false);
+              
+              // 🎨 Restore default styling after cancel
+              const isNowDefault = originalValue === input.dataset.paymentDate;
+              input.classList.toggle('is-default', isNowDefault);
             });
 
             // Prevent event bubbling to avoid triggering card click
@@ -6356,14 +6393,19 @@ ORDER BY timestamp DESC;</pre>
             return;
           }
           
-          // Convert MM-DD-YYYY to YYYY-MM-DD for database storage
+          // Convert display date to YYYY-MM-DD for database storage
           const convertToDbFormat = (displayDate) => {
             if (!displayDate) return '';
             const parts = displayDate.split('-');
-            if (parts.length === 3) {
-              return `${parts[2]}-${parts[0]}-${parts[1]}`; // YYYY-MM-DD
+            if (parts.length !== 3) return displayDate;
+
+            // If already YYYY-MM-DD, return as-is
+            if (parts[0].length === 4) {
+              return displayDate;
             }
-            return displayDate;
+
+            // Otherwise assume MM-DD-YYYY and convert
+            return `${parts[2]}-${parts[0]}-${parts[1]}`;
           };
           
           debugLog(`📅 Updating for_class_dates[${dateIndex}] = "${newDate}" for payment ${paymentId}`);
@@ -6433,9 +6475,10 @@ ORDER BY timestamp DESC;</pre>
          * @param {number} newAmount - The new payment amount
          * @param {number} studentPricePerClass - Student's price per class
          * @param {Array<string>} existingDates - Existing for_class_dates array
+         * @param {string} paymentDate - Payment date to use as default
          * @returns {Array<string>} Updated dates array
          */
-        async function recalculateForClassDates(paymentId, newAmount, studentPricePerClass, existingDates = []) {
+        async function recalculateForClassDates(paymentId, newAmount, studentPricePerClass, existingDates = [], paymentDate = '') {
           const newClassCount = studentPricePerClass > 0 
             ? Math.floor(newAmount / studentPricePerClass)
             : 0;
@@ -6450,9 +6493,9 @@ ORDER BY timestamp DESC;</pre>
             debugLog(`✂️ Trimmed ${existingDates.length - newClassCount} excess dates`);
           }
           
-          // If increased: pad with empty strings
+          // If increased: pad with payment date (default for new dates)
           while (updatedDates.length < newClassCount) {
-            updatedDates.push('');
+            updatedDates.push(paymentDate || '');  // 🎯 DEFAULT to payment date
           }
           
           // Update Supabase
@@ -8390,8 +8433,8 @@ ORDER BY timestamp DESC;</pre>
           const bodyTextLower = bodyText.toLowerCase();
 
           // ✅ Wells Fargo Zelle payment pattern: "SENDER NAME sent you $AMOUNT"
-          // Look for pattern in body text - match only capital letter words before "sent you"
-          const wellsFargoPattern = /([A-Za-z][A-Za-z\s]+?)\s+sent\s+you\s+\$?([\d,]+\.\d{2})/;
+          // Allow punctuation (comma, period, ampersand, hyphen, apostrophe) in sender names
+          const wellsFargoPattern = /([A-Za-z][A-Za-z\s.,&'\-]+?)\s+sent\s+you\s+\$?([\d,]+\.\d{2})/;
           const patternMatch = bodyText.match(wellsFargoPattern);
 
           console.log('📧 Parsing email body:', bodyText.substring(0, 300));
@@ -8411,6 +8454,7 @@ ORDER BY timestamp DESC;</pre>
           senderName = senderName
             .replace(/^Wells\s+Fargo\s+home\s+page\s*/i, '')
             .replace(/^Wells\s+Fargo\s*/i, '')
+            .replace(/[.,]+$/g, '')
             .replace(/\s+/g, ' ')
             .trim();
 
