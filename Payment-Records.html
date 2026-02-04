@@ -8727,7 +8727,6 @@ ORDER BY timestamp DESC;</pre>
 
         // Filter out payments that are already ignored OR already exist in payments table
         const paymentIds = supabasePayments.map(p => p.id);
-        console.log('💾 Payment IDs (gmail_ids) to check:', paymentIds);
         
         // Check for ignored payments
         const { data: ignoredPayments } = await supabaseClient
@@ -8735,10 +8734,7 @@ ORDER BY timestamp DESC;</pre>
           .select('payment_id')
           .in('payment_id', paymentIds);
         
-        console.log('🚫 Ignored payments from DB:', ignoredPayments);
-        
         const ignoredIds = new Set((ignoredPayments || []).map(p => p.payment_id));
-        console.log('🚫 Ignored IDs Set:', Array.from(ignoredIds));
         
         // CRITICAL FIX: Check for existing gmail_ids in payments table to prevent re-insertion
         const { data: existingGmailPayments } = await supabaseClient
@@ -8748,7 +8744,6 @@ ORDER BY timestamp DESC;</pre>
         
         const existingGmailIds = new Set((existingGmailPayments || []).map(p => p.gmail_id));
         const existingMemoById = new Map((existingGmailPayments || []).map(p => [p.gmail_id, p.memo || '']));
-        console.log(`📋 Existing gmail_ids in payments table: ${existingGmailIds.size} found`);
         
         const isMeaningfulMemo = (value = '') => {
           const trimmed = String(value || '').trim();
@@ -8770,7 +8765,6 @@ ORDER BY timestamp DESC;</pre>
           .filter(Boolean);
         
         if (memoUpdates.length > 0) {
-          console.log(`📝 Updating memo for ${memoUpdates.length} existing payments`);
           await Promise.all(
             memoUpdates.map(update =>
               supabaseClient
@@ -8782,10 +8776,8 @@ ORDER BY timestamp DESC;</pre>
         }
         
         const paymentsToInsert = supabasePayments.filter(p => !ignoredIds.has(p.id) && !existingGmailIds.has(p.id));
-        console.log(`✅ Payments to insert after filtering: ${paymentsToInsert.length} out of ${supabasePayments.length} (${ignoredIds.size} ignored, ${existingGmailIds.size} already exist)`);
         
         if (paymentsToInsert.length === 0) {
-          debugLog(`⏭️ [${contextLabel}] All ${supabasePayments.length} payments are already ignored or exist in DB, skipping insert`);
           return { data: [], error: null };
         }
         
