@@ -216,6 +216,31 @@
         color: rgba(255, 255, 255, 0.9);
       }
 
+      /* Payment Summary in Day Cell */
+      .day-payment-summary {
+        font-size: 0.7rem;
+        font-weight: 600;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 4px;
+        z-index: 1;
+        white-space: nowrap;
+        margin-top: 4px;
+      }
+
+      .day-payment-paid {
+        color: #22c55e;
+      }
+
+      .day-payment-unpaid {
+        color: #ef4444;
+      }
+
+      .day-payment-divider {
+        color: rgba(255, 255, 255, 0.4);
+      }
+
       /* Dot Indicators */
       .day-dots {
         display: flex;
@@ -2096,6 +2121,55 @@
         if (!isOtherMonth && year !== null && month !== null) {
           const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           cell.dataset.date = dateStr;
+
+          // Calculate paid/unpaid totals for this day
+          let paidTotal = 0;
+          let unpaidTotal = 0;
+          const today = getLATodayISO();
+
+          groupsData.forEach(group => {
+            if (isScheduledClassDate(dateStr, group) && !isClassSkippedCached(dateStr, group.group_name)) {
+              studentsData.forEach(student => {
+                if (student.group_name === group.group_name && student.show_in_grid !== false) {
+                  const hasPayment = hasPaymentCached(student.id, dateStr, student);
+                  const isAbsent = isAbsentCached(dateStr, student.id);
+                  const pricePerClass = parseFloat(student.price_per_class || 0);
+                  
+                  if (hasPayment) {
+                    paidTotal += pricePerClass;
+                  } else if (!isAbsent && dateStr <= today) {
+                    unpaidTotal += pricePerClass;
+                  }
+                }
+              });
+            }
+          });
+
+          // Add payment summary if there are amounts
+          if (paidTotal > 0 || unpaidTotal > 0) {
+            const paymentSummary = document.createElement('div');
+            paymentSummary.className = 'day-payment-summary';
+
+            // Paid amount
+            const paidSpan = document.createElement('span');
+            paidSpan.className = 'day-payment-paid';
+            paidSpan.textContent = `${formatCurrency(paidTotal)} $`;
+            paymentSummary.appendChild(paidSpan);
+
+            // Divider
+            const divider = document.createElement('span');
+            divider.className = 'day-payment-divider';
+            divider.textContent = '/';
+            paymentSummary.appendChild(divider);
+
+            // Unpaid amount
+            const unpaidSpan = document.createElement('span');
+            unpaidSpan.className = 'day-payment-unpaid';
+            unpaidSpan.textContent = `${formatCurrency(unpaidTotal)} $`;
+            paymentSummary.appendChild(unpaidSpan);
+
+            cell.appendChild(paymentSummary);
+          }
 
           // Add dots based on data
           const dots = createDots(dateStr);
