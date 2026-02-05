@@ -1542,17 +1542,31 @@
                 <!-- Recipient Selection -->
                 <div class="form-group">
                   <label class="form-label" style="display: block; margin-bottom: 12px;">
-                    Recipient
+                    Recipient Type
                   </label>
                   
-                  <!-- Combined Search and Selector -->
-                  <div style="position: relative;">
+                  <!-- Recipient Type Selector -->
+                  <select 
+                    id="recipientTypeSelector" 
+                    class="form-input" 
+                    onchange="updateRecipientInterface()"
+                    style="margin-bottom: 16px;"
+                  >
+                    <option value="individual">Individual Student</option>
+                    <option value="active">All Active Students</option>
+                    <option value="all">All Students</option>
+                    <option value="group">By Group</option>
+                    <option value="custom">Custom Selection</option>
+                  </select>
+                  
+                  <!-- Individual Student Search (default) -->
+                  <div id="individualRecipientContainer" style="position: relative;">
                     <input 
                       type="text" 
                       id="studentSearchInput" 
                       class="form-input" 
                       placeholder="🔍 Type to search students OR enter email manually..."
-                      oninput="filterStudentDropdown()"
+                      oninput="filterStudentDropdown(); updateSelectedRecipients();"
                       style="margin-bottom: 12px;"
                     />
                     <select 
@@ -1564,15 +1578,54 @@
                     >
                       <option value="">Loading students...</option>
                     </select>
+                    <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 6px;">
+                      💡 Type to search students, or enter an email address directly
+                    </div>
                   </div>
 
-              <!-- Selected Email Display -->
-              <div id="selectedEmailDisplay" style="margin-top: 12px; padding: 12px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; display: none;">
+                  <!-- Group Selector (hidden by default) -->
+                  <div id="groupRecipientContainer" style="display: none;">
+                    <select id="groupSelector" class="form-input" onchange="updateSelectedRecipients()">
+                      <option value="">Select a group...</option>
+                    </select>
+                    <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 6px;">
+                      📚 Select a group to send to all students in that group
+                    </div>
+                  </div>
+
+                  <!-- Custom Multi-Select (hidden by default) -->
+                  <div id="customRecipientContainer" style="display: none;">
+                    <div style="margin-bottom: 12px;">
+                      <input 
+                        type="text" 
+                        id="customSearchInput" 
+                        class="form-input" 
+                        placeholder="🔍 Search students..."
+                        oninput="filterCustomStudentList()"
+                        style="margin-bottom: 12px;"
+                      />
+                      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                        <button type="button" class="btn" onclick="selectAllCustomStudents()" style="flex: 1; padding: 8px; font-size: 12px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3);">
+                          ✓ Select All
+                        </button>
+                        <button type="button" class="btn" onclick="clearAllCustomStudents()" style="flex: 1; padding: 8px; font-size: 12px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3);">
+                          ✗ Clear All
+                        </button>
+                      </div>
+                    </div>
+                    <div id="customStudentList" style="max-height: 300px; overflow-y: auto; border: 1px solid rgba(102,126,234,0.3); border-radius: 8px; padding: 8px; background: rgba(0,0,0,0.2);">
+                      <!-- Checkboxes will be populated here -->
+                    </div>
+                    <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 6px;">
+                      ☑️ Select individual students to create a custom recipient list
+                    </div>
+                  </div>
+
+              <!-- Selected Recipients Display -->
+              <div id="selectedEmailDisplay" style="margin-top: 16px; padding: 12px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 8px; display: none;">
                 <div style="font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 4px;">Sending to:</div>
                 <div id="selectedEmailText" style="font-size: 14px; color: #10b981; font-weight: 600;"></div>
-              </div>
-              <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 6px;">
-                💡 Type to search students, or enter an email address directly (e.g., name@example.com)
+                <div id="selectedEmailCount" style="font-size: 12px; color: rgba(255,255,255,0.7); margin-top: 4px;"></div>
               </div>
             </div>
 
@@ -3726,9 +3779,14 @@
         document.getElementById('manualEmailBCC').value = '';
         document.getElementById('studentSearchInput').value = '';
         document.getElementById('selectedEmailDisplay').style.display = 'none';
+        document.getElementById('recipientTypeSelector').value = 'individual';
+        selectedCustomStudents.clear();
         
         // Hide dropdown initially
         document.getElementById('studentSelector').style.display = 'none';
+        
+        // Initialize recipient interface
+        updateRecipientInterface();
         
         // Initialize preview with placeholder data
         updateManualPreview();
@@ -3844,6 +3902,204 @@
           selector.style.display = 'block';
         } else {
           selector.style.display = 'block';
+        }
+      }
+
+      // ============================================================
+      // NEW RECIPIENT INTERFACE FUNCTIONS
+      // ============================================================
+      let selectedCustomStudents = new Set();
+
+      async function updateRecipientInterface() {
+        const recipientType = document.getElementById('recipientTypeSelector').value;
+        
+        // Hide all containers
+        document.getElementById('individualRecipientContainer').style.display = 'none';
+        document.getElementById('groupRecipientContainer').style.display = 'none';
+        document.getElementById('customRecipientContainer').style.display = 'none';
+        
+        // Show appropriate container
+        switch(recipientType) {
+          case 'individual':
+            document.getElementById('individualRecipientContainer').style.display = 'block';
+            updateSelectedRecipients();
+            break;
+          
+          case 'active':
+          case 'all':
+            updateSelectedRecipients();
+            break;
+          
+          case 'group':
+            document.getElementById('groupRecipientContainer').style.display = 'block';
+            await loadGroupsForSelection();
+            updateSelectedRecipients();
+            break;
+          
+          case 'custom':
+            document.getElementById('customRecipientContainer').style.display = 'block';
+            await loadCustomStudentList();
+            updateSelectedRecipients();
+            break;
+        }
+      }
+
+      async function loadGroupsForSelection() {
+        const groupSelector = document.getElementById('groupSelector');
+        
+        try {
+          const { data: groups, error } = await supabaseClient
+            .from('groups')
+            .select('group_name')
+            .eq('active', true)
+            .order('group_name', { ascending: true });
+
+          if (error) throw error;
+
+          groupSelector.innerHTML = '<option value="">Select a group...</option>';
+          
+          groups.forEach(group => {
+            const option = document.createElement('option');
+            option.value = group.group_name;
+            option.textContent = `Group ${group.group_name}`;
+            groupSelector.appendChild(option);
+          });
+
+        } catch (error) {
+          console.error('❌ Error loading groups:', error);
+          showDesignAlert('Failed to load groups', { type: 'error' });
+        }
+      }
+
+      async function loadCustomStudentList() {
+        const container = document.getElementById('customStudentList');
+        container.innerHTML = '<div style="text-align: center; padding: 20px; color: rgba(255,255,255,0.5);">Loading students...</div>';
+        
+        try {
+          const { data: students, error } = await supabaseClient
+            .from('students')
+            .select('id, name, email, group_name, show_in_grid')
+            .eq('show_in_grid', true)
+            .order('name', { ascending: true });
+
+          if (error) throw error;
+
+          container.innerHTML = '';
+          
+          students.forEach(student => {
+            const checkbox = document.createElement('label');
+            checkbox.style.cssText = 'display: block; padding: 8px 12px; cursor: pointer; border-radius: 6px; margin-bottom: 4px; transition: all 0.2s;';
+            checkbox.onmouseover = () => checkbox.style.background = 'rgba(102,126,234,0.1)';
+            checkbox.onmouseout = () => checkbox.style.background = 'transparent';
+            
+            const input = document.createElement('input');
+            input.type = 'checkbox';
+            input.value = student.id;
+            input.dataset.email = student.email || '';
+            input.dataset.name = student.name || '';
+            input.style.marginRight = '8px';
+            input.onchange = () => {
+              if (input.checked) {
+                selectedCustomStudents.add(student.id);
+              } else {
+                selectedCustomStudents.delete(student.id);
+              }
+              updateSelectedRecipients();
+            };
+            
+            const text = document.createTextNode(
+              `${student.name}${student.group_name ? ' (Group ' + student.group_name + ')' : ''}${student.email ? ' - ' + student.email : ''}`
+            );
+            
+            checkbox.appendChild(input);
+            checkbox.appendChild(text);
+            container.appendChild(checkbox);
+          });
+
+        } catch (error) {
+          console.error('❌ Error loading custom student list:', error);
+          container.innerHTML = '<div style="text-align: center; padding: 20px; color: #ef4444;">Error loading students</div>';
+        }
+      }
+
+      function filterCustomStudentList() {
+        const searchTerm = document.getElementById('customSearchInput').value.toLowerCase();
+        const checkboxes = document.getElementById('customStudentList').querySelectorAll('label');
+        
+        checkboxes.forEach(label => {
+          const text = label.textContent.toLowerCase();
+          label.style.display = text.includes(searchTerm) ? 'block' : 'none';
+        });
+      }
+
+      function selectAllCustomStudents() {
+        const checkboxes = document.getElementById('customStudentList').querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => {
+          if (cb.parentElement.style.display !== 'none') {
+            cb.checked = true;
+            selectedCustomStudents.add(cb.value);
+          }
+        });
+        updateSelectedRecipients();
+      }
+
+      function clearAllCustomStudents() {
+        const checkboxes = document.getElementById('customStudentList').querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => cb.checked = false);
+        selectedCustomStudents.clear();
+        updateSelectedRecipients();
+      }
+
+      async function updateSelectedRecipients() {
+        const recipientType = document.getElementById('recipientTypeSelector').value;
+        const display = document.getElementById('selectedEmailDisplay');
+        const textEl = document.getElementById('selectedEmailText');
+        const countEl = document.getElementById('selectedEmailCount');
+        
+        let recipientText = '';
+        let count = 0;
+        
+        switch(recipientType) {
+          case 'individual':
+            const searchInput = document.getElementById('studentSearchInput').value.trim();
+            if (searchInput) {
+              recipientText = searchInput;
+              count = 1;
+            }
+            break;
+          
+          case 'active':
+            const activeStudents = manualSendStudents.filter(s => s.show_in_grid);
+            count = activeStudents.length;
+            recipientText = `All Active Students (${count} students)`;
+            break;
+          
+          case 'all':
+            count = manualSendStudents.length;
+            recipientText = `All Students (${count} students)`;
+            break;
+          
+          case 'group':
+            const selectedGroup = document.getElementById('groupSelector').value;
+            if (selectedGroup) {
+              const groupStudents = manualSendStudents.filter(s => s.group_name === selectedGroup);
+              count = groupStudents.length;
+              recipientText = `Group ${selectedGroup} (${count} students)`;
+            }
+            break;
+          
+          case 'custom':
+            count = selectedCustomStudents.size;
+            recipientText = `Custom Selection (${count} students)`;
+            break;
+        }
+        
+        if (recipientText && count > 0) {
+          display.style.display = 'block';
+          textEl.textContent = recipientText;
+          countEl.textContent = count === 1 ? '1 recipient' : `${count} recipients`;
+        } else {
+          display.style.display = 'none';
         }
       }
 
@@ -4035,38 +4291,84 @@
         const originalText = sendBtn.textContent;
 
         try {
-          // Get recipient from selected student OR manual email input
-          const searchInput = document.getElementById('studentSearchInput').value.trim();
-          const selector = document.getElementById('studentSelector');
-          const studentId = selector.value;
-          
-          let recipientEmail = '';
-          let recipientName = '';
+          // Get recipient type and determine recipient list
+          const recipientType = document.getElementById('recipientTypeSelector').value;
+          let recipients = [];
 
-          // Check if a student is selected
-          if (studentId) {
-            const student = manualSendStudents.find(s => s.id == studentId);
-            if (!student || !student.email) {
-              showDesignAlert('Selected student has no email address', { type: 'error', title: 'No Email' });
-              return;
-            }
-            recipientEmail = student.email;
-            recipientName = student.name;
-          } 
-          // Otherwise check if manual email was entered
-          else if (searchInput) {
-            // Validate email format
-            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-            if (!emailRegex.test(searchInput)) {
-              showDesignAlert('Please enter a valid email address or select a student', { type: 'error', title: 'Invalid Email' });
-              return;
-            }
-            recipientEmail = searchInput;
-            recipientName = searchInput.split('@')[0];
+          switch(recipientType) {
+            case 'individual':
+              // Original individual email logic
+              const searchInput = document.getElementById('studentSearchInput').value.trim();
+              const selector = document.getElementById('studentSelector');
+              const studentId = selector.value;
+              
+              if (studentId) {
+                const student = manualSendStudents.find(s => s.id == studentId);
+                if (!student || !student.email) {
+                  showDesignAlert('Selected student has no email address', { type: 'error', title: 'No Email' });
+                  return;
+                }
+                recipients.push({ email: student.email, name: student.name });
+              } else if (searchInput) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!emailRegex.test(searchInput)) {
+                  showDesignAlert('Please enter a valid email address or select a student', { type: 'error', title: 'Invalid Email' });
+                  return;
+                }
+                recipients.push({ email: searchInput, name: searchInput.split('@')[0] });
+              } else {
+                showDesignAlert('Please select a student or enter an email address', { type: 'warning', title: 'No Recipient' });
+                return;
+              }
+              break;
+
+            case 'active':
+              // All active students
+              recipients = manualSendStudents
+                .filter(s => s.show_in_grid && s.email)
+                .map(s => ({ email: s.email, name: s.name }));
+              break;
+
+            case 'all':
+              // All students
+              recipients = manualSendStudents
+                .filter(s => s.email)
+                .map(s => ({ email: s.email, name: s.name }));
+              break;
+
+            case 'group':
+              // Students in selected group
+              const selectedGroup = document.getElementById('groupSelector').value;
+              if (!selectedGroup) {
+                showDesignAlert('Please select a group', { type: 'warning', title: 'No Group Selected' });
+                return;
+              }
+              recipients = manualSendStudents
+                .filter(s => s.group_name === selectedGroup && s.email)
+                .map(s => ({ email: s.email, name: s.name }));
+              break;
+
+            case 'custom':
+              // Custom selection
+              if (selectedCustomStudents.size === 0) {
+                showDesignAlert('Please select at least one student', { type: 'warning', title: 'No Students Selected' });
+                return;
+              }
+              recipients = manualSendStudents
+                .filter(s => selectedCustomStudents.has(s.id) && s.email)
+                .map(s => ({ email: s.email, name: s.name }));
+              break;
           }
-          // No recipient provided
-          else {
-            showDesignAlert('Please select a student or enter an email address', { type: 'warning', title: 'No Recipient' });
+
+          // Validate we have recipients
+          if (recipients.length === 0) {
+            showDesignAlert('No valid email addresses found for selected recipients', { type: 'error', title: 'No Recipients' });
+            return;
+          }
+
+          // Validate we have recipients
+          if (recipients.length === 0) {
+            showDesignAlert('No valid email addresses found for selected recipients', { type: 'error', title: 'No Recipients' });
             return;
           }
 
@@ -4080,6 +4382,13 @@
           if (!subject || !bodyContent) {
             showDesignAlert('Please fill in subject and message', { type: 'warning', title: 'Missing Fields' });
             return;
+          }
+
+          // Confirm if sending to multiple recipients
+          if (recipients.length > 1) {
+            const confirmMsg = `You are about to send this email to ${recipients.length} recipients. Continue?`;
+            const confirmed = confirm(confirmMsg);
+            if (!confirmed) return;
           }
 
           // Parse CC and BCC emails (comma-separated)
@@ -4104,82 +4413,119 @@
           }
 
           // Show loading state
-          sendBtn.textContent = '⏳ Sending...';
+          sendBtn.textContent = `⏳ Sending to ${recipients.length} recipient${recipients.length > 1 ? 's' : ''}...`;
           sendBtn.disabled = true;
 
-          // Use title only if provided (don't default to subject)
+          // Use title only if provided
           const emailTitle = title || '';
-
-          // Preserve all formatting - newlines, spaces, tabs
-          // The CSS in generateEmailHTML uses white-space: pre-wrap to preserve everything
           const fullHTML = generateEmailHTML(emailTitle, bodyContent);
 
-          // Build request body
-          const emailData = {
-            to: recipientEmail,
-            subject: subject,
-            html: fullHTML,
-          };
+          // Send emails
+          let successCount = 0;
+          let failCount = 0;
+          const errors = [];
 
-          // Add CC if provided
-          if (ccEmails.length > 0) {
-            emailData.cc = ccEmails;
+          for (let i = 0; i < recipients.length; i++) {
+            const recipient = recipients[i];
+            
+            try {
+              // Build request body
+              const emailData = {
+                to: recipient.email,
+                subject: subject,
+                html: fullHTML,
+              };
+
+              // Add CC if provided
+              if (ccEmails.length > 0) {
+                emailData.cc = ccEmails;
+              }
+
+              // Add BCC if provided
+              if (bccEmails.length > 0) {
+                emailData.bcc = bccEmails;
+              }
+
+              // Send email via Supabase Edge Function
+              const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify(emailData),
+              });
+
+              if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || 'Failed to send email');
+              }
+
+              const responseData = await response.json();
+              const resendEmailId = responseData?.id || responseData?.emailId || null;
+
+              debugLog('✅ Email sent:', { to: recipient.email, subject, resendId: resendEmailId });
+
+              // Track sent email
+              emailSystem.addSentEmail({
+                to: recipient.email,
+                subject: subject,
+                html: fullHTML,
+                status: 'sent',
+                resendId: resendEmailId,
+                deliveryStatus: 'pending',
+                templateName: 'Manual Send',
+                type: 'manual',
+                responseData: responseData,
+              });
+
+              successCount++;
+              
+              // Update button with progress
+              if (recipients.length > 1) {
+                sendBtn.textContent = `⏳ Sent ${successCount}/${recipients.length}...`;
+              }
+
+              // Small delay between sends to avoid rate limiting
+              if (i < recipients.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+              }
+
+            } catch (error) {
+              console.error(`❌ Error sending to ${recipient.email}:`, error);
+              failCount++;
+              errors.push(`${recipient.name}: ${error.message}`);
+            }
           }
-
-          // Add BCC if provided
-          if (bccEmails.length > 0) {
-            emailData.bcc = bccEmails;
-          }
-
-          // Send email via Supabase Edge Function
-          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            },
-            body: JSON.stringify(emailData),
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || 'Failed to send email');
-          }
-
-          const responseData = await response.json();
-          const resendEmailId = responseData?.id || responseData?.emailId || null;
-
-          debugLog('✅ Manual email sent:', { to: recipientEmail, subject, resendId: resendEmailId });
-
-          // Track sent email
-          emailSystem.addSentEmail({
-            to: recipientEmail,
-            subject: subject,
-            html: fullHTML,
-            status: 'sent',
-            resendId: resendEmailId,
-            deliveryStatus: 'pending',
-            templateName: 'Manual Send',
-            type: 'manual',
-            responseData: responseData,
-          });
 
           // Build success message
-          let successMsg = `✅ Email sent successfully to ${recipientName || recipientEmail}`;
+          let resultMsg = '';
+          if (successCount > 0) {
+            resultMsg = `✅ Successfully sent ${successCount} email${successCount > 1 ? 's' : ''}`;
+          }
+          if (failCount > 0) {
+            resultMsg += `\n❌ Failed to send ${failCount} email${failCount > 1 ? 's' : ''}`;
+            if (errors.length > 0 && errors.length <= 5) {
+              resultMsg += '\n\nErrors:\n' + errors.join('\n');
+            }
+          }
           if (ccEmails.length > 0) {
-            successMsg += `\n📋 CC: ${ccEmails.length} recipient${ccEmails.length > 1 ? 's' : ''}`;
+            resultMsg += `\n� CC: ${ccEmails.join(', ')}`;
           }
           if (bccEmails.length > 0) {
-            successMsg += `\n🔒 BCC: ${bccEmails.length} recipient${bccEmails.length > 1 ? 's' : ''}`;
+            resultMsg += `\n🔒 BCC: ${bccEmails.join(', ')}`;
           }
 
-          // Success notification
-          showCustomNotification(successMsg, 'success');
+          // Show notification
+          showCustomNotification(resultMsg, failCount === 0 ? 'success' : 'warning');
 
           // Reset button and close modal
           sendBtn.textContent = originalText;
           sendBtn.disabled = false;
-          closeManualSendModal();
+          
+          if (failCount === 0) {
+            closeManualSendModal();
+          }
 
         } catch (error) {
           console.error('❌ Error sending manual email:', error);
