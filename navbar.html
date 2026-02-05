@@ -1,0 +1,1190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes, viewport-fit=cover" />
+  <title>ARNOMA - Floating Navbar</title>
+  
+  <!-- Supabase Configuration -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+  
+  <!-- Inline Auth Script -->
+  <script>
+    (function (global) {
+      const AUTH_CACHE_KEY = 'arnoma:auth:session';
+      const AUTH_USER_KEY = 'arnoma:auth:user';
+      const REMEMBER_ME_KEY = 'arnoma:remember-me';
+      const SESSION_EXPIRY_KEY = 'arnoma:session-expiry';
+      const DEFAULT_SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7; // 7 days default
+
+      function clearCache() {
+        try {
+          localStorage.removeItem(AUTH_CACHE_KEY);
+          localStorage.removeItem(AUTH_USER_KEY);
+        } catch (error) {
+          console.error('ArnomaAuth: failed to clear cache', error);
+        }
+      }
+
+      function saveSession(session) {
+        if (!session) {
+          clearCache();
+          return;
+        }
+
+        try {
+          const snapshot = {
+            access_token: session.access_token,
+            refresh_token: session.refresh_token,
+            expires_at: session.expires_at,
+            expires_in: session.expires_in,
+            token_type: session.token_type,
+            user: session.user,
+            stored_at: Date.now()
+          };
+          localStorage.setItem(AUTH_CACHE_KEY, JSON.stringify(snapshot));
+
+          if (session.user?.email) {
+            localStorage.setItem(
+              AUTH_USER_KEY,
+              JSON.stringify({ email: session.user.email, stored_at: Date.now() })
+            );
+          }
+        } catch (error) {
+          console.error('ArnomaAuth: failed to persist session', error);
+        }
+      }
+
+      function readCachedSession() {
+        try {
+          const cached = localStorage.getItem(AUTH_CACHE_KEY);
+          if (!cached) return null;
+          const parsed = JSON.parse(cached);
+          
+          const rememberMe = localStorage.getItem(REMEMBER_ME_KEY) === 'true';
+          const customExpiry = localStorage.getItem(SESSION_EXPIRY_KEY);
+          
+          let maxAge = DEFAULT_SESSION_MAX_AGE_MS;
+          
+          if (rememberMe && customExpiry) {
+            const expiryTime = parseInt(customExpiry, 10);
+            if (Date.now() > expiryTime) {
+              console.log('ArnomaAuth: Session expired (30-day remember-me expired)');
+              clearCache();
+              return null;
+            }
+          } else if (parsed?.stored_at && Date.now() - parsed.stored_at > maxAge) {
+            console.log('ArnomaAuth: Session expired (7-day default)');
+            clearCache();
+            return null;
+          }
+          
+          return parsed;
+        } catch (error) {
+          console.error('ArnomaAuth: failed to parse cached session', error);
+          clearCache();
+          return null;
+        }
+      }
+
+      async function ensureSession(supabase, options = {}) {
+        if (!supabase?.auth) {
+          throw new Error('ArnomaAuth.ensureSession requires a Supabase client');
+        }
+
+        const redirectToLogin = options.redirectToLogin !== false;
+
+        try {
+          const {
+            data: { session },
+            error
+          } = await supabase.auth.getSession();
+
+          if (session && !error) {
+            saveSession(session);
+            return session;
+          }
+        } catch (error) {
+          console.warn('ArnomaAuth: getSession failed, attempting to restore', error);
+        }
+
+        const cached = readCachedSession();
+        if (cached?.access_token && cached?.refresh_token) {
+          try {
+            const { data, error } = await supabase.auth.setSession({
+              access_token: cached.access_token,
+              refresh_token: cached.refresh_token
+            });
+
+            if (!error && data?.session) {
+              saveSession(data.session);
+              return data.session;
+            }
+
+            if (error) {
+              console.error('ArnomaAuth: setSession failed', error);
+              if (error.status === 400) {
+                clearCache();
+              }
+            }
+          } catch (setError) {
+            console.error('ArnomaAuth: unexpected error during setSession', setError);
+          }
+        }
+
+        if (redirectToLogin) {
+          window.location.href = 'index.html';
+        }
+
+        throw new Error('AUTH_REQUIRED');
+      }
+
+      function attachAuthListener(supabase) {
+        if (!supabase?.auth?.onAuthStateChange) return;
+
+        supabase.auth.onAuthStateChange((_event, session) => {
+          if (session) {
+            saveSession(session);
+          } else {
+            clearCache();
+          }
+        });
+      }
+
+      global.ArnomaAuth = {
+        ensureSession,
+        attachAuthListener,
+        saveSessionSnapshot: saveSession,
+        readCachedSession,
+        clearSessionCache: clearCache
+      };
+    })(window);
+  </script>
+  
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      display: none !important;
+      visibility: hidden !important;
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'SF Pro Display', sans-serif;
+      background: linear-gradient(135deg, #0b0b10 0%, #1a1a2e 100%) !important;
+      min-height: 100vh;
+      padding: 12px;
+      position: relative;
+      overflow-x: hidden;
+      color: rgba(255, 255, 255, 0.9);
+    }
+    
+    body.admin-verified {
+      display: block !important;
+      visibility: visible !important;
+    }
+
+    :root {
+      --panel-blur: 8px;
+      --modal-blur: 14px;
+      --nav-btn-size: 40px;
+      --nav-opacity: 0.95;
+      --nav-handle-size: 16px;
+    }
+
+    /* ============================================================
+       FLOATING NAVIGATION BAR - HORIZONTAL COLLAPSIBLE
+       ============================================================ */
+    body:not(.admin-verified) .floating-nav {
+      display: none !important;
+    }
+
+    .floating-nav {
+      position: fixed;
+      bottom: 80px;
+      right: 0;
+      transform: translateX(0);
+      z-index: 9999;
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
+      background: linear-gradient(
+        135deg,
+        rgba(30, 30, 46, 0.98),
+        rgba(42, 42, 62, 0.98)
+      );
+      backdrop-filter: blur(var(--modal-blur));
+      -webkit-backdrop-filter: blur(var(--modal-blur));
+      border: 1px solid rgba(138, 180, 255, 0.25);
+      border-radius: 20px 0 0 20px;
+      padding: 10px 14px;
+      box-shadow:
+        -8px 0 32px rgba(0, 0, 0, 0.5),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+      transition: none;
+      will-change: auto;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .floating-nav {
+        transition: none;
+      }
+    }
+
+    .floating-nav.expanded {
+      transform: translateX(0) !important;
+    }
+
+    .floating-nav.interacting {
+      transform: translateX(0) !important;
+    }
+
+    .nav-row {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .nav-row-top {
+      display: flex;
+      gap: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(138, 180, 255, 0.15);
+      transition: all 0.2s ease;
+    }
+
+    .nav-row-top.drag-over {
+      background: rgba(138, 180, 255, 0.1);
+      border-radius: 8px;
+      padding: 8px;
+      border-bottom-color: rgba(138, 180, 255, 0.4);
+    }
+
+    .nav-row-main {
+      display: flex;
+      gap: 12px;
+      transition: all 0.2s ease;
+    }
+
+    .nav-row-main.drag-over {
+      background: rgba(138, 180, 255, 0.1);
+      border-radius: 8px;
+      padding: 8px;
+    }
+
+    .nav-btn, .nav-btn-placeholder {
+      width: var(--nav-btn-size, 40px);
+      height: var(--nav-btn-size, 40px);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.06);
+      color: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      cursor: pointer;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      font-size: 18px;
+      font-weight: 400;
+      position: relative;
+      overflow: visible;
+      user-select: none;
+    }
+
+    .nav-btn.dragging, .nav-btn-placeholder.dragging {
+      opacity: 0.5;
+      transform: scale(0.95);
+      cursor: pointer;
+    }
+
+    .nav-btn.drag-over, .nav-btn-placeholder.drag-over {
+      background: rgba(138, 180, 255, 0.3);
+      border-color: rgba(138, 180, 255, 0.6);
+      transform: scale(1.1);
+    }
+
+    .nav-btn::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(138, 180, 255, 0.3), transparent);
+      transform: translate(-50%, -50%);
+      transition: width 0.4s ease, height 0.4s ease;
+    }
+
+    .nav-btn:hover::before {
+      width: 120%;
+      height: 120%;
+    }
+
+    .nav-btn-placeholder {
+      background: rgba(255, 255, 255, 0.02);
+      color: rgba(255, 255, 255, 0.3);
+      border: 1px dashed rgba(255, 255, 255, 0.1);
+      font-size: 16px;
+    }
+
+    .nav-btn-placeholder:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(138, 180, 255, 0.3);
+      border-style: solid;
+      transform: scale(1.05);
+      cursor: pointer;
+    }
+
+    .nav-btn svg {
+      width: calc(var(--nav-btn-size, 40px) * 0.5);
+      height: calc(var(--nav-btn-size, 40px) * 0.5);
+      stroke: currentColor;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      z-index: 1;
+    }
+
+    .nav-btn:hover {
+      background: linear-gradient(135deg, rgba(138, 180, 255, 0.25), rgba(168, 85, 247, 0.25));
+      color: #fff;
+      border-color: rgba(138, 180, 255, 0.5);
+      transform: translateY(-4px) scale(1.08);
+      box-shadow: 0 12px 24px rgba(138, 180, 255, 0.5);
+    }
+
+    .nav-btn:hover svg {
+      transform: scale(1.15) rotate(-5deg);
+      filter: drop-shadow(0 0 8px rgba(138, 180, 255, 0.6));
+    }
+
+    .nav-btn.refreshing {
+      opacity: 0.65;
+      pointer-events: none;
+      cursor: default;
+      background: rgba(138, 180, 255, 0.18);
+      border-color: rgba(138, 180, 255, 0.45);
+      box-shadow: inset 0 0 12px rgba(138, 180, 255, 0.25);
+      transform: none !important;
+    }
+
+    .nav-btn.refreshing::before {
+      width: 0;
+      height: 0;
+    }
+
+    .nav-btn.refreshing svg {
+      transform: none;
+      filter: none;
+      animation: spin 1s linear infinite;
+    }
+
+    .nav-btn:active {
+      transform: translateY(-2px) scale(1.02);
+      transition: all 0.1s ease;
+    }
+
+    .nav-btn.active {
+      background: linear-gradient(135deg, rgba(138, 180, 255, 0.35), rgba(168, 85, 247, 0.35));
+      color: #8ab4ff;
+      border-color: rgba(138, 180, 255, 0.7);
+      box-shadow:
+        0 0 20px rgba(138, 180, 255, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+
+    .nav-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      background: linear-gradient(135deg, #8ab4ff, #a855f7);
+      color: white;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 5px;
+      border-radius: 10px;
+      min-width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(138, 180, 255, 0.6);
+      animation: pulseNavBadge 2s ease-in-out infinite;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    @keyframes pulseNavBadge {
+      0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.8;
+        transform: scale(1.1);
+      }
+    }
+
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    /* ============================================================
+       COUNTDOWN TIMER
+       ============================================================ */
+    #navCountdownTimer {
+      height: var(--nav-btn-size, 40px);
+      min-width: 100px;
+      padding: 0 16px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: linear-gradient(
+        135deg,
+        rgba(138, 180, 255, 0.12),
+        rgba(168, 85, 247, 0.12)
+      );
+      border: 1px solid rgba(138, 180, 255, 0.3);
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      backdrop-filter: blur(var(--panel-blur));
+      -webkit-backdrop-filter: blur(var(--panel-blur));
+      box-shadow:
+        0 4px 12px rgba(138, 180, 255, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    #navCountdownTimer::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(138, 180, 255, 0.3),
+        transparent
+      );
+      transition: left 0.6s ease;
+    }
+
+    #navCountdownTimer:hover::before {
+      left: 100%;
+    }
+
+    #navCountdownTimer:hover {
+      transform: translateY(-2px) scale(1.05);
+      box-shadow:
+        0 6px 16px rgba(138, 180, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    }
+
+    #navCountdownTimer .timer-icon {
+      font-size: 16px;
+      filter: drop-shadow(0 0 4px currentColor);
+      transition: transform 0.3s ease, filter 0.3s ease;
+    }
+
+    #navCountdownTimer .timer-text {
+      font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+      transition: opacity 0.2s ease;
+    }
+
+    /* Timer states */
+    #navCountdownTimer.time-none {
+      background: linear-gradient(135deg, rgba(138, 180, 255, 0.1), rgba(168, 85, 247, 0.1));
+      border-color: rgba(138, 180, 255, 0.2);
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    #navCountdownTimer.time-safe {
+      background: linear-gradient(135deg, rgba(74, 222, 128, 0.15), rgba(34, 197, 94, 0.15));
+      border-color: rgba(74, 222, 128, 0.4);
+      color: #4ade80;
+    }
+
+    #navCountdownTimer.time-upcoming {
+      background: linear-gradient(135deg, rgba(96, 165, 250, 0.15), rgba(59, 130, 246, 0.15));
+      border-color: rgba(96, 165, 250, 0.4);
+      color: #60a5fa;
+    }
+
+    #navCountdownTimer.time-warning {
+      background: linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(245, 158, 11, 0.15));
+      border-color: rgba(251, 191, 36, 0.4);
+      color: #fbbf24;
+    }
+
+    #navCountdownTimer.time-critical {
+      background: linear-gradient(135deg, rgba(248, 113, 113, 0.15), rgba(239, 68, 68, 0.15));
+      border-color: rgba(248, 113, 113, 0.4);
+      color: #f87171;
+      animation: pulseTimer 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulseTimer {
+      0%, 100% {
+        box-shadow:
+          0 4px 12px rgba(248, 113, 113, 0.3),
+          inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      }
+      50% {
+        box-shadow:
+          0 6px 20px rgba(248, 113, 113, 0.5),
+          inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      }
+    }
+
+    /* ============================================================
+       NAVIGATION SETTINGS CONTEXT MENU
+       ============================================================ */
+    .nav-context-menu-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      z-index: 99998;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .nav-context-menu-overlay.show {
+      opacity: 1;
+    }
+
+    .nav-context-menu {
+      display: none;
+      position: fixed;
+      bottom: 140px;
+      right: 20px;
+      min-width: 320px;
+      max-width: 420px;
+      max-height: 80vh;
+      overflow-y: auto;
+      background: linear-gradient(
+        135deg,
+        rgba(30, 30, 46, 0.98),
+        rgba(42, 42, 62, 0.98)
+      );
+      backdrop-filter: blur(var(--modal-blur));
+      -webkit-backdrop-filter: blur(var(--modal-blur));
+      border: 1px solid rgba(138, 180, 255, 0.3);
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow:
+        0 20px 60px rgba(0, 0, 0, 0.6),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+      z-index: 99999;
+      opacity: 0;
+      transform: translateY(20px) scale(0.95);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .nav-context-menu.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    .nav-settings-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.95);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .nav-setting-item {
+      margin-bottom: 20px;
+    }
+
+    .nav-setting-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      color: rgba(255, 255, 255, 0.8);
+      margin-bottom: 8px;
+    }
+
+    .nav-setting-value {
+      font-size: 13px;
+      font-weight: 700;
+      color: #8ab4ff;
+    }
+
+    .nav-slider {
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.1);
+      outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+      cursor: pointer;
+    }
+
+    .nav-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #8ab4ff, #a855f7);
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(138, 180, 255, 0.6);
+      transition: all 0.2s ease;
+    }
+
+    .nav-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+      box-shadow: 0 4px 12px rgba(138, 180, 255, 0.8);
+    }
+
+    .nav-slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #8ab4ff, #a855f7);
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(138, 180, 255, 0.6);
+      border: none;
+      transition: all 0.2s ease;
+    }
+
+    .nav-slider::-moz-range-thumb:hover {
+      transform: scale(1.2);
+      box-shadow: 0 4px 12px rgba(138, 180, 255, 0.8);
+    }
+
+    .nav-selector {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(138, 180, 255, 0.3);
+      color: rgba(255, 255, 255, 0.9);
+      font-size: 14px;
+      outline: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .nav-selector:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(138, 180, 255, 0.5);
+    }
+
+    .nav-selector:focus {
+      border-color: rgba(138, 180, 255, 0.7);
+      box-shadow: 0 0 0 3px rgba(138, 180, 255, 0.2);
+    }
+
+    .nav-toggle {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+    }
+
+    .nav-toggle input[type="checkbox"] {
+      display: none;
+    }
+
+    .nav-toggle-switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      transition: all 0.3s ease;
+    }
+
+    .nav-toggle-switch::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.8);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .nav-toggle input[type="checkbox"]:checked + .nav-toggle-switch {
+      background: linear-gradient(135deg, #8ab4ff, #a855f7);
+      border-color: rgba(138, 180, 255, 0.5);
+    }
+
+    .nav-toggle input[type="checkbox"]:checked + .nav-toggle-switch::after {
+      left: 22px;
+      background: white;
+    }
+
+    /* Mobile Responsiveness */
+    @media (max-width: 768px) {
+      .floating-nav {
+        bottom: 12px;
+        right: 12px;
+        transform: translateX(0) !important;
+        opacity: 1 !important;
+        padding: 12px 16px;
+        border-radius: 16px;
+        gap: 10px;
+      }
+
+      .floating-nav.auto-hide {
+        transform: translateX(0) !important;
+        opacity: 1 !important;
+      }
+
+      .floating-nav.expanded {
+        padding: 12px 16px;
+      }
+
+      .nav-btn, .nav-btn-placeholder {
+        width: 44px;
+        height: 44px;
+        --nav-btn-size: 44px;
+      }
+
+      .nav-btn svg {
+        width: 22px;
+        height: 22px;
+      }
+
+      .nav-badge {
+        font-size: 11px;
+        min-width: 20px;
+        height: 20px;
+        padding: 0 6px;
+      }
+
+      .nav-context-menu {
+        min-width: 260px;
+        bottom: 70px;
+        right: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ============================================================
+       FLOATING NAVIGATION BAR
+       ============================================================ -->
+  <div class="floating-nav expanded">
+    <div class="nav-row">
+      <!-- Top Row - Module Buttons -->
+      <div class="nav-row-top">
+        <button class="nav-btn" id="navEmailSystemBtn" onclick="openModulePopup('Email-System.html', '📧 Email System')" title="Email System">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+            <polyline points="22,6 12,13 2,6"></polyline>
+          </svg>
+        </button>
+        <button class="nav-btn" id="navGroupManagerBtn" onclick="openModulePopup('Group-Manager.html', '👥 Group Manager')" title="Group Manager">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+            <circle cx="9" cy="7" r="4"></circle>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+          </svg>
+        </button>
+        <button class="nav-btn" id="navStudentManagerBtn" onclick="openModulePopup('Student-Manager.html', '👨‍🎓 Student Manager')" title="Student Manager">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 10v6M2 10l10-5 10 5-10 5z"></path>
+            <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
+          </svg>
+        </button>
+        <button class="nav-btn" id="navCalendarBtn" onclick="openModulePopup('Calendar-NEW.html', '📅 Smart Calendar')" title="Smart Payment Calendar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+        </button>
+        <button class="nav-btn" id="navPaymentRecordsBtn" onclick="openModulePopup('Payment-Records.html', '💳 Payment Records')" title="Payment Records">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1" y="4" width="22" height="16" rx="2" ry="2"></rect>
+            <line x1="1" y1="10" x2="23" y2="10"></line>
+          </svg>
+        </button>
+        <button class="nav-btn" id="navQuickViewBtn" onclick="openModulePopup('Group-Schedule-Quick-View.html', '📅 Group Schedules')" title="Quick View – Group Schedules">◈</button>
+      </div>
+
+      <!-- Main Row - Core Buttons -->
+      <div class="nav-row-main">
+        <!-- Countdown Timer -->
+        <div id="navCountdownTimer" class="time-none" draggable="true" title="Loading countdown...">
+          <span class="timer-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/>
+              <path d="M12 12 L12 3 A9 9 0 0 1 21 12 Z" fill="currentColor" opacity="0.3"/>
+              <line x1="12" y1="12" x2="12" y2="5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <line x1="12" y1="12" x2="18" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="timer-text"></span>
+        </div>
+
+        <button class="nav-btn" id="navTopBtn" title="Scroll to Top" onclick="scrollToTop()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="18 15 12 9 6 15"></polyline>
+          </svg>
+        </button>
+        <button class="nav-btn" id="navRefreshBtn" title="Refresh Data" onclick="refreshPage()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <polyline points="1 20 1 14 7 14"></polyline>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+          </svg>
+        </button>
+        <button class="nav-btn" id="notificationBellBtn" onclick="openModulePopup('Notification-Center.html', '🔔 Notifications')" title="Notifications">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+          </svg>
+          <span id="notificationBadge" class="nav-badge" style="display: none;">0</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Navigation Settings Backdrop -->
+  <div class="nav-context-menu-overlay" id="navContextMenuOverlay"></div>
+
+  <!-- Navigation Settings Context Menu -->
+  <div class="nav-context-menu" id="navContextMenu">
+    <div class="nav-settings-title">⚙️ Navigation Settings</div>
+
+    <div class="nav-setting-item">
+      <div class="nav-setting-label">
+        <span>Size</span>
+        <span class="nav-setting-value" id="sizeValue">40px</span>
+      </div>
+      <input type="range" class="nav-slider" id="navSizeSlider" min="30" max="60" value="40" step="5" />
+    </div>
+
+    <div class="nav-setting-item">
+      <div class="nav-setting-label">
+        <span>Opacity</span>
+        <span class="nav-setting-value" id="opacityValue">95%</span>
+      </div>
+      <input type="range" class="nav-slider" id="navOpacitySlider" min="1" max="100" value="95" step="1" />
+    </div>
+
+    <div class="nav-setting-item">
+      <div class="nav-setting-label">
+        <span>Position</span>
+        <span class="nav-setting-value" id="positionValue">80px</span>
+      </div>
+      <input type="range" class="nav-slider" id="navPositionSlider" min="20" max="200" value="80" step="10" />
+    </div>
+
+    <div class="nav-setting-item">
+      <div class="nav-setting-label">
+        <span>Handle Size</span>
+        <span class="nav-setting-value" id="handleSizeValue">16px</span>
+      </div>
+      <input type="range" class="nav-slider" id="navHandleSizeSlider" min="6" max="40" value="16" step="2" />
+    </div>
+
+    <div class="nav-setting-item">
+      <div class="nav-setting-label">
+        <span>Navbar Location</span>
+        <span class="nav-setting-value" id="locationValue">Right Bottom</span>
+      </div>
+      <select class="nav-selector" id="navLocationSelect">
+        <option value="right-bottom">Right Bottom</option>
+        <option value="right-top">Right Top</option>
+        <option value="left-bottom">Left Bottom</option>
+        <option value="left-top">Left Top</option>
+        <option value="top-left">Top Left</option>
+        <option value="top-right">Top Right</option>
+        <option value="bottom-left">Bottom Left</option>
+        <option value="bottom-right">Bottom Right</option>
+      </select>
+    </div>
+
+    <div class="nav-setting-item">
+      <label class="nav-toggle">
+        <input type="checkbox" id="navAutoHideToggle" />
+        <span class="nav-toggle-switch"></span>
+        <span class="nav-setting-label" style="margin: 0">Auto-hide</span>
+      </label>
+    </div>
+
+    <div class="nav-setting-item">
+      <label class="nav-toggle">
+        <input type="checkbox" id="navStayExpandedToggle" />
+        <span class="nav-toggle-switch"></span>
+        <span class="nav-setting-label" style="margin: 0">Stay Expanded on Hover</span>
+      </label>
+    </div>
+
+    <div class="nav-setting-item">
+      <label class="nav-toggle">
+        <input type="checkbox" id="navLockButtonsToggle" />
+        <span class="nav-toggle-switch"></span>
+        <span class="nav-setting-label" style="margin: 0">🔒 Lock Button Positions</span>
+      </label>
+    </div>
+  </div>
+
+  <script>
+    // Supabase Configuration
+    const SUPABASE_URL = 'https://ekndrsvdyajpbaghhzol.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVrbmRyc3ZkeWFqcGJhZ2hoem9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzMyNjc4NTEsImV4cCI6MjA0ODg0Mzg1MX0.VCJxi5ECgy4gCzk6UbkAJSaWBpx7_y0kZSZRgD7HkVo';
+    const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // Admin authentication check
+    async function requireAdminSession() {
+      const session = await ArnomaAuth.ensureSession(supabaseClient);
+      if (session) {
+        document.body.classList.add('admin-verified');
+      }
+      return session;
+    }
+
+    // Helper functions
+    function openModulePopup(url, title) {
+      window.open(url, '_blank');
+    }
+
+    function scrollToTop() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function refreshPage() {
+      const btn = document.getElementById('navRefreshBtn');
+      btn.classList.add('refreshing');
+      setTimeout(() => {
+        location.reload();
+      }, 500);
+    }
+
+    // Storage helper with fallback
+    const navStorageHelper = {
+      setItem(key, value) {
+        try {
+          localStorage.setItem(key, value);
+        } catch (err) {
+          console.warn('localStorage unavailable:', err);
+        }
+      },
+      getItem(key) {
+        try {
+          return localStorage.getItem(key);
+        } catch (err) {
+          return null;
+        }
+      }
+    };
+
+    // Setup navigation context menu
+    function setupNavContextMenu() {
+      const nav = document.querySelector('.floating-nav');
+      const contextMenu = document.getElementById('navContextMenu');
+      const overlay = document.getElementById('navContextMenuOverlay');
+      const sizeSlider = document.getElementById('navSizeSlider');
+      const opacitySlider = document.getElementById('navOpacitySlider');
+      const positionSlider = document.getElementById('navPositionSlider');
+      const handleSizeSlider = document.getElementById('navHandleSizeSlider');
+      const locationSelect = document.getElementById('navLocationSelect');
+      const autoHideToggle = document.getElementById('navAutoHideToggle');
+      const stayExpandedToggle = document.getElementById('navStayExpandedToggle');
+      const lockButtonsToggle = document.getElementById('navLockButtonsToggle');
+
+      // Load saved settings
+      const savedSize = Number(navStorageHelper.getItem('navBtnSize')) || 40;
+      const savedOpacity = Number(navStorageHelper.getItem('navOpacity')) || 95;
+      const savedPosition = Number(navStorageHelper.getItem('navPosition')) || 80;
+      const savedHandleSize = Number(navStorageHelper.getItem('navHandleSize')) || 16;
+      const savedLocation = navStorageHelper.getItem('navLocation') || 'right-bottom';
+      const savedAutoHide = navStorageHelper.getItem('navAutoHide') === 'true';
+      const savedStayExpanded = navStorageHelper.getItem('navStayExpanded') === 'true';
+      const savedButtonsLocked = navStorageHelper.getItem('navButtonsLocked') === 'true';
+
+      // Apply saved settings
+      sizeSlider.value = savedSize;
+      opacitySlider.value = savedOpacity;
+      positionSlider.value = savedPosition;
+      handleSizeSlider.value = savedHandleSize;
+      locationSelect.value = savedLocation;
+      autoHideToggle.checked = savedAutoHide;
+      stayExpandedToggle.checked = savedStayExpanded;
+      lockButtonsToggle.checked = savedButtonsLocked;
+
+      applyNavSettings(savedSize, savedOpacity, savedPosition, savedHandleSize, savedLocation, savedAutoHide, savedStayExpanded);
+
+      // Right-click to open settings
+      nav.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        overlay.style.display = 'block';
+        contextMenu.style.display = 'block';
+        requestAnimationFrame(() => {
+          overlay.classList.add('show');
+          contextMenu.classList.add('show');
+        });
+      });
+
+      // Close on overlay click
+      overlay.addEventListener('click', () => {
+        contextMenu.classList.remove('show');
+        overlay.classList.remove('show');
+        setTimeout(() => {
+          contextMenu.style.display = 'none';
+          overlay.style.display = 'none';
+        }, 200);
+      });
+
+      // Slider event listeners
+      sizeSlider.addEventListener('input', (e) => {
+        const size = e.target.value;
+        document.getElementById('sizeValue').textContent = `${size}px`;
+        applyNavSettings(size, opacitySlider.value, positionSlider.value, handleSizeSlider.value, locationSelect.value, autoHideToggle.checked, stayExpandedToggle.checked);
+        navStorageHelper.setItem('navBtnSize', size);
+      });
+
+      opacitySlider.addEventListener('input', (e) => {
+        const opacity = e.target.value;
+        document.getElementById('opacityValue').textContent = `${opacity}%`;
+        applyNavSettings(sizeSlider.value, opacity, positionSlider.value, handleSizeSlider.value, locationSelect.value, autoHideToggle.checked, stayExpandedToggle.checked);
+        navStorageHelper.setItem('navOpacity', opacity);
+      });
+
+      positionSlider.addEventListener('input', (e) => {
+        const position = e.target.value;
+        document.getElementById('positionValue').textContent = `${position}px`;
+        applyNavSettings(sizeSlider.value, opacitySlider.value, position, handleSizeSlider.value, locationSelect.value, autoHideToggle.checked, stayExpandedToggle.checked);
+        navStorageHelper.setItem('navPosition', position);
+      });
+
+      handleSizeSlider.addEventListener('input', (e) => {
+        const handleSize = e.target.value;
+        document.getElementById('handleSizeValue').textContent = `${handleSize}px`;
+        applyNavSettings(sizeSlider.value, opacitySlider.value, positionSlider.value, handleSize, locationSelect.value, autoHideToggle.checked, stayExpandedToggle.checked);
+        navStorageHelper.setItem('navHandleSize', handleSize);
+      });
+
+      locationSelect.addEventListener('change', (e) => {
+        const location = e.target.value;
+        const locationText = locationSelect.options[locationSelect.selectedIndex].text;
+        document.getElementById('locationValue').textContent = locationText;
+        applyNavSettings(sizeSlider.value, opacitySlider.value, positionSlider.value, handleSizeSlider.value, location, autoHideToggle.checked, stayExpandedToggle.checked);
+        navStorageHelper.setItem('navLocation', location);
+      });
+
+      autoHideToggle.addEventListener('change', (e) => {
+        applyNavSettings(sizeSlider.value, opacitySlider.value, positionSlider.value, handleSizeSlider.value, locationSelect.value, e.target.checked, stayExpandedToggle.checked);
+        navStorageHelper.setItem('navAutoHide', e.target.checked);
+      });
+
+      stayExpandedToggle.addEventListener('change', (e) => {
+        applyNavSettings(sizeSlider.value, opacitySlider.value, positionSlider.value, handleSizeSlider.value, locationSelect.value, autoHideToggle.checked, e.target.checked);
+        navStorageHelper.setItem('navStayExpanded', e.target.checked);
+      });
+
+      lockButtonsToggle.addEventListener('change', (e) => {
+        navStorageHelper.setItem('navButtonsLocked', e.target.checked);
+      });
+
+      function applyNavSettings(size, opacity, position, handleSize, location, autoHide, stayExpanded) {
+        document.documentElement.style.setProperty('--nav-btn-size', `${size}px`);
+        document.documentElement.style.setProperty('--nav-opacity', opacity / 100);
+        document.documentElement.style.setProperty('--nav-handle-size', `${handleSize}px`);
+
+        nav.style.top = '';
+        nav.style.right = '';
+        nav.style.bottom = '';
+        nav.style.left = '';
+        nav.style.transform = '';
+        nav.style.borderRadius = '';
+
+        switch(location) {
+          case 'right-bottom':
+            nav.style.bottom = `${position}px`;
+            nav.style.right = '0';
+            nav.style.borderRadius = '20px 0 0 20px';
+            break;
+          case 'right-top':
+            nav.style.top = `${position}px`;
+            nav.style.right = '0';
+            nav.style.borderRadius = '20px 0 0 20px';
+            break;
+          case 'left-bottom':
+            nav.style.bottom = `${position}px`;
+            nav.style.left = '0';
+            nav.style.borderRadius = '0 20px 20px 0';
+            break;
+          case 'left-top':
+            nav.style.top = `${position}px`;
+            nav.style.left = '0';
+            nav.style.borderRadius = '0 20px 20px 0';
+            break;
+          case 'top-left':
+            nav.style.top = '0';
+            nav.style.left = `${position}px`;
+            nav.style.borderRadius = '0 0 20px 20px';
+            break;
+          case 'top-right':
+            nav.style.top = '0';
+            nav.style.right = `${position}px`;
+            nav.style.borderRadius = '0 0 20px 20px';
+            break;
+          case 'bottom-left':
+            nav.style.bottom = '0';
+            nav.style.left = `${position}px`;
+            nav.style.borderRadius = '20px 20px 0 0';
+            break;
+          case 'bottom-right':
+            nav.style.bottom = '0';
+            nav.style.right = `${position}px`;
+            nav.style.borderRadius = '20px 20px 0 0';
+            break;
+        }
+
+        if (autoHide) {
+          nav.classList.add('auto-hide');
+        } else {
+          nav.classList.remove('auto-hide');
+        }
+      }
+    }
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', async () => {
+      await requireAdminSession();
+      setupNavContextMenu();
+      
+      // Countdown timer placeholder
+      const timer = document.getElementById('navCountdownTimer');
+      timer.querySelector('.timer-text').textContent = 'No Class';
+    });
+  </script>
+</body>
+</html>
