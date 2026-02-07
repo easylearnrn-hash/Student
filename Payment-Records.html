@@ -8862,12 +8862,21 @@ ORDER BY timestamp DESC;</pre>
         }
 
         // Load all students for matching
-        const { data: allStudents, error: studentsError } = await supabaseClient
-          .from('students')
-          .select('id, name, email, aliases');
-        
-        if (studentsError) {
-          console.error('Error loading students for matching:', studentsError);
+        let allStudents = [];
+        try {
+          const { data, error: studentsError } = await supabaseClient
+            .from('students')
+            .select('id, name, email, aliases');
+          
+          if (studentsError) {
+            console.error('Error loading students for matching:', studentsError);
+            console.warn('⚠️ Proceeding without student matching - payments will be unmatched');
+          } else {
+            allStudents = data || [];
+          }
+        } catch (err) {
+          console.error('Exception loading students:', err);
+          console.warn('⚠️ Proceeding without student matching - payments will be unmatched');
         }
 
         // Match each payment to a student ID - ONLY by payer name, NEVER by message text
@@ -8937,21 +8946,40 @@ ORDER BY timestamp DESC;</pre>
         const paymentIds = supabasePayments.map(p => p.id);
         
         // Check for ignored payments
-        const { data: ignoredPayments } = await supabaseClient
-          .from('ignored_fuchsia_payments')
-          .select('payment_id')
-          .in('payment_id', paymentIds);
-        
-        const ignoredIds = new Set((ignoredPayments || []).map(p => p.payment_id));
+        let ignoredIds = new Set();
+        try {
+          const { data: ignoredPayments, error: ignoredError } = await supabaseClient
+            .from('ignored_fuchsia_payments')
+            .select('payment_id')
+            .in('payment_id', paymentIds);
+          
+          if (ignoredError) {
+            console.warn('⚠️ Failed to check ignored payments:', ignoredError);
+          } else {
+            ignoredIds = new Set((ignoredPayments || []).map(p => p.payment_id));
+          }
+        } catch (err) {
+          console.warn('⚠️ Exception checking ignored payments:', err);
+        }
         
         // CRITICAL FIX: Check for existing gmail_ids in payments table to prevent re-insertion
-        const { data: existingGmailPayments } = await supabaseClient
-          .from('payments')
-          .select('gmail_id, memo')
-          .in('gmail_id', paymentIds);
-        
-        const existingGmailIds = new Set((existingGmailPayments || []).map(p => p.gmail_id));
-        const existingMemoById = new Map((existingGmailPayments || []).map(p => [p.gmail_id, p.memo || '']));
+        let existingGmailIds = new Set();
+        let existingMemoById = new Map();
+        try {
+          const { data: existingGmailPayments, error: existingError } = await supabaseClient
+            .from('payments')
+            .select('gmail_id, memo')
+            .in('gmail_id', paymentIds);
+          
+          if (existingError) {
+            console.warn('⚠️ Failed to check existing payments:', existingError);
+          } else {
+            existingGmailIds = new Set((existingGmailPayments || []).map(p => p.gmail_id));
+            existingMemoById = new Map((existingGmailPayments || []).map(p => [p.gmail_id, p.memo || '']));
+          }
+        } catch (err) {
+          console.warn('⚠️ Exception checking existing payments:', err);
+        }
         
         const isMeaningfulMemo = (value = '') => {
           const trimmed = String(value || '').trim();
@@ -9006,57 +9034,66 @@ ORDER BY timestamp DESC;</pre>
           debugLog(`📊 [${contextLabel}] Student IDs: ${studentIds.join(', ')}`);
           debugLog(`📅 [${contextLabel}] for_class dates: ${forClassDates.join(', ')}`);
           
-          // Query for all existing payments with these student_ids and dates
-          const { data: existingPayments } = await supabaseClient
-            .from('payments')
-            .select('id, student_id, for_class')
-            .in('student_id', studentIds)
-            .in('for_class', forClassDates)
-            .not('student_id', 'is', null)
-            .not('for_class', 'is', null);
-          
-          if (existingPayments && existingPayments.length > 0) {
-            debugLog(`📋 [${contextLabel}] Found ${existingPayments.length} existing (student_id, for_class) pairs in database`);
+          try {
+            // Query for all existing payments with these student_ids and dates
+            const { data: existingPayments, error: checkError } = await supabaseClient
+              .from('payments')
+              .select('id, student_id, for_class')
+              .in('student_id', studentIds)
+              .in('for_class', forClassDates)
+              .not('student_id', 'is', null)
+              .not('for_class', 'is', null);
             
-            // Create a Set of existing (student_id, for_class) combinations
-            const existingPairs = new Set(
-              existingPayments.map(p => `${p.student_id}|${p.for_class}`)
-            );
-            
-            // Filter out payments that would violate the unique constraint
-            const beforeFilterCount = paymentsToInsert.length;
-            const filteredPayments = paymentsToInsert.filter(p => {
-              const studentId = p.linked_student_id || p.student_id;
-              const forClassCandidate = getForClassCandidate(p);
-              if (!studentId || !forClassCandidate) return true; // Keep payments without both fields
-              const pairKey = `${studentId}|${forClassCandidate}`;
-              const isDuplicate = existingPairs.has(pairKey);
-              if (isDuplicate) {
-                debugLog(`🚫 [${contextLabel}] Filtering duplicate: student_id=${studentId}, for_class=${forClassCandidate}`);
+            if (checkError) {
+              console.warn(`⚠️ [${contextLabel}] Failed to check for duplicate (student_id, for_class) pairs:`, checkError);
+              // Continue anyway - the insert will handle duplicates via ignoreDuplicates flag
+            } else if (existingPayments && existingPayments.length > 0) {
+              debugLog(`📋 [${contextLabel}] Found ${existingPayments.length} existing (student_id, for_class) pairs in database`);
+              
+              // Create a Set of existing (student_id, for_class) combinations
+              const existingPairs = new Set(
+                existingPayments.map(p => `${p.student_id}|${p.for_class}`)
+              );
+              
+              // Filter out payments that would violate the unique constraint
+              const beforeFilterCount = paymentsToInsert.length;
+              const filteredPayments = paymentsToInsert.filter(p => {
+                const studentId = p.linked_student_id || p.student_id;
+                const forClassCandidate = getForClassCandidate(p);
+                if (!studentId || !forClassCandidate) return true; // Keep payments without both fields
+                const pairKey = `${studentId}|${forClassCandidate}`;
+                const isDuplicate = existingPairs.has(pairKey);
+                if (isDuplicate) {
+                  debugLog(`🚫 [${contextLabel}] Filtering duplicate: student_id=${studentId}, for_class=${forClassCandidate}`);
+                }
+                return !isDuplicate; // Only keep if pair doesn't exist
+              });
+              
+              const duplicateCount = beforeFilterCount - filteredPayments.length;
+              if (duplicateCount > 0) {
+                console.log(`⚠️ [${contextLabel}] Filtered out ${duplicateCount} duplicate (student_id, for_class) pairs BEFORE insert`);
+                paymentsToInsert.length = 0;
+                paymentsToInsert.push(...filteredPayments);
               }
-              return !isDuplicate; // Only keep if pair doesn't exist
-            });
-            
-            const duplicateCount = beforeFilterCount - filteredPayments.length;
-            if (duplicateCount > 0) {
-              console.log(`⚠️ [${contextLabel}] Filtered out ${duplicateCount} duplicate (student_id, for_class) pairs BEFORE insert`);
-              paymentsToInsert.length = 0;
-              paymentsToInsert.push(...filteredPayments);
+            } else {
+              debugLog(`✅ [${contextLabel}] No existing (student_id, for_class) pairs found - safe to insert`);
             }
-          } else {
-            debugLog(`✅ [${contextLabel}] No existing (student_id, for_class) pairs found - safe to insert`);
+          } catch (err) {
+            console.warn(`⚠️ [${contextLabel}] Exception checking duplicates:`, err);
+            // Continue anyway - the insert will handle duplicates
           }
         }
 
         if (paymentsToInsert.length === 0) {
-          debugLog(`⏭️ [${contextLabel}] All payments are duplicates or ignored, skipping insert`);
+          console.log(`⏭️ [${contextLabel}] All payments are duplicates or ignored, skipping insert`);
           return { data: [], error: null };
         }
 
         // CRITICAL: Use ignoreDuplicates=true to skip updates of existing gmail_id records
         // This prevents overwriting manually-assigned student_id/for_class values
         // which would violate the unique_student_class_payment constraint
-        console.log(`💾 [${contextLabel}] Inserting ${paymentsToInsert.length} payment(s) with ignoreDuplicates=true`);
+        console.log(`💾 [${contextLabel}] Attempting to insert ${paymentsToInsert.length} new payment(s) (ignoreDuplicates=true)`);
+        debugLog(`📊 [${contextLabel}] Payment IDs being inserted:`, paymentsToInsert.map(p => p.gmail_id));
         
         const { data, error } = await supabaseClient
           .from('payments')
