@@ -8513,6 +8513,8 @@ ORDER BY timestamp DESC;</pre>
             // console.log(`✅ [${silent ? 'Auto-Refresh' : 'Manual'}] Parsed ${payments.length} NEW payments (after filtering known IDs)`);
             debugLog(`✅ [${silent ? 'Auto-Refresh' : 'Manual'}] Parsed ${payments.length} payments:`, payments);
 
+            adjustDaysLoadedForPayments(payments);
+
             const { error } = await savePaymentsToSupabase(payments, 'Auto-Refresh');
             if (error) {
               console.error('[Auto-Refresh] Supabase save failed');
@@ -8765,6 +8767,7 @@ ORDER BY timestamp DESC;</pre>
           if (payments.length > 0) {
             debugLog(`✅ Parsed ${payments.length} payments from last ${lookbackHours}h`);
             renderPayments(payments);
+            adjustDaysLoadedForPayments(payments);
             const { data, error } = await savePaymentsToSupabase(payments, 'Manual Sync - Recent');
             if (error) {
               showNotification('❌ Failed to save payments to Supabase. See console for details.', 'error');
@@ -8827,6 +8830,30 @@ ORDER BY timestamp DESC;</pre>
           return;
         }
         PaymentRecordsEngine.ingestLivePayments(payments);
+      }
+
+      function adjustDaysLoadedForPayments(payments = []) {
+        if (!payments.length || !PaymentRecordsEngine?.state) return;
+
+        const now = Date.now();
+        let oldestTs = null;
+
+        payments.forEach(payment => {
+          const candidate = payment.email_date || payment.emailDate || payment.date || payment.created_at || payment.timestamp || payment.time;
+          const ts = Date.parse(candidate);
+          if (!Number.isNaN(ts)) {
+            oldestTs = oldestTs === null ? ts : Math.min(oldestTs, ts);
+          }
+        });
+
+        if (!oldestTs) return;
+
+        const daysNeeded = Math.ceil((now - oldestTs) / 86400000);
+        if (daysNeeded > PaymentRecordsEngine.state.daysLoaded) {
+          PaymentRecordsEngine.state.daysLoaded = daysNeeded;
+          PaymentRecordsEngine.state.paymentsCache = null;
+          debugLog(`📆 Expanded daysLoaded to ${daysNeeded} to keep older Gmail payments visible`);
+        }
       }
 
       async function savePaymentsToSupabase(payments = [], contextLabel = 'Manual Sync') {
@@ -10156,6 +10183,7 @@ ORDER BY timestamp DESC;</pre>
             showNotification(`✅ Found ${payments.length} payment${payments.length > 1 ? 's' : ''} from ${fromDate} to ${toDate}!`, 'success');
 
             renderPayments(payments);
+            adjustDaysLoadedForPayments(payments);
 
             const { data, error } = await savePaymentsToSupabase(payments, 'Manual Sync - Date Range');
             if (error) {
