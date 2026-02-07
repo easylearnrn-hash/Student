@@ -9041,11 +9041,24 @@ ORDER BY timestamp DESC;</pre>
 
         if (error) {
           console.error(`[${contextLabel}] Error saving to Supabase:`, error);
-          if (error.code === '23505') {
-            // This should not happen with ignoreDuplicates=true, but handle gracefully
-            console.warn(`⚠️ [${contextLabel}] Constraint violation - skipping duplicate`);
+
+          // Some Supabase responses return HTTP status 409 for unique constraint
+          // violations or may not expose Postgres error code directly. Treat
+          // these as non-fatal when they indicate duplicate/constraint issues
+          // and ignore them because ignoreDuplicates=true was requested.
+          const message = (error.message || '').toString();
+          const status = error.status || error.statusCode || null;
+          const isConstraintViolation = (
+            error.code === '23505' || // Postgres unique_violation
+            status === 409 || // HTTP conflict
+            /duplicate|unique|constraint|already exists/i.test(message)
+          );
+
+          if (isConstraintViolation) {
+            console.warn(`⚠️ [${contextLabel}] Constraint violation / duplicate detected - skipping duplicate inserts`);
             return { data: data || [], error: null };
           }
+
           return { data: null, error };
         }
         
