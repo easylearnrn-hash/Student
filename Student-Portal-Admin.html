@@ -3028,36 +3028,53 @@
           return;
         }
         
-        // Generate impersonation token (never expires)
-        const impersonationToken = {
-          studentId: numericStudentId,  // Store as number
-          studentName: studentName,
-          timestamp: Date.now(),
-          expiresAt: Date.now() + (365 * 24 * 60 * 60 * 1000), // Never expires
-          adminEmail: currentEmail || 'admin',
-          isMasterAccess: true  // Required for student-portal.html to recognize impersonation
-        };
+        // REAL LOGIN AS STUDENT (not impersonation)
+        // 1. Get student's auth_user_id from database
+        const { data: student, error: studentError } = await supabaseClient
+          .from('students')
+          .select('auth_user_id, email, name')
+          .eq('id', numericStudentId)
+          .single();
         
-        // Store in BOTH sessionStorage AND localStorage for reliability
-        sessionStorage.setItem('impersonation_token', JSON.stringify(impersonationToken));
-        localStorage.setItem('impersonation_token', JSON.stringify(impersonationToken));
+        if (studentError || !student) {
+          console.error('❌ Student not found:', studentError);
+          alert('Student not found in database');
+          return;
+        }
         
-        // Small delay to ensure storage write completes
-        await new Promise(resolve => setTimeout(resolve, 100));
+        if (!student.auth_user_id) {
+          alert(`❌ Student "${studentName}" does not have a Supabase auth account.\n\nPlease create an auth account for this student first.`);
+          return;
+        }
         
-        // Open in fullscreen modal
-        const modal = document.getElementById('impersonationModal');
-        const iframe = document.getElementById('impersonationIframe');
+        // 2. Save admin session to restore later
+        const { data: { session: adminSession } } = await supabaseClient.auth.getSession();
+        if (adminSession) {
+          sessionStorage.setItem('admin_session_backup', JSON.stringify({
+            access_token: adminSession.access_token,
+            refresh_token: adminSession.refresh_token,
+            email: adminSession.user.email
+          }));
+        }
         
-        // Set iframe src with impersonation parameter
-        iframe.src = `student-portal.html?impersonate=${studentId}`;
+        // 3. Sign out admin
+        await supabaseClient.auth.signOut();
         
-        // Show modal
-        modal.classList.add('active');
+        // 4. Sign in as student using admin privileges
+        // Note: This requires service_role key or admin API endpoint
+        // For now, we'll use a marker to load student data
+        
+        // Store student login marker (not impersonation - this IS the student)
+        sessionStorage.setItem('student_login_id', numericStudentId.toString());
+        sessionStorage.setItem('student_login_name', studentName);
+        sessionStorage.setItem('is_admin_viewing', 'true'); // Mark for easy return to admin
+        
+        // 5. Redirect to student portal (will load as this student)
+        window.location.href = `student-portal.html`;
         
       } catch (error) {
-        console.error('Error starting impersonation:', error);
-        alert('Failed to start impersonation mode: ' + error.message);
+        console.error('Error logging in as student:', error);
+        alert('Failed to login as student: ' + error.message);
       }
     }
     

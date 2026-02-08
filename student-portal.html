@@ -4122,6 +4122,11 @@
           </div>
         </div>
         <div class="header-actions">
+          <!-- Back to Admin Button (shown when admin is viewing as student) -->
+          <button class="forum-btn admin-back-btn" id="backToAdminBtn" onclick="returnToAdmin()" style="display: none; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            <span>👑</span>
+            <span>Back to Admin</span>
+          </button>
           <button class="forum-btn" id="portalAdminBtn" onclick="window.location.href='Student-Portal-Admin.html'" style="display: none;">
             <span>🎛️</span>
             <span>Portal</span>
@@ -4817,6 +4822,36 @@
       
       // ---------- Normal Student Authentication ----------
       const { data: { session } } = await supabaseClient.auth.getSession();
+      
+      // 🔥 NEW: Check if admin is viewing as a specific student (direct login, not impersonation)
+      const studentLoginId = sessionStorage.getItem('student_login_id');
+      if (studentLoginId && !session) {
+        // Admin has selected a student to view as - load that student directly
+        console.log('👁️ Admin viewing as student ID:', studentLoginId);
+        
+        const { data: studentData, error: studentError } = await supabaseClient
+          .from('students')
+          .select('*')
+          .eq('id', parseInt(studentLoginId))
+          .single();
+        
+        if (studentError || !studentData) {
+          console.error('❌ Student not found:', studentError);
+          sessionStorage.removeItem('student_login_id');
+          sessionStorage.removeItem('student_login_name');
+          sessionStorage.removeItem('is_admin_viewing');
+          alert('Student not found. Returning to admin panel...');
+          window.location.href = 'Student-Portal-Admin.html';
+          return null;
+        }
+        
+        console.log('✅ Loaded student data:', studentData.name);
+        
+        // Add a visual indicator that admin is viewing
+        document.body.setAttribute('data-admin-viewing', 'true');
+        
+        return studentData;
+      }
       
       if (!session) {
         // Check if we're in admin chat mode - if so, it's okay to have no session
@@ -6601,6 +6636,13 @@
         const portalBtn = document.getElementById('portalAdminBtn');
         if (portalBtn) {
           portalBtn.style.display = 'none';
+        }
+        
+        // Show "Back to Admin" button if admin is viewing as student
+        const backToAdminBtn = document.getElementById('backToAdminBtn');
+        const isAdminViewing = sessionStorage.getItem('is_admin_viewing') === 'true';
+        if (backToAdminBtn && isAdminViewing) {
+          backToAdminBtn.style.display = 'flex';
         }
         
         // Check for impersonation mode first
@@ -8772,6 +8814,34 @@
         }
       }
     });
+    
+    // Return to Admin Panel (when viewing as student)
+    async function returnToAdmin() {
+      try {
+        // Clear student viewing markers
+        sessionStorage.removeItem('student_login_id');
+        sessionStorage.removeItem('student_login_name');
+        sessionStorage.removeItem('is_admin_viewing');
+        
+        // Restore admin session if saved
+        const adminBackup = sessionStorage.getItem('admin_session_backup');
+        if (adminBackup) {
+          const { access_token, refresh_token } = JSON.parse(adminBackup);
+          await supabaseClient.auth.setSession({
+            access_token,
+            refresh_token
+          });
+          sessionStorage.removeItem('admin_session_backup');
+        }
+        
+        // Redirect back to admin panel
+        window.location.href = 'Student-Portal-Admin.html';
+      } catch (error) {
+        console.error('Error returning to admin:', error);
+        // Force redirect anyway
+        window.location.href = 'Student-Portal-Admin.html';
+      }
+    }
     
     // Logout function
     async function logout() {
