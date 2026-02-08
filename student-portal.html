@@ -11422,17 +11422,9 @@
           systemStatsCacheKey = cacheKey;
         }
 
-        function determineSystemStatus(progress) {
-          // 100% = Completed (Green)
-          if (progress === 100) return 'completed';
-          
-          // 90%+ = In Progress (Blue)
-          if (progress >= 90) return 'in-progress';
-          
-          // 1-89% = Will be set to 'current' for lowest progress (Yellow)
-          if (progress > 0) return 'in-progress';
-          
-          // 0% = Not Started (Red)
+        function determineSystemStatusByViewed(totalNotes, viewedNotes) {
+          if (totalNotes > 0 && viewedNotes >= totalNotes) return 'completed';
+          if (viewedNotes > 0) return 'in-progress';
           return 'not-started';
         }
 
@@ -11626,6 +11618,7 @@
             }
             
             const systemNotes = stats?.totalNotes || 0;
+            const viewedNotes = stats?.viewedNotes || 0;
             const lockedNotes = stats?.lockedNotes || 0;
             const unlockedNotes = stats?.unlockedNotes || 0;
             
@@ -11649,25 +11642,10 @@
               }
             }
             
-            // Progress calculation:
-            // Prefer template totals when available to avoid false 100% completion.
+            // Progress calculation based on opened notes
             let progress = 0;
-            let totalNotesForProgress = totalNotesInSystem;
-
-            if (totalTemplates > 0) {
-              totalNotesForProgress = totalTemplates;
-            } else if (totalNotesInSystem === systemNotes) {
-              // If our total equals posted count, treat as unknown to keep in-progress
-              totalNotesForProgress = 0;
-            }
-            
-            if (totalNotesForProgress > 0 && systemNotes > 0) {
-              progress = Math.min(100, Math.round((systemNotes / totalNotesForProgress) * 100));
-            } else if (systemNotes > 0) {
-              // Notes exist but we don't know total - mark as in progress
-              progress = 50;
-            } else {
-              progress = 0;
+            if (systemNotes > 0) {
+              progress = Math.min(100, Math.round((viewedNotes / systemNotes) * 100));
             }
             
             return {
@@ -11676,8 +11654,9 @@
               icon: folder.icon || '📚',
               totalTemplates: totalNotesInSystem, // Use actual total instead of template count
               assignedCount: systemNotes,
+              viewedCount: viewedNotes,
               progress,
-              status: folder.is_current ? 'current' : determineSystemStatus(progress)
+              status: folder.is_current ? 'current' : determineSystemStatusByViewed(systemNotes, viewedNotes)
             };
           });
           
@@ -11698,17 +11677,12 @@
           nclexSystems = Array.from(normalizedSystems).map(normalizedName => {
             const stats = assignmentStats.get(normalizedName);
             const systemNotes = stats?.totalNotes || 0;
-            let totalNotesInSystem = totalNotesByNormalized.get(normalizedName) || systemNotes;
-
-            if (totalNotesInSystem === systemNotes) {
-              totalNotesInSystem = 0;
-            }
+            const viewedNotes = stats?.viewedNotes || 0;
+            const totalNotesInSystem = totalNotesByNormalized.get(normalizedName) || systemNotes;
 
             let progress = 0;
-            if (totalNotesInSystem > 0 && systemNotes > 0) {
-              progress = Math.min(100, Math.round((systemNotes / totalNotesInSystem) * 100));
-            } else if (systemNotes > 0) {
-              progress = 50;
+            if (systemNotes > 0) {
+              progress = Math.min(100, Math.round((viewedNotes / systemNotes) * 100));
             }
 
             return {
@@ -11717,8 +11691,9 @@
               icon: '📚',
               totalTemplates: totalNotesInSystem,
               assignedCount: systemNotes,
+              viewedCount: viewedNotes,
               progress,
-              status: determineSystemStatus(progress)
+              status: determineSystemStatusByViewed(systemNotes, viewedNotes)
             };
           });
 
@@ -11739,7 +11714,7 @@
           if (sys.status === 'current') {
             if (foundCurrent) {
               // Already found one - reset this to normal status
-              sys.status = determineSystemStatus(sys.progress);
+              sys.status = determineSystemStatusByViewed(sys.assignedCount || 0, sys.viewedCount || 0);
             } else {
               foundCurrent = true;
             }
