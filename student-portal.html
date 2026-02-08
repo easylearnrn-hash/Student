@@ -10720,6 +10720,12 @@
         // Combine permission-based access AND free access
         const allAccessibleNoteIds = [...new Set([...permissionNoteIds, ...freeAccessNoteIds])];
         
+        console.log('🔓 ACCESSIBLE NOTE IDS:', {
+          total: allAccessibleNoteIds.length,
+          fromPermissions: permissionNoteIds.length,
+          fromFreeAccess: freeAccessNoteIds.length
+        });
+        
         if (DEBUG_MODE) {
           debugLog('🔓 Total Accessible Notes:', allAccessibleNoteIds.length, '(Permissions:', permissionNoteIds.length, '+ Free:', freeAccessNoteIds.length, ')');
         }
@@ -10749,6 +10755,18 @@
         }
         
         if (DEBUG_MODE) debugLog(`✅ Loaded ${notes?.length || 0} notes`);
+        
+        // ALWAYS log note count for debugging
+        console.log('📚 LOADED NOTES COUNT:', notes?.length || 0);
+        if (notes && notes.length > 0) {
+          console.log('📝 Sample notes (first 3):', notes.slice(0, 3).map(n => ({
+            id: n.id,
+            title: n.title,
+            category: n.category,
+            system_category: n.system_category,
+            group_name: n.group_name
+          })));
+        }
         
         // USE THE PASSED PAYMENT DATA (already loaded by loadPaymentHistory)
         const mergedPaymentRecords = paymentData;
@@ -10882,6 +10900,13 @@
         allSystemNotes = transformedNotes;
         refreshSystemAssignmentStats();
         
+        console.log('✅ ALL SYSTEM NOTES SET:', allSystemNotes.length);
+        console.log('📊 System breakdown:', allSystemNotes.reduce((acc, note) => {
+          const sys = note.course || 'Unknown';
+          acc[sys] = (acc[sys] || 0) + 1;
+          return acc;
+        }, {}));
+        
         // 🔄 Refresh the progress carousel with new note data
         await loadSystemsProgress();
         
@@ -10907,6 +10932,9 @@
   function filterNotesBySystem(systemName) {
       selectedSystem = systemName;
       
+      console.log('🔍 Filtering notes for system:', systemName);
+      console.log('📚 Total notes available:', allSystemNotes.length);
+      
       // Normalize system names for comparison (handle "Cardiovascular" vs "Cardiovascular System")
       const normalizeSystemName = (name) => {
         if (!name) return '';
@@ -10914,13 +10942,19 @@
         return name.replace(/\s+System$/i, '').trim().toLowerCase();
       };
       
-  const normalizedSearchName = normalizeSystemName(systemName);
+      const normalizedSearchName = normalizeSystemName(systemName);
+      console.log('🎯 Normalized search name:', normalizedSearchName);
       
       let filteredNotes = allSystemNotes.filter(note => {
         const systemNameFromNote = getSystemNameFromNote(note);
         const normalizedNoteName = normalizeSystemName(systemNameFromNote);
         return normalizedNoteName === normalizedSearchName;
       });
+      
+      console.log('✅ Filtered notes count:', filteredNotes.length);
+      if (filteredNotes.length > 0) {
+        console.log('📝 First 3 filtered notes:', filteredNotes.slice(0, 3).map(n => ({ title: n.title, category: n.course })));
+      }
       
       // Apply locked filter if active
       if (showLockedOnly) {
@@ -11422,9 +11456,17 @@
           systemStatsCacheKey = cacheKey;
         }
 
-        function determineSystemStatusByViewed(totalNotes, viewedNotes) {
-          if (totalNotes > 0 && viewedNotes >= totalNotes) return 'completed';
-          if (viewedNotes > 0) return 'in-progress';
+        function determineSystemStatus(progress) {
+          // 100% = Completed (Green)
+          if (progress === 100) return 'completed';
+          
+          // 90%+ = In Progress (Blue)
+          if (progress >= 90) return 'in-progress';
+          
+          // 1-89% = Will be set to 'current' for lowest progress (Yellow)
+          if (progress > 0) return 'in-progress';
+          
+          // 0% = Not Started (Red)
           return 'not-started';
         }
 
@@ -11484,6 +11526,8 @@
     async function loadSystemsProgress() {
       const loadStartTime = Date.now(); // Track when loading started
       
+      console.log('🎯 loadSystemsProgress() called');
+      
       const carousel = document.getElementById('systemsCarousel');
       if (!carousel) {
         console.error('❌ Carousel element not found');
@@ -11491,6 +11535,8 @@
       }
 
       refreshSystemAssignmentStats();
+      
+      console.log('📊 systemAssignmentStats:', systemAssignmentStats);
 
       try {
         // Get student's group letter for filtering folders
@@ -11537,45 +11583,48 @@
           systemsDataCache.timestamp = Date.now();
         }
         
-        // Build map of total notes per system
-        const totalNotesPerSystem = new Map();
-        if (allNotes && allNotes.length > 0) {
-          allNotes.forEach(note => {
-            // CONSISTENT: Use helper function to get system name
+        // 📊 NEW STATS CALCULATION: Based on OPENED notes vs ASSIGNED notes
+        // 1. Get opened notes (from localStorage/memory)
+        const openedNotesSet = getOpenedNotes();
+        
+        // 2. Count ACTUAL visible notes per system
+        // systemName -> { assigned: 0, opened: 0 }
+        const studentSystemStats = new Map();
+
+        // Use allSystemNotes which contains the notes currently visible to student (after RLS/permissions)
+        if (allSystemNotes && allSystemNotes.length > 0) {
+          allSystemNotes.forEach(note => {
+            // Use getSystemNameFromNote helper to be consistent
             const systemName = getSystemNameFromNote(note);
-            totalNotesPerSystem.set(systemName, (totalNotesPerSystem.get(systemName) || 0) + 1);
+            
+            if (!studentSystemStats.has(systemName)) {
+              studentSystemStats.set(systemName, { assigned: 0, opened: 0 });
+            }
+            
+            const stats = studentSystemStats.get(systemName);
+            stats.assigned++;
+            
+            // Note.read is set in loadClassroomUpdates, or check Set directly
+            if (note.read || openedNotesSet.has(note.id)) {
+              stats.opened++;
+            }
           });
-        } else {
-          // Fallback: Use allSystemNotes if we couldn't fetch all notes
-          console.warn('⚠️ Could not fetch all notes, using accessible notes for totals');
-          if (allSystemNotes && allSystemNotes.length > 0) {
-            allSystemNotes.forEach(note => {
-              const systemName = getSystemNameFromNote(note);
-              totalNotesPerSystem.set(systemName, (totalNotesPerSystem.get(systemName) || 0) + 1);
-            });
-          }
-        }
-
-        const assignmentStats = systemAssignmentStats || new Map();
-
-        // Build normalized totals for fallback rendering (when folders are missing)
-        const totalNotesByNormalized = new Map();
-        const systemDisplayNames = new Map();
-        for (const [systemName, count] of totalNotesPerSystem.entries()) {
-          const normalized = normalizeSystemName(systemName);
-          totalNotesByNormalized.set(normalized, (totalNotesByNormalized.get(normalized) || 0) + count);
-          if (!systemDisplayNames.has(normalized)) {
-            systemDisplayNames.set(normalized, systemName);
-          }
         }
         
+        console.log('📊 Student System Stats:', Object.fromEntries(studentSystemStats));
+
         // Build systems array from folders or use defaults
         if (folders && folders.length) {
           // CRITICAL: Deduplicate folders by NORMALIZED name (case-insensitive, handle variations)
           const folderMap = new Map();
+          const normalizeName = (name) => {
+            if (!name) return '';
+            return name.replace(/\s+System$/i, '').trim().toLowerCase();
+          };
+
           folders.forEach(folder => {
             // Normalize the folder name for robust matching
-            const normalizedKey = normalizeSystemName(folder.folder_name);
+            const normalizedKey = normalizeName(folder.folder_name);
             const existing = folderMap.get(normalizedKey);
             
             // Keep this folder if: no existing, OR existing is global (null) but this is group-specific
@@ -11583,150 +11632,93 @@
               folderMap.set(normalizedKey, folder);
             }
           });
+          
           // Now map unique folders to system objects
           const mappedSystems = Array.from(folderMap.values()).map(folder => {
-            const totalTemplates = folder.note_templates?.length || 0;
+            const normalizedFolderName = normalizeName(folder.folder_name);
             
-            // Normalize folder name for stats lookup (remove " System" suffix)
-            const normalizedFolderName = normalizeSystemName(folder.folder_name);
+            // Find stats for this folder
+            let systemStats = { assigned: 0, opened: 0 };
             
-            // Try normalized name first
-            let stats = assignmentStats.get(normalizedFolderName);
-            
-            // Try exact match with full name
-            if (!stats) {
-              stats = assignmentStats.get(folder.folder_name);
+            // 1. Try exact match
+            if (studentSystemStats.has(folder.folder_name)) {
+              systemStats = studentSystemStats.get(folder.folder_name);
+            } 
+            // 2. Try normalized match
+            else {
+               // Verify against keys in studentSystemStats
+               for (const [key, val] of studentSystemStats.entries()) {
+                 if (normalizeName(key) === normalizedFolderName) {
+                   systemStats = val;
+                   break;
+                 }
+               }
             }
             
-            if (!stats) {
-              // Try fuzzy matching: find stats key that contains or is contained by folder name
-              const folderNameLower = folder.folder_name.toLowerCase();
-              const normalizedLower = normalizedFolderName.toLowerCase();
-              for (const [key, value] of assignmentStats.entries()) {
-                const keyLower = key.toLowerCase();
-                // Match if: exact, key contains folder name, folder name contains key, OR normalized names match
-                if (keyLower === folderNameLower || 
-                    keyLower === normalizedLower ||
-                    keyLower.includes(folderNameLower) || 
-                    keyLower.includes(normalizedLower) ||
-                    folderNameLower.includes(keyLower) ||
-                    normalizedLower.includes(keyLower)) {
-                  stats = value;
-                  break;
-                }
-              }
-            }
-            
-            const systemNotes = stats?.totalNotes || 0;
-            const viewedNotes = stats?.viewedNotes || 0;
-            const lockedNotes = stats?.lockedNotes || 0;
-            const unlockedNotes = stats?.unlockedNotes || 0;
-            
-            // Get total notes for this system (using fuzzy matching like we do for stats)
-            let totalNotesInSystem = 0;
-            
-            // Try exact match first
-            if (totalNotesPerSystem.has(folder.folder_name)) {
-              totalNotesInSystem = totalNotesPerSystem.get(folder.folder_name);
-            } else {
-              // Try fuzzy matching
-              const folderNameLower = folder.folder_name.toLowerCase();
-              for (const [key, value] of totalNotesPerSystem.entries()) {
-                const keyLower = key.toLowerCase();
-                if (keyLower === folderNameLower || 
-                    keyLower.includes(folderNameLower) || 
-                    folderNameLower.includes(keyLower)) {
-                  totalNotesInSystem = value;
-                  break;
-                }
-              }
-            }
-            
-            // Progress calculation based on opened notes
+            // PROGRESS: Opened / Assigned (Visible)
             let progress = 0;
-            if (systemNotes > 0) {
-              progress = Math.min(100, Math.round((viewedNotes / systemNotes) * 100));
+            if (systemStats.assigned > 0) {
+              progress = Math.round((systemStats.opened / systemStats.assigned) * 100);
             }
             
+            // Determine Status based strictly on progress & current flag
+            let status = 'not-started';
+            
+            if (folder.is_current) {
+               // If it's current, does it stay Yellow even if 100%? 
+               // User: "unless all notes are open it should not change from blue to green".
+               // User: "Green means all notes... have been opened (100% progress)"
+               // This implies Green overrides everything OR Green happens at 100%.
+               // Let's assume Green > Yellow if 100%.
+               if (progress === 100 && systemStats.assigned > 0) {
+                 status = 'completed';
+               } else {
+                 status = 'current';
+               }
+            } else {
+               if (progress === 100 && systemStats.assigned > 0) {
+                 status = 'completed';
+               } else if (progress > 0) {
+                 status = 'in-progress';
+               } else {
+                 status = 'not-started';
+               }
+            }
+
             return {
               id: folder.id,
               name: folder.folder_name,
               icon: folder.icon || '📚',
-              totalTemplates: totalNotesInSystem, // Use actual total instead of template count
-              assignedCount: systemNotes,
-              viewedCount: viewedNotes,
+              totalTemplates: systemStats.assigned, // Show assigned counts for student
+              assignedCount: systemStats.opened,    // Show opened counts
               progress,
-              status: folder.is_current ? 'current' : determineSystemStatusByViewed(systemNotes, viewedNotes)
+              status
             };
           });
           
-          // SHOW ALL SYSTEMS: Display all configured systems including "Not Started" (red cards)
-          // Students should see:
-          // - 🟢 GREEN = Completed systems (100%)
-          // - 🔵 BLUE = In-progress systems (1-99%)
-          // - 🟡 YELLOW = Current/ongoing system (admin marked)
-          // - 🔴 RED = Not started systems (0% - no notes yet)
           nclexSystems = mappedSystems;
+          
+          console.log('🎨 System cards generated:', nclexSystems.length);
+          console.log('📋 Systems by status:', nclexSystems.reduce((acc, s) => {
+            acc[s.status] = (acc[s.status] || 0) + 1;
+            return acc;
+          }, {}));
         } else {
-          // Fallback: Build cards from accessible notes when folders aren't available
-          const normalizedSystems = new Set([
-            ...assignmentStats.keys(),
-            ...totalNotesByNormalized.keys()
-          ]);
-
-          nclexSystems = Array.from(normalizedSystems).map(normalizedName => {
-            const stats = assignmentStats.get(normalizedName);
-            const systemNotes = stats?.totalNotes || 0;
-            const viewedNotes = stats?.viewedNotes || 0;
-            const totalNotesInSystem = totalNotesByNormalized.get(normalizedName) || systemNotes;
-
-            let progress = 0;
-            if (systemNotes > 0) {
-              progress = Math.min(100, Math.round((viewedNotes / systemNotes) * 100));
-            }
-
-            return {
-              id: normalizedName,
-              name: systemDisplayNames.get(normalizedName) || normalizedName,
-              icon: '📚',
-              totalTemplates: totalNotesInSystem,
-              assignedCount: systemNotes,
-              viewedCount: viewedNotes,
-              progress,
-              status: determineSystemStatusByViewed(systemNotes, viewedNotes)
-            };
-          });
-
-          if (nclexSystems.length === 0) {
-            nclexSystems = DEFAULT_SYSTEMS.map(system => ({
-              ...system,
-              totalTemplates: 0,
-              assignedCount: 0,
-              progress: 0,
-              status: 'not-started'
-            }));
-          }
+          nclexSystems = DEFAULT_SYSTEMS.map(system => ({
+            ...system,
+            totalTemplates: 0,
+            assignedCount: 0,
+            progress: 0,
+            status: 'not-started'
+          }));
         }
-        // Database is_current flag is the source of truth (set by Group-Notes.html)
-        // Just ensure only ONE system has 'current' status (in case of data issues)
-        let foundCurrent = false;
-        nclexSystems.forEach(sys => {
-          if (sys.status === 'current') {
-            if (foundCurrent) {
-              // Already found one - reset this to normal status
-              sys.status = determineSystemStatusByViewed(sys.assignedCount || 0, sys.viewedCount || 0);
-            } else {
-              foundCurrent = true;
-            }
-          }
-        });
 
         // Sort systems by completion status
-        // Order: Completed → Ongoing/Current → In Progress → Not Started
+        // Order: Completed (Green) → Ongoing/Current (Yellow) → In Progress (Blue) → Not Started (Red)
         nclexSystems.sort((a, b) => {
           const statusOrder = {
             'completed': 1,
-            'current': 2,      // Ongoing system
+            'current': 2,      
             'in-progress': 3,
             'not-started': 4
           };
