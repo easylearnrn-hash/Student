@@ -4687,200 +4687,64 @@
       // Check for MASTER ACCESS token (from login page)
       const masterTokenStr = sessionStorage.getItem('impersonation_token') || localStorage.getItem('impersonation_token');
       debugLog('🔍 Checking for master token:', masterTokenStr ? 'FOUND' : 'NOT FOUND');
+      // Deprecated master/impersonation tokens are no longer supported.
       if (masterTokenStr) {
-        try {
-          const masterToken = JSON.parse(masterTokenStr);
-          debugLog('📋 Master token parsed:', masterToken);
-          debugLog('🔍 Is master access?', masterToken.isMasterAccess);
-          // 🔥 REMOVED TIMEOUT CHECK - impersonation never expires
-          // console.log('🔍 Is expired?', masterToken.expiresAt < Date.now());
-          
-          if (masterToken.isMasterAccess) {
-            debugLog('🔓 MASTER ACCESS detected (no timeout):', masterToken.studentName);
-            
-            // Load student data
-            const { data: student, error } = await supabaseClient
-              .from('students')
-              .select('*')
-              .eq('id', masterToken.studentId)
-              .maybeSingle();
-            
-            debugLog('Student data:', student);
-            debugLog('Error:', error);
-            
-            if (student) {
-              debugLog('✅ Master access granted for:', student.name);
-              debugLog('📊 Setting currentStudent and loading portal data...');
-              currentStudent = student; // SET GLOBAL BEFORE LOADING
-              window.currentStudent = student; // Also set window property
-              await loadPortalData();
-              await ensurePaymentsData();
-              debugLog('✅ Portal data loaded! paymentHistory:', window.paymentHistory);
-              return student;
-            } else {
-              console.log('❌ Student not found for ID:', masterToken.studentId);
-            }
-          } else {
-            console.log('❌ Master token invalid or expired');
-          }
-        } catch (e) {
-          console.log('❌ Error parsing master token:', e);
-        }
+        console.warn('⚠️ Deprecated master token found. Clearing token.');
+        sessionStorage.removeItem('impersonation_token');
+        localStorage.removeItem('impersonation_token');
       }
-      
-      // Check for impersonation mode first
+
+      // Deprecated ?impersonate= URL is ignored in favor of student_login_id.
       const urlParams = new URLSearchParams(window.location.search);
       const impersonateId = urlParams.get('impersonate');
-      
-      // ---------- Impersonation Authentication ----------
       if (impersonateId) {
-        debugLog('🎭 Impersonation mode detected for student ID:', impersonateId);
-        debugLog('📍 Running in iframe:', window.self !== window.top);
-        
-        // Try both sessionStorage and localStorage
-        let tokenData = sessionStorage.getItem('impersonation_token') || localStorage.getItem('impersonation_token');
-        debugLog('🔍 Token data found:', tokenData ? 'YES' : 'NO');
-        
-        if (tokenData) {
-          const impersonationToken = JSON.parse(tokenData);
-          debugLog('📋 Token parsed:', impersonationToken);
-          
-          // 🔥 REMOVED TIMEOUT CHECK - impersonation never expires
-          // Admin can stay in impersonation mode indefinitely
-          // if (impersonationToken.expiresAt < Date.now()) {
-          //   console.error('⏰ Token expired');
-          //   alert('Impersonation session has expired.');
-          //   sessionStorage.removeItem('impersonation_token');
-          //   localStorage.removeItem('impersonation_token');
-          //   
-          //   // If in iframe, tell parent to close modal
-          //   if (window.self !== window.top) {
-          //     window.parent.postMessage({ action: 'closeImpersonation', reason: 'expired' }, '*');
-          //   } else {
-          //     window.location.href = 'Student-Portal-Admin.html';
-          //   }
-          //   return null;
-          // }
-          
-          // Validate student ID matches (convert both to string for comparison)
-          if (String(impersonationToken.studentId) !== String(impersonateId)) {
-            console.error('❌ Student ID mismatch!', impersonationToken.studentId, 'vs', impersonateId);
-            alert('Invalid impersonation token.');
-            sessionStorage.removeItem('impersonation_token');
-            localStorage.removeItem('impersonation_token');
-            
-            // If in iframe, tell parent to close modal
-            if (window.self !== window.top) {
-              window.parent.postMessage({ action: 'closeImpersonation', reason: 'mismatch' }, '*');
-            } else {
-              window.location.href = 'Student-Portal-Admin.html';
-            }
-            return null;
+        console.warn('⚠️ Deprecated impersonate URL detected. Redirecting to clean URL.');
+        window.location.href = 'student-portal.html';
+        return null;
+      }
+
+      // Admin viewing as student (real data, no impersonation tokens)
+      const studentLoginId = sessionStorage.getItem('student_login_id');
+      const isAdminViewing = sessionStorage.getItem('is_admin_viewing') === 'true';
+      const adminSessionBackup = sessionStorage.getItem('admin_session_backup');
+      if (studentLoginId && isAdminViewing && adminSessionBackup) {
+        try {
+          const { access_token, refresh_token } = JSON.parse(adminSessionBackup);
+          const { error: restoreError } = await supabaseClient.auth.setSession({
+            access_token,
+            refresh_token
+          });
+          if (restoreError) {
+            console.error('❌ Failed to restore admin session:', restoreError);
           }
-          
-          // Load the impersonated student's data
-          debugLog('📥 Loading student data for ID:', impersonateId);
-          const { data: student, error } = await supabaseClient
+
+          const { data: studentData, error: studentError } = await supabaseClient
             .from('students')
             .select('*')
-            .eq('id', impersonateId)
-            .maybeSingle();
-          
-          if (error || !student) {
-            console.error('❌ Impersonated student not found:', error);
-            console.error('Query details - ID:', impersonateId, 'Type:', typeof impersonateId);
-            alert('Student not found. Please contact administrator.');
-            sessionStorage.removeItem('impersonation_token');
-            localStorage.removeItem('impersonation_token');
-            
-            // If in iframe, tell parent to close modal
-            if (window.self !== window.top) {
-              window.parent.postMessage({ action: 'closeImpersonation', reason: 'not_found' }, '*');
-            } else {
-              window.location.href = 'Student-Portal-Admin.html';
-            }
+            .eq('id', parseInt(studentLoginId))
+            .single();
+
+          if (studentError || !studentData) {
+            console.error('❌ Student not found:', studentError);
+            sessionStorage.removeItem('student_login_id');
+            sessionStorage.removeItem('student_login_name');
+            sessionStorage.removeItem('is_admin_viewing');
+            alert('Student not found. Returning to admin panel...');
+            window.location.href = 'Student-Portal-Admin.html';
             return null;
           }
-          
-          debugLog('✅ Impersonation authenticated for:', student.name);
-          return student;
-        } else {
-          console.error('❌ No impersonation token found in sessionStorage or localStorage');
-          console.error('SessionStorage keys:', Object.keys(sessionStorage));
-          console.error('LocalStorage keys:', Object.keys(localStorage));
-          alert('Invalid impersonation session.');
-          
-          // If in iframe, tell parent to close modal
-          if (window.self !== window.top) {
-            window.parent.postMessage({ action: 'closeImpersonation', reason: 'no_token' }, '*');
-          } else {
-            window.location.href = 'Student-Portal-Admin.html';
-          }
+
+          console.log('✅ Admin viewing as student:', studentData.name);
+          return studentData;
+        } catch (error) {
+          console.error('❌ Admin viewing setup failed:', error);
+          window.location.href = 'Student-Portal-Admin.html';
           return null;
         }
       }
       
       // ---------- Normal Student Authentication ----------
       const { data: { session } } = await supabaseClient.auth.getSession();
-      
-      // 🔥 NEW: Check if admin is viewing as a specific student (direct login, not impersonation)
-      const studentLoginId = sessionStorage.getItem('student_login_id');
-      if (studentLoginId) {
-        // Admin has selected a student to view as - load that student directly
-        console.log('👁️ Admin viewing as student ID:', studentLoginId);
-        
-        // First restore admin session to have permission to query students table
-        const adminBackup = sessionStorage.getItem('admin_session_backup');
-        if (adminBackup) {
-          try {
-            const { access_token, refresh_token } = JSON.parse(adminBackup);
-            const { data: sessionData, error: sessionError } = await supabaseClient.auth.setSession({
-              access_token,
-              refresh_token
-            });
-            
-            if (sessionError) {
-              console.error('❌ Failed to restore admin session:', sessionError);
-            } else {
-              console.log('✅ Admin session restored for student lookup');
-            }
-          } catch (err) {
-            console.error('❌ Error parsing admin backup:', err);
-          }
-        }
-        
-        // Now query student with admin credentials
-        const { data: studentData, error: studentError } = await supabaseClient
-          .from('students')
-          .select('*')
-          .eq('id', parseInt(studentLoginId))
-          .single();
-        
-        if (studentError || !studentData) {
-          console.error('❌ Student not found:', {
-            error: studentError,
-            studentId: studentLoginId,
-            message: studentError?.message,
-            code: studentError?.code
-          });
-          
-          // Clean up markers
-          sessionStorage.removeItem('student_login_id');
-          sessionStorage.removeItem('student_login_name');
-          sessionStorage.removeItem('is_admin_viewing');
-          
-          alert(`Student not found (ID: ${studentLoginId}).\n\nError: ${studentError?.message || 'Unknown error'}\n\nReturning to admin panel...`);
-          window.location.href = 'Student-Portal-Admin.html';
-          return null;
-        }
-        
-        console.log('✅ Loaded student data:', studentData.name);
-        
-        // Add a visual indicator that admin is viewing
-        document.body.setAttribute('data-admin-viewing', 'true');
-        
-        return studentData;
-      }
       
       if (!session) {
         // Check if we're in admin chat mode - if so, it's okay to have no session
@@ -6689,6 +6553,24 @@
           window.location.href = 'student-portal.html';
           return;
         }
+
+        // Restore admin session if we're viewing as a student (fixes file:// session loss)
+        const adminViewingActive = sessionStorage.getItem('is_admin_viewing') === 'true';
+        const adminSessionBackup = sessionStorage.getItem('admin_session_backup');
+        if (adminViewingActive && adminSessionBackup) {
+          try {
+            const { access_token, refresh_token } = JSON.parse(adminSessionBackup);
+            const { error: restoreError } = await supabaseClient.auth.setSession({
+              access_token,
+              refresh_token
+            });
+            if (restoreError) {
+              console.error('❌ Failed to restore admin session:', restoreError);
+            }
+          } catch (restoreError) {
+            console.error('❌ Error restoring admin session:', restoreError);
+          }
+        }
         
         // ---------- Admin Detection & Verification ----------
         // Normal authentication flow (non-impersonation)
@@ -6697,6 +6579,37 @@
         
         if (session && session.user) {
           currentEmail = session.user.email;
+          
+          // Check if admin is viewing as a student
+          const studentLoginId = sessionStorage.getItem('student_login_id');
+          const isAdminViewing = sessionStorage.getItem('is_admin_viewing') === 'true';
+          
+          if (studentLoginId && isAdminViewing) {
+            // Admin is viewing as a student - load that student's data
+            console.log('👁️ Admin viewing as student ID:', studentLoginId);
+            
+            const { data: studentData, error: studentError } = await supabaseClient
+              .from('students')
+              .select('*')
+              .eq('id', parseInt(studentLoginId))
+              .single();
+            
+            if (studentError || !studentData) {
+              console.error('❌ Student not found:', studentError);
+              sessionStorage.removeItem('student_login_id');
+              sessionStorage.removeItem('student_login_name');
+              sessionStorage.removeItem('is_admin_viewing');
+              alert('Student not found. Returning to admin panel...');
+              window.location.href = 'Student-Portal-Admin.html';
+              return;
+            }
+            
+            console.log('✅ Loaded student:', studentData.name);
+            currentStudent = studentData;
+            window.currentStudent = studentData;
+            await loadPortalData();
+            return;
+          }
           
           // First, try to find student record by email
           const { data: studentRecord, error: studentError } = await supabaseClient
