@@ -4698,7 +4698,7 @@
               .from('students')
               .select('*')
               .eq('id', masterToken.studentId)
-              .single();
+              .maybeSingle();
             
             debugLog('Student data:', student);
             debugLog('Error:', error);
@@ -4779,7 +4779,7 @@
             .from('students')
             .select('*')
             .eq('id', impersonateId)
-            .single();
+            .maybeSingle();
           
           if (error || !student) {
             console.error('❌ Impersonated student not found:', error);
@@ -4832,14 +4832,17 @@
       
       
       // Check if user is an admin FIRST (before student lookup)
-      debugLog('🔍 Checking if user is admin:', session.user.email);
+      debugLog('🔍 Checking if user is admin:', session.user.id);
       const { data: adminCheck, error: adminError } = await supabaseClient
         .from('admin_accounts')
-        .select('email, role')
-        .eq('email', session.user.email)
+        .select('email, role, auth_user_id')
+        .eq('auth_user_id', session.user.id)
         .maybeSingle();
       
-      if (adminCheck) {
+      if (adminError) {
+        console.error('⚠️ Admin check query failed:', adminError);
+        // Don't redirect on error - treat as non-admin and continue
+      } else if (adminCheck) {
         console.log('👑 Admin detected, redirecting to Student Manager:', adminCheck.email);
         alert('Admin accounts cannot access the student portal.\n\nRedirecting to Student Manager...');
         window.location.href = 'Student-Manager.html';
@@ -4852,7 +4855,7 @@
         .from('students')
         .select('*')
         .eq('auth_user_id', session.user.id)
-        .single();
+        .maybeSingle();
       
       if (error || !studentData) {
         console.error('❌ Student lookup failed:', {
@@ -11664,17 +11667,13 @@
             };
           });
           
-          // CRITICAL FILTER: Only show systems that have notes OR are marked as ongoing
-          // This prevents empty/unused systems from cluttering the carousel
-          const filteredSystems = mappedSystems.filter(sys => {
-            const hasNotes = sys.assignedCount > 0 || sys.totalTemplates > 0;
-            const isOngoing = sys.status === 'current';
-            const shouldShow = hasNotes || isOngoing;
-            
-            return shouldShow;
-          });
-          
-          nclexSystems = filteredSystems;
+          // SHOW ALL SYSTEMS: Display all configured systems including "Not Started" (red cards)
+          // Students should see:
+          // - 🟢 GREEN = Completed systems (100%)
+          // - 🔵 BLUE = In-progress systems (1-99%)
+          // - 🟡 YELLOW = Current/ongoing system (admin marked)
+          // - 🔴 RED = Not started systems (0% - no notes yet)
+          nclexSystems = mappedSystems;
         } else {
           nclexSystems = DEFAULT_SYSTEMS.map(system => ({
             ...system,

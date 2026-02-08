@@ -4510,7 +4510,7 @@
               <path d="M6 12v5c3 3 9 3 12 0v-5"></path>
             </svg>
           </button>
-          <button class="nav-btn" id="navCalendarBtn" onclick="openModulePopup('Calendar.html', '📅 Smart Calendar')" title="Smart Payment Calendar">
+          <button class="nav-btn" id="navCalendarBtn" onclick="window.location.href='Calendar-NEW-COMPLETE.html'" title="Smart Payment Calendar">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
               <line x1="16" y1="2" x2="16" y2="6"></line>
@@ -4542,7 +4542,7 @@
             <span class="timer-text"></span>
           </div>
 
-          <button class="nav-btn" id="navTopBtn" title="Scroll to Top">
+          <button class="nav-btn" id="navCalendarNewBtn" onclick="window.location.href='Calendar-NEW-COMPLETE.html'" title="Complete Calendar">
             <svg
               width="20"
               height="20"
@@ -4553,7 +4553,10 @@
               stroke-linecap="round"
               stroke-linejoin="round"
             >
-              <polyline points="18 15 12 9 6 15"></polyline>
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
             </svg>
           </button>
           <button class="nav-btn" id="navRefreshBtn" title="Refresh Data">
@@ -5094,15 +5097,16 @@ ORDER BY timestamp DESC;</pre>
         if (!adminSessionPromise) {
           adminSessionPromise = (async () => {
             try {
-              const session = window.ArnomaAuth
-                ? await window.ArnomaAuth.ensureSession(supabaseClient, { redirectToLogin: true })
-                : (await supabaseClient.auth.getSession()).data.session;
-
+              // CRITICAL: Check session first - redirect immediately if not logged in
+              const { data: { session } } = await supabaseClient.auth.getSession();
+              
               if (!session?.user?.email) {
-                console.error('❌ No authenticated session');
+                console.error('❌ No authenticated session - redirecting to login');
                 window.location.href = 'index.html';
                 throw new Error('NO_SESSION');
               }
+
+              console.log('✅ Session found for:', session.user.email);
 
               // Check if user is in admin_accounts table
               const { data: adminCheck, error: adminError } = await supabaseClient
@@ -9011,7 +9015,7 @@ ORDER BY timestamp DESC;</pre>
           );
         }
         
-        const paymentsToInsert = supabasePayments.filter(p => !ignoredIds.has(p.id) && !existingGmailIds.has(p.id));
+  let paymentsToInsert = supabasePayments.filter(p => !ignoredIds.has(p.id) && !existingGmailIds.has(p.id));
         
         if (paymentsToInsert.length === 0) {
           return { data: [], error: null };
@@ -9021,9 +9025,11 @@ ORDER BY timestamp DESC;</pre>
           debugLog(`⏭️ [${contextLabel}] Skipping ${ignoredIds.size} ignored + ${existingGmailIds.size} existing payments, inserting ${paymentsToInsert.length}`);
         }
 
+        // Helper function to get for_class candidate date
+        const getForClassCandidate = (payment) => payment.for_class || payment.date || null;
+
         // CRITICAL FIX: Check for existing (student_id, for_class) combinations to avoid unique constraint violation
         // Note: New payment objects use 'linked_student_id', but database uses 'student_id'
-        const getForClassCandidate = (payment) => payment.for_class || payment.date || null;
         const paymentsWithStudent = paymentsToInsert.filter(p => (p.linked_student_id || p.student_id) && getForClassCandidate(p));
         if (paymentsWithStudent.length > 0) {
           // Build a list of all student_ids and for_class dates
@@ -9034,54 +9040,88 @@ ORDER BY timestamp DESC;</pre>
           debugLog(`📊 [${contextLabel}] Student IDs: ${studentIds.join(', ')}`);
           debugLog(`📅 [${contextLabel}] for_class dates: ${forClassDates.join(', ')}`);
           
-          try {
-            // Query for all existing payments with these student_ids and dates
-            const { data: existingPayments, error: checkError } = await supabaseClient
-              .from('payments')
-              .select('id, student_id, for_class')
-              .in('student_id', studentIds)
-              .in('for_class', forClassDates)
-              .not('student_id', 'is', null)
-              .not('for_class', 'is', null);
-            
-            if (checkError) {
-              console.warn(`⚠️ [${contextLabel}] Failed to check for duplicate (student_id, for_class) pairs:`, checkError);
-              // Continue anyway - the insert will handle duplicates via ignoreDuplicates flag
-            } else if (existingPayments && existingPayments.length > 0) {
-              debugLog(`📋 [${contextLabel}] Found ${existingPayments.length} existing (student_id, for_class) pairs in database`);
+          if (studentIds.length > 0 && forClassDates.length > 0) {
+            try {
+              // Query for all existing payments with these student_ids and dates
+              const { data: existingPayments, error: checkError } = await supabaseClient
+                .from('payments')
+                .select('id, student_id, for_class')
+                .in('student_id', studentIds)
+                .in('for_class', forClassDates)
+                .not('student_id', 'is', null)
+                .not('for_class', 'is', null);
               
-              // Create a Set of existing (student_id, for_class) combinations
-              const existingPairs = new Set(
-                existingPayments.map(p => `${p.student_id}|${p.for_class}`)
-              );
-              
-              // Filter out payments that would violate the unique constraint
-              const beforeFilterCount = paymentsToInsert.length;
-              const filteredPayments = paymentsToInsert.filter(p => {
-                const studentId = p.linked_student_id || p.student_id;
-                const forClassCandidate = getForClassCandidate(p);
-                if (!studentId || !forClassCandidate) return true; // Keep payments without both fields
-                const pairKey = `${studentId}|${forClassCandidate}`;
-                const isDuplicate = existingPairs.has(pairKey);
-                if (isDuplicate) {
-                  debugLog(`🚫 [${contextLabel}] Filtering duplicate: student_id=${studentId}, for_class=${forClassCandidate}`);
+              if (checkError) {
+                console.warn(`⚠️ [${contextLabel}] Failed to check for duplicate (student_id, for_class) pairs:`, checkError);
+                // Continue anyway - we'll handle errors later
+              } else if (existingPayments && existingPayments.length > 0) {
+                console.log(`📋 [${contextLabel}] Found ${existingPayments.length} existing (student_id, for_class) pairs in database`);
+                
+                // Create a Set of existing (student_id, for_class) combinations
+                const existingPairs = new Set(
+                  existingPayments.map(p => `${p.student_id}|${p.for_class}`)
+                );
+                
+                debugLog(`🔍 [${contextLabel}] Existing pairs:`, Array.from(existingPairs));
+                
+                // Filter out payments that would violate the unique constraint
+                const beforeFilterCount = paymentsToInsert.length;
+                const filteredPayments = paymentsToInsert.filter(p => {
+                  const studentId = p.linked_student_id || p.student_id;
+                  const forClassCandidate = getForClassCandidate(p);
+                  if (!studentId || !forClassCandidate) return true; // Keep payments without both fields
+                  const pairKey = `${studentId}|${forClassCandidate}`;
+                  const isDuplicate = existingPairs.has(pairKey);
+                  if (isDuplicate) {
+                    console.log(`🚫 [${contextLabel}] Filtering duplicate: student_id=${studentId}, for_class=${forClassCandidate}, gmail_id=${p.gmail_id}`);
+                  }
+                  return !isDuplicate; // Only keep if pair doesn't exist
+                });
+                
+                const duplicateCount = beforeFilterCount - filteredPayments.length;
+                if (duplicateCount > 0) {
+                  console.log(`⚠️ [${contextLabel}] Filtered out ${duplicateCount} duplicate (student_id, for_class) pairs BEFORE insert`);
+                  paymentsToInsert = filteredPayments;
                 }
-                return !isDuplicate; // Only keep if pair doesn't exist
-              });
-              
-              const duplicateCount = beforeFilterCount - filteredPayments.length;
-              if (duplicateCount > 0) {
-                console.log(`⚠️ [${contextLabel}] Filtered out ${duplicateCount} duplicate (student_id, for_class) pairs BEFORE insert`);
-                paymentsToInsert.length = 0;
-                paymentsToInsert.push(...filteredPayments);
+              } else {
+                debugLog(`✅ [${contextLabel}] No existing (student_id, for_class) pairs found - safe to insert`);
               }
-            } else {
-              debugLog(`✅ [${contextLabel}] No existing (student_id, for_class) pairs found - safe to insert`);
+            } catch (err) {
+              console.warn(`⚠️ [${contextLabel}] Exception checking duplicates:`, err);
+              // Continue anyway - we'll handle errors later
             }
-          } catch (err) {
-            console.warn(`⚠️ [${contextLabel}] Exception checking duplicates:`, err);
-            // Continue anyway - the insert will handle duplicates
           }
+        }
+
+        // SECONDARY GUARD: Ensure this batch doesn't contain duplicate (student_id, for_class)
+        if (paymentsToInsert.length > 1) {
+          const seenPairs = new Set();
+          const dedupedPayments = [];
+
+          for (const payment of paymentsToInsert) {
+            const studentId = payment.linked_student_id || payment.student_id;
+            const forClassCandidate = getForClassCandidate(payment);
+
+            if (!studentId || !forClassCandidate) {
+              dedupedPayments.push(payment);
+              continue;
+            }
+
+            const pairKey = `${studentId}|${forClassCandidate}`;
+            if (seenPairs.has(pairKey)) {
+              console.warn(`⚠️ [${contextLabel}] Detected duplicate in batch → student_id=${studentId}, for_class=${forClassCandidate}, gmail_id=${payment.gmail_id}`);
+              continue; // Skip duplicates within the same insert batch
+            }
+
+            seenPairs.add(pairKey);
+            dedupedPayments.push(payment);
+          }
+
+          if (dedupedPayments.length !== paymentsToInsert.length) {
+            console.log(`⚠️ [${contextLabel}] Removed ${paymentsToInsert.length - dedupedPayments.length} duplicate payment(s) within batch BEFORE insert`);
+          }
+
+          paymentsToInsert = dedupedPayments;
         }
 
         if (paymentsToInsert.length === 0) {
@@ -9089,17 +9129,23 @@ ORDER BY timestamp DESC;</pre>
           return { data: [], error: null };
         }
 
-        // CRITICAL: Use ignoreDuplicates=true to skip updates of existing gmail_id records
-        // This prevents overwriting manually-assigned student_id/for_class values
-        // which would violate the unique_student_class_payment constraint
+        // CRITICAL: Map linked_student_id → student_id for database insert
+        // The unique constraint is on (student_id, for_class), not (linked_student_id, for_class)
+        paymentsToInsert = paymentsToInsert.map(p => ({
+          ...p,
+          student_id: p.linked_student_id || p.student_id || null
+        }));
+
+        // CRITICAL: Use .insert() to avoid triggering unique constraint validation on ALL constraints
+        // when payments with gmail_id already exist. We've already filtered by gmail_id above,
+        // so any remaining duplicates should be silently skipped via ignoreDuplicates.
         console.log(`💾 [${contextLabel}] Attempting to insert ${paymentsToInsert.length} new payment(s) (ignoreDuplicates=true)`);
         debugLog(`📊 [${contextLabel}] Payment IDs being inserted:`, paymentsToInsert.map(p => p.gmail_id));
         
         const { data, error } = await supabaseClient
           .from('payments')
-          .upsert(paymentsToInsert, { 
-            onConflict: 'gmail_id',
-            ignoreDuplicates: true  // Skip updates if gmail_id already exists
+          .insert(paymentsToInsert, { 
+            ignoreDuplicates: true  // Silently skip if ANY unique constraint is violated
           })
           .select();
 
@@ -10702,11 +10748,6 @@ ORDER BY timestamp DESC;</pre>
       function setupNavigation() {
         const nav = document.querySelector('.floating-nav');
         
-        // Scroll to top
-        document.getElementById('navTopBtn').addEventListener('click', () => {
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-
         // Refresh data silently from floating nav
   const navRefreshBtn = document.getElementById('navRefreshBtn');
   if (!navRefreshBtn) return;

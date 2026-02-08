@@ -2582,8 +2582,8 @@
       // ============================================================
       // SUPABASE CLIENT INITIALIZATION
       // ============================================================
-      const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
-      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+  const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
 
       let supabaseClient = null;
       let students = [];
@@ -2601,30 +2601,46 @@
           const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
           
           if (sessionError || !session) {
-            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
-            window.location.href = 'student-portal.html';
+            console.error('❌ No session found:', sessionError);
+            console.log('📍 Current Supabase URL:', SUPABASE_URL);
+            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the login page.');
+            window.location.href = 'index.html';
             return false;
           }
 
+          console.log('✅ Session found for:', session.user.email, '| User ID:', session.user.id);
+          console.log('📍 Checking admin_accounts in:', SUPABASE_URL);
+          
           // Check if user is in admin_accounts table
           const { data: adminAccount, error: adminError } = await supabaseClient
             .from('admin_accounts')
             .select('*')
             .eq('auth_user_id', session.user.id)
-            .single();
+            .maybeSingle();
 
-          if (adminError || !adminAccount) {
-            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
-            window.location.href = 'student-portal.html';
+          if (adminError) {
+            console.error('❌ Admin check query failed:', adminError);
+            console.log('📊 Query details - auth_user_id:', session.user.id);
+            alert('⛔ Access Denied\n\nDatabase error checking admin status.\n\nError: ' + adminError.message + '\n\nYou will be redirected to the login page.');
+            window.location.href = 'index.html';
+            return false;
+          }
+          
+          if (!adminAccount) {
+            console.log('❌ User is not an admin (no record in admin_accounts)');
+            console.log('📊 Searched for auth_user_id:', session.user.id);
+            console.log('💡 TIP: This user may need to be added to admin_accounts table');
+            alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYour account (' + session.user.email + ') is not in the admin list.\n\nYou will be redirected to the login page.');
+            window.location.href = 'index.html';
             return false;
           }
 
-          console.log('✅ Admin access verified:', adminAccount.email);
+          console.log('✅ Admin access verified:', adminAccount.email, '| Role:', adminAccount.role || 'N/A');
           return true;
         } catch (error) {
           console.error('❌ Admin auth error:', error);
-          alert('⛔ Access Denied\n\nThis page is for administrators only.\n\nYou will be redirected to the student portal.');
-          window.location.href = 'student-portal.html';
+          alert('⛔ Access Denied\n\nUnexpected error checking admin status.\n\nError: ' + error.message + '\n\nYou will be redirected to the login page.');
+          window.location.href = 'index.html';
           return false;
         }
       }

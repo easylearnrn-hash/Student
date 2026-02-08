@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Sona Payment</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+</head>
+<body style="background: #1a1a2e; color: white; font-family: monospace; padding: 20px;">
+    <h1>🔍 Debugging Sona Husikyan Payment</h1>
+    <div id="output"></div>
+    
+    <script>
+        const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        
+        const output = document.getElementById('output');
+        
+        function log(title, data) {
+            const div = document.createElement('div');
+            div.style.cssText = 'margin: 20px 0; padding: 15px; background: rgba(255,255,255,0.1); border-left: 4px solid #667eea;';
+            div.innerHTML = `<h3>${title}</h3><pre>${JSON.stringify(data, null, 2)}</pre>`;
+            output.appendChild(div);
+        }
+        
+        async function debug() {
+            try {
+                // Find Sona student
+                const { data: students, error: studErr } = await supabaseClient
+                    .from('students')
+                    .select('*')
+                    .ilike('name', '%sona%husikyan%');
+                
+                log('🧑 Sona Student Record', students);
+                
+                if (students && students.length > 0) {
+                    const sonaId = students[0].id;
+                    
+                    // Find payments with Sona's ID
+                    const { data: payments, error: payErr } = await supabaseClient
+                        .from('payments')
+                        .select('*')
+                        .eq('student_id', sonaId);
+                    
+                    log('💳 Payments (by student_id)', payments);
+                    
+                    // Find payments with linked_student_id
+                    const { data: linkedPayments } = await supabaseClient
+                        .from('payments')
+                        .select('*')
+                        .eq('linked_student_id', sonaId);
+                    
+                    log('💳 Payments (by linked_student_id)', linkedPayments);
+                    
+                    // Find payments with name match
+                    const { data: namePayments } = await supabaseClient
+                        .from('payments')
+                        .select('*')
+                        .or(`resolved_student_name.ilike.%sona%,payer_name.ilike.%husikyan%`);
+                    
+                    log('💳 Payments (by name match)', namePayments);
+                    
+                    // Find payment records
+                    const { data: records } = await supabaseClient
+                        .from('payment_records')
+                        .select('*')
+                        .eq('student_id', sonaId);
+                    
+                    log('📝 Payment Records', records);
+                    
+                    // Find Feb 2-3 payments for analysis
+                    const { data: febPayments } = await supabaseClient
+                        .from('payments')
+                        .select('*')
+                        .gte('date', '2026-02-01')
+                        .lte('date', '2026-02-05');
+                    
+                    const sonaFeb = febPayments.filter(p => {
+                        const allFields = [
+                            p.student_id,
+                            p.linked_student_id,
+                            p.resolved_student_name,
+                            p.payer_name,
+                            p.student_name
+                        ];
+                        return allFields.some(f => 
+                            String(f || '').toLowerCase().includes('sona') ||
+                            String(f || '').toLowerCase().includes('husikyan') ||
+                            f === sonaId
+                        );
+                    });
+                    
+                    log('💳 Feb 2-5 Sona Payments (all matching)', sonaFeb);
+                    
+                    // Check specifically what for_class and for_class_dates contain
+                    if (sonaFeb && sonaFeb.length > 0) {
+                        sonaFeb.forEach((p, idx) => {
+                            log(`🔬 Payment #${idx + 1} Detailed Analysis`, {
+                                id: p.id,
+                                gmail_id: p.gmail_id,
+                                student_id: p.student_id,
+                                linked_student_id: p.linked_student_id,
+                                resolved_student_name: p.resolved_student_name,
+                                payer_name: p.payer_name,
+                                date: p.date,
+                                email_date: p.email_date,
+                                for_class: p.for_class,
+                                for_class_type: typeof p.for_class,
+                                for_class_dates: p.for_class_dates,
+                                for_class_dates_type: typeof p.for_class_dates,
+                                for_class_dates_isArray: Array.isArray(p.for_class_dates),
+                                amount: p.amount
+                            });
+                        });
+                    }
+                }
+                
+            } catch (err) {
+                log('❌ ERROR', err);
+            }
+        }
+        
+        debug();
+    </script>
+</body>
+</html>

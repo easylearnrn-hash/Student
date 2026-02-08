@@ -1241,51 +1241,47 @@
         } = await supabase.auth.getSession();
 
         if (session) {
-          console.log('✅ Already logged in, checking role...');
+          console.log('✅ Session found, validating against current database...');
           
           // Check user role and redirect appropriately
-          const { data: studentData } = await supabase
+          const { data: studentData, error: studentError } = await supabase
             .from('students')
-            .select('role')
+            .select('role, id, name, auth_user_id')
             .eq('auth_user_id', session.user.id)
-            .single();
+            .maybeSingle();
 
-          if (studentData?.role === 'admin') {
+          // Check if admin
+          const { data: adminData, error: adminError } = await supabase
+            .from('admin_accounts')
+            .select('email')
+            .eq('auth_user_id', session.user.id)
+            .maybeSingle();
+
+          if (adminError || studentError) {
+            console.error('❌ Database check failed, clearing invalid session:', { adminError, studentError });
+            await supabase.auth.signOut();
+            localStorage.clear();
+            sessionStorage.clear();
+            console.log('🔄 Session cleared, please log in again');
+            return;
+          }
+
+          if (adminData) {
+            console.log('👑 Admin detected, redirecting to Student Manager');
             window.location.href = 'Student-Manager.html';
           } else if (studentData) {
-            // Student found with linked auth_user_id
+            console.log('✅ Student found, redirecting to portal');
             window.location.href = 'student-portal.html';
           } else {
-            // No student found with this auth_user_id - try to link by email
-            console.log('🔗 No linked student found, attempting auto-link...');
-            const userEmail = session.user.email;
-            
-            try {
-              // Try to link the account using the RPC function
-              const { data: linkResult, error: linkError } = await supabase.rpc(
-                'link_student_auth_account',
-                {
-                  p_student_id: null,  // Let the function find by email
-                  p_auth_user_id: session.user.id
-                }
-              );
-
-              if (linkError) {
-                console.error('❌ Failed to auto-link:', linkError);
-                // Try fallback auto-link
-                await autoLinkStudentAccount(session.user.id, userEmail);
-              } else {
-                console.log('✅ Auto-link successful:', linkResult);
-              }
-              
-              // Redirect to portal after linking
-              window.location.href = 'student-portal.html';
-            } catch (err) {
-              console.error('❌ Auto-link error:', err);
-              // Still try to redirect - portal will show error if needed
-              window.location.href = 'student-portal.html';
-            }
+            // No student OR admin found with this auth_user_id - clear session
+            console.log('❌ No matching student or admin found for this session, clearing...');
+            await supabase.auth.signOut();
+            localStorage.clear();
+            sessionStorage.clear();
+            console.log('🔄 Session cleared, please log in again');
           }
+        } else {
+          console.log('ℹ️ No active session found');
         }
       });
 
