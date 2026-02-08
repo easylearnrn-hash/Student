@@ -4825,10 +4825,31 @@
       
       // 🔥 NEW: Check if admin is viewing as a specific student (direct login, not impersonation)
       const studentLoginId = sessionStorage.getItem('student_login_id');
-      if (studentLoginId && !session) {
+      if (studentLoginId) {
         // Admin has selected a student to view as - load that student directly
         console.log('👁️ Admin viewing as student ID:', studentLoginId);
         
+        // First restore admin session to have permission to query students table
+        const adminBackup = sessionStorage.getItem('admin_session_backup');
+        if (adminBackup) {
+          try {
+            const { access_token, refresh_token } = JSON.parse(adminBackup);
+            const { data: sessionData, error: sessionError } = await supabaseClient.auth.setSession({
+              access_token,
+              refresh_token
+            });
+            
+            if (sessionError) {
+              console.error('❌ Failed to restore admin session:', sessionError);
+            } else {
+              console.log('✅ Admin session restored for student lookup');
+            }
+          } catch (err) {
+            console.error('❌ Error parsing admin backup:', err);
+          }
+        }
+        
+        // Now query student with admin credentials
         const { data: studentData, error: studentError } = await supabaseClient
           .from('students')
           .select('*')
@@ -4836,11 +4857,19 @@
           .single();
         
         if (studentError || !studentData) {
-          console.error('❌ Student not found:', studentError);
+          console.error('❌ Student not found:', {
+            error: studentError,
+            studentId: studentLoginId,
+            message: studentError?.message,
+            code: studentError?.code
+          });
+          
+          // Clean up markers
           sessionStorage.removeItem('student_login_id');
           sessionStorage.removeItem('student_login_name');
           sessionStorage.removeItem('is_admin_viewing');
-          alert('Student not found. Returning to admin panel...');
+          
+          alert(`Student not found (ID: ${studentLoginId}).\n\nError: ${studentError?.message || 'Unknown error'}\n\nReturning to admin panel...`);
           window.location.href = 'Student-Portal-Admin.html';
           return null;
         }
