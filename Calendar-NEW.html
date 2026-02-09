@@ -4300,14 +4300,31 @@
             const group = groupsData.find(g => g.group_name === student.group_name);
             
             if (group) {
-              // Get date range to check (last 60 days to today)
+              // Get student creation date - only check classes AFTER this date
+              const studentCreatedDate = student.created_at ? new Date(student.created_at) : null;
+              
+              // Get date range to check (last 60 days to today, but not before student was created)
               const today = new Date();
-              const startDate = new Date(today);
+              let startDate = new Date(today);
               startDate.setDate(today.getDate() - 60);
+              
+              // CRITICAL: Don't go back before student was created
+              if (studentCreatedDate && studentCreatedDate > startDate) {
+                startDate = new Date(studentCreatedDate);
+                console.log(`⏰ Student created on ${studentCreatedDate.toISOString().split('T')[0]}, starting from that date`);
+              }
               
               // Check each day in the range
               for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
                 const dateStr = d.toISOString().split('T')[0];
+                
+                // CRITICAL: Skip classes before student was created
+                if (studentCreatedDate) {
+                  const classDate = new Date(dateStr);
+                  if (classDate < studentCreatedDate) {
+                    continue; // Skip this date
+                  }
+                }
                 
                 // Check if this group has class on this date
                 if (isScheduledClassDate(dateStr, group)) {
