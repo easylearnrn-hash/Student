@@ -4315,7 +4315,10 @@
               // Get student creation date - only check classes AFTER this date
               const studentCreatedDate = student.created_at ? new Date(student.created_at) : null;
               
-              // Get date range to check (last 60 days to today, but not before student was created)
+              // Get group creation date - only check classes AFTER this date
+              const groupCreatedDate = group.created_at ? new Date(group.created_at) : null;
+              
+              // Get date range to check (last 60 days to today, but not before student/group was created)
               const today = new Date();
               let startDate = new Date(today);
               startDate.setDate(today.getDate() - 60);
@@ -4326,16 +4329,25 @@
                 console.log(`⏰ Student created on ${studentCreatedDate.toISOString().split('T')[0]}, starting from that date`);
               }
               
+              // CRITICAL: Don't go back before group was created
+              if (groupCreatedDate && groupCreatedDate > startDate) {
+                startDate = new Date(groupCreatedDate);
+                console.log(`⏰ Group created on ${groupCreatedDate.toISOString().split('T')[0]}, starting from that date`);
+              }
+              
               // Check each day in the range
               for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
                 const dateStr = d.toISOString().split('T')[0];
+                const classDate = new Date(dateStr);
                 
                 // CRITICAL: Skip classes before student was created
-                if (studentCreatedDate) {
-                  const classDate = new Date(dateStr);
-                  if (classDate < studentCreatedDate) {
-                    continue; // Skip this date
-                  }
+                if (studentCreatedDate && classDate < studentCreatedDate) {
+                  continue; // Skip this date
+                }
+                
+                // CRITICAL: Skip classes before group was created
+                if (groupCreatedDate && classDate < groupCreatedDate) {
+                  continue; // Skip this date
                 }
                 
                 // Check if this group has class on this date
