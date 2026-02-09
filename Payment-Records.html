@@ -9122,44 +9122,12 @@ ORDER BY timestamp DESC;</pre>
         }
         */
 
-        // SECONDARY GUARD: Ensure this batch doesn't contain duplicate (student_id, for_class)
-        if (paymentsToInsert.length > 1) {
-          const seenPairs = new Set();
-          const dedupedPayments = [];
-
-          for (const payment of paymentsToInsert) {
-            const studentId = payment.linked_student_id || payment.student_id;
-            const forClassCandidate = getForClassCandidate(payment);
-
-            if (!studentId || !forClassCandidate) {
-              dedupedPayments.push(payment);
-              continue;
-            }
-
-            const pairKey = `${studentId}|${forClassCandidate}`;
-            if (seenPairs.has(pairKey)) {
-              console.warn(`⚠️ [${contextLabel}] Detected duplicate in batch → student_id=${studentId}, for_class=${forClassCandidate}, gmail_id=${payment.gmail_id}`);
-              continue; // Skip duplicates within the same insert batch
-            }
-
-            seenPairs.add(pairKey);
-            dedupedPayments.push(payment);
-          }
-
-          if (dedupedPayments.length !== paymentsToInsert.length) {
-            console.log(`⚠️ [${contextLabel}] Removed ${paymentsToInsert.length - dedupedPayments.length} duplicate payment(s) within batch BEFORE insert`);
-          }
-
-          paymentsToInsert = dedupedPayments;
-        }
-
         if (paymentsToInsert.length === 0) {
           console.log(`⏭️ [${contextLabel}] All payments are duplicates or ignored, skipping insert`);
           return { data: [], error: null };
         }
 
         // CRITICAL: Map linked_student_id → student_id for database insert
-        // The unique constraint is on (student_id, for_class), not (linked_student_id, for_class)
         paymentsToInsert = paymentsToInsert.map(p => ({
           ...p,
           student_id: p.linked_student_id || p.student_id || null
