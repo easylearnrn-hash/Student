@@ -5097,8 +5097,14 @@ ORDER BY timestamp DESC;</pre>
         if (!adminSessionPromise) {
           adminSessionPromise = (async () => {
             try {
-              // CRITICAL: Check session first - redirect immediately if not logged in
-              const { data: { session } } = await supabaseClient.auth.getSession();
+              // CRITICAL: Restore session (cached) before checking admin status
+              let session = null;
+              if (window.ArnomaAuth?.ensureSession) {
+                session = await window.ArnomaAuth.ensureSession(supabaseClient, { redirectToLogin: true });
+              } else {
+                const { data } = await supabaseClient.auth.getSession();
+                session = data?.session || null;
+              }
               
               if (!session?.user?.email) {
                 console.error('❌ No authenticated session - redirecting to login');
