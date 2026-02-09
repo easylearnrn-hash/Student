@@ -7100,7 +7100,30 @@ ORDER BY timestamp DESC;</pre>
             return { added: 0, displayed: 0 };
           }
 
-          const newRecords = normalized.filter(record => !state.paymentLookup.has(record.uniqueKey));
+          // CRITICAL FIX: Check for duplicates by BOTH uniqueKey AND gmail_id
+          // Problem: Gmail payment has uniqueKey="gmail:XYZ", but after saving to Supabase 
+          // it becomes uniqueKey="supabase:123". Keys don't match, so it looks like a new payment!
+          // Solution: Also check by gmail_id to prevent showing the same Gmail message multiple times
+          const newRecords = normalized.filter(record => {
+            // Check by uniqueKey (standard check)
+            if (state.paymentLookup.has(record.uniqueKey)) {
+              return false;
+            }
+            
+            // ADDITIONAL CHECK: If record has gmail_id, check if any existing payment has same gmail_id
+            if (record.gmailId) {
+              const isDuplicate = state.payments.some(existing => 
+                existing.gmailId && existing.gmailId === record.gmailId
+              );
+              if (isDuplicate) {
+                debugLog(`🚫 Filtering duplicate by gmail_id: ${record.gmailId} (${record.payerName})`);
+                return false;
+              }
+            }
+            
+            return true; // Not a duplicate
+          });
+          
           if (!newRecords.length) {
             debugLog('ℹ️ PaymentRecords: Ignoring duplicate payments (no UI changes).');
             return { added: 0, displayed: 0 };
