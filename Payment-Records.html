@@ -9057,11 +9057,15 @@ ORDER BY timestamp DESC;</pre>
         // Helper function to get for_class candidate date
         const getForClassCandidate = (payment) => payment.for_class || payment.date || null;
 
-        // CRITICAL FIX: Check for existing (student_id, for_class) combinations to avoid unique constraint violation
-        // Note: New payment objects use 'linked_student_id', but database uses 'student_id'
+        // DISABLED: Removed (student_id, for_class) duplicate checking
+        // This was blocking legitimate multiple payments from same student on same date
+        // Example: Student pays $100 twice on same day (different times, different confirmation codes)
+        // The gmail_id unique constraint is sufficient to prevent actual duplicates
+        
+        /*
+        // OLD CODE - REMOVED TO ALLOW MULTIPLE PAYMENTS PER STUDENT PER DATE
         const paymentsWithStudent = paymentsToInsert.filter(p => (p.linked_student_id || p.student_id) && getForClassCandidate(p));
         if (paymentsWithStudent.length > 0) {
-          // Build a list of all student_ids and for_class dates
           const studentIds = [...new Set(paymentsWithStudent.map(p => p.linked_student_id || p.student_id))];
           const forClassDates = [...new Set(paymentsWithStudent.map(p => getForClassCandidate(p)))];
           
@@ -9071,7 +9075,6 @@ ORDER BY timestamp DESC;</pre>
           
           if (studentIds.length > 0 && forClassDates.length > 0) {
             try {
-              // Query for all existing payments with these student_ids and dates
               const { data: existingPayments, error: checkError } = await supabaseClient
                 .from('payments')
                 .select('id, student_id, for_class')
@@ -9082,29 +9085,26 @@ ORDER BY timestamp DESC;</pre>
               
               if (checkError) {
                 console.warn(`⚠️ [${contextLabel}] Failed to check for duplicate (student_id, for_class) pairs:`, checkError);
-                // Continue anyway - we'll handle errors later
               } else if (existingPayments && existingPayments.length > 0) {
                 console.log(`📋 [${contextLabel}] Found ${existingPayments.length} existing (student_id, for_class) pairs in database`);
                 
-                // Create a Set of existing (student_id, for_class) combinations
                 const existingPairs = new Set(
                   existingPayments.map(p => `${p.student_id}|${p.for_class}`)
                 );
                 
                 debugLog(`🔍 [${contextLabel}] Existing pairs:`, Array.from(existingPairs));
                 
-                // Filter out payments that would violate the unique constraint
                 const beforeFilterCount = paymentsToInsert.length;
                 const filteredPayments = paymentsToInsert.filter(p => {
                   const studentId = p.linked_student_id || p.student_id;
                   const forClassCandidate = getForClassCandidate(p);
-                  if (!studentId || !forClassCandidate) return true; // Keep payments without both fields
+                  if (!studentId || !forClassCandidate) return true;
                   const pairKey = `${studentId}|${forClassCandidate}`;
                   const isDuplicate = existingPairs.has(pairKey);
                   if (isDuplicate) {
                     console.log(`🚫 [${contextLabel}] Filtering duplicate: student_id=${studentId}, for_class=${forClassCandidate}, gmail_id=${p.gmail_id}`);
                   }
-                  return !isDuplicate; // Only keep if pair doesn't exist
+                  return !isDuplicate;
                 });
                 
                 const duplicateCount = beforeFilterCount - filteredPayments.length;
@@ -9117,10 +9117,10 @@ ORDER BY timestamp DESC;</pre>
               }
             } catch (err) {
               console.warn(`⚠️ [${contextLabel}] Exception checking duplicates:`, err);
-              // Continue anyway - we'll handle errors later
             }
           }
         }
+        */
 
         // SECONDARY GUARD: Ensure this batch doesn't contain duplicate (student_id, for_class)
         if (paymentsToInsert.length > 1) {
