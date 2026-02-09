@@ -4289,55 +4289,75 @@
           
           // Get student balance and price
           const balance = Number(student.balance) || 0;
-          const pricePerClass = Number(student.price_per_class) || 0;
+          const pricePerClass = Number(student.price_per_class) || 15;
           
-          // Query unpaid classes from payment_records table
-          let unpaidClassesFromDB = [];
-          let unpaidAmountFromDB = 0;
+          // Find all unpaid classes for this student by checking scheduled classes vs payments
           const unpaidClassDetails = [];
+          let unpaidAmountFromCalendar = 0;
           
           try {
-            // Get unpaid payment records for this student
-            const { data: unpaidRecords, error: unpaidError } = await supabaseClient
-              .from('payment_records')
-              .select('*')
-              .eq('student_id', studentId)
-              .eq('status', 'unpaid')
-              .order('date', { ascending: true });
+            // Get student's group
+            const group = groupsData.find(g => g.group_name === student.group_name);
             
-            if (!unpaidError && unpaidRecords) {
-              unpaidClassesFromDB = unpaidRecords;
-              unpaidAmountFromDB = unpaidRecords.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
+            if (group) {
+              // Get date range to check (last 60 days to today)
+              const today = new Date();
+              const startDate = new Date(today);
+              startDate.setDate(today.getDate() - 60);
               
-              // Build detailed class list
-              unpaidRecords.forEach(record => {
-                const formattedDate = new Date(record.date + 'T12:00:00').toLocaleDateString('en-US', {
-                  weekday: 'long',
-                  year: 'numeric',
-                  month: 'long',
-                  day: 'numeric'
-                });
+              // Check each day in the range
+              for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
+                const dateStr = d.toISOString().split('T')[0];
                 
-                unpaidClassDetails.push({
-                  date: record.date,
-                  formattedDate,
-                  amount: Number(record.amount) || pricePerClass
-                });
-              });
+                // Check if this group has class on this date
+                if (isScheduledClassDate(dateStr, group)) {
+                  // Check if student has payment for this date
+                  const hasPayment = hasPaymentCached(student.id, dateStr, student);
+                  const hasAbsence = isAbsentCached(dateStr, student.id);
+                  const isSkipped = isClassSkippedCached(dateStr, group.group_name);
+                  
+                  // If no payment, no absence, and not skipped = unpaid
+                  if (!hasPayment && !hasAbsence && !isSkipped) {
+                    const formattedDate = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    });
+                    
+                    unpaidClassDetails.push({
+                      date: dateStr,
+                      formattedDate,
+                      amount: pricePerClass
+                    });
+                    
+                    unpaidAmountFromCalendar += pricePerClass;
+                  }
+                }
+              }
             }
+            
+            console.log('💰 Found unpaid classes from calendar logic:', {
+              studentId,
+              studentName: student.name,
+              groupName: student.group_name,
+              unpaidClassesCount: unpaidClassDetails.length,
+              unpaidAmount: unpaidAmountFromCalendar,
+              unpaidDates: unpaidClassDetails.map(c => c.date)
+            });
           } catch (err) {
-            console.warn('⚠️ Could not fetch unpaid records, using balance:', err);
+            console.warn('⚠️ Could not calculate unpaid classes, using balance:', err);
           }
           
-          // Use database data if we found unpaid classes, otherwise fall back to balance
-          const finalBalance = unpaidAmountFromDB > 0 ? unpaidAmountFromDB : balance;
+          // Use calendar data if we found unpaid classes, otherwise fall back to balance
+          const finalBalance = unpaidAmountFromCalendar > 0 ? unpaidAmountFromCalendar : balance;
           const finalPrice = pricePerClass || 15;
           
           console.log('💰 Payment reminder calculation:', {
             studentId,
             studentName: student.name,
-            unpaidRecordsCount: unpaidClassesFromDB.length,
-            unpaidAmountFromDB,
+            unpaidClassesCount: unpaidClassDetails.length,
+            unpaidAmountFromCalendar,
             studentBalance: balance,
             finalBalance,
             unpaidClassDetails
