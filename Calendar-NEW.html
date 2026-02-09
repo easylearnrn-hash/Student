@@ -4291,54 +4291,57 @@
           const balance = Number(student.balance) || 0;
           const pricePerClass = Number(student.price_per_class) || 0;
           
-          // CRITICAL: Calculate ACTUAL unpaid classes from month data, not just balance
-          let unpaidClassesFromCalendar = 0;
-          let unpaidAmountFromCalendar = 0;
+          // Query unpaid classes from payment_records table
+          let unpaidClassesFromDB = [];
+          let unpaidAmountFromDB = 0;
           const unpaidClassDetails = [];
           
-          // Get the current month data from the calendar
-          const currentDate = new Date();
-          const currentYear = currentDate.getFullYear();
-          const currentMonth = currentDate.getMonth();
-          
-          // Look through the entire month cache for unpaid classes
-          const monthCacheKeys = Array.from(monthCache.keys());
-          for (const cacheKey of monthCacheKeys) {
-            const monthData = monthCache.get(cacheKey);
-            if (monthData && monthData.dayMap) {
-              // Iterate through all days in the month
-              Object.values(monthData.dayMap).forEach(dayData => {
-                // Check each group's students for this student
-                (dayData.groups || []).forEach(group => {
-                  (group.students || []).forEach(studentEntry => {
-                    // Match by student ID
-                    if (String(studentEntry.id) === String(studentId) && studentEntry.status === 'unpaid') {
-                      unpaidClassesFromCalendar++;
-                      const amount = studentEntry.pricePerClass || pricePerClass;
-                      unpaidAmountFromCalendar += amount;
-
-                      const formattedDate = new Date(`${dayData.dateStr}T12:00:00`).toLocaleDateString('en-US', {
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      });
-                      
-                      unpaidClassDetails.push({
-                        date: dayData.dateStr,
-                        formattedDate,
-                        amount
-                      });
-                    }
-                  });
+          try {
+            // Get unpaid payment records for this student
+            const { data: unpaidRecords, error: unpaidError } = await supabaseClient
+              .from('payment_records')
+              .select('*')
+              .eq('student_id', studentId)
+              .eq('status', 'unpaid')
+              .order('date', { ascending: true });
+            
+            if (!unpaidError && unpaidRecords) {
+              unpaidClassesFromDB = unpaidRecords;
+              unpaidAmountFromDB = unpaidRecords.reduce((sum, record) => sum + (Number(record.amount) || 0), 0);
+              
+              // Build detailed class list
+              unpaidRecords.forEach(record => {
+                const formattedDate = new Date(record.date + 'T12:00:00').toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                });
+                
+                unpaidClassDetails.push({
+                  date: record.date,
+                  formattedDate,
+                  amount: Number(record.amount) || pricePerClass
                 });
               });
             }
+          } catch (err) {
+            console.warn('⚠️ Could not fetch unpaid records, using balance:', err);
           }
           
-          // Use calendar data if we found unpaid classes, otherwise fall back to balance
-          const finalBalance = unpaidAmountFromCalendar > 0 ? unpaidAmountFromCalendar : balance;
+          // Use database data if we found unpaid classes, otherwise fall back to balance
+          const finalBalance = unpaidAmountFromDB > 0 ? unpaidAmountFromDB : balance;
           const finalPrice = pricePerClass || 15;
+          
+          console.log('💰 Payment reminder calculation:', {
+            studentId,
+            studentName: student.name,
+            unpaidRecordsCount: unpaidClassesFromDB.length,
+            unpaidAmountFromDB,
+            studentBalance: balance,
+            finalBalance,
+            unpaidClassDetails
+          });
           
           // Generate email HTML (async now - loads from Email System)
           const emailHTML = await generatePaymentReminderEmailHTML(
