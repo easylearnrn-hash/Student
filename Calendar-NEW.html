@@ -297,6 +297,11 @@
         box-shadow: 0 0 6px rgba(0, 255, 65, 0.5);
       }
 
+      .dot-manual {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+        box-shadow: 0 0 6px rgba(59, 130, 246, 0.5);
+      }
+
       .dot-unpaid {
         background: linear-gradient(135deg, #ff1744 0%, #cc1133 100%);
         box-shadow: 0 0 6px rgba(255, 23, 68, 0.5);
@@ -1767,8 +1772,20 @@
         const hasPayment = paymentIndex.has(normalizedDateStr) && 
                           paymentIndex.get(normalizedDateStr).has(String(studentId));
         
-        paymentCache.set(cacheKey, hasPayment);
-        return hasPayment;
+        // Check if payment is manual (from payment_records table with payment_method='cash')
+        let isManual = false;
+        if (hasPayment) {
+          const manualPayment = paymentRecordsData.find(pr => 
+            String(pr.student_id) === String(studentId) && 
+            normalizeDateString(pr.date) === normalizedDateStr &&
+            pr.payment_method === 'cash'
+          );
+          isManual = !!manualPayment;
+        }
+        
+        const result = { hasPayment, isManual };
+        paymentCache.set(cacheKey, result);
+        return result;
       }
 
       // Active filters
@@ -2269,11 +2286,11 @@
                     }
                   }
                   
-                  const hasPayment = hasPaymentCached(student.id, dateStr, student);
+                  const paymentInfo = hasPaymentCached(student.id, dateStr, student);
                   const isAbsent = isAbsentCached(dateStr, student.id);
                   const pricePerClass = parseFloat(student.price_per_class || 0);
                   
-                  if (hasPayment) {
+                  if (paymentInfo.hasPayment) {
                     paidTotal += pricePerClass;
                   } else if (!isAbsent && dateStr <= today) {
                     unpaidTotal += pricePerClass;
@@ -2363,7 +2380,7 @@
               }
 
               // Check payment status using cached function
-              const hasPayment = hasPaymentCached(student.id, dateStr, student);
+              const paymentInfo = hasPaymentCached(student.id, dateStr, student);
 
               // Check absence using indexed lookup
               const isAbsent = isAbsentCached(dateStr, student.id);
@@ -2378,9 +2395,10 @@
               } else if (isAbsent) {
                 dotType = 'absent';
                 dotLabel += ' (Absent)';
-              } else if (hasPayment) {
-                dotType = 'paid';
-                dotLabel += ' (Paid)';
+              } else if (paymentInfo.hasPayment) {
+                // Use blue for manual cash payments, green for automated payments
+                dotType = paymentInfo.isManual ? 'manual' : 'paid';
+                dotLabel += paymentInfo.isManual ? ' (Cash Payment)' : ' (Paid)';
               } else if (dateStr <= getLATodayISO()) {
                 dotType = 'unpaid';
                 dotLabel += ' (Unpaid)';
@@ -2531,9 +2549,9 @@
                     }
                   }
                   
-                  const hasPayment = hasPaymentCached(student.id, dateStr, student);
+                  const paymentInfo = hasPaymentCached(student.id, dateStr, student);
                   
-                  if (hasPayment) {
+                  if (paymentInfo.hasPayment) {
                     paidTotal += parseFloat(student.price_per_class || 0);
                   } else if (dateStr <= today) {
                     // Only count unpaid for past/today dates - using cached lookup for performance
@@ -2603,7 +2621,7 @@
             }
             
             // Check payment status
-            const hasPayment = hasPaymentCached(student.id, dateStr, student);
+            const paymentInfo = hasPaymentCached(student.id, dateStr, student);
             const hasAbsence = isAbsentCached(dateStr, student.id);
             const isSkipped = isClassSkippedCached(dateStr, group.group_name);
             
@@ -2612,7 +2630,7 @@
               status = 'canceled';
             } else if (hasAbsence) {
               status = 'absent';
-            } else if (hasPayment) {
+            } else if (paymentInfo.hasPayment) {
               status = 'paid';
             } else {
               status = 'unpaid';
@@ -2622,7 +2640,7 @@
               ...student,
               groupName: group.group_name,
               status: status,
-              hasPayment: hasPayment,
+              hasPayment: paymentInfo.hasPayment,
               hasAbsence: hasAbsence,
               isSkipped: isSkipped
             });
@@ -3677,17 +3695,15 @@
             return;
           }
 
-          // Create payment record
+          // Create payment record in payment_records table (for manual cash payments)
           const { error } = await supabaseClient
-            .from('payments')
+            .from('payment_records')
             .insert([{
               student_id: studentId,
-              student_name: student.name,
-              amount: paymentAmount,
               date: dateStr,
-              email_date: dateStr + 'T12:00:00',
-              payer_name: student.name,
-              for_class: dateStr
+              amount: paymentAmount,
+              status: 'paid',
+              payment_method: 'cash'
             }]);
 
           if (error) {
@@ -3716,7 +3732,7 @@
 
           // Reload data and refresh
           await loadPayments();
-          closeDayModal();
+          await loadPaymentRecords();
           renderCalendar();
           
           // Success notification
@@ -4530,12 +4546,12 @@
                 // Check if this group has class on this date
                 if (isScheduledClassDate(dateStr, group)) {
                   // Check if student has payment for this date
-                  const hasPayment = hasPaymentCached(student.id, dateStr, student);
+                  const paymentInfo = hasPaymentCached(student.id, dateStr, student);
                   const hasAbsence = isAbsentCached(dateStr, student.id);
                   const isSkipped = isClassSkippedCached(dateStr, group.group_name);
                   
                   // If no payment, no absence, and not skipped = unpaid
-                  if (!hasPayment && !hasAbsence && !isSkipped) {
+                  if (!paymentInfo.hasPayment && !hasAbsence && !isSkipped) {
                     const formattedDate = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
                       weekday: 'long',
                       year: 'numeric',
