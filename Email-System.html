@@ -3672,9 +3672,18 @@
       // ============================================================
       // MODAL CONTROLS
       // ============================================================
-      function openSentEmails() {
+      async function openSentEmails() {
         document.getElementById('sentEmailsModal').classList.add('active');
         document.body.style.overflow = 'hidden';
+
+        try {
+          if (emailSystem && typeof emailSystem.loadSentEmails === 'function') {
+            await emailSystem.loadSentEmails();
+            emailSystem.renderSentEmails();
+          }
+        } catch (error) {
+          console.error('❌ Failed to refresh sent emails:', error);
+        }
       }
       function closeSentEmails() {
         document.getElementById('sentEmailsModal').classList.remove('active');
@@ -6573,9 +6582,9 @@
               this._sentEmails = data.map(email => ({
                 id: email.id,
                 timestamp: email.sent_at,
-                to: email.recipient_email || email.recipient,  // Use correct column name
+                to: email.recipient_email,
                 subject: email.subject,
-                html: email.html_content || email.body_html || email.body_text,  // Try all variants
+                html: email.html_content,
                 status: email.status || 'sent',
                 templateName: email.template_name,
                 type: email.email_type || 'manual',
@@ -6598,87 +6607,97 @@
         },
 
         async addSentEmail(emailData) {
-          if (!supabase) {
+          if (!supabaseClient) {
             console.error('❌ Supabase not initialized');
             return null;
           }
 
-          // Use correct column names for sent_emails table
-          const sentEmail = {
-            recipient_email: emailData.to,  // FIXED: was 'recipient'
-            recipient_name: emailData.recipientName || emailData.to,
+          const timestamp = new Date().toISOString();
+          const baseRecord = {
             subject: emailData.subject,
-            html_content: emailData.html,  // FIXED: was 'body_html'
             status: emailData.status || 'sent',
             template_name: emailData.templateName,
             email_type: emailData.type || 'manual',
             resend_id: emailData.resendId || null,
             delivery_status: emailData.deliveryStatus || 'unknown',
-            sent_at: new Date().toISOString()
+            sent_at: timestamp
           };
 
+          const sentEmail = {
+            recipient_email: emailData.to,
+            recipient_name: emailData.recipientName || emailData.to,
+            html_content: emailData.html,
+            ...baseRecord
+          };
+          let savedRecord = null;
+
           try {
-            // 1. Log to sent_emails table
             const { data, error } = await supabaseClient
               .from('sent_emails')
               .insert([sentEmail])
               .select();
 
-            if (error) throw error;
-
-            debugLog('✅ Sent email logged to Supabase:', data[0]);
-            
-            // 2. Log to notifications table (for Notification Center bell)
-            try {
-              const notificationRecord = {
-                type: 'email_sent',
-                category: 'email',
-                title: `Email Sent: ${emailData.templateName || 'Custom Email'}`,
-                description: `Sent to ${emailData.to} - ${emailData.subject}`,
-                student_name: emailData.recipientName || null,
-                metadata: {
-                  email: emailData.to,
-                  email_type: emailData.type || 'manual',
-                  subject: emailData.subject,
-                  html: emailData.html,
-                  template_name: emailData.templateName
-                },
-                timestamp: new Date().toISOString(),
-                read: false,
-                created_at: new Date().toISOString()
-              };
-              
-              const { error: notifError } = await supabaseClient.from('notifications').insert([notificationRecord]);
-              if (notifError) console.error('⚠️ Failed to log notification:', notifError);
-            } catch (notifErr) {
-              console.error('⚠️ Error logging notification (email still logged):', notifErr);
+            if (error) {
+              throw error;
             }
 
-            // Add to local array for immediate UI update
-            this._sentEmails.unshift({
-              id: data[0].id,
-              timestamp: data[0].sent_at,
-              to: data[0].recipient_email,  // FIXED: was 'recipient'
-              subject: data[0].subject,
-              html: data[0].html_content,  // FIXED: was 'body_html'
-              status: data[0].status,
-              templateName: data[0].template_name,
-              type: data[0].email_type || 'manual',
-              resendId: data[0].resend_id || null,
-              deliveryStatus: data[0].delivery_status || 'unknown'
-            });
-
-            // Keep only last 500 in memory
-            if (this._sentEmails.length > 500) {
-              this._sentEmails = this._sentEmails.slice(0, 500);
-            }
-
-            this.renderSentEmails();
-            return data[0];
-          } catch (e) {
-            console.error('❌ Error saving sent email to Supabase:', e);
-            return null;
+            savedRecord = data?.[0] || sentEmail;
+          } catch (error) {
+            console.error('❌ Error saving sent email to Supabase:', error);
           }
+
+          if (savedRecord) {
+            debugLog('✅ Sent email logged to Supabase:', savedRecord);
+          }
+          
+          // 2. Log to notifications table (for Notification Center bell)
+          try {
+            const notificationRecord = {
+              type: 'email_sent',
+              category: 'email',
+              title: `Email Sent: ${emailData.templateName || 'Custom Email'}`,
+              description: `Sent to ${emailData.to} - ${emailData.subject}`,
+              student_name: emailData.recipientName || null,
+              metadata: {
+                email: emailData.to,
+                email_type: emailData.type || 'manual',
+                subject: emailData.subject,
+                html: emailData.html,
+                template_name: emailData.templateName
+              },
+              timestamp: timestamp,
+              read: false,
+              created_at: timestamp
+            };
+            
+            const { error: notifError } = await supabaseClient.from('notifications').insert([notificationRecord]);
+            if (notifError) console.error('⚠️ Failed to log notification:', notifError);
+          } catch (notifErr) {
+            console.error('⚠️ Error logging notification (email still logged):', notifErr);
+          }
+
+          const localEntry = {
+            id: savedRecord?.id || Date.now(),
+            timestamp: savedRecord?.sent_at || timestamp,
+            to: savedRecord?.recipient_email || emailData.to,
+            subject: savedRecord?.subject || emailData.subject,
+            html: savedRecord?.html_content || emailData.html,
+            status: savedRecord?.status || emailData.status || 'sent',
+            templateName: savedRecord?.template_name || emailData.templateName,
+            type: savedRecord?.email_type || emailData.type || 'manual',
+            resendId: savedRecord?.resend_id || emailData.resendId || null,
+            deliveryStatus: savedRecord?.delivery_status || emailData.deliveryStatus || 'unknown'
+          };
+
+          this._sentEmails.unshift(localEntry);
+
+          // Keep only last 500 in memory
+          if (this._sentEmails.length > 500) {
+            this._sentEmails = this._sentEmails.slice(0, 500);
+          }
+
+          this.renderSentEmails();
+          return savedRecord || localEntry;
         },
 
         // LEGACY: Remove old method, now handled in addSentEmail above

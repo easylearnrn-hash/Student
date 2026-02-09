@@ -3,10 +3,10 @@
 
 CREATE TABLE IF NOT EXISTS sent_emails (
   id BIGSERIAL PRIMARY KEY,
-  recipient TEXT NOT NULL,
+  recipient_email TEXT NOT NULL,
+  recipient_name TEXT,
   subject TEXT NOT NULL,
-  body_html TEXT,
-  body_text TEXT,
+  html_content TEXT,
   status TEXT DEFAULT 'sent',
   template_name TEXT,
   email_type TEXT,
@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS sent_emails (
 
 -- Create index for faster queries
 CREATE INDEX IF NOT EXISTS idx_sent_emails_sent_at ON sent_emails(sent_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sent_emails_recipient ON sent_emails(recipient);
+CREATE INDEX IF NOT EXISTS idx_sent_emails_recipient ON sent_emails(recipient_email);
 CREATE INDEX IF NOT EXISTS idx_sent_emails_type ON sent_emails(email_type);
 
 -- Enable RLS (Row Level Security)
@@ -33,5 +33,13 @@ CREATE POLICY "Enable all operations for authenticated users" ON sent_emails
 -- Grant permissions
 GRANT ALL ON sent_emails TO authenticated;
 GRANT ALL ON sent_emails TO anon;
-GRANT USAGE, SELECT ON SEQUENCE sent_emails_id_seq TO authenticated;
-GRANT USAGE, SELECT ON SEQUENCE sent_emails_id_seq TO anon;
+DO $$
+DECLARE
+  seq_name TEXT;
+BEGIN
+  seq_name := pg_get_serial_sequence('sent_emails', 'id');
+  IF seq_name IS NOT NULL THEN
+    EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO authenticated', seq_name);
+    EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO anon', seq_name);
+  END IF;
+END $$;

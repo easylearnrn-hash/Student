@@ -4291,13 +4291,62 @@
           const balance = Number(student.balance) || 0;
           const pricePerClass = Number(student.price_per_class) || 0;
           
-          // Generate email HTML
+          // CRITICAL: Calculate ACTUAL unpaid classes from month data, not just balance
+          let unpaidClassesFromCalendar = 0;
+          let unpaidAmountFromCalendar = 0;
+          const unpaidClassDetails = [];
+          
+          // Get the current month data from the calendar
+          const currentDate = new Date();
+          const currentYear = currentDate.getFullYear();
+          const currentMonth = currentDate.getMonth();
+          
+          // Look through the entire month cache for unpaid classes
+          const monthCacheKeys = Array.from(monthCache.keys());
+          for (const cacheKey of monthCacheKeys) {
+            const monthData = monthCache.get(cacheKey);
+            if (monthData && monthData.dayMap) {
+              // Iterate through all days in the month
+              Object.values(monthData.dayMap).forEach(dayData => {
+                // Check each group's students for this student
+                (dayData.groups || []).forEach(group => {
+                  (group.students || []).forEach(studentEntry => {
+                    // Match by student ID
+                    if (String(studentEntry.id) === String(studentId) && studentEntry.status === 'unpaid') {
+                      unpaidClassesFromCalendar++;
+                      const amount = studentEntry.pricePerClass || pricePerClass;
+                      unpaidAmountFromCalendar += amount;
+
+                      const formattedDate = new Date(`${dayData.dateStr}T12:00:00`).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      });
+                      
+                      unpaidClassDetails.push({
+                        date: dayData.dateStr,
+                        formattedDate,
+                        amount
+                      });
+                    }
+                  });
+                });
+              });
+            }
+          }
+          
+          // Use calendar data if we found unpaid classes, otherwise fall back to balance
+          const finalBalance = unpaidAmountFromCalendar > 0 ? unpaidAmountFromCalendar : balance;
+          const finalPrice = pricePerClass || 15;
+          
+          // Generate email HTML (async now - loads from Email System)
           const emailHTML = await generatePaymentReminderEmailHTML(
             student.name,
-            balance,
-            pricePerClass,
+            finalBalance,
+            finalPrice,
             studentId,
-            []
+            unpaidClassDetails
           );
           
           console.log('📧 Sending payment reminder to:', cleanEmail);
@@ -4333,10 +4382,11 @@
           
           console.log('✅ Payment reminder email sent successfully:', result);
           
-          // Log to sent_emails table
+          // CRITICAL: Log to BOTH notification systems
           try {
             const resendEmailId = result?.id || result?.data?.id || null;
             
+            // 1. Log to sent_emails table (for Email System)
             const sentEmailRecord = {
               recipient_email: cleanEmail,
               recipient_name: student.name,
@@ -4360,6 +4410,39 @@
             } else {
               console.log('✅ Payment reminder logged to sent_emails:', logData[0]);
             }
+            
+            // 2. Log to notifications table (for Notification Center bell)
+            const notificationRecord = {
+              type: 'email_sent',
+              category: 'email',  // For UI rendering (getCategoryIcon)
+              title: 'Payment Reminder Sent',
+              description: `Sent payment reminder to ${student.name} (${cleanEmail}) for $${finalBalance}`,
+              student_name: student.name,
+              metadata: {
+                student_id: studentId,
+                student_name: student.name,
+                email: cleanEmail,
+                amount: finalBalance,
+                email_type: 'payment_reminder',
+                subject: `Payment Reminder - ARNOMA NCLEX-RN`,
+                html: emailHTML  // Full email HTML for preview
+              },
+              timestamp: new Date().toISOString(),
+              read: false,
+              created_at: new Date().toISOString()
+            };
+            
+            const { data: notifData, error: notifError } = await supabaseClient
+              .from('notifications')
+              .insert([notificationRecord])
+              .select();
+            
+            if (notifError) {
+              console.error('⚠️ Failed to log to notifications:', notifError);
+            } else {
+              console.log('✅ Notification logged:', notifData[0]);
+            }
+            
           } catch (logErr) {
             console.error('⚠️ Error logging notifications (email still sent):', logErr);
           }
@@ -4372,13 +4455,110 @@
       }
 
       async function generatePaymentReminderEmailHTML(studentName, balance, pricePerClass, studentId = null, unpaidClassDetails = []) {
-        const normalizedPricePerClass = Number(pricePerClass) > 0 ? Number(pricePerClass) : 15;
-        const normalizedBalance = Number(balance) || 0;
-        const actualAmountDue = normalizedBalance > 0 ? normalizedBalance : 0;
-        const actualUnpaidCount = Math.ceil(actualAmountDue / normalizedPricePerClass);
+        // Helper function to format date beautifully
+        function formatClassDate(dateStr) {
+          const date = new Date(dateStr + 'T12:00:00');
+          const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+          return date.toLocaleDateString('en-US', options);
+        }
         
-        // Build unpaid classes summary
-        const unpaidClassesSummary = `${actualUnpaidCount} unpaid ${actualUnpaidCount === 1 ? 'class' : 'classes'} - Total: $${actualAmountDue.toFixed(2)}`;
+        const normalizedPricePerClass = Number(pricePerClass) > 0 ? Number(pricePerClass) : 15;
+        const unpaidClasses = (Array.isArray(unpaidClassDetails) ? unpaidClassDetails : []).map(cls => {
+          const rawDate = cls.date || cls.class_date || null;
+          const formattedDate = cls.formattedDate || (rawDate ? formatClassDate(rawDate) : 'Class date pending');
+          const amount = Number(cls.amount);
+          return {
+            date: rawDate,
+            formattedDate,
+            amount: Number.isFinite(amount) && amount > 0 ? amount : normalizedPricePerClass
+          };
+        });
+        
+        // Calculate unpaid amount from student balance
+        let actualAmountDue = 0;
+        let actualUnpaidCount = 0;
+        
+        if (studentId && balance && balance > 0) {
+          // Student has positive balance = money owed
+          actualAmountDue = balance;
+          
+          // Calculate number of unpaid classes based on price per class
+          actualUnpaidCount = Math.ceil(actualAmountDue / normalizedPricePerClass);
+          
+          console.log('💰 Payment reminder - using student balance:', {
+            studentId,
+            studentName,
+            balance,
+            pricePerClass: normalizedPricePerClass,
+            unpaidCount: actualUnpaidCount,
+            amountDue: actualAmountDue
+          });
+        } else {
+          console.log('💰 Payment reminder - no balance owed:', {
+            studentId,
+            studentName,
+            balance
+          });
+        }
+        
+        // Build unpaid classes summary HTML
+        let unpaidClassesSummary = '';
+        
+        // Calculate actual amounts from unpaid classes
+        if (unpaidClasses.length > 0) {
+          actualUnpaidCount = unpaidClasses.length;
+          actualAmountDue = unpaidClasses.reduce((sum, cls) => sum + cls.amount, 0);
+          
+          if (unpaidClasses.length === 1) {
+            // Single unpaid class - simple format
+            unpaidClassesSummary = `
+              <div style="background: #f0f4ff; border-left: 4px solid #667eea; padding: 16px; margin: 16px 0; border-radius: 6px;">
+                <p style="margin: 4px 0; font-size: 15px;"><strong>📅 ${unpaidClasses[0].formattedDate}</strong></p>
+                <p style="margin: 4px 0; font-size: 15px;"><strong>Amount Due:</strong> $${unpaidClasses[0].amount.toFixed(2)}</p>
+              </div>
+            `;
+          } else {
+            // Multiple unpaid classes - beautiful list
+            const classList = unpaidClasses.map((cls, index) => `
+              <div style="background: ${index === unpaidClasses.length - 1 ? '#fff9e6' : '#ffffff'}; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid #e5e7eb;">
+                <p style="margin: 4px 0; font-size: 14px; color: #6b7280;">Class ${index + 1}</p>
+                <p style="margin: 4px 0; font-size: 15px;"><strong>${index === unpaidClasses.length - 1 ? '👉 ' : ''}${cls.formattedDate}</strong></p>
+                <p style="margin: 4px 0; font-size: 15px; text-align: right;"><strong>$${cls.amount.toFixed(2)}</strong></p>
+              </div>
+            `).join('');
+            
+            unpaidClassesSummary = `
+              <div style="background: #f9fafb; border: 2px solid #e5e7eb; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <h3 style="margin: 0 0 16px 0; color: #764ba2; font-size: 18px;">💳 Outstanding Classes</h3>
+                ${classList}
+                <div style="background: #667eea; color: white; padding: 12px; margin: 12px 0 0 0; border-radius: 6px; text-align: right;">
+                  <strong style="font-size: 16px;">Total Amount Due: $${actualAmountDue.toFixed(2)}</strong>
+                </div>
+              </div>
+            `;
+          }
+        } else {
+          // Fallback: calculate from balance if we couldn't fetch classes
+          const normalizedBalance = Number(balance) || 0;
+          actualAmountDue = normalizedBalance > 0 ? normalizedBalance : 0;
+          
+          // Validate pricePerClass to prevent NaN
+          actualUnpaidCount = Math.ceil(actualAmountDue / normalizedPricePerClass);
+          
+          // Ensure actualUnpaidCount is a valid number
+          if (!Number.isFinite(actualUnpaidCount) || actualUnpaidCount < 0) {
+            actualUnpaidCount = 0;
+          }
+          
+          console.log('💰 Using fallback calculation:', {
+            balance: normalizedBalance,
+            actualAmountDue,
+            pricePerClass: normalizedPricePerClass,
+            unpaidCount: actualUnpaidCount
+          });
+          
+          unpaidClassesSummary = `${actualUnpaidCount} unpaid ${actualUnpaidCount === 1 ? 'class' : 'classes'} - Total: $${actualAmountDue.toFixed(2)}`;
+        }
         
         try {
           // Try to load Payment Reminder template from Email System (Supabase)
@@ -4390,8 +4570,9 @@
           
           if (!error && templates && templates.body) {
             console.log('✅ Using Payment Reminder template from Email System');
+            console.log(`📊 Payment details: ${actualUnpaidCount} classes, $${actualAmountDue.toFixed(2)} total`);
             
-            // Replace template variables with actual data
+            // Replace template variables with actual data (case-insensitive)
             let emailHTML = templates.body
               .replace(/\{\{StudentName\}\}/gi, studentName)
               .replace(/\{\{UnpaidClasses\}\}/gi, unpaidClassesSummary)
@@ -4409,43 +4590,326 @@
           console.warn('⚠️ Could not load template from Email System, using fallback:', e);
         }
         
-        // FALLBACK: Use simple template
-        return `
-          <html>
-            <body style="font-family: Arial, sans-serif; background: #f5f5f5; padding: 20px;">
-              <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center;">
-                  <h1 style="color: white; margin: 0; font-size: 28px;">ARNOMA NCLEX-RN</h1>
-                </div>
-                <div style="padding: 30px;">
-                  <p style="font-size: 18px; margin-bottom: 20px;">Dear ${studentName},</p>
-                  <p style="font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
-                    This is a friendly reminder about your outstanding balance.
-                  </p>
-                  <div style="background: #f0f4ff; border-left: 4px solid #667eea; padding: 20px; margin: 20px 0; border-radius: 6px;">
-                    <h3 style="margin: 0 0 10px 0; color: #764ba2;">Payment Details</h3>
-                    <p style="margin: 5px 0; font-size: 16px;"><strong>Unpaid Classes:</strong> ${actualUnpaidCount}</p>
-                    <p style="margin: 5px 0; font-size: 16px;"><strong>Amount Due:</strong> $${actualAmountDue.toFixed(2)}</p>
-                  </div>
-                  <p style="font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
-                    Please send your payment via Zelle or Venmo at your earliest convenience.
-                  </p>
-                  <div style="text-align: center; margin: 30px 0;">
-                    <p style="font-size: 16px; margin: 5px 0;"><strong>Zelle:</strong> arnomaschool@gmail.com</p>
-                    <p style="font-size: 16px; margin: 5px 0;"><strong>Venmo:</strong> @ARNOMA-School</p>
-                  </div>
-                  <p style="font-size: 14px; color: #666; margin-top: 30px;">
-                    Thank you for your continued participation!
-                  </p>
-                  <p style="font-size: 14px; color: #666; margin-top: 10px;">
-                    Best regards,<br>
-                    ARNOMA Team
-                  </p>
-                </div>
-              </div>
-            </body>
-          </html>
-        `;
+        // FALLBACK: Use hardcoded template if Email System template not found
+        console.log('ℹ️ Using fallback payment reminder template');
+        const fallbackHTML = `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ARNOMA NCLEX-RN Email</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 20px;
+        margin: 0;
+      }
+
+      .email-wrapper {
+        width: 100%;
+        max-width: 600px;
+        margin: 0 auto;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 24px;
+        border-radius: 16px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      }
+
+      .email-container {
+        background: white;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      }
+
+      .email-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 40px 30px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .email-header::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+        animation: none;
+      }
+
+      .email-header img {
+        width: 120px;
+        height: auto;
+        margin-bottom: 20px;
+        position: relative;
+        z-index: 1;
+        filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.1)) drop-shadow(0 0 10px rgba(255, 255, 255, 0.6)) drop-shadow(0 0 20px rgba(255, 255, 255, 0.4));
+      }
+
+      .email-header h1 {
+        color: white;
+        font-size: 32px;
+        font-weight: 700;
+        margin: 0;
+        position: relative;
+        z-index: 1;
+        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      }
+
+      .email-body {
+        padding: 40px 30px;
+        color: #1f2937;
+        line-height: 1.8;
+        background: white;
+      }
+
+      .email-body p {
+        margin: 16px 0;
+        font-size: 16px;
+        color: #374151;
+      }
+
+      .email-body strong {
+        color: #764ba2;
+        font-weight: 600;
+      }
+
+      .info-box {
+        background-color: #f6f8fe;
+        border-left: 3px solid #3b82f6;
+        border-radius: 10px;
+        padding: 14px 18px;
+        font-size: 15px;
+        line-height: 1.5;
+        color: #1e293b;
+        margin: 20px 0;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+      }
+
+      .info-box p {
+        margin: 6px 0;
+        text-align: left;
+      }
+
+      .payment-instructions {
+        background: #f9fafb;
+        border-radius: 12px;
+        padding: 24px;
+        margin: 24px 0;
+      }
+
+      .payment-instructions h3 {
+        color: #764ba2;
+        font-size: 20px;
+        margin-bottom: 16px;
+        font-weight: 600;
+      }
+
+      .payment-instructions p {
+        margin: 12px 0;
+        color: #4b5563;
+      }
+
+      .payment-frame {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+        border: 2px solid rgba(118, 75, 162, 0.2);
+        border-radius: 16px;
+        padding: 32px;
+        margin: 32px 0;
+        text-align: center;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
+      }
+
+      .payment-frame p {
+        margin: 12px 0;
+        font-size: 18px;
+        color: #1f2937;
+      }
+
+      .payment-frame img {
+        max-width: 240px;
+        height: auto;
+        margin: 20px auto;
+        display: block;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      }
+
+      .zelle-number {
+        font-size: 24px;
+        font-weight: 700;
+        color: #764ba2;
+        margin: 16px 0;
+        letter-spacing: 1px;
+      }
+
+      .email-footer {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 32px 30px;
+        text-align: center;
+        color: white;
+      }
+
+      .email-footer img {
+        width: 80px;
+        height: auto;
+        margin-bottom: 16px;
+        filter: brightness(0) invert(1);
+        opacity: 0.9;
+      }
+
+      .email-footer p {
+        margin: 8px 0;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .email-footer strong {
+        color: white;
+        font-weight: 600;
+      }
+
+      .divider {
+        height: 1px;
+        background: linear-gradient(to right, transparent, rgba(118, 75, 162, 0.3), transparent);
+        margin: 24px 0;
+      }
+
+      @media only screen and (max-width: 600px) {
+        .email-wrapper {
+          padding: 16px;
+        }
+
+        .email-header {
+          padding: 30px 20px;
+        }
+
+        .email-header h1 {
+          font-size: 24px;
+        }
+
+        .email-body {
+          padding: 24px 20px;
+        }
+
+        .payment-frame {
+          padding: 20px;
+        }
+
+        .payment-frame img {
+          max-width: 200px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="email-wrapper">
+      <div class="email-container">
+        <!-- Header -->
+        <div class="email-header">
+          <img
+            src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png"
+            alt="ARNOMA Logo"
+          />
+          <h1>Payment Reminder</h1>
+        </div>
+
+        <!-- Body -->
+        <div class="email-body">
+          <p>
+            Hello
+            <strong>${studentName}</strong>
+            ,
+          </p>
+
+          <p>This is a quick, automated check regarding your recent classes:</p>
+
+          <div class="info-box">
+            <p><strong>${unpaidClassesSummary}</strong></p>
+          </div>
+
+          <p>Our records show that your payment hasn't been posted yet.</p>
+
+          <div class="divider"></div>
+
+          <div class="payment-instructions">
+            <h3>What to do:</h3>
+
+            <p>
+              <strong>If you have already paid:</strong>
+              <br />
+              Great! Please simply reply with the screenshot of your transfer. That's all we need to update our log and
+              ensure you don't receive any more reminders.
+            </p>
+
+            <p>
+              <strong>If you still plan to pay:</strong>
+              <br />
+              Please submit the payment at your earliest convenience. The system can only process and send your notes
+              once payment is confirmed.
+            </p>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Payment Frame -->
+          <div class="payment-frame">
+            <p style="font-size: 20px; margin-bottom: 8px">
+              <strong>
+                Send Money with
+                <span style="color: #764ba2">Zelle®</span>
+              </strong>
+            </p>
+            <p style="font-size: 14px; color: #6b7280; margin-bottom: 20px">Scan in your banking app to pay.</p>
+
+            <p class="zelle-number">909-300-5155</p>
+
+            <img
+              src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/Arnoma%20Zelle.JPG"
+              alt="Zelle QR Code"
+            />
+
+            <p style="font-size: 16px; color: #9ca3af; margin-top: 16px">
+              <strong style="color: #764ba2">Zelle</strong>
+            </p>
+          </div>
+
+          <p style="margin-top: 32px">Thank you for your prompt attention to this!</p>
+
+          <p style="margin-top: 24px">
+            Best regards,
+            <br />
+            <strong style="color: #764ba2">ARNOMA Team</strong>
+          </p>
+        </div>
+
+        <!-- Footer -->
+        <div class="email-footer">
+          <img
+            src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png"
+            alt="ARNOMA Logo"
+          />
+          <p><strong>ARNOMA – NCLEX RN</strong></p>
+          <p style="margin-top: 12px">nclex.rn@arnoma.us | richy@arnoma.us | 909-808-1818</p>
+          <p style="margin-top: 16px; font-size: 12px; opacity: 0.8">© 2025 ARNOMA. All rights reserved.</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`;
+        
+        return fallbackHTML;
       }
 
       async function saveBalance() {
