@@ -7,8 +7,12 @@
 -- The gmail_id unique constraint is sufficient to prevent actual duplicates
 -- (i.e., the same Gmail message being imported multiple times)
 
+-- Drop BOTH possible constraint names (the actual name is unique_student_class_payment)
 ALTER TABLE payments 
 DROP CONSTRAINT IF EXISTS payments_student_id_for_class_key;
+
+ALTER TABLE payments 
+DROP CONSTRAINT IF EXISTS unique_student_class_payment;
 
 -- Verify the constraint was removed
 SELECT 
@@ -16,6 +20,6 @@ SELECT
     contype AS constraint_type
 FROM pg_constraint
 WHERE conrelid = 'payments'::regclass
-  AND conname LIKE '%student%for_class%';
+  AND conname LIKE '%student%';
 
--- Expected result: No rows (constraint should be gone)
+-- Expected result: Only gmail_id unique constraint should remain
