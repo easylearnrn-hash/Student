@@ -2721,7 +2721,7 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
                   <div style="flex: 1; min-width: 0;">
                     <div style="color: white; font-weight: 500; margin-bottom: 4px;">${student.name}</div>
-                    <div style="color: rgba(255,255,255,0.5); font-size: 12px;">Group ${student.groupName} • Balance: $${student.balance || 0}</div>
+                    <div style="color: rgba(255,255,255,0.5); font-size: 12px;">Group ${student.groupName} • Owes: $${pricePerClass} • Credit: $${student.balance || 0}</div>
                   </div>
                   ${actionButtons}
                   <div style="padding: 6px 12px; background: rgba(248,113,113,0.2); border: 1px solid rgba(248,113,113,0.5); border-radius: 8px; color: #f87171; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;">UNPAID</div>
@@ -2835,7 +2835,7 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
                   <div style="flex: 1; min-width: 0;">
                     <div style="color: white; font-weight: 500; margin-bottom: 4px;">${student.name}</div>
-                    <div style="color: rgba(255,255,255,0.5); font-size: 12px;">Balance: $${student.balance || 0}</div>
+                    <div style="color: rgba(255,255,255,0.5); font-size: 12px;">${student.status === 'unpaid' ? `Owes: $${pricePerClass} • Credit: $${student.balance || 0}` : `Credit: $${student.balance || 0}`}</div>
                   </div>
                   ${actionButtons}
                   <div style="padding: 6px 12px; background: ${statusBg}; border: 1px solid ${statusBorder}; border-radius: 8px; color: ${statusColor}; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;">${statusBadge}</div>
@@ -3467,8 +3467,14 @@
 
           // Reload data and refresh
           await loadAbsences();
-          closeDayModal();
+          
+          // Refresh the calendar
           renderCalendar();
+          
+          // Refresh the day modal if it's still open
+          if (currentModalDate === dateStr) {
+            openDayModal(dateStr);
+          }
           
           // Success notification
           const successOverlay = document.createElement('div');
@@ -3584,8 +3590,14 @@
 
           // Reload data and refresh
           await loadAbsences();
-          closeDayModal();
+          
+          // Refresh the calendar
           renderCalendar();
+          
+          // Refresh the day modal if it's still open
+          if (currentModalDate === dateStr) {
+            openDayModal(dateStr);
+          }
           
           // Success notification
           const successOverlay = document.createElement('div');
@@ -3696,7 +3708,7 @@
           }
 
           // Create payment record in payment_records table (for manual cash payments)
-          const { error } = await supabaseClient
+          const { data: insertedData, error } = await supabaseClient
             .from('payment_records')
             .insert([{
               student_id: studentId,
@@ -3704,7 +3716,8 @@
               amount: paymentAmount,
               status: 'paid',
               payment_method: 'cash'
-            }]);
+            }])
+            .select();
 
           if (error) {
             console.error('❌ Error creating payment:', error);
@@ -3730,10 +3743,32 @@
             return;
           }
 
-          // Reload data and refresh
-          await loadPayments();
-          await loadPaymentRecords();
+          // Immediately add to local data
+          if (insertedData && insertedData[0]) {
+            paymentRecordsData.push(insertedData[0]);
+          }
+          
+          // Immediately update payment index for this student/date
+          const normalizedDate = normalizeDateString(dateStr);
+          if (!paymentIndex.has(normalizedDate)) {
+            paymentIndex.set(normalizedDate, new Set());
+          }
+          paymentIndex.get(normalizedDate).add(String(studentId));
+          
+          // Clear payment cache to force recalculation
+          clearPaymentCache();
+          
+          // Reload data in background
+          loadPayments().catch(console.error);
+          loadPaymentRecords().catch(console.error);
+          
+          // Refresh the calendar (visual update)
           renderCalendar();
+          
+          // Refresh the day modal if it's still open
+          if (currentModalDate === dateStr) {
+            openDayModal(dateStr);
+          }
           
           // Success notification
           const successOverlay = document.createElement('div');
@@ -3894,8 +3929,17 @@
           
           // Reload data and refresh
           await loadCreditPayments();
-          closeDayModal();
+          
+          // Refresh the calendar (this rebuilds payment index)
           renderCalendar();
+          
+          // Clear payment cache AFTER index rebuild
+          clearPaymentCache();
+          
+          // Refresh the day modal if it's still open
+          if (currentModalDate === dateStr) {
+            openDayModal(dateStr);
+          }
           
           // Success notification
           const successOverlay = document.createElement('div');
