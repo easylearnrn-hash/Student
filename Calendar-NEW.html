@@ -2261,6 +2261,14 @@
             if (isScheduledClassDate(dateStr, group) && !isClassSkippedCached(dateStr, group.group_name)) {
               studentsData.forEach(student => {
                 if (student.group_name === group.group_name && student.show_in_grid !== false) {
+                  // IMPORTANT: Only count classes after student's creation date
+                  if (student.created_at) {
+                    const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
+                    if (dateStr < studentCreatedDate) {
+                      return; // Skip this student for dates before creation
+                    }
+                  }
+                  
                   const hasPayment = hasPaymentCached(student.id, dateStr, student);
                   const isAbsent = isAbsentCached(dateStr, student.id);
                   const pricePerClass = parseFloat(student.price_per_class || 0);
@@ -2334,6 +2342,14 @@
 
             // Add a dot for each active student in the scheduled class
             groupStudents.forEach(student => {
+              // IMPORTANT: Only show classes after student's creation date
+              if (student.created_at) {
+                const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
+                if (dateStr < studentCreatedDate) {
+                  return; // Skip this student for dates before creation
+                }
+              }
+              
               // Get pre-parsed aliases from cache
               const aliases = getStudentAliases(student.id);
 
@@ -2507,6 +2523,14 @@
             if (isScheduledClassDate(dateStr, group) && !isClassSkippedCached(dateStr, group.group_name)) {
               studentsData.forEach(student => {
                 if (student.group_name === group.group_name && student.show_in_grid !== false) {
+                  // IMPORTANT: Only count classes after student's creation date
+                  if (student.created_at) {
+                    const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
+                    if (dateStr < studentCreatedDate) {
+                      return; // Skip this student for dates before creation
+                    }
+                  }
+                  
                   const hasPayment = hasPaymentCached(student.id, dateStr, student);
                   
                   if (hasPayment) {
@@ -2569,6 +2593,15 @@
           
           // Check if this group has class on this date
           if (isScheduledClassDate(dateStr, group)) {
+            // IMPORTANT: Only show classes after student's creation date
+            if (student.created_at) {
+              const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
+              if (dateStr < studentCreatedDate) {
+                // Don't show this student for classes before they were created
+                return;
+              }
+            }
+            
             // Check payment status
             const hasPayment = hasPaymentCached(student.id, dateStr, student);
             const hasAbsence = isAbsentCached(dateStr, student.id);
@@ -4183,18 +4216,14 @@
               position: fixed;
               top: 20px;
               right: 20px;
-              background: rgba(34, 197, 94, 0.15);
-              backdrop-filter: blur(14px);
-              -webkit-backdrop-filter: blur(14px);
-              border: 1px solid rgba(34, 197, 94, 0.3);
-              color: #22c55e;
+              background: linear-gradient(135deg, #8ab4ff 0%, #a855f7 100%);
+              color: white;
               padding: 16px 24px;
               border-radius: 12px;
-              box-shadow: 0 8px 24px rgba(34, 197, 94, 0.2);
+              box-shadow: 0 8px 24px rgba(138, 180, 255, 0.4);
               z-index: 10000000;
               font-weight: 600;
               animation: slideInRight 0.3s ease;
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             `;
             successOverlay.textContent = `✅ Payment reminder sent to ${studentName}!`;
             document.body.appendChild(successOverlay);
@@ -4210,18 +4239,14 @@
               position: fixed;
               top: 20px;
               right: 20px;
-              background: rgba(239, 68, 68, 0.15);
-              backdrop-filter: blur(14px);
-              -webkit-backdrop-filter: blur(14px);
-              border: 1px solid rgba(239, 68, 68, 0.3);
-              color: #ef4444;
+              background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+              color: white;
               padding: 16px 24px;
               border-radius: 12px;
-              box-shadow: 0 8px 24px rgba(239, 68, 68, 0.2);
+              box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
               z-index: 10000000;
               font-weight: 600;
               animation: slideInRight 0.3s ease;
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             `;
             errorOverlay.textContent = `❌ Failed to send email: ${emailErr.message}`;
             document.body.appendChild(errorOverlay);
@@ -4236,18 +4261,14 @@
             position: fixed;
             top: 20px;
             right: 20px;
-            background: rgba(239, 68, 68, 0.15);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: #ef4444;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
             padding: 16px 24px;
             border-radius: 12px;
-            box-shadow: 0 8px 24px rgba(239, 68, 68, 0.2);
+            box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
             z-index: 10000000;
             font-weight: 600;
             animation: slideInRight 0.3s ease;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
           `;
           errorOverlay.textContent = '❌ Error sending reminder. Please try again.';
           document.body.appendChild(errorOverlay);
@@ -4312,42 +4333,30 @@
             const group = groupsData.find(g => g.group_name === student.group_name);
             
             if (group) {
-              // Get student creation date - only check classes AFTER this date
-              const studentCreatedDate = student.created_at ? new Date(student.created_at) : null;
-              
-              // Get group creation date - only check classes AFTER this date
-              const groupCreatedDate = group.created_at ? new Date(group.created_at) : null;
-              
-              // Get date range to check (last 60 days to today, but not before student/group was created)
+              // Determine start date: use student creation date or 60 days ago, whichever is more recent
               const today = new Date();
               let startDate = new Date(today);
               startDate.setDate(today.getDate() - 60);
               
-              // CRITICAL: Don't go back before student was created
-              if (studentCreatedDate && studentCreatedDate > startDate) {
-                startDate = new Date(studentCreatedDate);
-                console.log(`⏰ Student created on ${studentCreatedDate.toISOString().split('T')[0]}, starting from that date`);
-              }
-              
-              // CRITICAL: Don't go back before group was created
-              if (groupCreatedDate && groupCreatedDate > startDate) {
-                startDate = new Date(groupCreatedDate);
-                console.log(`⏰ Group created on ${groupCreatedDate.toISOString().split('T')[0]}, starting from that date`);
+              // IMPORTANT: If student was created recently, only check from creation date
+              if (student.created_at) {
+                const studentCreatedDate = new Date(student.created_at);
+                if (studentCreatedDate > startDate) {
+                  startDate = studentCreatedDate;
+                  console.log('🆕 Student created recently, checking from creation date:', startDate.toISOString().split('T')[0]);
+                }
               }
               
               // Check each day in the range
               for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
                 const dateStr = d.toISOString().split('T')[0];
-                const classDate = new Date(dateStr);
                 
-                // CRITICAL: Skip classes before student was created
-                if (studentCreatedDate && classDate < studentCreatedDate) {
-                  continue; // Skip this date
-                }
-                
-                // CRITICAL: Skip classes before group was created
-                if (groupCreatedDate && classDate < groupCreatedDate) {
-                  continue; // Skip this date
+                // IMPORTANT: Double-check that class date is on or after student creation date
+                if (student.created_at) {
+                  const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
+                  if (dateStr < studentCreatedDate) {
+                    continue; // Skip classes before student was created
+                  }
                 }
                 
                 // Check if this group has class on this date
@@ -4382,6 +4391,7 @@
               studentId,
               studentName: student.name,
               groupName: student.group_name,
+              createdAt: student.created_at,
               unpaidClassesCount: unpaidClassDetails.length,
               unpaidAmount: unpaidAmountFromCalendar,
               unpaidDates: unpaidClassDetails.map(c => c.date)
