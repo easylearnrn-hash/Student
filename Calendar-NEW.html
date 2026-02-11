@@ -2696,7 +2696,7 @@
               <div class="student-actions">
                 <button class="action-icon-btn send"
                         data-tooltip="Send Email"
-                        onclick="event.stopPropagation(); sendManualReminder(${student.id}, '${safeName}')">
+                        onclick="event.stopPropagation(); sendManualReminder(${student.id}, '${safeName}', '${dateStr}', ${pricePerClass})">
                   <span class="btn-icon">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                       <path d="M5 12h14M12 5l7 7-7 7"/>
@@ -2809,7 +2809,7 @@
                 <div class="student-actions">
                   <button class="action-icon-btn send"
                           data-tooltip="Send Email"
-                          onclick="event.stopPropagation(); sendManualReminder(${student.id}, '${safeName}')">
+                          onclick="event.stopPropagation(); sendManualReminder(${student.id}, '${safeName}', '${dateStr}', ${pricePerClass})">
                     <span class="btn-icon">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M5 12h14M12 5l7 7-7 7"/>
@@ -4443,75 +4443,52 @@
       // 📧 EMAIL PAYMENT REMINDER SYSTEM
       // ============================================================
 
-      async function sendManualReminder(studentId, studentName) {
+      async function sendManualReminder(studentId, studentName, classDate = null, pricePerClass = null) {
         try {
           console.log(`Preparing to send manual payment reminder to ${studentName}`, { studentId });
 
-          // Show confirmation dialog
-          const confirmed = await showConfirmDialog(
-            'Send Payment Reminder?',
-            `
-              <div style="text-align: left; line-height: 1.6;">
-                <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Student:</strong> ${studentName}</div>
-                <div style="margin-top: 16px; padding: 12px; background: rgba(138, 180, 255, 0.1); border: 1px solid rgba(138, 180, 255, 0.3); border-radius: 8px; font-size: 14px; color: rgba(255,255,255,0.85);">
-                  💌 This will send a payment reminder email to the student with their current balance and unpaid classes.
-                </div>
-              </div>
-            `
-          );
+          const templateChoice = await showEmailTemplatePicker(studentName);
+          if (!templateChoice) return;
 
-          if (!confirmed) return;
-
-          // Send payment reminder email
-          try {
-            await sendPaymentReminderEmail(studentId);
-            
-            // Success notification - matching design system
-            const successOverlay = document.createElement('div');
-            successOverlay.style.cssText = `
-              position: fixed;
-              top: 20px;
-              right: 20px;
-              background: linear-gradient(135deg, #8ab4ff 0%, #a855f7 100%);
-              color: white;
-              padding: 16px 24px;
-              border-radius: 12px;
-              box-shadow: 0 8px 24px rgba(138, 180, 255, 0.4);
-              z-index: 10000000;
-              font-weight: 600;
-              animation: slideInRight 0.3s ease;
-            `;
-            successOverlay.textContent = `✅ Payment reminder sent to ${studentName}!`;
-            document.body.appendChild(successOverlay);
-            setTimeout(() => successOverlay.remove(), 3000);
-            
-            console.log(`✅ Manual reminder sent to ${studentName}`);
-          } catch (emailErr) {
-            console.error('❌ Failed to send payment reminder email:', emailErr);
-            
-            // Error notification - matching design system
-            const errorOverlay = document.createElement('div');
-            errorOverlay.style.cssText = `
-              position: fixed;
-              top: 20px;
-              right: 20px;
-              background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-              color: white;
-              padding: 16px 24px;
-              border-radius: 12px;
-              box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
-              z-index: 10000000;
-              font-weight: 600;
-              animation: slideInRight 0.3s ease;
-            `;
-            errorOverlay.textContent = `❌ Failed to send email: ${emailErr.message}`;
-            document.body.appendChild(errorOverlay);
-            setTimeout(() => errorOverlay.remove(), 4000);
+          let payload = null;
+          if (templateChoice === 'payment_failed') {
+            payload = await buildFailedPaymentPayload(studentId, classDate, pricePerClass);
+          } else {
+            payload = await buildPaymentReminderPayload(studentId);
           }
-        } catch (err) {
-          console.error('❌ Error sending reminder:', err);
-          
-          // Error notification
+
+          const previewConfirmed = await showEmailPreviewDialog(payload.subject, payload.html, templateChoice);
+          if (!previewConfirmed) return;
+
+          // Send email
+          const result = await sendEmailPayload(payload);
+          await logSentEmail(payload, result);
+
+          // Success notification - matching design system
+          const successOverlay = document.createElement('div');
+          successOverlay.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #8ab4ff 0%, #a855f7 100%);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(138, 180, 255, 0.4);
+            z-index: 10000000;
+            font-weight: 600;
+            animation: slideInRight 0.3s ease;
+          `;
+          successOverlay.textContent = `✅ Email sent to ${studentName}!`;
+          document.body.appendChild(successOverlay);
+          setTimeout(() => successOverlay.remove(), 3000);
+
+          console.log(`✅ Manual reminder sent to ${studentName}`);
+          return result;
+        } catch (emailErr) {
+          console.error('❌ Failed to send payment reminder email:', emailErr);
+
+          // Error notification - matching design system
           const errorOverlay = document.createElement('div');
           errorOverlay.style.cssText = `
             position: fixed;
@@ -4526,263 +4503,457 @@
             font-weight: 600;
             animation: slideInRight 0.3s ease;
           `;
-          errorOverlay.textContent = '❌ Error sending reminder. Please try again.';
+          errorOverlay.textContent = `❌ Failed to send email: ${emailErr.message}`;
           document.body.appendChild(errorOverlay);
           setTimeout(() => errorOverlay.remove(), 4000);
         }
       }
 
-      async function sendPaymentReminderEmail(studentId) {
-        try {
-          console.log('📧 Sending payment reminder email...', { studentId });
-          
-          // Get student information
-          const student = studentsData.find(s => s.id === parseInt(studentId));
-          
-          if (!student) {
-            throw new Error('Student not found');
-          }
-          
-          console.log('📧 Student email check:', { 
-            name: student.name, 
-            email: student.email, 
-            emailType: typeof student.email 
+      function showEmailTemplatePicker(studentName) {
+        return new Promise((resolve) => {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 9999999;
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            animation: fadeIn 0.2s ease;
+          `;
+
+          const dialog = document.createElement('div');
+          dialog.style.cssText = `
+            background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
+            border: 1px solid rgba(138, 180, 255, 0.3);
+            border-radius: 16px;
+            padding: 28px;
+            min-width: 460px;
+            max-width: 520px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            pointer-events: auto;
+            animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          `;
+
+          dialog.innerHTML = `
+            <h3 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 600; color: #8ab4ff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">Choose Email Template</h3>
+            <div style="margin-bottom: 20px; color: rgba(255,255,255,0.85); font-size: 14px; line-height: 1.6;">
+              Select which email to send for <strong>${studentName}</strong>.
+            </div>
+            <div style="display: grid; gap: 12px;">
+              <button id="templateReminder" style="
+                text-align: left;
+                padding: 14px 16px;
+                background: rgba(138, 180, 255, 0.12);
+                border: 1px solid rgba(138, 180, 255, 0.35);
+                border-radius: 10px;
+                color: white;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+              ">💌 Payment Reminder (current template)</button>
+              <button id="templateFailed" style="
+                text-align: left;
+                padding: 14px 16px;
+                background: rgba(248, 113, 113, 0.12);
+                border: 1px solid rgba(248, 113, 113, 0.35);
+                border-radius: 10px;
+                color: white;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+              ">⚠️ Payment Failed Notice</button>
+            </div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 20px;">
+              <button id="templateCancel" style="
+                padding: 10px 22px;
+                background: rgba(255,255,255,0.08);
+                border: none;
+                border-radius: 8px;
+                color: rgba(255,255,255,0.7);
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+              ">Cancel</button>
+            </div>
+          `;
+
+          overlay.appendChild(dialog);
+          document.body.appendChild(overlay);
+
+          const cleanup = (value) => {
+            overlay.remove();
+            resolve(value);
+          };
+
+          dialog.querySelector('#templateReminder').addEventListener('click', () => cleanup('payment_reminder'));
+          dialog.querySelector('#templateFailed').addEventListener('click', () => cleanup('payment_failed'));
+          dialog.querySelector('#templateCancel').addEventListener('click', () => cleanup(null));
+          overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) cleanup(null);
           });
-          
-          if (!student.email) {
-            throw new Error('Student has no email address');
-          }
-          
-          // Parse email if it's JSON array string
-          let cleanEmail = String(student.email).trim();
-          
-          // Check if email is a JSON array string like '["email@example.com"]'
-          if (cleanEmail.startsWith('[') && cleanEmail.endsWith(']')) {
-            try {
-              const parsed = JSON.parse(cleanEmail);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                cleanEmail = String(parsed[0]).trim();
-                console.log('📧 Parsed email from JSON array:', cleanEmail);
-              }
-            } catch (e) {
-              console.warn('⚠️ Failed to parse email JSON:', e);
-            }
-          }
-          
-          // Validate email format
-          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-          
-          if (!emailRegex.test(cleanEmail)) {
-            throw new Error(`Invalid email format: "${cleanEmail}" - Please update student's email in Student Manager`);
-          }
-          
-          // Get student balance and price
-          const balance = Number(student.balance) || 0;
-          const pricePerClass = Number(student.price_per_class) || 15;
-          
-          // Find all unpaid classes for this student by checking scheduled classes vs payments
-          const unpaidClassDetails = [];
-          let unpaidAmountFromCalendar = 0;
-          
+        });
+      }
+
+      function showEmailPreviewDialog(subject, html, templateKey) {
+        const templateLabel = templateKey === 'payment_failed' ? 'Payment Failed Notice' : 'Payment Reminder';
+        return new Promise((resolve) => {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 9999999;
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: auto;
+            animation: fadeIn 0.2s ease;
+          `;
+
+          const dialog = document.createElement('div');
+          dialog.style.cssText = `
+            background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
+            border: 1px solid rgba(138, 180, 255, 0.3);
+            border-radius: 16px;
+            padding: 24px;
+            min-width: 520px;
+            max-width: 720px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            pointer-events: auto;
+            animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          `;
+
+          dialog.innerHTML = `
+            <h3 style="margin: 0 0 8px 0; font-size: 20px; font-weight: 600; color: #8ab4ff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">Preview: ${templateLabel}</h3>
+            <div style="margin-bottom: 16px; color: rgba(255,255,255,0.85); font-size: 14px;">Subject: <strong>${subject}</strong></div>
+            <div style="background: white; border-radius: 10px; padding: 14px; max-height: 320px; overflow-y: auto; color: #111;">
+              ${html}
+            </div>
+            <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px;">
+              <button id="previewCancel" style="
+                padding: 10px 22px;
+                background: rgba(255,255,255,0.08);
+                border: none;
+                border-radius: 8px;
+                color: rgba(255,255,255,0.7);
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+              ">Cancel</button>
+              <button id="previewSend" style="
+                padding: 10px 22px;
+                background: linear-gradient(135deg, #8ab4ff 0%, #a855f7 100%);
+                border: none;
+                border-radius: 8px;
+                color: white;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s ease;
+              ">Send Email</button>
+            </div>
+          `;
+
+          overlay.appendChild(dialog);
+          document.body.appendChild(overlay);
+
+          const cleanup = (value) => {
+            overlay.remove();
+            resolve(value);
+          };
+
+          dialog.querySelector('#previewCancel').addEventListener('click', () => cleanup(false));
+          dialog.querySelector('#previewSend').addEventListener('click', () => cleanup(true));
+          overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) cleanup(false);
+          });
+        });
+      }
+
+      async function sendPaymentReminderEmail(studentId) {
+        const payload = await buildPaymentReminderPayload(studentId);
+        const result = await sendEmailPayload(payload);
+        await logSentEmail(payload, result);
+        return result;
+      }
+
+      async function getStudentEmailInfo(studentId) {
+        console.log('📧 Preparing email payload...', { studentId });
+
+        const student = studentsData.find(s => s.id === parseInt(studentId));
+        if (!student) {
+          throw new Error('Student not found');
+        }
+
+        console.log('📧 Student email check:', {
+          name: student.name,
+          email: student.email,
+          emailType: typeof student.email
+        });
+
+        if (!student.email) {
+          throw new Error('Student has no email address');
+        }
+
+        // Parse email if it's JSON array string
+        let cleanEmail = String(student.email).trim();
+        if (cleanEmail.startsWith('[') && cleanEmail.endsWith(']')) {
           try {
-            // Get student's group
-            const group = groupsData.find(g => g.group_name === student.group_name);
-            
-            if (group) {
-              // Hard cutoff: February 1, 2026 - don't count unpaid classes before this date
-              const CUTOFF_DATE = new Date('2026-02-01');
-              const today = new Date();
-              let startDate = CUTOFF_DATE;
-              
-              // IMPORTANT: If student was created after Feb 1, 2026, use their creation date
+            const parsed = JSON.parse(cleanEmail);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              cleanEmail = String(parsed[0]).trim();
+              console.log('📧 Parsed email from JSON array:', cleanEmail);
+            }
+          } catch (e) {
+            console.warn('⚠️ Failed to parse email JSON:', e);
+          }
+        }
+
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(cleanEmail)) {
+          throw new Error(`Invalid email format: "${cleanEmail}" - Please update student's email in Student Manager`);
+        }
+
+        return { student, cleanEmail };
+      }
+
+      async function buildPaymentReminderPayload(studentId) {
+        const { student, cleanEmail } = await getStudentEmailInfo(studentId);
+
+        const balance = Number(student.balance) || 0;
+        const pricePerClass = Number(student.price_per_class) || 15;
+
+        const unpaidClassDetails = [];
+        let unpaidAmountFromCalendar = 0;
+
+        try {
+          const group = groupsData.find(g => g.group_name === student.group_name);
+          if (group) {
+            const CUTOFF_DATE = new Date('2026-02-01');
+            const today = new Date();
+            let startDate = CUTOFF_DATE;
+
+            if (student.created_at) {
+              const studentCreatedDate = new Date(student.created_at);
+              if (studentCreatedDate > startDate) {
+                startDate = studentCreatedDate;
+                console.log('🆕 Student created after Feb 1, checking from creation date:', startDate.toISOString().split('T')[0]);
+              } else {
+                console.log('📅 Using Feb 1, 2026 cutoff date for unpaid calculation');
+              }
+            }
+
+            for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
+              const dateStr = d.toISOString().split('T')[0];
+
               if (student.created_at) {
-                const studentCreatedDate = new Date(student.created_at);
-                if (studentCreatedDate > startDate) {
-                  startDate = studentCreatedDate;
-                  console.log('🆕 Student created after Feb 1, checking from creation date:', startDate.toISOString().split('T')[0]);
-                } else {
-                  console.log('📅 Using Feb 1, 2026 cutoff date for unpaid calculation');
+                const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
+                if (dateStr < studentCreatedDate) {
+                  continue;
                 }
               }
-              
-              // Check each day in the range
-              for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
-                const dateStr = d.toISOString().split('T')[0];
-                
-                // IMPORTANT: Double-check that class date is on or after student creation date
-                if (student.created_at) {
-                  const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
-                  if (dateStr < studentCreatedDate) {
-                    continue; // Skip classes before student was created
-                  }
-                }
-                
-                // Check if this group has class on this date
-                if (isScheduledClassDate(dateStr, group)) {
-                  // Check if student has payment for this date
-                  const paymentInfo = hasPaymentCached(student.id, dateStr, student);
-                  const hasAbsence = isAbsentCached(dateStr, student.id);
-                  const isSkipped = isClassSkippedCached(dateStr, group.group_name);
-                  
-                  // If no payment, no absence, and not skipped = unpaid
-                  if (!paymentInfo.hasPayment && !hasAbsence && !isSkipped) {
-                    const formattedDate = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    });
-                    
-                    unpaidClassDetails.push({
-                      date: dateStr,
-                      formattedDate,
-                      amount: pricePerClass
-                    });
-                    
-                    unpaidAmountFromCalendar += pricePerClass;
-                  }
+
+              if (isScheduledClassDate(dateStr, group)) {
+                const paymentInfo = hasPaymentCached(student.id, dateStr, student);
+                const hasAbsence = isAbsentCached(dateStr, student.id);
+                const isSkipped = isClassSkippedCached(dateStr, group.group_name);
+
+                if (!paymentInfo.hasPayment && !hasAbsence && !isSkipped) {
+                  const formattedDate = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                  });
+
+                  unpaidClassDetails.push({
+                    date: dateStr,
+                    formattedDate,
+                    amount: pricePerClass
+                  });
+
+                  unpaidAmountFromCalendar += pricePerClass;
                 }
               }
             }
-            
-            console.log('💰 Found unpaid classes from calendar logic:', {
-              studentId,
-              studentName: student.name,
-              groupName: student.group_name,
-              createdAt: student.created_at,
-              unpaidClassesCount: unpaidClassDetails.length,
-              unpaidAmount: unpaidAmountFromCalendar,
-              unpaidDates: unpaidClassDetails.map(c => c.date)
-            });
-          } catch (err) {
-            console.warn('⚠️ Could not calculate unpaid classes, using balance:', err);
           }
-          
-          // Use calendar data if we found unpaid classes, otherwise fall back to balance
-          const finalBalance = unpaidAmountFromCalendar > 0 ? unpaidAmountFromCalendar : balance;
-          const finalPrice = pricePerClass || 15;
-          
-          console.log('💰 Payment reminder calculation:', {
+
+          console.log('💰 Found unpaid classes from calendar logic:', {
             studentId,
             studentName: student.name,
+            groupName: student.group_name,
+            createdAt: student.created_at,
             unpaidClassesCount: unpaidClassDetails.length,
-            unpaidAmountFromCalendar,
-            studentBalance: balance,
-            finalBalance,
-            unpaidClassDetails
+            unpaidAmount: unpaidAmountFromCalendar,
+            unpaidDates: unpaidClassDetails.map(c => c.date)
           });
-          
-          // Generate email HTML (async now - loads from Email System)
-          const emailHTML = await generatePaymentReminderEmailHTML(
-            student.name,
-            finalBalance,
-            finalPrice,
-            studentId,
-            unpaidClassDetails
-          );
-          
-          console.log('📧 Sending payment reminder to:', cleanEmail);
-          
-          // Send email via Supabase Edge Function
-          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-            },
-            body: JSON.stringify({
-              to: cleanEmail,
-              subject: `Payment Reminder - ARNOMA NCLEX-RN`,
-              html: emailHTML,
-            }),
-          });
-          
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            console.error('❌ Email API error response:', errorData);
-            const errorMsg = errorData.error?.message || errorData.error || 'Unknown error';
-            throw new Error(`Email API error: ${errorMsg}`);
-          }
-          
-          const result = await response.json();
-          
-          // Check if the result contains an error
-          if (result.data && result.data.error) {
-            console.error('❌ Email service error:', result.data.error);
-            throw new Error(`Email service error: ${result.data.error.message || JSON.stringify(result.data.error)}`);
-          }
-          
-          console.log('✅ Payment reminder email sent successfully:', result);
-          
-          // CRITICAL: Log to BOTH notification systems
-          try {
-            const resendEmailId = result?.id || result?.data?.id || null;
-            
-            // 1. Log to sent_emails table (for Email System)
-            const sentEmailRecord = {
-              recipient_email: cleanEmail,
-              recipient_name: student.name,
-              subject: `Payment Reminder - ARNOMA NCLEX-RN`,
-              html_content: emailHTML,
-              template_name: 'Payment Reminder',
-              email_type: 'payment_reminder',
-              resend_id: resendEmailId,
-              delivery_status: 'delivered',
-              status: 'sent',
-              sent_at: new Date().toISOString()
-            };
-            
-            const { data: logData, error: logError } = await supabaseClient
-              .from('sent_emails')
-              .insert([sentEmailRecord])
-              .select();
-            
-            if (logError) {
-              console.error('⚠️ Failed to log to sent_emails:', logError);
-            } else {
-              console.log('✅ Payment reminder logged to sent_emails:', logData[0]);
-            }
-            
-            // 2. Log to notifications table (for Notification Center bell)
-            const notificationRecord = {
-              type: 'email_sent',
-              category: 'email',  // For UI rendering (getCategoryIcon)
-              title: 'Payment Reminder Sent',
-              description: `Sent payment reminder to ${student.name} (${cleanEmail}) for $${finalBalance}`,
-              student_name: student.name,
-              metadata: {
-                student_id: studentId,
-                student_name: student.name,
-                email: cleanEmail,
-                amount: finalBalance,
-                email_type: 'payment_reminder',
-                subject: `Payment Reminder - ARNOMA NCLEX-RN`,
-                html: emailHTML  // Full email HTML for preview
-              },
-              timestamp: new Date().toISOString(),
-              read: false,
-              created_at: new Date().toISOString()
-            };
-            
-            const { data: notifData, error: notifError } = await supabaseClient
-              .from('notifications')
-              .insert([notificationRecord])
-              .select();
-            
-            if (notifError) {
-              console.error('⚠️ Failed to log to notifications:', notifError);
-            } else {
-              console.log('✅ Notification logged:', notifData[0]);
-            }
-            
-          } catch (logErr) {
-            console.error('⚠️ Error logging notifications (email still sent):', logErr);
-          }
-          
-          return result;
         } catch (err) {
-          console.error('❌ Error sending payment reminder email:', err);
-          throw err;
+          console.warn('⚠️ Could not calculate unpaid classes, using balance:', err);
+        }
+
+        const finalBalance = unpaidAmountFromCalendar > 0 ? unpaidAmountFromCalendar : balance;
+        const finalPrice = pricePerClass || 15;
+
+        console.log('💰 Payment reminder calculation:', {
+          studentId,
+          studentName: student.name,
+          unpaidClassesCount: unpaidClassDetails.length,
+          unpaidAmountFromCalendar,
+          studentBalance: balance,
+          finalBalance,
+          unpaidClassDetails
+        });
+
+        const emailHTML = await generatePaymentReminderEmailHTML(
+          student.name,
+          finalBalance,
+          finalPrice,
+          studentId,
+          unpaidClassDetails
+        );
+
+        return {
+          studentId,
+          student,
+          cleanEmail,
+          subject: 'Payment Reminder - ARNOMA NCLEX-RN',
+          html: emailHTML,
+          emailType: 'payment_reminder',
+          templateName: 'Payment Reminder',
+          amount: finalBalance
+        };
+      }
+
+      async function buildFailedPaymentPayload(studentId, classDate = null, pricePerClass = null) {
+        const { student, cleanEmail } = await getStudentEmailInfo(studentId);
+
+        const amount = Number(pricePerClass || student.price_per_class || 15);
+        const emailHTML = await generateFailedPaymentEmailHTML(
+          student.name,
+          classDate,
+          amount
+        );
+
+        return {
+          studentId,
+          student,
+          cleanEmail,
+          subject: 'Payment Failed - ARNOMA NCLEX-RN',
+          html: emailHTML,
+          emailType: 'payment_failed',
+          templateName: 'Payment Failed',
+          amount
+        };
+      }
+
+      async function sendEmailPayload(payload) {
+        console.log('📧 Sending email to:', payload.cleanEmail);
+
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({
+            to: payload.cleanEmail,
+            subject: payload.subject,
+            html: payload.html,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          console.error('❌ Email API error response:', errorData);
+          const errorMsg = errorData.error?.message || errorData.error || 'Unknown error';
+          throw new Error(`Email API error: ${errorMsg}`);
+        }
+
+        const result = await response.json();
+        if (result.data && result.data.error) {
+          console.error('❌ Email service error:', result.data.error);
+          throw new Error(`Email service error: ${result.data.error.message || JSON.stringify(result.data.error)}`);
+        }
+
+        console.log('✅ Email sent successfully:', result);
+        return result;
+      }
+
+      async function logSentEmail(payload, result) {
+        try {
+          const resendEmailId = result?.id || result?.data?.id || null;
+
+          const sentEmailRecord = {
+            recipient_email: payload.cleanEmail,
+            recipient_name: payload.student.name,
+            subject: payload.subject,
+            html_content: payload.html,
+            template_name: payload.templateName,
+            email_type: payload.emailType,
+            resend_id: resendEmailId,
+            delivery_status: 'delivered',
+            status: 'sent',
+            sent_at: new Date().toISOString()
+          };
+
+          const { data: logData, error: logError } = await supabaseClient
+            .from('sent_emails')
+            .insert([sentEmailRecord])
+            .select();
+
+          if (logError) {
+            console.error('⚠️ Failed to log to sent_emails:', logError);
+          } else {
+            console.log('✅ Email logged to sent_emails:', logData[0]);
+          }
+
+          const notificationRecord = {
+            type: 'email_sent',
+            category: 'email',
+            title: payload.templateName + ' Sent',
+            description: `Sent ${payload.templateName.toLowerCase()} to ${payload.student.name} (${payload.cleanEmail}) for $${payload.amount}`,
+            student_name: payload.student.name,
+            metadata: {
+              student_id: payload.studentId,
+              student_name: payload.student.name,
+              email: payload.cleanEmail,
+              amount: payload.amount,
+              email_type: payload.emailType,
+              subject: payload.subject,
+              html: payload.html
+            },
+            timestamp: new Date().toISOString(),
+            read: false,
+            created_at: new Date().toISOString()
+          };
+
+          const { data: notifData, error: notifError } = await supabaseClient
+            .from('notifications')
+            .insert([notificationRecord])
+            .select();
+
+          if (notifError) {
+            console.error('⚠️ Failed to log to notifications:', notifError);
+          } else {
+            console.log('✅ Notification logged:', notifData[0]);
+          }
+        } catch (logErr) {
+          console.error('⚠️ Error logging notifications (email still sent):', logErr);
         }
       }
 
@@ -5244,6 +5415,53 @@
         return fallbackHTML;
       }
 
+      async function generateFailedPaymentEmailHTML(studentName, classDate = null, amount = null) {
+        const formattedDate = classDate
+          ? new Date(classDate + 'T12:00:00').toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })
+          : new Date().toLocaleDateString('en-US', {
+              weekday: 'long',
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            });
+        const formattedAmount = Number(amount || 0).toFixed(2);
+
+        return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payment Failed</title>
+  </head>
+  <body style="margin: 0; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: #f3f4f6;">
+    <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 12px 30px rgba(0,0,0,0.15);">
+      <div style="background: #ef4444; color: white; padding: 24px; text-align: center;">
+        <h1 style="margin: 0; font-size: 24px;">Payment Failed</h1>
+      </div>
+      <div style="padding: 28px; color: #111827; line-height: 1.7;">
+        <p style="font-size: 16px; margin-top: 0;">Dear ${studentName},</p>
+        <p style="font-size: 16px;">We received a notification from the bank that your payment has failed and was not deposited.</p>
+        <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 10px; padding: 16px; margin: 18px 0;">
+          <div style="font-size: 14px; color: #991b1b; font-weight: 600; margin-bottom: 6px;">Payment Details</div>
+          <div style="font-size: 15px; color: #111827;"><strong>Date:</strong> ${formattedDate}</div>
+          <div style="font-size: 15px; color: #111827;"><strong>Amount:</strong> $${formattedAmount}</div>
+        </div>
+        <p style="font-size: 16px;">Please resend the payment when you can. If you believe this is a mistake, reply to this email and we’ll help right away.</p>
+        <p style="margin-top: 24px;">Thank you,<br /><strong>ARNOMA Team</strong></p>
+      </div>
+      <div style="background: #f9fafb; padding: 16px; text-align: center; font-size: 12px; color: #6b7280;">
+        ARNOMA – NCLEX RN · nclex.rn@arnoma.us · 909-808-1818
+      </div>
+    </div>
+  </body>
+</html>`;
+      }
+
       async function saveBalance() {
         if (!currentStudentData) return;
         
@@ -5309,7 +5527,12 @@
         if (!currentStudentData) return;
         
         // Call the actual email sending function
-        await sendManualReminder(currentStudentData.studentId, currentStudentData.studentName);
+        await sendManualReminder(
+          currentStudentData.studentId,
+          currentStudentData.studentName,
+          currentStudentData.classDate,
+          currentStudentData.price
+        );
       }
 
       async function markAsAbsent() {
