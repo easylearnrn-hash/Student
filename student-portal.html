@@ -10532,15 +10532,26 @@
         
         // Fetch permissions for this student (both group and individual access)
         // 🔥 FIX: Also fetch class_date and granted_at for per-group posting dates
+        console.log('🔍 Querying student_note_permissions with:', {
+          studentId,
+          studentGroup,
+          query: `student_id.eq.${studentId},and(group_name.eq.${studentGroup},student_id.is.null)`
+        });
+        
         const { data: permissions, error: permError} = await supabaseClient
           .from('student_note_permissions')
-          .select('note_id, is_accessible, class_date, granted_at')
+          .select('note_id, is_accessible, class_date, granted_at, group_name, student_id')
           .or(`student_id.eq.${studentId},and(group_name.eq.${studentGroup},student_id.is.null)`)
           .eq('is_accessible', true);
         
         if (permError) {
           console.error('❌ Error loading permissions:', permError);
         }
+        
+        console.log('📊 Permissions query result:', {
+          count: permissions?.length || 0,
+          permissions: permissions
+        });
         
         const permissionNoteIds = permissions?.map(p => p.note_id) || [];
         
@@ -10711,16 +10722,12 @@
         // USE THE PASSED PAYMENT DATA (already loaded by loadPaymentHistory)
         const mergedPaymentRecords = paymentData;
         
-        // Create a Set of note IDs that have free access
-        // 🔥 FIX: Include BOTH note_free_access AND student_note_permissions
-        // When admin posts a note to a group, it creates a permission record
-        // These posted notes should be unlocked for students to see
-        const freeNoteIds = new Set([
-          ...(freeAccessNoteIds || []),
-          ...(permissionNoteIds || [])
-        ]);
+        // Create a Set of note IDs that have FREE access (no payment required)
+        // ⚠️ IMPORTANT: Only note_free_access grants free access
+        // Posted notes (from student_note_permissions) are VISIBLE but still require payment
+        const freeNoteIds = new Set(freeAccessNoteIds || []);
         
-        if (DEBUG_MODE) debugLog(`✨ FREE access notes: ${freeNoteIds.size} notes (${freeAccessNoteIds?.length || 0} from free_access + ${permissionNoteIds?.length || 0} from permissions)`);
+        if (DEBUG_MODE) debugLog(`✨ FREE access notes: ${freeNoteIds.size} notes (bypass payment checks)`);
         
         // Build set of absence dates for checking if student was absent on note dates
         const absentDatesSet = new Set(
