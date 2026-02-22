@@ -1307,8 +1307,8 @@
             </div>
           </div>
 
-          <!-- Quick Actions (3 columns) -->
-          <div class="quick-actions">
+          <!-- Quick Actions (dynamic) -->
+          <div class="quick-actions" id="studentQuickActions">
             <button class="action-btn email" onclick="sendEmailReminder()">
               <span class="action-btn-icon">📧</span>
               <span>Email</span>
@@ -1749,6 +1749,19 @@
             });
           });
         });
+
+        // Index credit_payments table (applied_class_date is the date it covers)
+        creditPaymentsData.forEach(cp => {
+          const dateStr = (cp.applied_class_date || cp.class_date || '').split('T')[0];
+          if (!dateStr) return;
+          const normalizedDate = normalizeDateString(dateStr);
+          if (!paymentIndex.has(normalizedDate)) {
+            paymentIndex.set(normalizedDate, new Set());
+          }
+          if (cp.student_id) {
+            paymentIndex.get(normalizedDate).add(String(cp.student_id));
+          }
+        });
       }
       
       function getStudentAliases(studentId) {
@@ -1780,6 +1793,7 @@
         
         // Check if payment is manual (from payment_records table with payment_method='cash')
         let isManual = false;
+        let isCredit = false;
         if (hasPayment) {
           const manualPayment = paymentRecordsData.find(pr => 
             String(pr.student_id) === String(studentId) && 
@@ -1787,9 +1801,17 @@
             pr.payment_method === 'cash'
           );
           isManual = !!manualPayment;
+
+          if (!isManual) {
+            const creditPayment = creditPaymentsData.find(cp =>
+              String(cp.student_id) === String(studentId) &&
+              normalizeDateString(cp.applied_class_date || cp.class_date) === normalizedDateStr
+            );
+            isCredit = !!creditPayment;
+          }
         }
         
-        const result = { hasPayment, isManual };
+        const result = { hasPayment, isManual, isCredit };
         paymentCache.set(cacheKey, result);
         return result;
       }
@@ -2402,9 +2424,17 @@
                 dotType = 'absent';
                 dotLabel += ' (Absent)';
               } else if (paymentInfo.hasPayment) {
-                // Use blue for manual cash payments, green for automated payments
-                dotType = paymentInfo.isManual ? 'manual' : 'paid';
-                dotLabel += paymentInfo.isManual ? ' (Cash Payment)' : ' (Paid)';
+                // Gold for credit, blue for cash, green for automated payments
+                if (paymentInfo.isCredit) {
+                  dotType = 'credit';
+                  dotLabel += ' (Credit)';
+                } else if (paymentInfo.isManual) {
+                  dotType = 'manual';
+                  dotLabel += ' (Cash Payment)';
+                } else {
+                  dotType = 'paid';
+                  dotLabel += ' (Paid)';
+                }
               } else if (dateStr <= getLATodayISO()) {
                 dotType = 'unpaid';
                 dotLabel += ' (Unpaid)';
@@ -2648,6 +2678,8 @@
               groupName: group.group_name,
               status: status,
               hasPayment: paymentInfo.hasPayment,
+              isManualCashPayment: paymentInfo.isManual,
+              isCreditPayment: paymentInfo.isCredit,
               hasAbsence: hasAbsence,
               isSkipped: isSkipped
             });
@@ -2765,10 +2797,22 @@
             let statusBorder = '';
             
             if (student.status === 'paid') {
-              statusBadge = 'PAID';
-              statusColor = '#4ade80';
-              statusBg = 'rgba(74,222,128,0.2)';
-              statusBorder = 'rgba(74,222,128,0.5)';
+              if (student.isCreditPayment) {
+                statusBadge = 'CREDIT';
+                statusColor = '#fbbf24';
+                statusBg = 'rgba(251,191,36,0.2)';
+                statusBorder = 'rgba(251,191,36,0.5)';
+              } else if (student.isManualCashPayment) {
+                statusBadge = 'CASH';
+                statusColor = '#60a5fa';
+                statusBg = 'rgba(96,165,250,0.2)';
+                statusBorder = 'rgba(96,165,250,0.5)';
+              } else {
+                statusBadge = 'PAID';
+                statusColor = '#4ade80';
+                statusBg = 'rgba(74,222,128,0.2)';
+                statusBorder = 'rgba(74,222,128,0.5)';
+              }
             } else if (student.status === 'unpaid') {
               statusBadge = 'UNPAID';
               statusColor = '#f87171';
@@ -2832,6 +2876,28 @@
                           data-tooltip="Mark Absent"
                           onclick="event.stopPropagation(); markAbsent(${student.id}, '${dateStr}')">
                     <span class="btn-icon">🚫</span>
+                  </button>
+                </div>
+              `;
+            } else if (student.status === 'paid' && student.isManualCashPayment) {
+              // Unpay button — only for manual cash payments
+              actionButtons = `
+                <div class="student-actions">
+                  <button class="action-icon-btn unmark"
+                          data-tooltip="Unpay (remove cash payment)"
+                          onclick="event.stopPropagation(); unpayManually(${student.id}, '${dateStr}', '${safeName}')">
+                    <span class="btn-icon">↩️</span>
+                  </button>
+                </div>
+              `;
+            } else if (student.status === 'paid' && student.isCreditPayment) {
+              // Undo credit payment button
+              actionButtons = `
+                <div class="student-actions">
+                  <button class="action-icon-btn unmark"
+                          data-tooltip="Undo credit payment"
+                          onclick="event.stopPropagation(); undoCreditPayment(${student.id}, '${dateStr}', '${safeName}', ${parseFloat(student.price_per_class || 0)})">
+                    <span class="btn-icon">↩️</span>
                   </button>
                 </div>
               `;
@@ -3402,6 +3468,82 @@
         // Update navigation buttons
         document.getElementById('prevStudentBtn').disabled = (index === 0);
         document.getElementById('nextStudentBtn').disabled = (index === allStudentsOnDate.length - 1);
+
+        // Rebuild quick actions based on payment status
+        updateStudentModalActions(currentStudentData);
+      }
+
+      function updateStudentModalActions(data) {
+        const container = document.getElementById('studentQuickActions');
+        if (!container) return;
+
+        const { studentId, studentName, classDate, price, balance, status } = data;
+        const canApplyCredit = (parseFloat(balance) || 0) >= (parseFloat(price) || 0);
+
+        let html = '';
+
+        if (status === 'manual') {
+          // Cash payment — show Unpay only
+          html = `
+            <button class="action-btn" style="background:linear-gradient(135deg,rgba(239,68,68,0.25)0%,rgba(220,38,38,0.15)100%);border-color:rgba(239,68,68,0.4);"
+              onclick="unpayManually(${studentId},'${classDate}','${studentName}')">
+              <span class="action-btn-icon">↩️</span>
+              <span>Unpay</span>
+            </button>`;
+        } else if (status === 'credit') {
+          // Credit payment — show Undo Credit only
+          html = `
+            <button class="action-btn" style="background:linear-gradient(135deg,rgba(239,68,68,0.25)0%,rgba(220,38,38,0.15)100%);border-color:rgba(239,68,68,0.4);"
+              onclick="undoCreditPayment(${studentId},'${classDate}','${studentName}',${price})">
+              <span class="action-btn-icon">↩️</span>
+              <span>Undo Credit</span>
+            </button>`;
+        } else if (status === 'paid') {
+          // Standard payment — Email only
+          html = `
+            <button class="action-btn email" onclick="sendEmailReminder()">
+              <span class="action-btn-icon">📧</span>
+              <span>Email</span>
+            </button>`;
+        } else if (status === 'absent') {
+          // Absent — Email only (absent actions handled in day modal)
+          html = `
+            <button class="action-btn email" onclick="sendEmailReminder()">
+              <span class="action-btn-icon">📧</span>
+              <span>Email</span>
+            </button>`;
+        } else {
+          // Unpaid (or gray/scheduled) — Email, Absent, Cash Payment, Apply Credit (if balance allows)
+          html = `
+            <button class="action-btn email" onclick="sendEmailReminder()">
+              <span class="action-btn-icon">📧</span>
+              <span>Email</span>
+            </button>
+            <button class="action-btn absent" onclick="markAsAbsent()">
+              <span class="action-btn-icon">🚫</span>
+              <span>Absent</span>
+            </button>
+            <button class="action-btn" style="background:linear-gradient(135deg,rgba(96,165,250,0.25)0%,rgba(59,130,246,0.15)100%);border-color:rgba(96,165,250,0.4);"
+              onclick="markPaidManually(${studentId},'${classDate}',${price},'${studentName}')">
+              <span class="action-btn-icon">💵</span>
+              <span>Cash</span>
+            </button>`;
+          if (canApplyCredit) {
+            html += `
+            <button class="action-btn credit" onclick="applyFromCredit(${studentId},'${classDate}',${price})">
+              <span class="action-btn-icon">💳</span>
+              <span>Apply Credit</span>
+            </button>`;
+          } else {
+            html += `
+            <button class="action-btn credit" onclick="addCredit()">
+              <span class="action-btn-icon">💳</span>
+              <span>Add Credit</span>
+            </button>`;
+          }
+        }
+
+        container.innerHTML = html;
       }
 
       function navigateStudent(direction) {
@@ -3837,6 +3979,150 @@
           errorOverlay.textContent = '❌ Error recording payment. Please try again.';
           document.body.appendChild(errorOverlay);
           setTimeout(() => errorOverlay.remove(), 4000);
+        }
+      }
+
+      async function unpayManually(studentId, dateStr, studentName) {
+        try {
+          const confirmed = await showConfirmDialog(
+            'Remove Cash Payment',
+            `Remove the cash payment for <strong>${studentName}</strong> on <strong>${dateStr}</strong>?<br><br>This will delete the payment record and mark the student as unpaid.`
+          );
+          if (!confirmed) return;
+
+          const normalizedDate = normalizeDateString(dateStr);
+
+          // Find the cash payment record to delete
+          const record = paymentRecordsData.find(pr =>
+            String(pr.student_id) === String(studentId) &&
+            normalizeDateString(pr.date) === normalizedDate &&
+            pr.payment_method === 'cash'
+          );
+
+          if (!record) {
+            const errOverlay = document.createElement('div');
+            errOverlay.style.cssText = `position:fixed;top:20px;right:20px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:16px 24px;border-radius:12px;box-shadow:0 8px 24px rgba(239,68,68,0.4);z-index:10000000;font-weight:600;animation:slideInRight 0.3s ease;`;
+            errOverlay.textContent = '❌ Cash payment record not found.';
+            document.body.appendChild(errOverlay);
+            setTimeout(() => errOverlay.remove(), 3000);
+            return;
+          }
+
+          const { error } = await supabaseClient
+            .from('payment_records')
+            .delete()
+            .eq('id', record.id);
+
+          if (error) throw error;
+
+          // Remove from local data
+          paymentRecordsData = paymentRecordsData.filter(pr => pr.id !== record.id);
+
+          // Update payment index
+          if (paymentIndex.has(normalizedDate)) {
+            paymentIndex.get(normalizedDate).delete(String(studentId));
+          }
+
+          // Clear payment cache to force recalculation
+          clearPaymentCache();
+
+          // Reload data and refresh UI
+          loadPayments().catch(console.error);
+          loadPaymentRecords().catch(console.error);
+          renderCalendar();
+
+          if (currentModalDate === dateStr) {
+            openDayModal(dateStr);
+          }
+
+          const successOverlay = document.createElement('div');
+          successOverlay.style.cssText = `position:fixed;top:20px;right:20px;background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:16px 24px;border-radius:12px;box-shadow:0 8px 24px rgba(245,158,11,0.4);z-index:10000000;font-weight:600;animation:slideInRight 0.3s ease;`;
+          successOverlay.textContent = `↩️ Cash payment removed for ${studentName}`;
+          document.body.appendChild(successOverlay);
+          setTimeout(() => successOverlay.remove(), 3000);
+        } catch (err) {
+          console.error('❌ Error removing cash payment:', err);
+          const errOverlay = document.createElement('div');
+          errOverlay.style.cssText = `position:fixed;top:20px;right:20px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:16px 24px;border-radius:12px;box-shadow:0 8px 24px rgba(239,68,68,0.4);z-index:10000000;font-weight:600;animation:slideInRight 0.3s ease;`;
+          errOverlay.textContent = '❌ Failed to remove payment. Please try again.';
+          document.body.appendChild(errOverlay);
+          setTimeout(() => errOverlay.remove(), 4000);
+        }
+      }
+
+      async function undoCreditPayment(studentId, dateStr, studentName, pricePerClass) {
+        try {
+          const normalizedDate = normalizeDateString(dateStr);
+          const student = studentsData.find(s => s.id === studentId);
+          if (!student) return;
+
+          const confirmed = await showConfirmDialog(
+            'Undo Credit Payment',
+            `Remove the credit payment for <strong>${studentName}</strong> on <strong>${dateStr}</strong>?<br><br>$${pricePerClass.toFixed(2)} will be refunded back to their balance.`
+          );
+          if (!confirmed) return;
+
+          // Find the credit payment record
+          const record = creditPaymentsData.find(cp =>
+            String(cp.student_id) === String(studentId) &&
+            normalizeDateString(cp.applied_class_date || cp.class_date) === normalizedDate
+          );
+
+          if (!record) {
+            const errOverlay = document.createElement('div');
+            errOverlay.style.cssText = `position:fixed;top:20px;right:20px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:16px 24px;border-radius:12px;box-shadow:0 8px 24px rgba(239,68,68,0.4);z-index:10000000;font-weight:600;animation:slideInRight 0.3s ease;`;
+            errOverlay.textContent = '❌ Credit payment record not found.';
+            document.body.appendChild(errOverlay);
+            setTimeout(() => errOverlay.remove(), 3000);
+            return;
+          }
+
+          // Delete the credit_payments record
+          const { error: deleteError } = await supabaseClient
+            .from('credit_payments')
+            .delete()
+            .eq('id', record.id);
+
+          if (deleteError) throw deleteError;
+
+          // Restore the balance
+          const newBalance = parseFloat(student.balance || 0) + pricePerClass;
+          const { error: updateError } = await supabaseClient
+            .from('students')
+            .update({ balance: newBalance })
+            .eq('id', studentId);
+
+          if (updateError) throw updateError;
+
+          // Update local state
+          student.balance = newBalance;
+          creditPaymentsData = creditPaymentsData.filter(cp => cp.id !== record.id);
+
+          // Remove from payment index
+          if (paymentIndex.has(normalizedDate)) {
+            paymentIndex.get(normalizedDate).delete(String(studentId));
+          }
+
+          clearPaymentCache();
+          await loadCreditPayments();
+          renderCalendar();
+
+          if (currentModalDate === dateStr) {
+            openDayModal(dateStr);
+          }
+
+          const successOverlay = document.createElement('div');
+          successOverlay.style.cssText = `position:fixed;top:20px;right:20px;background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:white;padding:16px 24px;border-radius:12px;box-shadow:0 8px 24px rgba(245,158,11,0.4);z-index:10000000;font-weight:600;animation:slideInRight 0.3s ease;`;
+          successOverlay.textContent = `↩️ Credit payment undone for ${studentName}. Balance restored to $${newBalance.toFixed(2)}.`;
+          document.body.appendChild(successOverlay);
+          setTimeout(() => successOverlay.remove(), 4000);
+        } catch (err) {
+          console.error('❌ Error undoing credit payment:', err);
+          const errOverlay = document.createElement('div');
+          errOverlay.style.cssText = `position:fixed;top:20px;right:20px;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:white;padding:16px 24px;border-radius:12px;box-shadow:0 8px 24px rgba(239,68,68,0.4);z-index:10000000;font-weight:600;animation:slideInRight 0.3s ease;`;
+          errOverlay.textContent = '❌ Failed to undo credit payment. Please try again.';
+          document.body.appendChild(errOverlay);
+          setTimeout(() => errOverlay.remove(), 4000);
         }
       }
 
