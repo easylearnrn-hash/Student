@@ -12610,44 +12610,28 @@
         const supabaseClient = window.supabaseClient;
         if (!supabaseClient) return;
 
-        // Use a short-lived localStorage cache (1 hour) to avoid a Supabase round-trip
-        // on every page load, and to avoid CORS/RLS errors when the session isn't ready.
-        const CACHE_KEY = 'arnoma:christmas_theme';
-        const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+        // Always clear any stale cache so admin toggle changes take effect immediately
+        localStorage.removeItem('arnoma:christmas_theme');
+
         let christmasEnabled = false;
 
         try {
-          const cached = localStorage.getItem(CACHE_KEY);
-          if (cached) {
-            const { value, ts } = JSON.parse(cached);
-            if (Date.now() - ts < CACHE_TTL) {
-              christmasEnabled = value;
-            }
-          }
-        } catch (_) { /* ignore parse errors */ }
+          const { data, error } = await supabaseClient
+            .from('portal_settings')
+            .select('setting_value')
+            .eq('setting_key', 'christmas_theme')
+            .single();
 
-        // Cache miss — fetch from Supabase (silently skip on any error)
-        if (!christmasEnabled) {
-          try {
-            const { data, error } = await supabaseClient
-              .from('portal_settings')
-              .select('setting_value')
-              .eq('setting_key', 'christmas_theme')
-              .single();
-
-            if (!error && data) {
-              christmasEnabled = data.setting_value?.enabled === true;
-              // Cache the result
-              localStorage.setItem(CACHE_KEY, JSON.stringify({ value: christmasEnabled, ts: Date.now() }));
-            }
-          } catch (_) {
-            // Network / RLS error — theme stays off, no console noise
+          if (!error && data) {
+            christmasEnabled = data.setting_value?.enabled === true;
           }
+        } catch (_) {
+          // Network / RLS error — theme stays off, no console noise
         }
 
         if (christmasEnabled) {
           document.body.classList.add('christmas-theme');
-          
+
           // Update welcome message to Merry Christmas
           const welcomeMessage = document.getElementById('welcomeMessage');
           if (welcomeMessage && window.currentStudent) {
@@ -12656,9 +12640,12 @@
               <span class="name-line">Nurse ${window.currentStudent.name}</span>
             `;
           }
-          
+
           // Initialize snow effect
           initializeSnowEffect();
+        } else {
+          // Ensure theme is fully removed if disabled
+          document.body.classList.remove('christmas-theme');
         }
       } catch (_) {
         // Never let a cosmetic feature break the portal
