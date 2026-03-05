@@ -11,6 +11,9 @@
   
   <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- Shared Dialogs -->
+  <script src="shared-dialogs.js"></script>
   
   <!-- PDF.js Library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -1532,60 +1535,71 @@
               console.log('  Student ID:', currentStudent.id);
               console.log('  Note ID:', noteId);
               
-              // Check if student has access via note_free_access table
-              // Fire free-access + both permission queries in parallel
-              const orConditions = [];
-              if (studentGroup) orConditions.push(`group_letter.eq.${studentGroup}`);
-              if (currentStudent.id) orConditions.push(`student_id.eq.${currentStudent.id}`);
+              let accessGrants = [];
+              let permissionGrants = [];
+              let hasPermissionAccess = false;
+              let hasFreeAccess = false;
 
-              let freeAccessQuery = supabaseClient
-                .from('note_free_access')
-                .select('*')
-                .eq('note_id', noteId);
-              if (orConditions.length > 0) freeAccessQuery = freeAccessQuery.or(orConditions.join(','));
+              if (currentStudent?.role === 'admin') {
+                console.log('👑 Admin access - skipping permission queries');
+                hasPermissionAccess = true;
+                hasFreeAccess = true;
+              } else {
+                // Check if student has access via note_free_access table
+                // Fire free-access + both permission queries in parallel
+                const orConditions = [];
+                if (studentGroup) orConditions.push(`group_letter.eq.${studentGroup}`);
+                if (currentStudent.id) orConditions.push(`student_id.eq.${currentStudent.id}`);
 
-              const individualPermQuery = currentStudent.id
-                ? supabaseClient
-                    .from('student_note_permissions')
-                    .select('id, student_id, group_name, is_accessible')
-                    .eq('note_id', noteId)
-                    .eq('student_id', currentStudent.id)
-                    .eq('is_accessible', true)
-                : Promise.resolve({ data: [], error: null });
+                let freeAccessQuery = supabaseClient
+                  .from('note_free_access')
+                  .select('*')
+                  .eq('note_id', noteId);
+                if (orConditions.length > 0) freeAccessQuery = freeAccessQuery.or(orConditions.join(','));
 
-              const groupPermQuery = normalizedGroupName
-                ? supabaseClient
-                    .from('student_note_permissions')
-                    .select('id, student_id, group_name, is_accessible')
-                    .eq('note_id', noteId)
-                    .is('student_id', null)
-                    .eq('group_name', normalizedGroupName)
-                    .eq('is_accessible', true)
-                : Promise.resolve({ data: [], error: null });
+                const individualPermQuery = currentStudent.id
+                  ? supabaseClient
+                      .from('student_note_permissions')
+                      .select('id, student_id, group_name, is_accessible')
+                      .eq('note_id', noteId)
+                      .eq('student_id', currentStudent.id)
+                      .eq('is_accessible', true)
+                  : Promise.resolve({ data: [], error: null });
 
-              const [
-                { data: accessGrants, error: accessError },
-                individualResult,
-                groupResult
-              ] = await Promise.all([freeAccessQuery, individualPermQuery, groupPermQuery]);
+                const groupPermQuery = normalizedGroupName
+                  ? supabaseClient
+                      .from('student_note_permissions')
+                      .select('id, student_id, group_name, is_accessible')
+                      .eq('note_id', noteId)
+                      .is('student_id', null)
+                      .eq('group_name', normalizedGroupName)
+                      .eq('is_accessible', true)
+                  : Promise.resolve({ data: [], error: null });
 
-              if (accessError) {
-                console.error('❌ Error checking note access:', accessError);
-                showError('❌ Error checking note access permissions');
-                return;
+                const [
+                  { data: accessGrantsResult, error: accessError },
+                  individualResult,
+                  groupResult
+                ] = await Promise.all([freeAccessQuery, individualPermQuery, groupPermQuery]);
+
+                if (accessError) {
+                  console.error('❌ Error checking note access:', accessError);
+                  showError('❌ Error checking note access permissions');
+                  return;
+                }
+
+                const permissionErrors = [individualResult?.error, groupResult?.error].filter(Boolean);
+                if (permissionErrors.length > 0) {
+                  console.error('❌ Permission verification failed:', permissionErrors[0]);
+                  showError('❌ Error checking note access permissions');
+                  return;
+                }
+
+                accessGrants = accessGrantsResult || [];
+                permissionGrants = [...(individualResult?.data || []), ...(groupResult?.data || [])];
+                hasPermissionAccess = permissionGrants.length > 0;
+                hasFreeAccess = Array.isArray(accessGrants) && accessGrants.length > 0;
               }
-
-              const permissionErrors = [individualResult?.error, groupResult?.error].filter(Boolean);
-              if (permissionErrors.length > 0) {
-                console.error('❌ Permission verification failed:', permissionErrors[0]);
-                showError('❌ Error checking note access permissions');
-                return;
-              }
-
-              const permissionGrants = [...(individualResult?.data || []), ...(groupResult?.data || [])];
-              const hasPermissionAccess = permissionGrants.length > 0;
-              
-              const hasFreeAccess = Array.isArray(accessGrants) && accessGrants.length > 0;
               
                 // If no access grants found, deny access
                 if (!hasFreeAccess && !hasPermissionAccess && currentStudent?.role !== 'admin') {
@@ -2344,6 +2358,25 @@
         ctx.stroke();
       }
       ctx.restore();
+    }
+
+    function showError(message) {
+      const content = document.getElementById('pdfContent');
+      if (content) {
+        content.innerHTML = `<div class="error-message">${message}</div>`;
+      } else {
+        alert(message);
+      }
+    }
+
+    function showCustomAlert() {
+      const studentName = getStudentDisplayName();
+      const message = `This document belongs to ARNOMA and is provided exclusively for ${studentName}. Please do not share it.`;
+      if (typeof customAlert === 'function') {
+        customAlert('Attention', message);
+      } else {
+        alert(message);
+      }
     }
 
     function toggleMediaPanel(event) {
