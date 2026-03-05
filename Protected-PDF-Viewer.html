@@ -1432,14 +1432,15 @@
         if (impersonationToken) {
           try {
             const tokenData = JSON.parse(impersonationToken);
-            const { data: student, error: studentError } = await supabaseClient
+            const { data: students, error: studentError } = await supabaseClient
               .from('students')
               .select('*')
               .eq('id', tokenData.studentId)
-              .maybeSingle();
+              .limit(1);
+            const student = Array.isArray(students) ? students[0] : null;
             if (student && !studentError) {
-                currentStudent = student;
-              }
+              currentStudent = student;
+            }
             } catch (e) {
               console.error('Error reading impersonation token:', e);
             }
@@ -1462,11 +1463,12 @@
               currentStudent = { id: 'admin', name: 'Admin', group: 'Admin', role: 'admin' };
             } else {
               // Get current student data by email — fire immediately after session resolves
-              const { data: student, error: studentError } = await supabaseClient
+              const { data: students, error: studentError } = await supabaseClient
                 .from('students')
                 .select('*')
                 .eq('email', session.user.email)
-                .maybeSingle();
+                .limit(1);
+              const student = Array.isArray(students) ? students[0] : null;
               
               if (studentError || !student) {
                 showError('Student profile not found');
@@ -2268,6 +2270,178 @@
           0,
           0,
           outputCanvas.width,
+          outputCanvas.height
+        );
+
+        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
+        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
+
+        return outputCanvas;
+      } catch (error) {
+        console.warn('Raster obfuscation fallback (canvas locked):', error);
+        return sourceCanvas;
+      }
+    }
+
+    function disableImageSmoothing(ctx) {
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = false;
+      ctx.mozImageSmoothingEnabled = false;
+      ctx.webkitImageSmoothingEnabled = false;
+      ctx.msImageSmoothingEnabled = false;
+    }
+
+    function applyNoiseOverlay(ctx, width, height) {
+      try {
+        const noiseTile = 96;
+        const noiseCanvas = document.createElement('canvas');
+        noiseCanvas.width = noiseTile;
+        noiseCanvas.height = noiseTile;
+        const noiseCtx = noiseCanvas.getContext('2d');
+        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
+        const buffer = imageData.data;
+        
+        for (let i = 0; i < buffer.length; i += 4) {
+          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
+          buffer[i] = shade;
+          buffer[i + 1] = shade;
+          buffer[i + 2] = shade;
+          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
+        }
+        
+        noiseCtx.putImageData(imageData, 0, 0);
+        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
+        if (pattern) {
+          ctx.save();
+          ctx.globalAlpha = 0.18;
+          ctx.fillStyle = pattern;
+          ctx.fillRect(0, 0, width, height);
+          ctx.restore();
+        }
+      } catch (error) {
+        console.warn('Noise overlay skipped:', error);
+      }
+    }
+
+    function drawMicroGrid(ctx, width, height) {
+      ctx.save();
+      ctx.globalAlpha = 0.08;
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
+      ctx.lineWidth = 0.75;
+      const spacing = 12;
+      for (let x = 0; x <= width; x += spacing) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, height);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+      for (let y = 0; y <= height; y += spacing) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(width, y + 0.5);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    function toggleMediaPanel(event) {
+      if (event) {
+        event.stopPropagation(); // Prevent immediate close from document click
+      }
+      
+      const panel = document.getElementById('mediaPanel');
+      panel.classList.toggle('open');
+      
+      // Clear search when closing
+      if (!panel.classList.contains('open')) {
+        const searchInput = document.getElementById('mediaSearchInput');
+        if (searchInput) {
+          searchInput.value = '';
+          filterMediaItems();
+        }
+      }
+    }
+
+    // Filter media items based on search input
+    function filterMediaItems() {
+      const searchInput = document.getElementById('mediaSearchInput');
+      const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+      const mediaItems = document.querySelectorAll('.media-item');
+      
+      mediaItems.forEach(item => {
+        const title = item.querySelector('h4')?.textContent.toLowerCase() || '';
+        const description = item.querySelector('p')?.textContent.toLowerCase() || '';
+        
+        if (title.includes(searchTerm) || description.includes(searchTerm)) {
+          item.style.display = '';
+        } else {
+          item.style.display = 'none';
+        }
+      });
+    }
+
+    // Show media panel toggle when PDF is loaded
+    function showMediaPanelToggle() {
+      document.getElementById('mediaPanelToggle').style.display = 'flex';
+    }
+
+    // Close media panel when clicking outside
+    document.addEventListener('click', function(event) {
+      const panel = document.getElementById('mediaPanel');
+      const toggle = document.getElementById('mediaPanelToggle');
+      
+      if (panel && panel.classList.contains('open')) {
+        // Check if click is outside both panel and toggle button
+        if (!panel.contains(event.target) && !toggle.contains(event.target)) {
+          panel.classList.remove('open');
+        }
+      }
+    });
+
+    // ============================================================
+    // GLOBAL ERROR HANDLERS - ROBUSTNESS
+    // ============================================================
+    
+    // Catch all unhandled promise rejections
+    window.addEventListener('unhandledrejection', function(event) {
+      console.error('❌ Unhandled Promise Rejection:', event.reason);
+      showError('An unexpected error occurred: ' + (event.reason?.message || event.reason || 'Unknown error'));
+      event.preventDefault();
+    });
+    
+    // Catch all uncaught errors
+    window.addEventListener('error', function(event) {
+      console.error('❌ Uncaught Error:', event.error);
+      
+      // Don't show error for script loading failures (CDN issues)
+      if (event.message && event.message.includes('Script error')) {
+        console.warn('Script loading error detected, but PDF viewer may still work');
+        return;
+      }
+      
+      showError('An unexpected error occurred. Please refresh the page.');
+      event.preventDefault();
+    });
+    
+    // Monitor PDF.js worker errors
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+    
+    // Verify critical dependencies on load
+    if (typeof window.supabase === 'undefined') {
+      showError('❌ CRITICAL: Supabase SDK failed to load. Please check your internet connection and refresh.');
+    }
+    
+    if (typeof pdfjsLib === 'undefined') {
+      showError('❌ CRITICAL: PDF.js library failed to load. Please check your internet connection and refresh.');
+    }
+    
+    console.log('✅ Protected PDF Viewer initialized with robust error handling');
+  </script>
+</body>
+</html>
           outputCanvas.height
         );
 
