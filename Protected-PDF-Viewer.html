@@ -226,27 +226,45 @@
 
     // ── Resolve current student ──────────────────────────────────
     async function resolveStudent(parsedStudentId, nameParam, groupParam) {
-      // 1. URL params (portal passes these)
+      // 1. URL params — portal always passes studentName; that is sufficient identity.
+      //    If studentId is also present we enrich with a DB lookup so permissions work.
       if (nameParam) {
         const gl = groupParam ? groupParam.toString().trim().toUpperCase().replace(/^GROUP\s*/i,'').charAt(0) : null;
         fallbackStudent = { id: parsedStudentId || undefined, name: nameParam, group_name: groupParam, group: groupParam, group_letter: gl || undefined };
         currentStudent  = fallbackStudent;
-      }
-      if (currentStudent?.id) return; // full identity from URL
 
-      // 2. Impersonation token
+        // Try to enrich with DB record so we have a real numeric id for permission checks
+        if (parsedStudentId) {
+          try {
+            const { data: rows } = await supabaseClient.from('students').select('*').eq('id', parsedStudentId).limit(1);
+            if (rows?.length > 0) { currentStudent = rows[0]; return; }
+          } catch {}
+        }
+        // No numeric id but we have name/group — enough to render, just skip id-based permission DB calls
+        return;
+      }
+
+      // 2. Impersonation token (admin viewing as student in same tab — rare for viewer)
       const tok = sessionStorage.getItem('impersonation_token') || localStorage.getItem('impersonation_token');
       if (tok) {
         try {
           const td = JSON.parse(tok);
-          const { data: rows } = await supabaseClient.from('students').select('*').eq('id', td.studentId).limit(1);
-          if (rows?.length > 0) { currentStudent = rows[0]; return; }
+          if (td.studentId) {
+            const { data: rows } = await supabaseClient.from('students').select('*').eq('id', td.studentId).limit(1);
+            if (rows?.length > 0) { currentStudent = rows[0]; return; }
+          }
         } catch {}
       }
 
-      // 3. Auth session (regular student)
-      const { data: { session }, error: authErr } = await supabaseClient.auth.getSession();
-      if (authErr || !session) {
+      // 3. Auth session — with a small retry because new tabs can take a tick to restore the session
+      let session = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await supabaseClient.auth.getSession();
+        if (!error && data?.session) { session = data.session; break; }
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      if (!session) {
         showError('Please log in to view this note.');
         setTimeout(() => { window.location.href = 'index.html'; }, 2500);
         throw new Error('Not authenticated');
