@@ -7,13 +7,9 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Study Notes — ARNOMA University</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230c0f1a'/%3E%3Ctext x='50' y='62' text-anchor='middle' font-size='56' font-family='Arial' fill='%23c4a45f'%3EA%3C/text%3E%3C/svg%3E">
   
   <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-
-  <!-- Shared Dialogs -->
-  <script src="shared-dialogs.js"></script>
   
   <!-- PDF.js Library -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -1434,55 +1430,47 @@
         if (!currentStudent || !currentStudent.id) {
           const impersonationToken = sessionStorage.getItem('impersonation_token');
         if (impersonationToken) {
-          try {
-            const tokenData = JSON.parse(impersonationToken);
-            const { data: students, error: studentError } = await supabaseClient
-              .from('students')
-              .select('*')
-              .eq('id', tokenData.studentId)
-              .limit(1);
-            const student = Array.isArray(students) ? students[0] : null;
-            if (student && !studentError) {
-              currentStudent = student;
-            }
+            try {
+              const tokenData = JSON.parse(impersonationToken);
+              const { data: students, error: studentError } = await supabaseClient
+                .from('students')
+                .select('*')
+                .eq('id', tokenData.studentId)
+                .limit(1);
+              
+              if (students && students.length > 0 && !studentError) {
+                currentStudent = students[0];
+              }
             } catch (e) {
               console.error('Error reading impersonation token:', e);
             }
           }
         }
         
-          // If no impersonation, check regular auth session
-          if (!currentStudent || !currentStudent.id) {
-            const { data: { session }, error: authError } = await supabaseClient.auth.getSession();
-            
-            if (authError || !session) {
-              showError('Please log in to view this note');
-              window.location.href = 'index.html';
-              return;
-            }
-            
-            // Check if it's the admin
-            if (session.user.email?.toLowerCase() === 'hrachfilm@gmail.com') {
-              console.log('👑 Admin access granted for PDF viewer');
-              currentStudent = { id: 'admin', name: 'Admin', group: 'Admin', role: 'admin' };
-            } else {
-              // Get current student data by email — fire immediately after session resolves
-              const { data: students, error: studentError } = await supabaseClient
-                .from('students')
-                .select('*')
-                .eq('email', session.user.email)
-                .limit(1);
-              const student = Array.isArray(students) ? students[0] : null;
-              
-              if (studentError || !student) {
-                showError('Student profile not found');
-                return;
-              }
-              
-              currentStudent = student;
-            }
+        // If no impersonation, check regular auth session
+        if (!currentStudent || !currentStudent.id) {
+          const { data: { session }, error: authError } = await supabaseClient.auth.getSession();
+          
+          if (authError || !session) {
+            showError('Please log in to view this note');
+            window.location.href = 'index.html';
+            return;
           }
-        if (!currentStudent) {
+          
+          // Get current student data by email — fire immediately after session resolves
+          const { data: students, error: studentError } = await supabaseClient
+            .from('students')
+            .select('*')
+            .eq('email', session.user.email)
+            .limit(1);
+          
+          if (studentError || !students || students.length === 0) {
+            showError('Student profile not found');
+            return;
+          }
+          
+          currentStudent = students[0];
+        }        if (!currentStudent) {
           showError('Student profile not found');
           return;
         }
@@ -1532,75 +1520,75 @@
               updateLoadingStatus('Confirming group permissions...');
               console.log('🔐 Group Access Check:');
               console.log('  Student Group:', studentGroup);
-              console.log('  Student ID:', currentStudent.id);
-              console.log('  Note ID:', noteId);
-              
-              let accessGrants = [];
-              let permissionGrants = [];
-              let hasPermissionAccess = false;
-              let hasFreeAccess = false;
-
-              if (currentStudent?.role === 'admin') {
-                console.log('👑 Admin access - skipping permission queries');
-                hasPermissionAccess = true;
-                hasFreeAccess = true;
-              } else {
-                // Check if student has access via note_free_access table
-                // Fire free-access + both permission queries in parallel
-                const orConditions = [];
-                if (studentGroup) orConditions.push(`group_letter.eq.${studentGroup}`);
-                if (currentStudent.id) orConditions.push(`student_id.eq.${currentStudent.id}`);
-
-                let freeAccessQuery = supabaseClient
-                  .from('note_free_access')
-                  .select('*')
-                  .eq('note_id', noteId);
-                if (orConditions.length > 0) freeAccessQuery = freeAccessQuery.or(orConditions.join(','));
-
-                const individualPermQuery = currentStudent.id
-                  ? supabaseClient
-                      .from('student_note_permissions')
-                      .select('id, student_id, group_name, is_accessible')
-                      .eq('note_id', noteId)
-                      .eq('student_id', currentStudent.id)
-                      .eq('is_accessible', true)
-                  : Promise.resolve({ data: [], error: null });
-
-                const groupPermQuery = normalizedGroupName
-                  ? supabaseClient
-                      .from('student_note_permissions')
-                      .select('id, student_id, group_name, is_accessible')
-                      .eq('note_id', noteId)
-                      .is('student_id', null)
-                      .eq('group_name', normalizedGroupName)
-                      .eq('is_accessible', true)
-                  : Promise.resolve({ data: [], error: null });
-
-                const [
-                  { data: accessGrantsResult, error: accessError },
-                  individualResult,
-                  groupResult
-                ] = await Promise.all([freeAccessQuery, individualPermQuery, groupPermQuery]);
-
-                if (accessError) {
-                  console.error('❌ Error checking note access:', accessError);
-                  showError('❌ Error checking note access permissions');
-                  return;
+                console.log('  Student ID:', currentStudent.id);
+                console.log('  Note ID:', noteId);
+                
+                let accessGrants = [];
+                let permissionGrants = [];
+                let hasPermissionAccess = false;
+                let hasFreeAccess = false;
+  
+                if (currentStudent?.role === 'admin') {
+                  console.log('👑 Admin access - skipping permission queries');
+                  hasPermissionAccess = true;
+                  hasFreeAccess = true;
+                } else {
+                  // Check if student has access via note_free_access table
+                  // Fire free-access + both permission queries in parallel
+                  const orConditions = [];
+                  if (studentGroup) orConditions.push(`group_letter.eq.${studentGroup}`);
+                  if (currentStudent.id) orConditions.push(`student_id.eq.${currentStudent.id}`);
+  
+                  let freeAccessQuery = supabaseClient
+                    .from('note_free_access')
+                    .select('*')
+                    .eq('note_id', noteId);
+                  if (orConditions.length > 0) freeAccessQuery = freeAccessQuery.or(orConditions.join(','));
+  
+                  const individualPermQuery = currentStudent.id
+                    ? supabaseClient
+                        .from('student_note_permissions')
+                        .select('id, student_id, group_name, is_accessible')
+                        .eq('note_id', noteId)
+                        .eq('student_id', currentStudent.id)
+                        .eq('is_accessible', true)
+                    : Promise.resolve({ data: [], error: null });
+  
+                  const groupPermQuery = normalizedGroupName
+                    ? supabaseClient
+                        .from('student_note_permissions')
+                        .select('id, student_id, group_name, is_accessible')
+                        .eq('note_id', noteId)
+                        .is('student_id', null)
+                        .eq('group_name', normalizedGroupName)
+                        .eq('is_accessible', true)
+                    : Promise.resolve({ data: [], error: null });
+  
+                  const [
+                    { data: accessGrantsResult, error: accessError },
+                    individualResult,
+                    groupResult
+                  ] = await Promise.all([freeAccessQuery, individualPermQuery, groupPermQuery]);
+  
+                  if (accessError) {
+                    console.error('❌ Error checking note access:', accessError);
+                    showError('❌ Error checking note access permissions');
+                    return;
+                  }
+  
+                  const permissionErrors = [individualResult?.error, groupResult?.error].filter(Boolean);
+                  if (permissionErrors.length > 0) {
+                    console.error('❌ Permission verification failed:', permissionErrors[0]);
+                    showError('❌ Error checking note access permissions');
+                    return;
+                  }
+  
+                  accessGrants = accessGrantsResult || [];
+                  permissionGrants = [...(individualResult?.data || []), ...(groupResult?.data || [])];
+                  hasPermissionAccess = permissionGrants.length > 0;
+                  hasFreeAccess = Array.isArray(accessGrants) && accessGrants.length > 0;
                 }
-
-                const permissionErrors = [individualResult?.error, groupResult?.error].filter(Boolean);
-                if (permissionErrors.length > 0) {
-                  console.error('❌ Permission verification failed:', permissionErrors[0]);
-                  showError('❌ Error checking note access permissions');
-                  return;
-                }
-
-                accessGrants = accessGrantsResult || [];
-                permissionGrants = [...(individualResult?.data || []), ...(groupResult?.data || [])];
-                hasPermissionAccess = permissionGrants.length > 0;
-                hasFreeAccess = Array.isArray(accessGrants) && accessGrants.length > 0;
-              }
-              
+                
                 // If no access grants found, deny access
                 if (!hasFreeAccess && !hasPermissionAccess && currentStudent?.role !== 'admin') {
                   console.error('❌ No access granted! Student:', studentGroup, 'Note ID:', noteId);
@@ -1668,13 +1656,9 @@
                 });
 
                 if (!hasPaidForThisDate) {
-                  if (currentStudent?.role === 'admin') {
-                    console.log('👑 Admin bypass for payment check on date:', checkDate);
-                  } else {
-                    console.error('❌ Payment required but not found for date:', checkDate);
-                    showError('🔒 This note is locked. Payment is required to access these notes.');
-                    return;
-                  }
+                  console.error('❌ Payment required but not found for date:', checkDate);
+                  showError('🔒 This note is locked. Payment is required to access these notes.');
+                  return;
                 }
                 console.log('✅ Payment verified: exact date match', checkDate);
               } else if (note.requires_payment && hasFreeAccess) {
@@ -2361,26 +2345,795 @@
       }
       ctx.restore();
     }
+    
+    // ============================================================
+    // UTILITY FUNCTIONS
+    // ============================================================
+    
+    function escapeHtml(value = '') {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
 
     function showError(message) {
       const content = document.getElementById('pdfContent');
-      if (content) {
-        content.innerHTML = `<div class="error-message">${message}</div>`;
-      } else {
-        alert(message);
-      }
+      content.innerHTML = `<div class="error-message">${message}</div>`;
+    }
+    
+    function formatDate(dateStr) {
+      const date = new Date(dateStr + 'T00:00:00');
+      return date.toLocaleDateString('en-US', { 
+        month: 'long', 
+        day: 'numeric', 
+        year: 'numeric' 
+      });
     }
 
+    // Custom Alert Function
     function showCustomAlert() {
       const studentName = getStudentDisplayName();
-      const message = `This document belongs to ARNOMA and is provided exclusively for ${studentName}. Please do not share it.`;
-      if (typeof customAlert === 'function') {
-        customAlert('Attention', message);
+      
+      const overlay = document.createElement('div');
+      overlay.className = 'custom-alert-overlay';
+      overlay.innerHTML = `
+        <div class="custom-alert-modal">
+          <div class="custom-alert-icon">⚠️</div>
+          <div class="custom-alert-title">ATTENTION</div>
+          <div class="custom-alert-message">
+            This document belongs to <strong>ARNOMA</strong> and is provided exclusively for <strong>${studentName}</strong>.<br><br>
+            Kindly respect the copyright and refrain from sharing it with others.<br><br>
+            Thank you for your understanding.
+          </div>
+          <button class="custom-alert-button" onclick="this.closest('.custom-alert-overlay').remove()">
+            I Understand
+          </button>
+        </div>
+      `;
+      
+      document.body.appendChild(overlay);
+      
+      // Close on overlay click
+      overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) {
+          overlay.remove();
+        }
+      });
+    }
+
+    // Print Warning Function - Shows alert and waits for user confirmation
+    function showPrintWarning() {
+      return new Promise((resolve) => {
+        const studentName = getStudentDisplayName();
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'custom-alert-overlay';
+        overlay.innerHTML = `
+          <div class="custom-alert-modal">
+            <div class="custom-alert-icon">⚠️</div>
+            <div class="custom-alert-title">ATTENTION</div>
+            <div class="custom-alert-message">
+              This document belongs to <strong>ARNOMA</strong> and is provided exclusively for <strong>${studentName}</strong>.<br><br>
+              Kindly respect the copyright and refrain from sharing it with others.<br><br>
+              Thank you for your understanding.
+            </div>
+            <button class="custom-alert-button" id="printWarningBtn">
+              I Understand
+            </button>
+          </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        // Resolve promise and remove overlay when button is clicked
+        const button = overlay.querySelector('#printWarningBtn');
+        button.addEventListener('click', () => {
+          overlay.remove();
+          resolve();
+        });
+        
+        // Prevent closing on overlay click for print warning
+        overlay.addEventListener('click', function(e) {
+          e.stopPropagation();
+        });
+      });
+    }
+
+    // ============================================================
+    // MEDIA PANEL FUNCTIONS
+    // ============================================================
+    
+    /**
+     * Extract YouTube video ID from various URL formats
+     * Supports: youtube.com/watch?v=..., youtu.be/..., youtube.com/embed/...
+     * CRITICAL: Never expose the full URL to the student - only use for iframe src
+     */
+    function extractYouTubeVideoId(url) {
+      if (!url) return null;
+      
+      const patterns = [
+        /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/,
+        /^([a-zA-Z0-9_-]{11})$/ // Raw video ID
+      ];
+      
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+      
+      return null;
+    }
+
+    /**
+     * Extract Google Drive file ID from various URL formats
+     * Supports: drive.google.com/file/d/{id}/view, drive.google.com/open?id={id}
+     */
+    function extractGoogleDriveFileId(url) {
+      if (!url) return null;
+      
+      const patterns = [
+        /\/file\/d\/([a-zA-Z0-9_-]+)/, // /file/d/{fileId}/view or /file/d/{fileId}/edit
+        /id=([a-zA-Z0-9_-]+)/, // ?id={fileId}
+        /\/open\?id=([a-zA-Z0-9_-]+)/, // /open?id={fileId}
+        /^([a-zA-Z0-9_-]{25,})$/ // Raw file ID (typically 25+ chars)
+      ];
+      
+      for (const pattern of patterns) {
+        const match = url.match(pattern);
+        if (match && match[1]) {
+          return match[1];
+        }
+      }
+      
+      return null;
+    }
+
+    /**
+     * Detect video source type (YouTube or Google Drive)
+     */
+    function detectVideoSource(url) {
+      if (!url) return null;
+      
+      if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        return 'youtube';
+      }
+      
+      if (url.includes('drive.google.com') || url.includes('docs.google.com')) {
+        return 'googledrive';
+      }
+      
+      // Try to detect by ID pattern
+      const youtubeId = extractYouTubeVideoId(url);
+      if (youtubeId) return 'youtube';
+      
+      const driveId = extractGoogleDriveFileId(url);
+      if (driveId) return 'googledrive';
+      
+      return null;
+    }
+
+    /**
+     * Create a protected YouTube iframe embed
+     * MAXIMUM SECURITY:
+     * - No URL exposure anywhere (sandboxed iframe)
+     * - Custom controls based on admin settings
+     * - No right-click, inspect, or dev tools access to URL
+     * - Privacy-enhanced mode (youtube-nocookie.com)
+     */
+    function createProtectedYouTubeEmbed(videoId, title = 'Study Video', controls = null) {
+      if (!videoId) {
+        return `
+          <div class="media-item">
+            <h4>🎥 ${title}</h4>
+            <div class="protected-video-container">
+              <div class="video-unavailable">
+                ⚠️ Video unavailable<br>
+                <small>Invalid video link</small>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      
+      // CRITICAL SECURITY: Use autoplay=1 to skip the red YouTube play button
+      // When autoplay is enabled, video starts immediately with NO branding overlay
+      // Combined with mute=1, this provides silent autoplay which students can unmute
+      
+      const embedUrl = `https://www.youtube-nocookie.com/embed/${videoId}?` + 
+        'autoplay=1&' +                         // Autoplay to skip red button
+        'mute=1&' +                             // Muted autoplay (required by browsers)
+        'controls=0&' +                         // ZERO controls = NO YouTube branding
+        'rel=0&' +                              // No related videos
+        'modestbranding=1&' +                   // Minimal branding
+        'showinfo=0&' +                         // No video info
+        'fs=0&' +                               // NO fullscreen button
+        'disablekb=1&' +                        // NO keyboard shortcuts
+        'iv_load_policy=3&' +                   // No annotations
+        'playsinline=1&' +                      // Inline playback
+        'loop=0&' +                             // No loop
+        'enablejsapi=0&' +                      // No JS API access
+        'origin=' + window.location.origin;     // Restrict to our domain only
+      
+      return `
+        <div class="media-item">
+          <h4>🎥 ${title}</h4>
+          <div class="protected-video-container" style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; pointer-events: auto;">
+            <iframe 
+              src="${embedUrl}"
+              title="Protected Video"
+              frameborder="0"
+              allow="autoplay; encrypted-media"
+              sandbox="allow-scripts allow-same-origin"
+              loading="lazy"
+              style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; pointer-events: auto;"
+              oncontextmenu="return false;"
+            ></iframe>
+            <!-- Overlay to block YouTube branding that might appear -->
+            <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 60px; pointer-events: none; z-index: 1;"></div>
+            <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 60px; pointer-events: none; z-index: 1; background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%);"></div>
+          </div>
+          <p style="color: var(--accent-primary); font-size: 12px; margin-top: 8px; text-align: center;">
+            🔒 <strong>Protected ARNOMA Content</strong> - Sharing prohibited<br>
+            <small style="opacity: 0.7;">Video starts muted - click to unmute and control</small>
+          </p>
+        </div>
+      `;
+    }
+
+    /**
+     * Create custom HTML5 video player with Google Drive source
+     * MAXIMUM SECURITY & FLEXIBILITY:
+     * - Uses signed Supabase URLs (stored from Drive, never exposed)
+     * - Complete control over UI (no external branding)
+     * - Custom controls (play, pause, volume, speed, quality, fullscreen)
+     * - URL never visible to student (blob URLs or signed URLs)
+     */
+    function createCustomVideoPlayer(videoUrl, title = 'Study Video', videoId = null) {
+      const playerId = `video-player-${Date.now()}`;
+      
+      return `
+        <div class="media-item">
+          <h4>🎥 ${title}</h4>
+          <div class="custom-video-player" id="${playerId}-container">
+            <video 
+              id="${playerId}"
+              preload="metadata"
+              playsinline
+              controlsList="nodownload nofullscreen noremoteplayback"
+              disablePictureInPicture
+              oncontextmenu="return false;"
+            >
+              <source src="${videoUrl}" type="video/mp4">
+              Your browser does not support the video tag.
+            </video>
+            
+            <div class="video-loading-overlay" id="${playerId}-loading" style="display: none;">
+              <div class="video-spinner"></div>
+            </div>
+            
+            <div class="video-controls-overlay" id="${playerId}-controls">
+              <div class="video-controls-row">
+                <button class="video-play-btn" id="${playerId}-play" onclick="togglePlayPause('${playerId}')">
+                  ▶️
+                </button>
+                
+                <div class="video-progress-container" id="${playerId}-progress-container" onclick="seekVideo(event, '${playerId}')">
+                  <div class="video-progress-bar" id="${playerId}-progress"></div>
+                </div>
+                
+                <div class="video-time" id="${playerId}-time">0:00 / 0:00</div>
+                
+                <button class="video-volume-btn" id="${playerId}-volume" onclick="toggleMute('${playerId}')">
+                  🔊
+                </button>
+                
+                <button class="video-settings-btn" id="${playerId}-settings" onclick="toggleSettings('${playerId}')">
+                  ⚙️
+                  <div class="video-settings-menu" id="${playerId}-settings-menu">
+                    <div class="video-settings-option" onclick="setPlaybackSpeed('${playerId}', 0.5)">
+                      Speed: 0.5x
+                    </div>
+                    <div class="video-settings-option" onclick="setPlaybackSpeed('${playerId}', 0.75)">
+                      Speed: 0.75x
+                    </div>
+                    <div class="video-settings-option active" onclick="setPlaybackSpeed('${playerId}', 1)">
+                      Speed: 1x ✓
+                    </div>
+                    <div class="video-settings-option" onclick="setPlaybackSpeed('${playerId}', 1.25)">
+                      Speed: 1.25x
+                    </div>
+                    <div class="video-settings-option" onclick="setPlaybackSpeed('${playerId}', 1.5)">
+                      Speed: 1.5x
+                    </div>
+                    <div class="video-settings-option" onclick="setPlaybackSpeed('${playerId}', 2)">
+                      Speed: 2x
+                    </div>
+                  </div>
+                </button>
+                
+                <button class="video-fullscreen-btn" id="${playerId}-fullscreen" onclick="toggleFullscreen('${playerId}')">
+                  ⛶
+                </button>
+              </div>
+            </div>
+          </div>
+          <p style="color: var(--accent-primary); font-size: 12px; margin-top: 8px; text-align: center;">
+            🔒 <strong>Protected ARNOMA Content</strong> - Sharing prohibited
+          </p>
+        </div>
+      `;
+    }
+
+    // Video player control functions
+    function togglePlayPause(playerId) {
+      const video = document.getElementById(playerId);
+      const playBtn = document.getElementById(`${playerId}-play`);
+      
+      if (video.paused) {
+        video.play();
+        playBtn.textContent = '⏸️';
       } else {
-        alert(message);
+        video.pause();
+        playBtn.textContent = '▶️';
       }
     }
 
+    function toggleMute(playerId) {
+      const video = document.getElementById(playerId);
+      const volumeBtn = document.getElementById(`${playerId}-volume`);
+      
+      video.muted = !video.muted;
+      volumeBtn.textContent = video.muted ? '🔇' : '🔊';
+    }
+
+    function toggleSettings(playerId) {
+      const settingsMenu = document.getElementById(`${playerId}-settings-menu`);
+      settingsMenu.classList.toggle('show');
+      
+      // Close menu when clicking outside
+      if (settingsMenu.classList.contains('show')) {
+        setTimeout(() => {
+          document.addEventListener('click', function closeSettings(e) {
+            if (!settingsMenu.contains(e.target) && !e.target.closest(`#${playerId}-settings`)) {
+              settingsMenu.classList.remove('show');
+              document.removeEventListener('click', closeSettings);
+            }
+          });
+        }, 10);
+      }
+    }
+
+    function setPlaybackSpeed(playerId, speed) {
+      const video = document.getElementById(playerId);
+      const settingsMenu = document.getElementById(`${playerId}-settings-menu`);
+      
+      video.playbackRate = speed;
+      
+      // Update active state
+      settingsMenu.querySelectorAll('.video-settings-option').forEach(opt => {
+        opt.classList.remove('active');
+        if (opt.textContent.includes(`${speed}x`)) {
+          opt.classList.add('active');
+          opt.innerHTML = opt.innerHTML.replace('✓', '') + ' ✓';
+        } else {
+          opt.innerHTML = opt.innerHTML.replace(' ✓', '');
+        }
+      });
+      
+      settingsMenu.classList.remove('show');
+    }
+
+    function toggleFullscreen(playerId) {
+      const container = document.getElementById(`${playerId}-container`);
+      
+      if (!document.fullscreenElement) {
+        if (container.requestFullscreen) {
+          container.requestFullscreen();
+        } else if (container.webkitRequestFullscreen) {
+          container.webkitRequestFullscreen();
+        } else if (container.msRequestFullscreen) {
+          container.msRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        } else if (document.msExitFullscreen) {
+          document.msExitFullscreen();
+        }
+      }
+    }
+
+    function seekVideo(event, playerId) {
+      const video = document.getElementById(playerId);
+      const progressContainer = document.getElementById(`${playerId}-progress-container`);
+      
+      const rect = progressContainer.getBoundingClientRect();
+      const clickX = event.clientX - rect.left;
+      const percentage = clickX / rect.width;
+      
+      video.currentTime = percentage * video.duration;
+    }
+
+    function formatVideoTime(seconds) {
+      if (isNaN(seconds)) return '0:00';
+      
+      const minutes = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Initialize video player event listeners
+    function initializeVideoPlayer(playerId) {
+      const video = document.getElementById(playerId);
+      if (!video) return;
+      
+      const playBtn = document.getElementById(`${playerId}-play`);
+      const progressBar = document.getElementById(`${playerId}-progress`);
+      const timeDisplay = document.getElementById(`${playerId}-time`);
+      const loadingOverlay = document.getElementById(`${playerId}-loading`);
+      const controlsOverlay = document.getElementById(`${playerId}-controls`);
+      
+      // Show loading spinner
+      video.addEventListener('waiting', () => {
+        loadingOverlay.style.display = 'block';
+      });
+      
+      video.addEventListener('canplay', () => {
+        loadingOverlay.style.display = 'none';
+      });
+      
+      // Update progress bar and time
+      video.addEventListener('timeupdate', () => {
+        const percentage = (video.currentTime / video.duration) * 100;
+        progressBar.style.width = `${percentage}%`;
+        
+        timeDisplay.textContent = `${formatVideoTime(video.currentTime)} / ${formatVideoTime(video.duration)}`;
+      });
+      
+      // Update play button on play/pause
+      video.addEventListener('play', () => {
+        playBtn.textContent = '⏸️';
+      });
+      
+      video.addEventListener('pause', () => {
+        playBtn.textContent = '▶️';
+      });
+      
+      // Show controls on hover or touch
+      let controlsTimeout;
+      const showControls = () => {
+        controlsOverlay.classList.add('show');
+        clearTimeout(controlsTimeout);
+        controlsTimeout = setTimeout(() => {
+          if (!video.paused) {
+            controlsOverlay.classList.remove('show');
+          }
+        }, 3000);
+      };
+      
+      video.addEventListener('mousemove', showControls);
+      video.addEventListener('touchstart', showControls);
+      
+      // Click video to play/pause
+      video.addEventListener('click', () => {
+        togglePlayPause(playerId);
+      });
+      
+      // Prevent right-click
+      video.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        return false;
+      });
+    }
+
+    /**
+     * Create a protected Google Drive video embed with fullscreen support
+     * MAXIMUM SECURITY + FULL FEATURES:
+     * - Settings: Quality, Speed, Subtitles (native Drive controls)
+     * - Play/Pause, Mute, Fullscreen (enabled)
+     * - No URL exposure (sandboxed iframe)
+     * - No download button (controlled by Drive sharing settings)
+     */
+    function createProtectedGoogleDriveEmbed(fileId, title = 'Study Video') {
+      if (!fileId) {
+        return `
+          <div class="media-item">
+            <h4>🎥 ${title}</h4>
+            <div class="protected-video-container">
+              <div class="video-unavailable">
+                ⚠️ Video unavailable<br>
+                <small>Invalid Google Drive link</small>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+      
+      // CRITICAL SECURITY: Google Drive preview mode with fullscreen enabled
+      // Students CANNOT access the file ID through iframe sandbox
+      const embedUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+      const playerId = `drive-player-${Date.now()}`;
+      
+      return `
+        <div class="media-item">
+          <h4>🎥 ${title}</h4>
+          <div class="protected-video-container" id="${playerId}-container" style="position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden; border-radius: 12px;">
+            <iframe 
+              id="${playerId}"
+              src="${embedUrl}"
+              title="Protected Video"
+              frameborder="0"
+              allow="autoplay; encrypted-media"
+              allowfullscreen
+              webkitallowfullscreen
+              mozallowfullscreen
+              sandbox="allow-scripts allow-same-origin"
+              loading="lazy"
+              style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; border-radius: 12px;"
+              oncontextmenu="return false;"
+            ></iframe>
+          </div>
+          <p style="color: var(--accent-primary); font-size: 12px; margin-top: 8px; text-align: center;">
+            🔒 <strong>Protected ARNOMA Content</strong> - Sharing prohibited<br>
+            <small style="opacity: 0.7;">Click ⚙️ in video for quality & speed • Click ⛶ for fullscreen</small>
+          </p>
+        </div>
+      `;
+    }
+
+    /**
+     * Create protected video embed (auto-detects YouTube or Google Drive)
+     * - YouTube: Uses iframe with maximum security parameters
+     * - Google Drive: Uses custom HTML5 player with signed URLs
+     */
+    function createProtectedVideoEmbed(videoUrl, title = 'Study Video', controls = null) {
+      const source = detectVideoSource(videoUrl);
+      
+      if (source === 'youtube') {
+        const videoId = extractYouTubeVideoId(videoUrl);
+        return createProtectedYouTubeEmbed(videoId, title, controls);
+      } else if (source === 'googledrive') {
+        // For Google Drive, use custom HTML5 player
+        // Admin stores Drive URL in database, we display with custom controls
+        const fileId = extractGoogleDriveFileId(videoUrl);
+        
+        // Use iframe embed method (students can't download from preview mode)
+        return createProtectedGoogleDriveEmbed(fileId, title);
+      } else {
+        return `
+          <div class="media-item">
+            <h4>🎥 ${title}</h4>
+            <div class="protected-video-container">
+              <div class="video-unavailable">
+                ⚠️ Video unavailable<br>
+                <small>Unsupported video source. Use YouTube or Google Drive links.</small>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    /**
+     * Load media content for the current note
+     * Fetches video_url from student_notes table and displays it securely
+     * 🔒 CRITICAL SECURITY RULES:
+     * 1. If note requires_payment = false (FREE) → NO VIDEO ACCESS for anyone
+     * 2. If note requires_payment = true AND student paid AND in video_allowed_groups → Video access
+     * 3. PDF is always accessible if student has note access (free or paid)
+     */
+    async function loadMediaContent() {
+      const mediaPanelContent = document.getElementById('mediaPanelContent');
+      
+      try {
+        const accessMode = noteData?.accessMode || 'unknown';
+        const isFreeAccess = accessMode === 'free-note' || accessMode === 'free-grant';
+
+        // 🔒 CRITICAL RULE: If note is FREE or accessed via free grant, BLOCK all media access
+        // Videos are ONLY for PAID students in allowed groups
+        if (isFreeAccess) {
+          console.log('🔒 MEDIA BLOCKED:', {
+            reason: accessMode === 'free-note' ? 'Note is free' : 'Free access grant',
+            accessMode,
+            noteId: noteData?.id,
+            student: currentStudent?.name || currentStudent?.id
+          });
+          mediaPanelContent.innerHTML = `
+            <div class="media-item">
+              <h4>📚 Study Resources</h4>
+              <p style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                🔒 Video content is only available to paid students in approved groups.
+              </p>
+            </div>
+          `;
+          return;
+        }
+        
+        // 🔒 STEP 1: Check group access for PAID notes
+        const hasGroupAccess = checkVideoGroupAccess(noteData);
+        
+        if (!hasGroupAccess) {
+          // Group restriction: Student's group NOT in video_allowed_groups
+          console.log('🔒 MEDIA ACCESS DENIED:', {
+            studentGroup: currentStudent?.group_letter || currentStudent?.group_name,
+            allowedGroups: noteData?.video_allowed_groups,
+            noteId: noteData?.id,
+            requiresPayment: noteData?.requires_payment
+          });
+          
+          mediaPanelContent.innerHTML = `
+            <div class="media-item">
+              <h4>📚 Study Resources</h4>
+              <p style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                🔒 Media content not available for your group.
+              </p>
+            </div>
+          `;
+          return;
+        }
+        
+        console.log('✅ MEDIA ACCESS GRANTED:', {
+          studentGroup: currentStudent?.group_letter || currentStudent?.group_name,
+          allowedGroups: noteData?.video_allowed_groups,
+          requiresPayment: noteData?.requires_payment,
+          noteId: noteData?.id,
+          accessMode
+        });
+        
+        // 🔒 STEP 2: If group access passed, load media from pdf_media table
+        let mediaHTML = '';
+        
+        // Load media items from pdf_media table
+        const { data: mediaItems, error: mediaError } = await supabaseClient
+          .from('pdf_media')
+          .select('*')
+          .eq('note_id', noteData.id)
+          .order('created_at', { ascending: true });
+        
+        if (mediaError) {
+          console.error('❌ Error loading media:', mediaError);
+        }
+        
+        // Render media items (GIFs, videos, links)
+        if (mediaItems && mediaItems.length > 0) {
+          console.log(`✅ Loaded ${mediaItems.length} media items for note ${noteData.id} (Group ${currentStudent?.group_letter || currentStudent?.group_name} access)`);
+          
+          mediaItems.forEach(item => {
+            if (item.type === 'image') {
+              mediaHTML += `
+                <div class="media-item">
+                  <h4>📸 ${item.title}</h4>
+                  ${item.description ? `<p>${item.description}</p>` : ''}
+                  <div style="margin-top: 12px;">
+                    <img src="${item.url}" alt="${item.title}" style="max-width: 100%; border-radius: 8px;">
+                  </div>
+                </div>
+              `;
+            } else if (item.type === 'video') {
+              const videoEmbed = createProtectedVideoEmbed(item.url, item.title, true);
+              mediaHTML += `
+                <div class="media-item">
+                  <h4>🎬 ${item.title}</h4>
+                  ${item.description ? `<p>${item.description}</p>` : ''}
+                  ${videoEmbed}
+                </div>
+              `;
+            } else if (item.type === 'link') {
+              mediaHTML += `
+                <div class="media-item">
+                  <h4>🔗 ${item.title}</h4>
+                  ${item.description ? `<p>${item.description}</p>` : ''}
+                  <div style="margin-top: 12px;">
+                    <a href="${item.url}" target="_blank" rel="noopener noreferrer" 
+                       style="color: var(--accent-primary); text-decoration: none;">
+                      Open Link →
+                    </a>
+                  </div>
+                </div>
+              `;
+            }
+          });
+        }
+        
+        // Legacy: Also check for old video_url field in student_notes
+        if (noteData && noteData.video_url) {
+          const videoTitle = noteData.video_title || noteData.title || 'Study Video';
+          const videoEmbed = createProtectedVideoEmbed(noteData.video_url, videoTitle, noteData.video_controls);
+          mediaHTML += `
+            <div class="media-item">
+              <h4>🎬 ${videoTitle}</h4>
+              ${videoEmbed}
+            </div>
+          `;
+        }
+        
+        // Display media or show "no media" message
+        if (mediaHTML) {
+          mediaPanelContent.innerHTML = mediaHTML;
+        } else {
+          mediaPanelContent.innerHTML = `
+            <div class="media-item">
+              <h4>📚 Study Resources</h4>
+              <p style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                No additional media available for this note.
+              </p>
+            </div>
+          `;
+        }
+        
+      } catch (error) {
+        console.error('❌ Error loading media content:', error);
+        mediaPanelContent.innerHTML = `
+          <div class="media-item">
+            <h4>❌ Error</h4>
+            <p style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+              Failed to load media content.
+            </p>
+          </div>
+        `;
+      }
+    }
+
+    /**
+     * Check if current student's group has access to media for this note
+     * Returns true if:
+     * - video_allowed_groups is NULL (all groups allowed)
+     * - video_allowed_groups is empty array (all groups allowed)
+     * - student's group is in video_allowed_groups array
+     * 
+     * 🔒 CRITICAL: This controls access to ALL media (video_url + pdf_media items)
+     */
+    function checkVideoGroupAccess(note) {
+      // If no restriction set (NULL or empty), allow all groups
+      if (!note.video_allowed_groups || note.video_allowed_groups.length === 0) {
+        console.log('✅ No group restrictions - allowing all groups');
+        return true;
+      }
+      
+      // Get student's group letter
+      const studentGroup = currentStudent?.group_letter || 
+                          currentStudent?.group_name || 
+                          currentStudent?.group || 
+                          fallbackStudent?.group_letter ||
+                          fallbackStudent?.group_name ||
+                          fallbackStudent?.group;
+      
+      if (!studentGroup) {
+        console.log('❌ Student has no group assigned');
+        return false;
+      }
+      
+      // Normalize to single letter (handle "Group A" or "A")
+      const groupLetter = studentGroup.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '').charAt(0);
+      
+      console.log('🔍 Checking group access:', {
+        studentGroup: groupLetter,
+        allowedGroups: note.video_allowed_groups,
+        noteId: note.id
+      });
+      
+      // Check if student's group is in allowed list
+      const hasAccess = note.video_allowed_groups.some(allowedGroup => {
+        const normalizedAllowed = allowedGroup.toString().trim().toUpperCase().replace(/^GROUP\s*/i, '').charAt(0);
+        return normalizedAllowed === groupLetter;
+      });
+      
+      if (hasAccess) {
+        console.log(`✅ Group ${groupLetter} HAS ACCESS to note ${note.id}`);
+      } else {
+        console.log(`🔒 Group ${groupLetter} BLOCKED from note ${note.id} (allowed: ${note.video_allowed_groups.join(', ')})`);
+      }
+      
+      return hasAccess;
+    }
+    
     function toggleMediaPanel(event) {
       if (event) {
         event.stopPropagation(); // Prevent immediate close from document click
@@ -2478,3588 +3231,3 @@
   </script>
 </body>
 </html>
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
-          outputCanvas.height
-        );
-
-        applyNoiseOverlay(outputCtx, outputCanvas.width, outputCanvas.height);
-        drawMicroGrid(outputCtx, outputCanvas.width, outputCanvas.height);
-
-        return outputCanvas;
-      } catch (error) {
-        console.warn('Raster obfuscation fallback (canvas locked):', error);
-        return sourceCanvas;
-      }
-    }
-
-    function disableImageSmoothing(ctx) {
-      if (!ctx) return;
-      ctx.imageSmoothingEnabled = false;
-      ctx.mozImageSmoothingEnabled = false;
-      ctx.webkitImageSmoothingEnabled = false;
-      ctx.msImageSmoothingEnabled = false;
-    }
-
-    function applyNoiseOverlay(ctx, width, height) {
-      try {
-        const noiseTile = 96;
-        const noiseCanvas = document.createElement('canvas');
-        noiseCanvas.width = noiseTile;
-        noiseCanvas.height = noiseTile;
-        const noiseCtx = noiseCanvas.getContext('2d');
-        const imageData = noiseCtx.createImageData(noiseTile, noiseTile);
-        const buffer = imageData.data;
-        
-        for (let i = 0; i < buffer.length; i += 4) {
-          const shade = 215 + Math.floor(Math.random() * 35); // 215-249 range
-          buffer[i] = shade;
-          buffer[i + 1] = shade;
-          buffer[i + 2] = shade;
-          buffer[i + 3] = Math.floor(Math.random() * 45); // alpha 0-45
-        }
-        
-        noiseCtx.putImageData(imageData, 0, 0);
-        const pattern = ctx.createPattern(noiseCanvas, 'repeat');
-        if (pattern) {
-          ctx.save();
-          ctx.globalAlpha = 0.18;
-          ctx.fillStyle = pattern;
-          ctx.fillRect(0, 0, width, height);
-          ctx.restore();
-        }
-      } catch (error) {
-        console.warn('Noise overlay skipped:', error);
-      }
-    }
-
-    function drawMicroGrid(ctx, width, height) {
-      ctx.save();
-      ctx.globalAlpha = 0.08;
-      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
-      ctx.lineWidth = 0.75;
-      const spacing = 12;
-      for (let x = 0; x <= width; x += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(x + 0.5, 0);
-        ctx.lineTo(x + 0.5, height);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      for (let y = 0; y <= height; y += spacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y + 0.5);
-        ctx.lineTo(width, y + 0.5);
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-    
-    // ============================================================
-    // PRINT FUNCTION - SAFE & STABLE (NO DOM DESTRUCTION)
-    // ============================================================
-    
-    async function printNote() {
-      if (isPreparingPrint) return;
-      if (!pdfDoc || totalPages === 0) {
-        alert('Still preparing this note. Please try printing again in a moment.');
-        return;
-      }
-
-      await showPrintWarning();
-
-      isPreparingPrint = true;
-      const printButton = document.getElementById('printButton');
-      const originalButtonLabel = printButton?.innerHTML;
-
-      if (printButton) {
-        printButton.disabled = true;
-        printButton.innerHTML = 'Preparing…';
-      }
-
-      const restoreButtonState = () => {
-        if (printButton && originalButtonLabel) {
-          printButton.innerHTML = originalButtonLabel;
-          printButton.disabled = false;
-        }
-      };
-
-      try {
-        const studentName = escapeHtml(getStudentDisplayName());
-        const studentGroup = escapeHtml(getStudentDisplayGroup());
-
-        // 1️⃣ Create iframe (VISIBLE but offscreen with z-index)
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.top = '0';
-        frame.style.left = '0';
-        frame.style.width = '100vw';
-        frame.style.height = '100vh';
-        frame.style.border = '0';
-        frame.style.background = 'white';
-        frame.style.zIndex = '-1'; // visible to browser, invisible to user
-        document.body.appendChild(frame);
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          frame.style.zIndex = '9999';
-          frame.style.background = 'white';
-        }
-
-        const doc = frame.contentDocument;
-        doc.open();
-        doc.write(`
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Print</title>
-            <style>
-              @page { size: ${PAGE_SIZE}; margin: 0.5in; }
-              * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; }
-              html, body { margin: 0; padding: 0; background: white; width: 100%; height: auto; }
-              body { min-height: 100%; width: 100%; }
-              .page { margin: 0; padding: 0; width: 100%; }
-              img { display: block; margin: 0; padding: 0; width: 100%; height: auto; max-width: 100%; }
-            </style>
-          </head>
-          <body></body>
-          </html>
-        `);
-        doc.close();
-
-        // 2️⃣ Render each page OFFSCREEN (never touches visible viewer)
-        for (let i = 1; i <= pdfDoc.numPages; i++) {
-          const page = await pdfDoc.getPage(i);
-
-          const viewport = page.getViewport({ scale: PRINT_SCALE });
-          const baseViewport = page.getViewport({ scale: 1 });
-          const widthInches = baseViewport.width / 72;
-          const heightInches = baseViewport.height / 72;
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-
-          await page.render({ canvasContext: ctx, viewport }).promise;
-
-          // 3️⃣ Draw watermark DIRECTLY INTO CANVAS
-          drawWatermark(ctx, canvas.width, canvas.height, studentName, studentGroup);
-
-          // 4️⃣ Convert to image (JPEG = smaller, faster)
-          const img = doc.createElement('img');
-          img.src = canvas.toDataURL('image/jpeg', 0.95);
-
-          const pageDiv = doc.createElement('div');
-          pageDiv.className = 'page';
-          pageDiv.appendChild(img);
-          doc.body.appendChild(pageDiv);
-        }
-
-        // 5️⃣ Wait for layout + paint to complete
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-
-        if (window.ARNOMA_PRINT_DEBUG) {
-          console.group('%cPrint Debug', 'color:#38bdf8;font-weight:700;');
-          console.log('Pages rendered:', pdfDoc.numPages);
-          console.log('Print scale:', PRINT_SCALE);
-          console.log('Print DPI:', PRINT_DPI);
-          console.log('Page size:', PAGE_SIZE);
-          console.groupEnd();
-        }
-
-        // 6️⃣ Print using native browser dialog
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-
-        // 7️⃣ Cleanup after print dialog closes
-        const cleanup = () => {
-          if (frame.parentNode && !window.ARNOMA_PRINT_DEBUG) {
-            document.body.removeChild(frame);
-          }
-          restoreButtonState();
-          isPreparingPrint = false;
-        };
-
-        frame.contentWindow.onafterprint = cleanup;
-        setTimeout(cleanup, 1000); // Fallback if event doesn't fire
-        
-      } catch (error) {
-        console.error('Print error:', error);
-        alert('Failed to prepare this note for printing. Please try again.');
-        restoreButtonState();
-        isPreparingPrint = false;
-      }
-    }
-
-    function obfuscateCanvasForPrint(sourceCanvas) {
-      try {
-        const pixelationFactor = 2.8; // Higher value => more pixelation
-        const downscaledWidth = Math.max(1, Math.round(sourceCanvas.width / pixelationFactor));
-        const downscaledHeight = Math.max(1, Math.round(sourceCanvas.height / pixelationFactor));
-        
-        const pixelatedCanvas = document.createElement('canvas');
-        pixelatedCanvas.width = downscaledWidth;
-        pixelatedCanvas.height = downscaledHeight;
-        const pixelCtx = pixelatedCanvas.getContext('2d');
-        disableImageSmoothing(pixelCtx);
-        pixelCtx.drawImage(sourceCanvas, 0, 0, downscaledWidth, downscaledHeight);
-        
-        const outputCanvas = document.createElement('canvas');
-        outputCanvas.width = sourceCanvas.width;
-        outputCanvas.height = sourceCanvas.height;
-        const outputCtx = outputCanvas.getContext('2d');
-        disableImageSmoothing(outputCtx);
-        outputCtx.drawImage(
-          pixelatedCanvas,
-          0,
-          0,
-          downscaledWidth,
-          downscaledHeight,
-          0,
-          0,
-          outputCanvas.width,
