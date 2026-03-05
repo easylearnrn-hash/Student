@@ -30,8 +30,8 @@ ON payment_records FOR SELECT
 TO authenticated, anon
 USING (
   is_arnoma_admin()
-  OR student_id::bigint IN (
-    SELECT id::bigint FROM students WHERE auth_user_id::text = auth.uid()::text
+  OR student_id::text IN (
+    SELECT id::text FROM students WHERE auth_user_id::text = auth.uid()::text
   )
 );
 
@@ -46,11 +46,11 @@ TO authenticated, anon
 USING (
   is_arnoma_admin()
   OR (auth.role() = 'service_role')
-  OR student_id::bigint IN (
-    SELECT id::bigint FROM students WHERE auth_user_id::text = auth.uid()::text
+  OR student_id::text IN (
+    SELECT id::text FROM students WHERE auth_user_id::text = auth.uid()::text
   )
-  OR linked_student_id::bigint IN (
-    SELECT id::bigint FROM students WHERE auth_user_id::text = auth.uid()::text
+  OR linked_student_id::text IN (
+    SELECT id::text FROM students WHERE auth_user_id::text = auth.uid()::text
   )
 );
 
