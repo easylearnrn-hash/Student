@@ -32,7 +32,7 @@
     #loadingScreen .loading-status { font-size:13px; color:var(--text-muted); }
 
     /* Error */
-    #errorPanel { display:none; position:fixed; inset:0; align-items:center; justify-content:center; flex-direction:column; gap:16px; padding:40px; }
+    #errorPanel { display:none; position:fixed; inset:0; z-index:10000; background:var(--bg); align-items:center; justify-content:center; flex-direction:column; gap:16px; padding:40px; }
     #errorPanel .error-icon { font-size:52px; }
     #errorPanel .error-msg { font-size:18px; font-weight:600; text-align:center; max-width:500px; line-height:1.55; }
 
@@ -320,10 +320,15 @@
     // ── Resolve PDF URL (path → public URL) ──────────────────────
     async function resolveURL(raw) {
       if (!raw) throw new Error('No PDF URL provided');
+      // Already a full URL — use as-is
       if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
-      const { data } = supabaseClient.storage.from('student-notes').getPublicUrl(raw);
-      if (data?.publicUrl) return data.publicUrl;
-      throw new Error('Could not generate URL for: ' + raw);
+      // Relative storage path — build public URL
+      // Strip leading slash if present
+      const cleanPath = raw.replace(/^\/+/, '');
+      const { data } = supabaseClient.storage.from('student-notes').getPublicUrl(cleanPath);
+      if (data?.publicUrl && data.publicUrl.startsWith('https://')) return data.publicUrl;
+      // Manual fallback construction in case SDK returns empty
+      return `${SUPABASE_URL}/storage/v1/object/public/student-notes/${cleanPath}`;
     }
 
     // ── Watermark ────────────────────────────────────────────────
@@ -531,6 +536,11 @@
 
     // ── MAIN INIT ────────────────────────────────────────────────
     async function init() {
+      // Guard: file:// blocks all network requests — must be served via https
+      if (window.location.protocol === 'file:') {
+        showError('⚠️ This viewer must be accessed via the website URL (https://), not as a local file. Please open it from the student portal.');
+        return;
+      }
       try {
         const p              = new URLSearchParams(window.location.search);
         const pdfUrl         = p.get('url');
