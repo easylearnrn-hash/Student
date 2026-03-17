@@ -8410,12 +8410,27 @@
           return true;
         }
 
-        debugDebug(` Note ${note.id} LOCKED: no payment for ${effectiveClassDate}`);
+        // 5b. ✅ FALLBACK — exact date miss but student has payments recorded.
+        //     This covers: notes uploaded without precise class_date, Zelle payments
+        //     whose for_class_dates were set to a slightly different date, or any
+        //     other date-alignment mismatch. If the student has ANY paid record at all
+        //     they are enrolled and should be able to access their notes.
+        if (paidDatesSet.size > 0) {
+          debugLog(`[shouldUnlockNote] Note ${note.id}: no exact date match for ${effectiveClassDate} but student has ${paidDatesSet.size} paid date(s) — unlocking`);
+          debugDebug(`🔓 Note ${note.id} unlocked: has payments (fallback)`);
+          return true;
+        }
+
+        debugDebug(`🔒 Note ${note.id} LOCKED: no payment found at all`);
         return false;
       }
 
-      // 6. Note has NO class_date at all.
-      //    If it requires payment and has no class date, it is locked.
+      // 6. Note has NO class_date at all — unlock if student has any payment.
+      if (paidDatesSet.size > 0) {
+        debugLog(`[shouldUnlockNote] Note ${note.id}: no class_date but student has payments — unlocking`);
+        return true;
+      }
+
       debugDebug(`🔒 Note ${note.id} LOCKED: no class_date and no qualifying payment`);
       return false;
     }
