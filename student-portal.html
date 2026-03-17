@@ -5147,113 +5147,6 @@
     }
     
     // Show dialog for absent students
-    function showAbsentNoteDialog(classDate, noteItem = null) {
-      // Create modal overlay
-      const overlay = document.createElement('div');
-      overlay.style.cssText = `
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.75);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 10000;
-        animation: fadeIn 0.15s ease;
-      `;
-      
-      // Create dialog
-      const dialog = document.createElement('div');
-      dialog.style.cssText = `
-        background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98));
-        border: 1px solid rgba(148, 163, 184, 0.3);
-        border-radius: 24px;
-        padding: 32px;
-        max-width: 440px;
-        width: 90%;
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        animation: slideUp 0.2s ease;
-      `;
-      
-      dialog.innerHTML = `
-        <div style="text-align: center;">
-          <div style="
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 20px;
-            border-radius: 20px;
-            background: linear-gradient(135deg, rgba(239, 68, 68, 0.2), rgba(220, 38, 38, 0.1));
-            border: 1px solid rgba(239, 68, 68, 0.4);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 40px;
-          ">🚫</div>
-          
-          <h3 style="
-            color: rgba(255, 255, 255, 0.95);
-            font-size: 1.5rem;
-            font-weight: 600;
-            margin: 0 0 12px 0;
-            letter-spacing: -0.02em;
-          ">Note Not Available</h3>
-          
-          <p style="
-            color: rgba(255, 255, 255, 0.75);
-            font-size: 1rem;
-            line-height: 1.6;
-            margin: 0 0 28px 0;
-          ">
-            You were marked absent for <strong style="color: rgba(255, 255, 255, 0.95);">${classDate}</strong>. 
-            Notes for this date are not accessible.
-          </p>
-          
-          <button id="closeDialogBtn" style="
-            width: 100%;
-            padding: 14px 24px;
-            border: none;
-            border-radius: 12px;
-            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.15));
-            color: rgba(255, 255, 255, 0.95);
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            border: 1px solid rgba(102, 126, 234, 0.3);
-          " onmouseover="this.style.background='linear-gradient(135deg, rgba(102, 126, 234, 0.3), rgba(118, 75, 162, 0.2))'; this.style.transform='translateY(-1px)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.3)'"
-             onmouseout="this.style.background='linear-gradient(135deg, rgba(102, 126, 234, 0.2), rgba(118, 75, 162, 0.15))'; this.style.transform='translateY(0)'; this.style.boxShadow='none'">
-            Got It
-          </button>
-        </div>
-      `;
-      
-      overlay.appendChild(dialog);
-      document.body.appendChild(overlay);
-      
-      // Close handlers - PERFORMANCE: Instant close + collapse note
-      const closeDialog = () => {
-        // Collapse the note immediately if it was passed in
-        if (noteItem) {
-          noteItem.classList.add('note-collapsed');
-          noteItem.classList.remove('note-expanded');
-          const attachmentsDiv = noteItem.querySelector('.note-attachments');
-          const indicator = noteItem.querySelector('.note-expand-indicator');
-          if (attachmentsDiv) attachmentsDiv.style.display = 'none';
-          if (indicator) indicator.innerHTML = '▼';
-        }
-        // Remove overlay instantly
-        overlay.remove();
-      };
-      
-      document.getElementById('closeDialogBtn').addEventListener('click', closeDialog);
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeDialog();
-      });
-    }
-    
     // Payment Information Modal
     function showPaymentInfoModal() {
       const overlay = document.createElement('div');
@@ -8247,106 +8140,6 @@
     /**
      * Computes all class dates for a student in a given month based on their schedule
      * @param {Object} scheduleData - Schedule object with weekly recurring and one-time schedules
-     * @param {number} year - Year (e.g., 2025)
-     * @param {number} month - Month (1-12)
-     * @returns {Array<string>} Array of date strings in YYYY-MM-DD format
-     */
-    function computeClassDatesForMonth(scheduleData, year, month) {
-      const classDates = [];
-      
-      if (!scheduleData || !scheduleData.schedule) {
-        console.warn('⚠️ No schedule data available for class date computation');
-        return classDates;
-      }
-      
-      // Day name mapping
-      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      
-      // Parse recurring schedule to get class days of week
-      const classDaysOfWeek = new Set();
-      Object.entries(scheduleData.schedule).forEach(([day, times]) => {
-        if (times && times.length > 0) {
-          const dayIndex = dayNames.indexOf(day);
-          if (dayIndex !== -1) {
-            classDaysOfWeek.add(dayIndex);
-          }
-        }
-      });
-      
-      // Generate all dates in the month that match class days
-      const firstDay = new Date(year, month - 1, 1);
-      const lastDay = new Date(year, month, 0);
-      
-      for (let date = new Date(firstDay); date <= lastDay; date.setDate(date.getDate() + 1)) {
-        const dayOfWeek = date.getDay();
-        if (classDaysOfWeek.has(dayOfWeek)) {
-          // Use local date string to avoid timezone issues
-          const year = date.getFullYear();
-          const month = String(date.getMonth() + 1).padStart(2, '0');
-          const day = String(date.getDate()).padStart(2, '0');
-          const dateStr = `${year}-${month}-${day}`;
-          classDates.push(dateStr);
-        }
-      }
-      
-      // Add one-time scheduled classes for this month
-      if (scheduleData.one_time_schedules && Array.isArray(scheduleData.one_time_schedules)) {
-        scheduleData.one_time_schedules.forEach(schedule => {
-          if (schedule.date) {
-            const scheduleDate = new Date(schedule.date);
-            if (scheduleDate.getFullYear() === year && scheduleDate.getMonth() === month - 1) {
-              // Use local date string to avoid timezone issues
-              const y = scheduleDate.getFullYear();
-              const m = String(scheduleDate.getMonth() + 1).padStart(2, '0');
-              const d = String(scheduleDate.getDate()).padStart(2, '0');
-              const dateStr = `${y}-${m}-${d}`;
-              if (!classDates.includes(dateStr)) {
-                classDates.push(dateStr);
-              }
-            }
-          }
-        });
-      }
-      
-      return classDates.sort();
-    }
-
-    /**
-     * Maps a note to its corresponding class date based on posted_at timestamp
-     * @param {Date} notePostedAt - When the note was posted
-     * @param {Array<string>} classDates - Sorted array of class dates (YYYY-MM-DD)
-     * @returns {string|null} The class date this note belongs to (YYYY-MM-DD) or null
-     */
-    function mapNoteToClassDate(notePostedAt, classDates) {
-      if (!notePostedAt || !classDates || classDates.length === 0) {
-        return null;
-      }
-      
-      const noteDateStr = notePostedAt.toISOString().split('T')[0];
-      
-      // Find the most recent class date on or before the note's posted date
-      let matchedClassDate = null;
-      
-      for (let i = 0; i < classDates.length; i++) {
-        const classDate = classDates[i];
-        
-        if (classDate <= noteDateStr) {
-          // This class date is on or before the note date
-          matchedClassDate = classDate;
-        } else {
-          // We've passed the note date, stop searching
-          break;
-        }
-      }
-      
-      // If note is posted before the first class, map it to the first class
-      if (!matchedClassDate && classDates.length > 0) {
-        matchedClassDate = classDates[0];
-      }
-      
-      return matchedClassDate;
-    }
-
     /**
      * Checks if a specific class date is paid for a student
      * @param {string} classDate - Class date in YYYY-MM-DD format
@@ -10055,8 +9848,9 @@
           return;
         }
         
+        const modalOverlay = document.querySelector('.custom-alert-overlay');
+        if (modalOverlay) modalOverlay.remove();
         showCustomAlert('Message updated successfully', 'success');
-        document.querySelector('.custom-alert-overlay').remove();
         await loadForumMessages();
         
       } catch (error) {
@@ -10225,7 +10019,8 @@
             if (data && data.length > 0) {
               const lastViewed = localStorage.getItem('lastForumView');
               if (!lastViewed || new Date(data[0].created_at) > new Date(lastViewed)) {
-                document.getElementById('forumBadge').style.display = 'block';
+                const badge = document.getElementById('forumBadge');
+                if (badge) badge.style.display = 'block';
               }
             }
           });
