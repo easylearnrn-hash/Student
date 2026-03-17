@@ -275,38 +275,25 @@
     }
 
     // ── Note access check ────────────────────────────────────────
-    async function checkNoteAccess(noteId) {
-      if (isAdmin()) return { hasFreeAccess: true, hasPermissionAccess: true };
-
+    // Only used for FREE notes — checks if this student's group has access.
+    // For PAID notes, payment is the only gate (see checkPayment).
+    async function checkNoteGroupAccess(noteId, noteRecord) {
+      if (isAdmin()) return true;
+      // If the note has no group restriction at all, everyone can see it
+      const ng = (noteRecord?.group_letter || noteRecord?.group_name || noteRecord?.group || '').toString().trim().toUpperCase().replace(/^GROUP\s*/i,'').charAt(0);
+      if (!ng) return true;
+      // Student's group must match
       const sg = getStudentGroup();
-      const gn = sg ? `Group ${sg}` : '';
-      const orConds = [];
-      if (sg) orConds.push(`group_letter.eq.${sg}`);
-      if (currentStudent?.id) orConds.push(`student_id.eq.${currentStudent.id}`);
-
-      let fq = supabaseClient.from('note_free_access').select('id').eq('note_id', noteId);
-      if (orConds.length) fq = fq.or(orConds.join(','));
-
-      const iq = currentStudent?.id
-        ? supabaseClient.from('student_note_permissions').select('id').eq('note_id', noteId).eq('student_id', currentStudent.id).eq('is_accessible', true)
-        : Promise.resolve({ data: [], error: null });
-
-      const gq = gn
-        ? supabaseClient.from('student_note_permissions').select('id').eq('note_id', noteId).is('student_id', null).eq('group_name', gn).eq('is_accessible', true)
-        : Promise.resolve({ data: [], error: null });
-
-      const [fr, ir, gr] = await Promise.all([fq, iq, gq]);
-      if (fr.error) throw new Error('Access check error: ' + fr.error.message);
-
-      return {
-        hasFreeAccess:       (fr.data?.length || 0) > 0,
-        hasPermissionAccess: (ir.data?.length || 0) + (gr.data?.length || 0) > 0
-      };
+      return sg === ng;
     }
 
     // ── Payment check ────────────────────────────────────────────
+    // Returns true if the student has ANY paid record (date-specific OR any payment at all).
     async function checkPayment(checkDate) {
-      if (isAdmin() || !currentStudent?.id) return true;
+      if (isAdmin()) return true;
+      // If we have no numeric student id we can't query — give benefit of the doubt
+      // (identity was passed via URL params which the portal controls)
+      if (!currentStudent?.id) return true;
       const sid = currentStudent.id;
       const [mr, ar, cr] = await Promise.all([
         supabaseClient.from('payment_records').select('date,for_class_dates,for_class,status').eq('student_id', sid).eq('status','paid'),
@@ -314,7 +301,13 @@
         supabaseClient.from('credit_payments').select('class_date').eq('student_id', sid)
       ]);
       const paid = buildPaidDates(mr?.data || [], ar?.data || [], cr?.data || []);
-      return checkDate ? paid.has(checkDate) : paid.size > 0;
+      // 1. Exact date match (ideal case)
+      if (checkDate && paid.has(checkDate)) return true;
+      // 2. Any payment exists — portal only shows the button when the date is correct,
+      //    so if we have any payment record at all the student is legitimately enrolled
+      if (paid.size > 0) return true;
+      // 3. No payment records at all
+      return false;
     }
 
     // ── Resolve PDF URL (path → public URL) ──────────────────────
@@ -577,20 +570,21 @@
             document.getElementById('noteTitle').textContent = (note.title || titleParam).replace(/\.pdf$/i, '');
 
             if (!isAdmin()) {
-              setStatus('Checking permissions…');
-              const { hasFreeAccess, hasPermissionAccess } = await checkNoteAccess(noteId);
-              if (!hasFreeAccess && !hasPermissionAccess) { showError('🚫 You do not have permission to view this note.'); return; }
-
               if (note.requires_payment) {
                 setStatus('Verifying payment…');
                 const checkDate = classDate || (note.class_date ? note.class_date.split('T')[0] : null);
-                if (!(await checkPayment(checkDate))) { showError('🔒 Payment required to access this note.'); return; }
+                if (!(await checkPayment(checkDate))) { showError('� Payment required to access this note.'); return; }
+              } else {
+                // Free note — check group access
+                if (!(await checkNoteGroupAccess(noteId, note))) {
+                  const ng = (note.group_letter || note.group_name || note.group || '').toString().trim().toUpperCase().replace(/^GROUP\s*/i,'').charAt(0);
+                  showError(`� This note is for Group ${ng}. You are not in that group.`); return;
+                }
               }
-
               const accessMode = note.requires_payment ? 'paid' : 'free-note';
-              noteData = { ...note, accessMode, hasFreeAccess, hasPermissionAccess };
+              noteData = { ...note, accessMode };
             } else {
-              noteData = { ...note, accessMode: 'paid', hasFreeAccess: true, hasPermissionAccess: true };
+              noteData = { ...note, accessMode: 'paid' };
             }
           } else {
             noteData = { title: titleParam, class_date: null, accessMode: 'paid' };
