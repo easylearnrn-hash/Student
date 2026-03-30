@@ -80,39 +80,58 @@
 
   function enforcePageAccess(session) {
     if (!session || !session.user || !session.user.email) return;
-    
-    // Check if we are in impersonation mode (admin viewing as student)
-    // If impersonation_token exists, the actual logged in user is still the admin,
-    // so they should bypass these restrictions anyway, but the email check below handles that.
-    
-    const ADMIN_EMAIL = 'hrachfilm@gmail.com';
+
+    // Pages students are allowed to access
     const STUDENT_ALLOWED_PAGES = [
       'student-portal.html',
-      'Tests-Library.html',
-      'Student-Test.html',
-      'Protected-PDF-Viewer.html',
-      'PharmaQuest.html',
       'index.html',
       'email-confirmed.html',
-      'armenian-nurses-association.html',
-      'Student-Chat.html'
     ];
-    
+
+    // Admin emails — full access to everything
+    const ADMIN_EMAILS = [
+      'hrachfilm@gmail.com',
+      'narine@arnoma.com',
+    ];
+
     const rawPath = window.location.pathname.split('/').pop() || 'index.html';
     const currentPath = rawPath.split('?')[0].split('#')[0];
-    
+
     if (!currentPath || currentPath === '' || currentPath === '/') return;
-    
+
     const userEmail = session.user.email.toLowerCase();
-    
-    if (userEmail === ADMIN_EMAIL) return; // Full access for Admin
-    
+
+    // Admins pass through unconditionally
+    if (ADMIN_EMAILS.includes(userEmail)) return;
+
+    // Everyone else (students) — only allowed pages above
     if (!STUDENT_ALLOWED_PAGES.includes(currentPath)) {
-      console.warn('⛔ Access denied: This page is restricted to administrators only.');
+      console.warn('⛔ Access denied for', userEmail, '— redirecting to student portal');
       window.location.replace('student-portal.html');
       throw new Error('ACCESS_DENIED_ADMIN_ONLY_PAGE');
     }
   }
+
+  // ── Auto-enforce on every page load ──────────────────────────────
+  // Reads the cached session immediately (no async Supabase call needed)
+  // and redirects students away from admin pages before any content renders.
+  function autoEnforceOnLoad() {
+    try {
+      const cached = readCachedSession();
+      if (!cached || !cached.user) return; // Not logged in — let the page handle it
+
+      // Build a minimal session-like object for enforcePageAccess
+      enforcePageAccess({ user: cached.user });
+    } catch (e) {
+      // ACCESS_DENIED throws intentionally — that's fine
+      if (e.message !== 'ACCESS_DENIED_ADMIN_ONLY_PAGE') {
+        console.error('ArnomaAuth autoEnforce error:', e);
+      }
+    }
+  }
+
+  // Run immediately when the script loads (before DOMContentLoaded)
+  autoEnforceOnLoad();
 
   async function ensureSession(supabase, options = {}) {
     if (!supabase?.auth) {
