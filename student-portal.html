@@ -4563,9 +4563,9 @@
       }
 
       // Admin viewing as student (real data, no impersonation tokens)
-      const studentLoginId = sessionStorage.getItem('student_login_id');
-      const isAdminViewing = sessionStorage.getItem('is_admin_viewing') === 'true';
-      const adminSessionBackup = sessionStorage.getItem('admin_session_backup');
+      const studentLoginId = sessionStorage.getItem('student_login_id') || localStorage.getItem('student_login_id');
+      const isAdminViewing = (sessionStorage.getItem('is_admin_viewing') === 'true') || (localStorage.getItem('is_admin_viewing') === 'true');
+      const adminSessionBackup = sessionStorage.getItem('admin_session_backup') || localStorage.getItem('admin_session_backup');
       if (studentLoginId && isAdminViewing && adminSessionBackup) {
         try {
           const { access_token, refresh_token } = JSON.parse(adminSessionBackup);
@@ -4588,6 +4588,9 @@
             sessionStorage.removeItem('student_login_id');
             sessionStorage.removeItem('student_login_name');
             sessionStorage.removeItem('is_admin_viewing');
+            localStorage.removeItem('student_login_id');
+            localStorage.removeItem('student_login_name');
+            localStorage.removeItem('is_admin_viewing');
             alert('Student not found. Returning to admin panel...');
             window.location.href = 'Student-Portal-Admin.html';
             return null;
@@ -6305,7 +6308,7 @@
         }
 
         // CHECK FOR ADMIN IMPERSONATION MODE - initPortal()/checkAuthentication() handles this
-        if (sessionStorage.getItem('is_admin_viewing') === 'true') {
+        if (sessionStorage.getItem('is_admin_viewing') === 'true' || localStorage.getItem('is_admin_viewing') === 'true') {
           debugLog('👁️ Admin impersonation mode detected - skipping secondary auth flow');
           return;
         }
@@ -6341,8 +6344,8 @@
         }
 
         // Restore admin session if we're viewing as a student (fixes file:// session loss)
-        const adminViewingActive = sessionStorage.getItem('is_admin_viewing') === 'true';
-        const adminSessionBackup = sessionStorage.getItem('admin_session_backup');
+        const adminViewingActive = (sessionStorage.getItem('is_admin_viewing') === 'true') || (localStorage.getItem('is_admin_viewing') === 'true');
+        const adminSessionBackup = sessionStorage.getItem('admin_session_backup') || localStorage.getItem('admin_session_backup');
         if (adminViewingActive && adminSessionBackup) {
           try {
             const { access_token, refresh_token } = JSON.parse(adminSessionBackup);
@@ -6367,8 +6370,8 @@
           currentEmail = session.user.email;
           
           // Check if admin is viewing as a student
-          const studentLoginId = sessionStorage.getItem('student_login_id');
-          const isAdminViewing = sessionStorage.getItem('is_admin_viewing') === 'true';
+          const studentLoginId = sessionStorage.getItem('student_login_id') || localStorage.getItem('student_login_id');
+          const isAdminViewing = (sessionStorage.getItem('is_admin_viewing') === 'true') || (localStorage.getItem('is_admin_viewing') === 'true');
           
           if (studentLoginId && isAdminViewing) {
             // Admin is viewing as a student - load that student's data
@@ -6385,6 +6388,9 @@
               sessionStorage.removeItem('student_login_id');
               sessionStorage.removeItem('student_login_name');
               sessionStorage.removeItem('is_admin_viewing');
+              localStorage.removeItem('student_login_id');
+              localStorage.removeItem('student_login_name');
+              localStorage.removeItem('is_admin_viewing');
               alert('Student not found. Returning to admin panel...');
               window.location.href = 'Student-Portal-Admin.html';
               return;
@@ -8461,9 +8467,12 @@
         sessionStorage.removeItem('student_login_id');
         sessionStorage.removeItem('student_login_name');
         sessionStorage.removeItem('is_admin_viewing');
+        localStorage.removeItem('student_login_id');
+        localStorage.removeItem('student_login_name');
+        localStorage.removeItem('is_admin_viewing');
         
         // Restore admin session if saved
-        const adminBackup = sessionStorage.getItem('admin_session_backup');
+        const adminBackup = sessionStorage.getItem('admin_session_backup') || localStorage.getItem('admin_session_backup');
         if (adminBackup) {
           const { access_token, refresh_token } = JSON.parse(adminBackup);
           await supabaseClient.auth.setSession({
@@ -8471,6 +8480,7 @@
             refresh_token
           });
           sessionStorage.removeItem('admin_session_backup');
+          localStorage.removeItem('admin_session_backup');
         }
         
         // Redirect back to admin panel
@@ -12544,13 +12554,17 @@
      */
     function exitImpersonation() {
       // Restore admin session before redirecting, then clear keys
-      const adminBackup = sessionStorage.getItem('admin_session_backup');
+      const adminBackup = sessionStorage.getItem('admin_session_backup') || localStorage.getItem('admin_session_backup');
       const doRedirect = () => {
         sessionStorage.removeItem('student_login_id');
         sessionStorage.removeItem('student_login_name');
         sessionStorage.removeItem('is_admin_viewing');
         sessionStorage.removeItem('admin_session_backup');
         sessionStorage.removeItem('impersonation_token');
+        localStorage.removeItem('student_login_id');
+        localStorage.removeItem('student_login_name');
+        localStorage.removeItem('is_admin_viewing');
+        localStorage.removeItem('admin_session_backup');
         localStorage.removeItem('impersonation_token');
         intervalManager.clear('impersonation');
         intervalManager.clear('countdown');
@@ -12720,7 +12734,8 @@
         // Start session tracking (skip for admin impersonation modes)
         const urlParams = new URLSearchParams(window.location.search);
         const isImpersonating = urlParams.get('impersonate');
-        const isAdminViewingAsStudent = sessionStorage.getItem('is_admin_viewing') === 'true';
+        // Ensure the portal data is loaded (this was previously handled in an IIFE)
+        const isAdminViewingAsStudent = sessionStorage.getItem('is_admin_viewing') === 'true' || localStorage.getItem('is_admin_viewing') === 'true';
         
         if (!isImpersonating && !isAdminViewingAsStudent) {
           // Only track real student sessions, not admin impersonations
@@ -12730,8 +12745,9 @@
           debugLog('🎭 Skipping session tracking for admin impersonation mode');
         }
         
-        // PERFORMANCE FIX: Removed duplicate loadPortalData() call
-        // It's already called inside checkAuthentication() after auth verification
+        // Actually load portal data since checkAuthentication relies on it
+        // The IIFE has an early exit for impersonation, so we must call it here
+        await loadPortalData();
         
         // Check if admin chat mode - hide portal content and show only forum
         if (currentStudent && currentStudent.isAdminChatMode) {
