@@ -2798,16 +2798,35 @@
         const group = groups.find(g => g.id === id);
         if (!group) return;
 
+        // Optimistically update local state
         group.active = active;
-        debugLog(`Group ${group.name} set to ${active ? 'active' : 'inactive'}`);
-
-        // Persist to Supabase first, then re-render
-        const saved = await saveGroupToSupabase(group);
-        if (!saved) {
-          // Revert local state if save failed
-          group.active = !active;
-        }
         renderGroups();
+
+        // Targeted update — only touch the active column
+        try {
+          const { data, error } = await supabaseClient
+            .from('groups')
+            .update({ active: active, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select('id, active');
+
+          console.log('🔄 Toggle result:', { data, error, id, active });
+
+          if (error) {
+            console.error('❌ Toggle save failed:', error);
+            // Revert local state
+            group.active = !active;
+            renderGroups();
+          } else if (!data || data.length === 0) {
+            console.warn('⚠️ Toggle: update returned no rows — RLS may be blocking write. id=', id);
+          } else {
+            console.log('✅ Toggle saved. DB active =', data[0].active);
+          }
+        } catch (e) {
+          console.error('❌ Toggle exception:', e);
+          group.active = !active;
+          renderGroups();
+        }
       }
 
       // Filter Groups
