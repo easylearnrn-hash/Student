@@ -1511,12 +1511,16 @@
       // MASTER ACCESS MODAL EVENTS
       // ============================================================
       if (masterModalClose) {
-        masterModalClose.onclick = () => closeMasterAccessModal();
+        masterModalClose.onclick = () => {
+          closeMasterAccessModal();
+          supabase.auth.signOut().catch(e => console.warn(e));
+        };
       }
       if (masterAccessModal) {
         masterAccessModal.onclick = e => {
           if (e.target === masterAccessModal) {
             closeMasterAccessModal();
+            supabase.auth.signOut().catch(e => console.warn(e));
           }
         };
       }
@@ -1628,6 +1632,16 @@
         document.body.style.overflow = '';
       }
 
+      // If user manually closes the modal via the "X" button
+      window.cancelMasterAccess = async function() {
+        closeMasterAccessModal();
+        try {
+          await supabase.auth.signOut();
+        } catch (e) {
+          console.warn('Error signing out on cancel', e);
+        }
+      }
+
       function filterMasterStudentList(query) {
         const term = (query || '').toLowerCase();
         if (!term) {
@@ -1701,47 +1715,49 @@
       async function unlockMasterAccessWithAdminPassword(email, password) {
         console.log('🔑 Verifying admin credentials for master access...');
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
+        
         if (error || !data?.user) {
           console.error('❌ Admin credential verification failed:', error);
           throw new Error('Admin password incorrect. Please double-check or use the Admin Login tab.');
         }
 
-        try {
-          await showMasterStudentPicker();
-        } finally {
-          try {
-            await supabase.auth.signOut();
-          } catch (signOutError) {
-            console.warn('⚠️ Failed to clear admin session after master unlock:', signOutError);
-          }
-        }
+        // Do not sign out! Keep the admin session alive so we can impersonate with RLS powers.
+        await showMasterStudentPicker();
       }
 
       async function startMasterAccessForStudent(studentData) {
         if (!studentData) return;
         closeMasterAccessModal();
-        const masterToken = {
-          studentId: studentData.id,
-          studentName: studentData.name,
-          studentEmail: studentData.email,
-          timestamp: Date.now(),
-          expiresAt: Date.now() + 8 * 60 * 60 * 1000,
-          isMasterAccess: true
-        };
+        
+        // Use modern impersonation tokens just like Student-Portal-Admin.html
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session) {
+          const adminBackup = JSON.stringify({
+            access_token: session.access_token,
+            refresh_token: session.refresh_token
+          });
+          sessionStorage.setItem('admin_session_backup', adminBackup);
+          localStorage.setItem('admin_session_backup', adminBackup);
+        }
 
-        sessionStorage.setItem('impersonation_token', JSON.stringify(masterToken));
-        localStorage.setItem('impersonation_token', JSON.stringify(masterToken));
+        sessionStorage.setItem('student_login_id', String(studentData.id));
+        localStorage.setItem('student_login_id', String(studentData.id));
+        
+        sessionStorage.setItem('student_login_name', studentData.name);
+        localStorage.setItem('student_login_name', studentData.name);
+        
+        sessionStorage.setItem('is_admin_viewing', 'true');
+        localStorage.setItem('is_admin_viewing', 'true');
 
-        console.log('💾 Master token stored:', masterToken);
-        showSuccess(`Master access granted! Logging in as ${studentData.name}...`);
+        console.log('💾 Admin impersonation tokens stored');
+        showSuccess(`Admin access granted! Entering portal as ${studentData.name}...`);
 
         setTimeout(() => {
-          window.location.href = `student-portal.html?impersonate=${studentData.id}&v=${Date.now()}`;
+          // Go to portal using clean URL, it will read modern tokens
+          window.location.href = 'student-portal.html';
         }, 800);
-      }
-
-      // Helper to link a Supabase auth user to an existing student row via RPC
+      }      // Helper to link a Supabase auth user to an existing student row via RPC
       async function autoLinkStudentAccount(user) {
         if (!user?.id || !user?.email) {
           console.warn('[AutoLink] Missing user data; skipping auto-link.');
