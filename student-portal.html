@@ -4594,6 +4594,24 @@
           }
 
           console.log('✅ Admin viewing as student:', studentData.name);
+
+          // Show the 👁️ impersonation indicator immediately
+          // Use a minimal token-like object so showImpersonationBanner can update the tooltip
+          const bannerToken = {
+            studentName: studentData.name,
+            expiresAt: Date.now() + 60 * 60 * 1000  // no real expiry — 1-hour dummy value
+          };
+          // DOM may not be ready yet; defer until after current call stack
+          setTimeout(() => {
+            const circle = document.getElementById('impersonationBanner');
+            if (circle) {
+              circle.style.display = 'flex';
+              circle.title = `Viewing as: ${studentData.name} — Click to exit`;
+            }
+            const backBtn = document.getElementById('backToAdminBtn');
+            if (backBtn) backBtn.style.display = 'flex';
+          }, 0);
+
           return studentData;
         } catch (error) {
           console.error('❌ Admin viewing setup failed:', error);
@@ -6369,6 +6387,16 @@
             console.log('✅ Loaded student:', studentData.name);
             currentStudent = studentData;
             window.currentStudent = studentData;
+
+            // Show 👁️ indicator and back-to-admin button
+            const circle = document.getElementById('impersonationBanner');
+            if (circle) {
+              circle.style.display = 'flex';
+              circle.title = `Viewing as: ${studentData.name} — Click to exit`;
+            }
+            const backBtn = document.getElementById('backToAdminBtn');
+            if (backBtn) backBtn.style.display = 'flex';
+
             await loadPortalData();
             return;
           }
@@ -12509,23 +12537,33 @@
      * <button onclick="exitImpersonation()">Exit Impersonation</button>
      */
     function exitImpersonation() {
-      // Clear new-style admin view keys
-      sessionStorage.removeItem('student_login_id');
-      sessionStorage.removeItem('student_login_name');
-      sessionStorage.removeItem('is_admin_viewing');
-      sessionStorage.removeItem('admin_session_backup');
+      // Restore admin session before redirecting, then clear keys
+      const adminBackup = sessionStorage.getItem('admin_session_backup');
+      const doRedirect = () => {
+        sessionStorage.removeItem('student_login_id');
+        sessionStorage.removeItem('student_login_name');
+        sessionStorage.removeItem('is_admin_viewing');
+        sessionStorage.removeItem('admin_session_backup');
+        sessionStorage.removeItem('impersonation_token');
+        localStorage.removeItem('impersonation_token');
+        intervalManager.clear('impersonation');
+        intervalManager.clear('countdown');
+        debugLog('🚪 Exiting admin view mode');
+        window.location.href = 'Student-Portal-Admin.html';
+      };
 
-      // Clear legacy impersonation data (belt-and-suspenders)
-      sessionStorage.removeItem('impersonation_token');
-      localStorage.removeItem('impersonation_token');
-      intervalManager.clear('impersonation');
-      intervalManager.clear('countdown');
-      
-      // Log exit
-      debugLog('🚪 Exiting admin view mode');
-      
-      // Redirect back to admin panel
-      window.location.href = 'Student-Portal-Admin.html';
+      if (adminBackup) {
+        try {
+          const { access_token, refresh_token } = JSON.parse(adminBackup);
+          supabaseClient.auth.setSession({ access_token, refresh_token })
+            .then(() => doRedirect())
+            .catch(() => doRedirect());
+        } catch (e) {
+          doRedirect();
+        }
+      } else {
+        doRedirect();
+      }
     }
     
     // ==========================================================================
@@ -12542,8 +12580,9 @@
                                  localStorage.getItem('impersonation_token');
       const adminChatToken = sessionStorage.getItem('admin_chat_token') || 
                             localStorage.getItem('admin_chat_token');
+      const isAdminViewingAsStudent = sessionStorage.getItem('is_admin_viewing') === 'true';
       
-      if (isImpersonating || impersonationToken || adminChatToken) {
+      if (isImpersonating || impersonationToken || adminChatToken || isAdminViewingAsStudent) {
         debugLog('🚫 SESSION TRACKING BLOCKED: Admin mode detected');
         return;
       }
@@ -12672,16 +12711,17 @@
           return;
         }
         
-        // Start session tracking (skip for impersonation mode)
+        // Start session tracking (skip for admin impersonation modes)
         const urlParams = new URLSearchParams(window.location.search);
         const isImpersonating = urlParams.get('impersonate');
+        const isAdminViewingAsStudent = sessionStorage.getItem('is_admin_viewing') === 'true';
         
-        if (!isImpersonating) {
+        if (!isImpersonating && !isAdminViewingAsStudent) {
           // Only track real student sessions, not admin impersonations
           await startSession();
           perfTimer.mark('Session tracking started');
         } else {
-          if (DEBUG_MODE) debugLog('🎭 Skipping session tracking for impersonation mode');
+          debugLog('🎭 Skipping session tracking for admin impersonation mode');
         }
         
         // PERFORMANCE FIX: Removed duplicate loadPortalData() call
