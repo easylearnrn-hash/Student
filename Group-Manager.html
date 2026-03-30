@@ -8,6 +8,7 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>ARNOMA - Group Manager [Connected to Supabase] v2024-12-28-v5</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📚</text></svg>" />
     
     <!-- Supabase Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
@@ -1831,10 +1832,12 @@
             group_name: group.name,  // Table uses 'group_name', not 'name'
             schedule: group.schedule || '',
             one_time_schedules: group.one_time_schedules || [],
-            color: group.color.value,
+            color: (group.color && group.color.value) ? group.color.value : (typeof group.color === 'string' ? group.color : '#3b82f6'),
             active: group.active !== false,
             updated_at: new Date().toISOString()
           };
+
+          console.log('💾 Saving groupData to Supabase:', groupData);
 
           let result;
           if (group.id) {
@@ -1852,7 +1855,10 @@
               .select();
           }
 
-          if (result.error) throw result.error;
+          if (result.error) {
+            console.error('❌ Supabase save error:', result.error);
+            throw result.error;
+          }
 
           debugLog('✅ Group saved to Supabase:', result.data[0]);
           return result.data[0];
@@ -2602,7 +2608,15 @@
       async function init() {
         // ⚡ Performance: Initialize DOM cache first
         DOMCache.init();
-        
+
+        // Ensure admin session before any data operations
+        try {
+          await ArnomaAuth.ensureSession(supabaseClient);
+        } catch (e) {
+          // ensureSession redirects to index.html on failure — stop here
+          return;
+        }
+
         await loadGroups(); // Load from Supabase
         await loadStudentsForGroupCount(); // Count students per group
         renderGroups();
