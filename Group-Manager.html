@@ -1408,7 +1408,7 @@
         />
         <select class="filter-select" id="statusFilter">
           <option value="">All Groups</option>
-          <option value="active" selected>Active Only</option>
+          <option value="active">Active Only</option>
           <option value="inactive">Inactive Only</option>
         </select>
         <select class="filter-select" id="sortSelect">
@@ -2785,11 +2785,15 @@
         if (!group) return;
 
         group.active = active;
-        renderGroups();
         debugLog(`Group ${group.name} set to ${active ? 'active' : 'inactive'}`);
 
-        // Persist to Supabase
-        await saveGroupToSupabase(group);
+        // Persist to Supabase first, then re-render
+        const saved = await saveGroupToSupabase(group);
+        if (!saved) {
+          // Revert local state if save failed
+          group.active = !active;
+        }
+        renderGroups();
       }
 
       // Filter Groups
@@ -2837,7 +2841,7 @@
       // Clear Filters
       function clearFilters() {
         document.getElementById('searchInput').value = '';
-        document.getElementById('statusFilter').value = 'active';
+        document.getElementById('statusFilter').value = '';
         document.getElementById('sortSelect').value = 'name';
         renderGroups();
       }
