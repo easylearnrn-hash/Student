@@ -10576,10 +10576,10 @@
             system: systemName,
             read: isNoteOpened(note.id), // Track which notes have been opened
             attachments: (note.file_path || note.pdf_url) ? [{
-              title: (note.title || 'Note') + '.pdf',
-              url: note.file_path || note.pdf_url, // Storage path for Protected-PDF-Viewer
+              title: (note.title || 'Note') + (( (note.file_path || note.pdf_url) || '').toLowerCase().endsWith('.html') ? '' : '.pdf'),
+              url: note.file_path || note.pdf_url, // Storage path for Protected-PDF-Viewer or local HTML path
               noteId: note.id,
-              type: 'pdf'
+              type: ( (note.file_path || note.pdf_url) || '').toLowerCase().endsWith('.html') ? 'html' : 'pdf'
             }] : []
           };
           
@@ -11855,9 +11855,14 @@
           const cacheBuster = Date.now();
           // Format date in LOCAL timezone (YYYY-MM-DD) to avoid UTC shift
           const groupPostDate = `${note.date.getFullYear()}-${String(note.date.getMonth() + 1).padStart(2, '0')}-${String(note.date.getDate()).padStart(2, '0')}`;
-          const clickHandler = attachment.type === 'pdf' 
-            ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&note=${note.id}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&studentId=${currentStudent.id || ''}&classDate=${groupPostDate}&v=${cacheBuster}', '_blank')`
-            : `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`;
+          // If the attachment URL is a local HTML note, open it directly in a new tab.
+          // Otherwise route PDFs through the Protected-PDF-Viewer.
+          const isHtmlNote = attachment.url && attachment.url.toLowerCase().endsWith('.html');
+          const clickHandler = isHtmlNote
+            ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`
+            : attachment.type === 'pdf'
+              ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&note=${note.id}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&studentId=${currentStudent.id || ''}&classDate=${groupPostDate}&v=${cacheBuster}', '_blank')`
+              : `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`;
           
           attachmentsHTML += `
             <button style="
