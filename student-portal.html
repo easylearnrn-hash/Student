@@ -2712,38 +2712,7 @@
       color: var(--accent-primary);
     }
 
-    /* ── Note print button ───────────────────────────────────── */
-    .note-print-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      padding: 6px 13px 6px 10px;
-      background: rgba(196, 164, 95, 0.08);
-      border: 1px solid rgba(196, 164, 95, 0.25);
-      border-radius: 8px;
-      color: rgba(196, 164, 95, 0.80);
-      font-family: var(--font-sans);
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.03em;
-      cursor: pointer;
-      transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
-      flex-shrink: 0;
-      line-height: 1;
-    }
-    .note-print-btn:hover {
-      background: rgba(196, 164, 95, 0.16);
-      border-color: rgba(196, 164, 95, 0.45);
-      color: rgba(196, 164, 95, 1);
-      transform: translateY(-1px);
-    }
-    .note-print-btn:active {
-      transform: translateY(0);
-    }
-    .note-print-btn svg {
-      flex-shrink: 0;
-    }
+    .profile-info {
       display: flex;
       flex-direction: column;
       gap: 16px;
@@ -12064,53 +12033,6 @@
           return new Set(stored ? JSON.parse(stored) : []);
         }
 
-        // Open a note in a print-ready popup window
-        function printNoteUrl(url, noteId) {
-          markNoteAsOpened(noteId);
-          const studentName = encodeURIComponent(currentStudent?.name || 'Student');
-          const printDate   = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-          const sep         = url.includes('?') ? '&' : '?';
-          const printWin = window.open(url + sep + 'print=1', '_blank');
-          // Inject auto-print + watermark logic once the page loads
-          if (printWin) {
-            printWin.addEventListener('load', () => {
-              try {
-                const doc = printWin.document;
-                // Inject watermark + auto-print stylesheet and script
-                const style = doc.createElement('style');
-                style.textContent = `
-                  @media print { @page { margin: 1cm; } }
-                  .arnoma-print-watermark {
-                    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                    pointer-events: none; z-index: 99999; overflow: hidden;
-                    display: flex; flex-wrap: wrap; align-content: center;
-                    justify-content: center; opacity: 0.13;
-                  }
-                  .arnoma-print-watermark span {
-                    font-size: 22px; font-weight: 700; color: #7a6030;
-                    transform: rotate(-30deg); display: inline-block;
-                    padding: 36px; white-space: nowrap; font-family: Arial, sans-serif;
-                  }
-                `;
-                doc.head.appendChild(style);
-                const wm = doc.createElement('div');
-                wm.className = 'arnoma-print-watermark';
-                const text = `ARNOMA · ${decodeURIComponent(studentName)} · ${printDate}`;
-                let html = '';
-                for (let i = 0; i < 30; i++) html += `<span>${text}</span>`;
-                wm.innerHTML = html;
-                doc.body.appendChild(wm);
-                printWin.focus();
-                printWin.print();
-              } catch(e) {
-                // cross-origin guard — just focus and print without watermark injection
-                printWin.focus();
-                printWin.print();
-              }
-            }, { once: true });
-          }
-        }
-
         function markNoteAsOpened(noteId) {
           const studentId = currentStudent?.id;
           if (!studentId) return;
@@ -12909,7 +12831,9 @@
                       attachment.type === 'pdf' ? '📄' : '📎';
           
           // Notes are HTML-only and open directly.
-          const clickHandler = `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`;
+          const encodedName = encodeURIComponent((window.currentStudent && window.currentStudent.name) ? window.currentStudent.name : '');
+          const noteUrl = encodedName ? `${attachment.url}?studentName=${encodedName}` : attachment.url;
+          const clickHandler = `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}' + (window.currentStudent && window.currentStudent.name ? '?studentName=' + encodeURIComponent(window.currentStudent.name) : ''), '_blank')`;
 
           
           attachmentsHTML += `
@@ -12994,19 +12918,6 @@
         </div>
       ` : '';
       
-      // Build print button HTML (only for unlocked notes with attachments)
-      const hasPrintableAttachment = note.isPaid && !note.isAbsent && note.attachments?.length > 0 && !note.isTemplateMissing;
-      const firstAttachmentUrl = hasPrintableAttachment ? note.attachments[0].url : '';
-      const printBtnHTML = hasPrintableAttachment ? `
-        <button class="note-print-btn" onclick="event.stopPropagation(); printNoteUrl('${firstAttachmentUrl}', ${note.id})" title="Print this note">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M6 9V2H18V9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M6 18H4C3.46957 18 2.96086 17.7893 2.58579 17.4142C2.21071 17.0391 2 16.5304 2 16V11C2 10.4696 2.21071 9.96086 2.58579 9.58579C2.96086 9.21071 3.46957 9 4 9H20C20.5304 9 21.0391 9.21071 21.4142 9.58579C21.7893 9.96086 22 10.4696 22 11V16C22 16.5304 21.7893 17.0391 21.4142 17.4142C21.0391 17.7893 20.5304 18 20 18H18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M18 14H6V22H18V14Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          Print
-        </button>` : '';
-
       item.innerHTML = `
         ${newBadge}
         <div class="note-content-area">
@@ -13022,9 +12933,8 @@
         </div>
         
         <div class="note-footer-area">
-          <div class="note-badge-container" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <div class="note-badge-container">
             <span class="classroom-badge ${badgeClass || (note.isPaid ? note.type || 'material' : 'locked')}" style="${badgeBlur}">${badgeIcon} ${badgeText}</span>
-            ${printBtnHTML}
           </div>
           ${note.isPaid && !note.isAbsent && (note.attachments?.length > 0 || note.isTemplateMissing) ? '<div class="note-expand-indicator" style="text-align: center; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); color: rgba(255,255,255,0.5); font-size: 20px; user-select: none; cursor: pointer;">▼</div>' : '<div style="height: 29px;"></div>'}
         </div>

@@ -300,7 +300,25 @@
   /* ─── 6b. Get student name from URL params (portal passes ?studentName=) ── */
   function _getStudentName() {
     try {
-      return new URLSearchParams(window.location.search).get('studentName') || 'Student';
+      // 1. URL param — portal appends ?studentName= when opening the note
+      var fromUrl = new URLSearchParams(window.location.search).get('studentName');
+      if (fromUrl && fromUrl.trim()) return fromUrl.trim();
+
+      // 2. Fallback: portal caches session in localStorage under 'arnoma:auth:user'
+      //    and the full session under 'arnoma:auth:session'
+      var sessionRaw = localStorage.getItem('arnoma:auth:session');
+      if (sessionRaw) {
+        try {
+          var session = JSON.parse(sessionRaw);
+          var name = session && session.user && (session.user.user_metadata && session.user.user_metadata.full_name || session.user.email);
+          if (name && name.trim()) return name.trim();
+        } catch (e) {}
+      }
+      // 3. Try the plain email key
+      var email = localStorage.getItem('arnoma:auth:user');
+      if (email && email.trim()) return email.trim();
+
+      return 'Student';
     } catch (e) { return 'Student'; }
   }
 
