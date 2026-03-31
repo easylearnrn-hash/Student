@@ -139,6 +139,8 @@
     let fallbackStudent = null;
     let noteData        = null;
     let isPrinting      = false;
+    let isHtmlNote      = false;   // true when content is an HTML note in an iframe
+    let htmlNoteIframe  = null;    // reference to the HTML-note iframe
 
     // ── UI helpers ───────────────────────────────────────────────
     function setStatus(msg) { const e = document.getElementById('loadingStatus'); if (e) e.textContent = msg; }
@@ -377,6 +379,8 @@
 
     async function loadAndRenderHTML(url) {
       setStatus('Loading Document…');
+      isHtmlNote     = true;
+      htmlNoteIframe = null;
       
       const area = document.getElementById('pdfArea');
       area.innerHTML = '';
@@ -402,6 +406,7 @@
       iframe.style.width = '100%';
       iframe.style.height = '100%';
       iframe.style.border = 'none';
+      htmlNoteIframe = iframe;   // save reference for print
       
       // Add secure overlay for watermarking via pattern
       const watermarkOverlay = document.createElement('div');
@@ -491,7 +496,9 @@
 
     // ── Print ────────────────────────────────────────────────────
     async function printNote() {
-      if (isPrinting || !pdfDoc) return;
+      if (isPrinting) return;
+      if (isHtmlNote) { printHtmlNote(); return; }
+      if (!pdfDoc) return;
       isPrinting = true;
       const btn = document.getElementById('printBtn');
       if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparing…'; }
@@ -530,6 +537,182 @@
         setTimeout(cleanup, 2000);
       } catch (err) {
         console.error('Print error:', err);
+        isPrinting = false;
+        if (btn) { btn.disabled = false; btn.textContent = '🖨 Print'; }
+        alert('Print failed. Please try again.');
+      }
+    }
+
+    // ── Print HTML Note ──────────────────────────────────────────
+    // Grabs the HTML note content from the iframe, strips the dark theme,
+    // injects a clean white/black print stylesheet and a dense CSS watermark
+    // (ARNOMA · student name · print date), then opens the browser print dialog.
+    function printHtmlNote() {
+      if (isPrinting || !htmlNoteIframe) return;
+      isPrinting = true;
+      const btn = document.getElementById('printBtn');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparing…'; }
+
+      try {
+        const studentName = getStudentName();
+        const noteTitle   = document.getElementById('noteTitle')?.textContent || 'Class Notes';
+        const printDate   = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        const wmText      = `ARNOMA  ·  ${studentName}  ·  ${printDate}`;
+
+        // Get the note body HTML from the iframe (same-origin)
+        let bodyHtml = '';
+        try {
+          const iDoc = htmlNoteIframe.contentDocument || htmlNoteIframe.contentWindow?.document;
+          if (iDoc && iDoc.body) {
+            bodyHtml = iDoc.body.innerHTML;
+          }
+        } catch(e) {
+          console.warn('Could not read iframe content — cross-origin?', e);
+        }
+
+        // Build a clean white-paper print window
+        const printWindow = window.open('', '_blank', 'width=900,height=700');
+        if (!printWindow) {
+          isPrinting = false;
+          if (btn) { btn.disabled = false; btn.textContent = '🖨 Print'; }
+          alert('Pop-up blocked. Please allow pop-ups for this site and try again.');
+          return;
+        }
+
+        printWindow.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>${noteTitle} — Print</title>
+  <style>
+    /* ── Reset all dark-theme variables to white paper ── */
+    :root {
+      --bg:#ffffff; --surface:#f8f8f8; --surface2:#f0f0f0;
+      --border:#d0d0d0; --gold:#8a6a1a; --gold-light:#7a5c10;
+      --text:#111111; --text-muted:#444444; --text-dim:#666666;
+      --red:#b91c1c; --green:#166534; --blue:#1d4ed8;
+      --purple:#7e22ce; --orange:#c2410c; --yellow:#92400e; --radius:8px;
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body {
+      background:#fff; color:#111;
+      font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      font-size:13px; line-height:1.7;
+      padding:32px 40px 80px; max-width:860px; margin:0 auto;
+    }
+
+    /* ── Print watermark — CSS only, repeating diagonal ── */
+    body::before {
+      content:'';
+      position:fixed; top:0; left:0; right:0; bottom:0;
+      background-image: repeating-linear-gradient(
+        -40deg,
+        transparent 0px,
+        transparent 80px,
+        rgba(0,0,0,0.04) 80px,
+        rgba(0,0,0,0.04) 82px
+      );
+      pointer-events:none; z-index:9999;
+    }
+    .arnoma-watermark {
+      position:fixed; top:0; left:0; right:0; bottom:0;
+      display:flex; flex-wrap:wrap; align-content:flex-start;
+      gap:0; overflow:hidden; pointer-events:none; z-index:9998;
+    }
+    .arnoma-watermark span {
+      display:inline-block;
+      font-size:11px; font-weight:700; letter-spacing:0.5px;
+      color:rgba(0,0,0,0.09);
+      transform:rotate(-38deg);
+      padding:28px 18px;
+      white-space:nowrap;
+      font-family:'Inter',Arial,sans-serif;
+    }
+
+    /* ── Print header strip ── */
+    .print-header {
+      display:flex; justify-content:space-between; align-items:flex-end;
+      border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:24px;
+    }
+    .print-header .ph-title { font-size:18px; font-weight:800; color:#111; }
+    .print-header .ph-meta  { font-size:10px; color:#555; text-align:right; line-height:1.6; }
+
+    /* ── Force dark-theme note elements → black on white ── */
+    .note-tag { color:#8a6a1a !important; background:rgba(138,106,26,0.08) !important;
+                border-color:rgba(138,106,26,0.3) !important; }
+    h1  { color:#111 !important; }
+    h2  { color:#7a5c10 !important; border-color:#ccc !important; }
+    h3  { color:#1d4ed8 !important; }
+    h4  { color:#333 !important; }
+    .card        { background:#f9f9f9 !important; border-color:#ccc !important; }
+    .card.gold   { background:rgba(138,106,26,0.05) !important; border-color:rgba(138,106,26,0.35) !important; }
+    .card.red    { background:rgba(185,28,28,0.04)  !important; border-color:rgba(185,28,28,0.3)   !important; }
+    .card.blue   { background:rgba(29,78,216,0.04)  !important; border-color:rgba(29,78,216,0.3)   !important; }
+    .card.green  { background:rgba(22,101,52,0.04)  !important; border-color:rgba(22,101,52,0.3)   !important; }
+    .card.purple { background:rgba(126,34,206,0.04) !important; border-color:rgba(126,34,206,0.3)  !important; }
+    .badge-red    { color:#b91c1c !important; background:rgba(185,28,28,0.08)  !important; border-color:rgba(185,28,28,0.25)   !important; }
+    .badge-blue   { color:#1d4ed8 !important; background:rgba(29,78,216,0.08)  !important; border-color:rgba(29,78,216,0.25)   !important; }
+    .badge-gold   { color:#8a6a1a !important; background:rgba(138,106,26,0.08) !important; border-color:rgba(138,106,26,0.25)  !important; }
+    .badge-green  { color:#166534 !important; background:rgba(22,101,52,0.08)  !important; border-color:rgba(22,101,52,0.25)   !important; }
+    .badge-purple { color:#7e22ce !important; background:rgba(126,34,206,0.08) !important; border-color:rgba(126,34,206,0.25)  !important; }
+    .badge-orange { color:#c2410c !important; background:rgba(194,65,12,0.08)  !important; border-color:rgba(194,65,12,0.25)   !important; }
+    .mini-table th { background:#ececec !important; color:#111 !important; }
+    .mini-table td { border-color:#ddd !important; color:#111 !important; }
+    .mini-table tr:nth-child(even) td { background:#f5f5f5 !important; }
+    .alert        { background:#f7f7f7 !important; border-color:#bbb !important; }
+    .alert-title  { color:#111 !important; }
+    .pill-row .pill { background:#efefef !important; color:#111 !important; border-color:#ccc !important; }
+    /* Hide scripts & protection overlays in print */
+    script, noscript, .page-shield, #acnhs-guard-hide { display:none !important; }
+
+    @media print {
+      @page { margin:15mm 12mm; }
+      body { padding:0; }
+      .arnoma-watermark { position:fixed; }
+      body::before { position:fixed; }
+    }
+  </style>
+</head>
+<body>
+  <div class="arnoma-watermark" id="wmContainer"></div>
+  <div class="print-header">
+    <div class="ph-title">${noteTitle}</div>
+    <div class="ph-meta">
+      <strong>ARNOMA University</strong><br>
+      ${studentName}<br>
+      Printed ${printDate}
+    </div>
+  </div>
+  ${bodyHtml || '<p style="color:#666;text-align:center;padding:40px 0;">Note content could not be loaded for printing.</p>'}
+  <script>
+    // Fill watermark tiles
+    (function(){
+      var c = document.getElementById('wmContainer');
+      var t = ${JSON.stringify(wmText)};
+      var n = 180;
+      var h = '';
+      for(var i=0;i<n;i++) h += '<span>'+t+'</span>';
+      c.innerHTML = h;
+      // Auto-print after brief delay to allow render
+      setTimeout(function(){
+        window.focus();
+        window.print();
+        setTimeout(function(){ window.close(); }, 1500);
+      }, 400);
+    })();
+  <\/script>
+</body>
+</html>`);
+        printWindow.document.close();
+
+        // Re-enable button after a delay (print window has taken over)
+        setTimeout(() => {
+          isPrinting = false;
+          if (btn) { btn.disabled = false; btn.textContent = '🖨 Print'; }
+        }, 3000);
+
+      } catch (err) {
+        console.error('HTML print error:', err);
         isPrinting = false;
         if (btn) { btn.disabled = false; btn.textContent = '🖨 Print'; }
         alert('Print failed. Please try again.');
