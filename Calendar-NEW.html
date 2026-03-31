@@ -4403,8 +4403,9 @@
 
           const unpaidDates = getUnpaidClassDates(student);
           const currentBalance = parseFloat(student.balance || 0);
-          // Negative balance = debt (money owed). Positive = credit.
-          const ledgerDebt = currentBalance < 0 ? Math.abs(currentBalance) : 0;
+          // Any non-zero balance means something is off — negative is canonical debt,
+          // but previous buggy commits may have left a positive value. Treat both as debt.
+          const ledgerDebt = currentBalance !== 0 ? Math.abs(currentBalance) : 0;
           
           if (unpaidDates.length === 0 && ledgerDebt === 0) return;
 
@@ -4491,16 +4492,12 @@
 
         // --- ZERO OUT STUDENT BALANCE ---
         // Set balance to exactly 0 for every selected student.
-        // This is the authoritative fix — the student portal reads balance as the
-        // source of truth, so zeroing it out clears the debt display completely.
+        // This is authoritative — regardless of what sign the balance currently has,
+        // excusing all debt means balance should be 0.
         for (const studentId of studentsToWipe) {
           const sIdNum = parseInt(studentId);
           const student = studentsData.find(s => s.id === sIdNum);
           if (!student) continue;
-
-          const currentBal = parseFloat(student.balance || 0);
-          // Only update if they actually have debt (negative balance)
-          if (currentBal >= 0) continue;
 
           const { error: balErr } = await supabaseClient
             .from('students')

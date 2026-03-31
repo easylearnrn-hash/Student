@@ -7797,9 +7797,10 @@
       // We still surface schedule-detected unpaid classes so nothing slips through, but we keep
       // the ledger amount for exports/profile modals.
       if (Number.isFinite(numericBalance)) {
-        // 🔧 FIX: Only treat NEGATIVE balance as unpaid debt
-        // Positive balance is CREDIT (overpayment), not unpaid
-        totalUnpaid = numericBalance < 0 ? Math.abs(numericBalance) : 0;
+        // Canonical debt = negative balance. But treat any non-zero balance as debt
+        // since earlier buggy commits may have set a positive value incorrectly.
+        // Zero balance = explicitly cleared by admin = no debt.
+        totalUnpaid = numericBalance !== 0 ? Math.abs(numericBalance) : 0;
         debugDebug(`✅ Using database balance as source of truth: $${numericBalance} (unpaid: $${totalUnpaid})`);
         
         // Still calculate unpaid classes for display purposes (e.g., showing which classes are unpaid)
@@ -7840,7 +7841,7 @@
       // If the admin has set balance=0, that is an intentional "all clear" — do NOT
       // override it with a higher schedule amount (which would re-show wiped debt).
       const ledgerIsExplicitlySet = Number.isFinite(numericBalance);
-      const ledgerIsExplicitlyClear = ledgerIsExplicitlySet && numericBalance >= 0; // 0 or positive = no debt
+      const ledgerIsExplicitlyClear = ledgerIsExplicitlySet && numericBalance === 0; // only exact 0 = admin cleared
 
       if (!ledgerIsExplicitlySet && scheduleUnpaidAmount > 0) {
         // No ledger value at all — fall back to schedule
