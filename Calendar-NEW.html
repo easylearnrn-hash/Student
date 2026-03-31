@@ -4105,10 +4105,12 @@
             paymentRecordsData.push(insertedData[0]);
           }
 
-          // Update student balance so Debt decreases
+          // Update student balance so Debt decreases (positive balance = money owed)
           const price = parseFloat(student.price_per_class || 0);
           if (price > 0) {
-            const newBalance = parseFloat(student.balance || 0) + price;
+            const currentBal = parseFloat(student.balance || 0);
+            let newBalance = currentBal - price;
+            if (currentBal > 0 && newBalance < 0) newBalance = 0;
             const { error: balErr } = await supabaseClient
               .from('students')
               .update({ balance: newBalance })
@@ -4456,7 +4458,10 @@
           });
 
           if (studentInfo && studentInfo.unpaidAmount > 0) {
-            amountsToCredit[studentId] = studentInfo.unpaidAmount;
+            // Always use the live DB balance to avoid stale-data partial wipes
+            const liveStudent = studentsData.find(s => s.id === studentId);
+            const liveBalance = parseFloat(liveStudent?.balance || 0);
+            amountsToCredit[studentId] = liveBalance > 0 ? liveBalance : studentInfo.unpaidAmount;
           }
         });
 
