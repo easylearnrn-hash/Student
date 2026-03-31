@@ -789,31 +789,39 @@
       created = true;
     }
 
-    // Build the portal URL by walking up the path to the site root.
-    // Notes live at varying depths (Notes/Category/file.html = 2 levels deep,
-    // or Notes/file.html = 1 level deep). We count the number of slashes after
-    // the origin to determine how many "../" we need, then fall back to the
-    // absolute URL from origin as a safety net.
+    // Build the absolute portal URL from the current page's location.
+    // Strategy: strip everything after the repo/site root by removing all
+    // path segments from "Notes/" onward, then append "student-portal.html".
+    // This works for https://, http://, and file:// without cross-origin issues.
     var portalUrl;
     try {
-      // Count path segments (excluding empty first segment from leading slash)
-      var pathParts = window.location.pathname.replace(/^\//, '').split('/');
-      // pathParts.length - 1 = number of directories above the current file
-      var depth = pathParts.length - 1; // e.g. "Notes/Category/file.html" → 2
-      var ups = '';
-      for (var d = 0; d < depth; d++) { ups += '../'; }
-      portalUrl = ups + 'student-portal.html';
+      var href = window.location.href;
+      // Find the index of "/Notes/" (case-insensitive) and trim from there
+      var notesIdx = href.search(/\/[Nn]otes\//);
+      if (notesIdx !== -1) {
+        portalUrl = href.slice(0, notesIdx) + '/student-portal.html';
+      } else {
+        // Fallback: walk up from current path to root
+        var origin = window.location.origin; // works for http/https
+        if (origin && origin !== 'null') {
+          portalUrl = origin + '/student-portal.html';
+        } else {
+          // file:// — build from pathname
+          var parts = window.location.pathname.split('/');
+          parts.pop(); // remove filename
+          parts.pop(); // remove category folder
+          parts.pop(); // remove Notes folder
+          portalUrl = 'file://' + parts.join('/') + '/student-portal.html';
+        }
+      }
     } catch (err) {
-      portalUrl = '/student-portal.html';
+      portalUrl = window.location.origin + '/student-portal.html';
     }
     backLink.setAttribute('href', portalUrl);
     backLink.textContent = '← Back to Portal';
     backLink.addEventListener('click', function (e) {
       e.preventDefault();
-      // Resolve to absolute so we always land on the right page
-      var a = document.createElement('a');
-      a.href = portalUrl;
-      window.location.href = a.href;
+      window.location.href = portalUrl;
     });
 
     if (created) {
