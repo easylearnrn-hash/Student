@@ -1,6 +1,7 @@
 (function (global) {
   const AUTH_CACHE_KEY = 'arnoma:auth:session';
   const AUTH_USER_KEY = 'arnoma:auth:user';
+  const ADMIN_FLAG_KEY = 'arnoma:is_admin';
   const REMEMBER_ME_KEY = 'arnoma:remember-me';
   const SESSION_EXPIRY_KEY = 'arnoma:session-expiry';
   const DEFAULT_SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 7; // 7 days default
@@ -9,6 +10,7 @@
     try {
       localStorage.removeItem(AUTH_CACHE_KEY);
       localStorage.removeItem(AUTH_USER_KEY);
+      localStorage.removeItem(ADMIN_FLAG_KEY);
     } catch (error) {
       console.error('ArnomaAuth: failed to clear cache', error);
     }
@@ -101,8 +103,10 @@
 
     const userEmail = session.user.email.toLowerCase();
 
-    // Admins pass through unconditionally
-    if (ADMIN_EMAILS.includes(userEmail)) return;
+  const isAdminFlagged = localStorage.getItem(ADMIN_FLAG_KEY) === 'true';
+
+  // Admins pass through unconditionally
+  if (isAdminFlagged || ADMIN_EMAILS.includes(userEmail)) return;
 
     // Everyone else (students) — only allowed pages above
     if (!STUDENT_ALLOWED_PAGES.includes(currentPath)) {

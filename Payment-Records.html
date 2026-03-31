@@ -5140,21 +5140,15 @@ ORDER BY timestamp DESC;</pre>
                 .eq('email', session.user.email)
                 .maybeSingle();
 
-              // Hardcoded fallback — RLS can block admin_accounts reads even for valid admins
-              const HARDCODED_ADMINS = ['hrachfilm@gmail.com', 'narine@arnoma.com'];
-              const isHardcodedAdmin = HARDCODED_ADMINS.includes((session.user.email || '').toLowerCase());
-
-              if (adminError) {
-                console.warn('⚠️ admin_accounts query failed (RLS?), falling back to hardcoded check:', adminError.message);
-              }
-
-              if (!adminCheck && !isHardcodedAdmin) {
+              if (adminError || !adminCheck) {
                 console.error('❌ Access denied - not an admin:', session.user.email);
-                    alert('Access Denied\n\nThis page is for administrators only.\n\nRedirecting to student portal...');
-                    await supabaseClient.auth.signOut();
+                alert('Access Denied\n\nThis page is for administrators only.\n\nRedirecting to student portal...');
+                await supabaseClient.auth.signOut();
                 window.location.href = 'student-portal.html';
                 throw new Error('ACCESS_DENIED');
-              }              // Admin verified
+              }
+
+              // Admin verified
               document.body.classList.add('admin-verified');
               currentAdminSession = session;
               debugLog('✅ Admin access verified for', session.user.email);
