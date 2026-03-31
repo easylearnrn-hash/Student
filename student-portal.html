@@ -10611,15 +10611,12 @@
             read: isNoteOpened(note.id), // Track which notes have been opened
             attachments: (() => {
               const htmlPath = resolveHtmlNotePath(note.title);
-              const rawUrl = note.file_path || note.pdf_url;
-              if (!htmlPath && !rawUrl) return [];
-              const url = htmlPath || rawUrl;
-              const isHtml = !!(htmlPath || (rawUrl || '').split('?')[0].toLowerCase().endsWith('.html'));
+              if (!htmlPath) return [];
               return [{
                 title: note.title || 'Note',
-                url: url,
+                url: htmlPath,
                 noteId: note.id,
-                type: isHtml ? 'html' : 'pdf'
+                type: 'html'
               }];
             })()
           };
@@ -12347,21 +12344,8 @@
                       attachment.type === 'html' ? '📖' :
                       attachment.type === 'pdf' ? '📄' : '📎';
           
-          // For PDF attachments from our system, use Protected-PDF-Viewer.html
-          // Pass student info in URL since sessionStorage doesn't transfer to new tabs
-          // CRITICAL: Also pass note ID so video_url can be loaded from database
-          // 🔥 FIX: Pass group-specific post date (not global class_date)
-          const cacheBuster = Date.now();
-          // Format date in LOCAL timezone (YYYY-MM-DD) to avoid UTC shift
-          const groupPostDate = `${note.date.getFullYear()}-${String(note.date.getMonth() + 1).padStart(2, '0')}-${String(note.date.getDate()).padStart(2, '0')}`;
-          // If the attachment URL is a local HTML note, open it directly in a new tab.
-          // PDFs still go through Protected-PDF-Viewer for watermarking.
-          const isHtmlNote = attachment.url && attachment.url.split('?')[0].toLowerCase().endsWith('.html');
-          const isPdfNote = attachment.type === 'pdf';
-          
-          const clickHandler = isPdfNote
-            ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&note=${note.id}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&studentId=${currentStudent.id || ''}&classDate=${groupPostDate}&v=${cacheBuster}', '_blank')`
-            : `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`;
+          // Notes are HTML-only and open directly.
+          const clickHandler = `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`;
 
           
           attachmentsHTML += `
