@@ -765,6 +765,11 @@
   function fixBackToPortalLink() {
     if (!document.body) return;
 
+    // If the premium nav injector is present on this page (acnhs-nav-inject.js),
+    // it handles the back link entirely — suppress this fallback button.
+    if (document.querySelector('script[src*="acnhs-nav-inject"]') ||
+        document.querySelector('.acnhs-site-nav, .acnhs-nav-back')) return;
+
     // Prefer explicit back buttons by class
     var backLink = document.querySelector('.back-btn, .back-link, .back_btn');
     var created = false;
