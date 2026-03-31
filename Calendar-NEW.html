@@ -4105,12 +4105,12 @@
             paymentRecordsData.push(insertedData[0]);
           }
 
-          // Update student balance so Debt decreases (positive balance = money owed)
+          // Update student balance so Debt decreases (negative balance = debt, add price to bring toward 0)
           const price = parseFloat(student.price_per_class || 0);
           if (price > 0) {
             const currentBal = parseFloat(student.balance || 0);
-            let newBalance = currentBal - price;
-            if (currentBal > 0 && newBalance < 0) newBalance = 0;
+            let newBalance = currentBal + price;
+            if (currentBal < 0 && newBalance > 0) newBalance = 0;
             const { error: balErr } = await supabaseClient
               .from('students')
               .update({ balance: newBalance })
@@ -4403,8 +4403,8 @@
 
           const unpaidDates = getUnpaidClassDates(student);
           const currentBalance = parseFloat(student.balance || 0);
-          // Positive balance = money owed (debt)
-          const ledgerDebt = currentBalance > 0 ? currentBalance : 0;
+          // Negative balance = debt (money owed). Positive = credit.
+          const ledgerDebt = currentBalance < 0 ? Math.abs(currentBalance) : 0;
           
           if (unpaidDates.length === 0 && ledgerDebt === 0) return;
 
@@ -4503,13 +4503,10 @@
           if (student && amountOrCredit > 0) {
             const currentBalance = parseFloat(student.balance || 0);
             
-            // If they are in debt (+), subtracting the wiped amount will bring them towards 0
-            let newBalance = currentBalance - amountOrCredit;
-            
-            // Unlikely to go far negative unless we wiped more than owed, but let's clamp it if it was pure debt wipe
-            if (currentBalance > 0 && newBalance < 0) {
-                newBalance = 0;
-            }
+            // Negative balance = debt. Adding the excused amount brings it toward 0.
+            // Clamp at 0 so we never accidentally flip into credit.
+            let newBalance = currentBalance + amountOrCredit;
+            if (currentBalance < 0 && newBalance > 0) newBalance = 0;
             
             const { error: balErr } = await supabaseClient
               .from('students')
