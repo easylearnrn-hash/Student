@@ -279,21 +279,16 @@
     // Only used for FREE notes — checks if this student's group has access.
     // For PAID notes, payment is the only gate (see checkPayment).
     async function checkNoteGroupAccess(noteId, noteRecord) {
-      if (isAdmin()) return true;
-      // If the note has no group restriction at all, everyone can see it
-      const ng = (noteRecord?.group_letter || noteRecord?.group_name || noteRecord?.group || '').toString().trim().toUpperCase().replace(/^GROUP\s*/i,'').charAt(0);
-      if (!ng) return true;
-      // Student's group must match
-      const sg = getStudentGroup();
-      return sg === ng;
+      // Group access is fully enforced by student-portal.html before the viewer is opened.
+      // The viewer trusts the URL it received — no second group gate here.
+      return true;
     }
 
     // ── Payment check ────────────────────────────────────────────
-    // Returns true if the student has ANY paid record (date-specific OR any payment at all).
+    // Returns true ONLY when the student has a paid/credit record for the exact class date.
+    // Mirrors the green-dot logic in Calendar-NEW.html and shouldUnlockNote() in student-portal.html.
     async function checkPayment(checkDate) {
       if (isAdmin()) return true;
-      // If we have no numeric student id we can't query — give benefit of the doubt
-      // (identity was passed via URL params which the portal controls)
       if (!currentStudent?.id) return true;
       const sid = currentStudent.id;
       const [mr, ar, cr] = await Promise.all([
@@ -302,12 +297,9 @@
         supabaseClient.from('credit_payments').select('class_date').eq('student_id', sid)
       ]);
       const paid = buildPaidDates(mr?.data || [], ar?.data || [], cr?.data || []);
-      // 1. Exact date match (ideal case)
+      // Exact date match required — green dot = paid, no dot = locked
       if (checkDate && paid.has(checkDate)) return true;
-      // 2. Any payment exists — portal only shows the button when the date is correct,
-      //    so if we have any payment record at all the student is legitimately enrolled
-      if (paid.size > 0) return true;
-      // 3. No payment records at all
+      // No exact match → locked (red dot or no dot)
       return false;
     }
 
@@ -359,6 +351,10 @@
 
     // ── PDF render ───────────────────────────────────────────────
     async function loadAndRenderPDF(url) {
+      if (url.split('?')[0].toLowerCase().endsWith('.html')) {
+        return loadAndRenderHTML(url);
+      }
+
       setStatus('Rendering pages…');
       pdfDoc     = await pdfjsLib.getDocument({ url, withCredentials: false }).promise;
       totalPages = pdfDoc.numPages;
@@ -375,6 +371,73 @@
       hideLoading();
       document.getElementById('controlsBar').style.display = 'flex';
       document.getElementById('mediaPanelToggle').style.display = 'flex';
+    }
+
+    async function loadAndRenderHTML(url) {
+      setStatus('Loading Document…');
+      
+      const area = document.getElementById('pdfArea');
+      area.innerHTML = '';
+      area.style.display = 'block'; // Remove flex centering
+      area.style.padding = '0';
+      area.style.overflow = 'hidden';
+      
+      // Hide PDF controls like Prev/Next, Zoom
+      document.getElementById('zoomOut').style.display = 'none';
+      document.getElementById('zoomIn').style.display = 'none';
+      document.getElementById('prevPage').style.display = 'none';
+      document.getElementById('nextPage').style.display = 'none';
+      document.getElementById('pageInfo').style.display = 'none';
+      
+      const wrapper = document.createElement('div');
+      wrapper.className = 'html-page-wrapper';
+      wrapper.style.position = 'relative';
+      wrapper.style.width = '100%';
+      wrapper.style.height = '100%';
+      wrapper.style.background = 'var(--bg)';
+      
+      const iframe = document.createElement('iframe');
+      iframe.src = url;
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.style.border = 'none';
+      
+      // Add secure overlay for watermarking via pattern
+      const watermarkOverlay = document.createElement('div');
+      watermarkOverlay.style.position = 'absolute';
+      watermarkOverlay.style.top = '0';
+      watermarkOverlay.style.left = '0';
+      watermarkOverlay.style.right = '0';
+      watermarkOverlay.style.bottom = '0';
+      watermarkOverlay.style.pointerEvents = 'none';
+      watermarkOverlay.style.zIndex = '100';
+      watermarkOverlay.style.display = 'flex';
+      watermarkOverlay.style.flexWrap = 'wrap';
+      watermarkOverlay.style.alignContent = 'center';
+      watermarkOverlay.style.justifyContent = 'center';
+      watermarkOverlay.style.overflow = 'hidden';
+      watermarkOverlay.style.opacity = '0.08';
+      
+      const p = new URLSearchParams(window.location.search);
+      const studentNameText = p.get('studentName') || 'Guest';
+      const studentGroupText = p.get('studentGroup') || '';
+      const wText = `ARNOMA ${studentNameText} Group ${studentGroupText}`;
+      
+      let wHtml = '';
+      for (let i = 0; i < 40; i++) {
+         wHtml += `<span style="font-size:26px; font-weight:bold; color:#000; transform: rotate(-30deg); display:inline-block; padding: 40px;">${wText}</span>`;
+      }
+      watermarkOverlay.innerHTML = wHtml;
+      
+      wrapper.appendChild(iframe);
+      wrapper.appendChild(watermarkOverlay);
+      area.appendChild(wrapper);
+      
+      iframe.onload = () => {
+        hideLoading();
+        document.getElementById('controlsBar').style.display = 'flex';
+        document.getElementById('mediaPanelToggle').style.display = 'flex';
+      };
     }
 
     async function renderPage(pageNum, container) {
@@ -578,8 +641,7 @@
               } else {
                 // Free note — check group access
                 if (!(await checkNoteGroupAccess(noteId, note))) {
-                  const ng = (note.group_letter || note.group_name || note.group || '').toString().trim().toUpperCase().replace(/^GROUP\s*/i,'').charAt(0);
-                  showError(`🚫 This note is for Group ${ng}. You are not in that group.`); return;
+                  showError('� This note is not available for your group.'); return;
                 }
               }
               const accessMode = note.requires_payment ? 'paid' : 'free-note';
@@ -606,7 +668,7 @@
           if (!isAdmin()) {
             const sg = getStudentGroup();
             const ng = (note.group_letter || note.group_name || note.group || '').toString().trim().toUpperCase().replace(/^GROUP\s*/i,'');
-            if (ng && sg !== ng) { showError(`🚫 This note is for Group ${ng}. You are in Group ${sg}.`); return; }
+            // Group check removed — portal enforces group access before opening viewer
             if (note.requires_payment) {
               setStatus('Verifying payment…');
               const cd = note.class_date ? note.class_date.split('T')[0] : null;
