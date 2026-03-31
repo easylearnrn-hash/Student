@@ -4394,6 +4394,9 @@
       }
 
       async function openBulkExcuseModal() {
+        // Always reload fresh student data so we see the real current balance, not stale cache
+        await loadStudents();
+
         const unpaidStudents = [];
         const unpaidDatesByStudent = new Map();
 
@@ -4403,9 +4406,9 @@
 
           const unpaidDates = getUnpaidClassDates(student);
           const currentBalance = parseFloat(student.balance || 0);
-          // Any non-zero balance means something is off — negative is canonical debt,
-          // but previous buggy commits may have left a positive value. Treat both as debt.
-          const ledgerDebt = currentBalance !== 0 ? Math.abs(currentBalance) : 0;
+          // Treat any non-zero balance as potential debt (abs value)
+          // The portal uses negative=debt, but historical data may vary — zero it out regardless
+          const ledgerDebt = Math.abs(currentBalance);
           
           if (unpaidDates.length === 0 && ledgerDebt === 0) return;
 
@@ -4491,13 +4494,15 @@
         }
 
         // --- ZERO OUT STUDENT BALANCE ---
-        // Set balance to exactly 0 for every selected student.
-        // This is authoritative — regardless of what sign the balance currently has,
-        // excusing all debt means balance should be 0.
+        // Directly set balance=0 for every selected student.
+        // Works regardless of whether the DB stores debt as positive or negative.
         for (const studentId of studentsToWipe) {
           const sIdNum = parseInt(studentId);
           const student = studentsData.find(s => s.id === sIdNum);
           if (!student) continue;
+
+          const currentBal = parseFloat(student.balance || 0);
+          if (currentBal === 0) continue; // Already zero, skip
 
           const { error: balErr } = await supabaseClient
             .from('students')

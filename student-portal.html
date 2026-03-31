@@ -7797,9 +7797,9 @@
       // We still surface schedule-detected unpaid classes so nothing slips through, but we keep
       // the ledger amount for exports/profile modals.
       if (Number.isFinite(numericBalance)) {
-        // Canonical debt = negative balance. But treat any non-zero balance as debt
-        // since earlier buggy commits may have set a positive value incorrectly.
-        // Zero balance = explicitly cleared by admin = no debt.
+        // Treat any non-zero balance as debt (absolute value).
+        // Historical data may store debt as positive OR negative — abs() handles both.
+        // Zero means fully cleared by admin.
         totalUnpaid = numericBalance !== 0 ? Math.abs(numericBalance) : 0;
         debugDebug(`✅ Using database balance as source of truth: $${numericBalance} (unpaid: $${totalUnpaid})`);
         
@@ -7841,7 +7841,7 @@
       // If the admin has set balance=0, that is an intentional "all clear" — do NOT
       // override it with a higher schedule amount (which would re-show wiped debt).
       const ledgerIsExplicitlySet = Number.isFinite(numericBalance);
-      const ledgerIsExplicitlyClear = ledgerIsExplicitlySet && numericBalance === 0; // only exact 0 = admin cleared
+      const ledgerIsExplicitlyClear = ledgerIsExplicitlySet && numericBalance >= 0; // 0 or positive = no debt
 
       if (!ledgerIsExplicitlySet && scheduleUnpaidAmount > 0) {
         // No ledger value at all — fall back to schedule
@@ -7932,24 +7932,9 @@
       const creditValueEl = document.getElementById('creditBalance');
       const creditNoteEl = document.getElementById('creditNote');
       if (creditCardEl && creditValueEl) {
-        if (Number.isFinite(numericBalance) && numericBalance > 0) {
-          creditValueEl.textContent = `$${numericBalance.toFixed(0)}`;
-          if (creditNoteEl) {
-            const classesCovered = pricePerClassValue > 0 ? numericBalance / pricePerClassValue : 0;
-            if (classesCovered >= 1) {
-              const rounded = classesCovered >= 2 ? Math.round(classesCovered) : Math.round(classesCovered * 10) / 10;
-              const label = rounded === 1 ? 'class' : 'classes';
-              creditNoteEl.textContent = `${rounded} ${label} covered`;
-            } else {
-              creditNoteEl.textContent = 'Extra payment available';
-            }
-          }
-          creditCardEl.style.display = 'flex';
-          creditCardEl.classList.add('credit-active');
-        } else {
-          creditCardEl.style.display = 'none';
-          creditCardEl.classList.remove('credit-active');
-        }
+        // Credit card is never shown — any non-zero balance is treated as debt (admin ledger convention)
+        creditCardEl.style.display = 'none';
+        creditCardEl.classList.remove('credit-active');
       }
       
       // Update absences card
