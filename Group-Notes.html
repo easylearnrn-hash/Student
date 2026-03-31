@@ -1868,6 +1868,24 @@
       }
     }
 
+    
+    async function fetchAll(table, selectStr, orderByObj = null) {
+      let allData = [];
+      let offset = 0;
+      const batchSize = 1000;
+      while (true) {
+        let query = supabaseClient.from(table).select(selectStr).range(offset, offset + batchSize - 1);
+        if (orderByObj) query = query.order(orderByObj.col, { ascending: orderByObj.asc });
+        const { data, error } = await query;
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        allData.push(...data);
+        if (data.length < batchSize) break;
+        offset += batchSize;
+      }
+      return allData;
+    }
+
     // ===== LOAD DATA =====
     async function loadData(forceRefresh = false) {
       const container = getCachedDOM('systemsContainer') || document.getElementById('systemsContainer');
@@ -1889,25 +1907,15 @@
           const [notesResult, permsResult, freeAccessResult] = await Promise.all([
             // Fetch notes (if not cached)
             notesCache ? Promise.resolve({ data: notesCache, error: null }) : 
-              supabaseClient
-                .from('student_notes')
-                .select('id, title, system_category, category, group_name, class_date, description, pdf_url, requires_payment, video_url, created_at, file_size, file_name')
-                .order('class_date', { ascending: false })
-                .limit(500),
+              fetchAll('student_notes', 'id, title, system_category, category, group_name, class_date, description, pdf_url, requires_payment, video_url, created_at, file_size, file_name', { col: 'class_date', asc: false }).then(d => ({data: d, error: null})),
             
             // Fetch permissions (if not cached)
             permsCache ? Promise.resolve({ data: permsCache, error: null }) :
-              supabaseClient
-                .from('student_note_permissions')
-                .select('note_id, group_name, is_accessible, class_date, granted_at')
-                .limit(1000),
+              fetchAll('student_note_permissions', 'note_id, group_name, is_accessible, class_date, granted_at, student_id').then(d => ({data: d, error: null})),
             
             // Fetch free access (if not cached)
             freeAccessCache ? Promise.resolve({ data: freeAccessCache, error: null }) :
-              supabaseClient
-                .from('note_free_access')
-                .select('note_id, access_type, group_letter, student_id, class_date, created_at')
-          ]);
+              fetchAll('note_free_access', 'note_id, access_type, group_letter, student_id, class_date, created_at').then(d => ({data: d, error: null}))]);
 
           // Handle errors
           if (notesResult.error) throw notesResult.error;
@@ -2796,6 +2804,7 @@ Kind regards,
       // 🚀 PERFORMANCE: Pre-build lookup Maps to avoid O(n³) nested loops
       const permissionsMap = new Map();
       permissions.forEach(perm => {
+        if (perm.student_id) return;
         const key = `${perm.note_id}_${perm.group_name}`;
         permissionsMap.set(key, perm);
       });
@@ -3070,7 +3079,7 @@ Kind regards,
         permission = permissionsMap.get(`${note.id}_${currentGroup}`);
         freeAccessGrant = freeAccessMap.get(`${note.id}_${groupLetter}`);
       } else {
-        permission = permissions.find(p => p.note_id === note.id && p.group_name === currentGroup);
+        permission = permissions.find(p => p.note_id === note.id && p.group_name === currentGroup && !p.student_id);
         freeAccessGrant = freeAccessGrants.find(g =>
           g.note_id === note.id && g.access_type === 'group' && g.group_letter === groupLetter
         );
@@ -3262,7 +3271,7 @@ Kind regards,
       try {
         // Check if permission record exists
         const existing = permissions.find(p => 
-          p.note_id === noteId && p.group_name === currentGroup
+          p.note_id === noteId && p.group_name === currentGroup && !p.student_id
         );
 
         // Get note details to check if it requires payment
@@ -3336,7 +3345,7 @@ Kind regards,
     async function revokeAccess(noteId, title) {
       try {
         const permission = permissions.find(p => 
-          p.note_id === noteId && p.group_name === currentGroup
+          p.note_id === noteId && p.group_name === currentGroup && !p.student_id
         );
 
         if (!permission) return;
@@ -3819,7 +3828,7 @@ Kind regards,
           if (postBtn) {
             const checkedNoteIds = Array.from(systemCheckboxes).map(cb => parseInt(cb.dataset.noteId, 10));
             const allPosted = checkedNoteIds.length > 0 && checkedNoteIds.every(noteId =>
-              permissions.some(p => p.note_id === noteId && p.group_name === currentGroup)
+              permissions.some(p => p.note_id === noteId && p.group_name === currentGroup && !p.student_id)
             );
             if (allPosted) {
               postBtn.textContent = 'Unpost';
@@ -3886,7 +3895,7 @@ Kind regards,
 
       // All selected notes posted to current group via student_note_permissions?
       const allPosted = Array.from(selectedNoteIds).every(noteId =>
-        permissions.some(p => p.note_id === noteId && p.group_name === currentGroup)
+        permissions.some(p => p.note_id === noteId && p.group_name === currentGroup && !p.student_id)
       );
 
       const postBtn = document.getElementById('globalPostBtn');
@@ -4513,7 +4522,7 @@ Kind regards,
         } else {
           // 🔥 CRITICAL FIX: Remove deleted permissions from local array
           permissions = permissions.filter(p => 
-            !(selectedNoteIds.has(p.note_id) && p.group_name === currentGroup)
+            !(selectedNoteIds.has(p.note_id) && p.group_name === currentGroup && !p.student_id)
           );
         }
 
@@ -5932,7 +5941,8 @@ Kind regards,
         systemNotes.forEach(note => {
           const isPosted = permissions.some(perm => 
             perm.note_id === note.id && 
-            perm.group_name === currentGroup
+            perm.group_name === currentGroup &&
+            !perm.student_id
           );
           if (isPosted) postedNoteIds.add(note.id);
         });
@@ -6529,7 +6539,7 @@ Kind regards,
         } else {
           // Remove from local permissions array
           permissions = permissions.filter(p =>
-            !(noteIdsArray.includes(p.note_id) && p.group_name === currentGroup)
+            !(noteIdsArray.includes(p.note_id) && p.group_name === currentGroup && !p.student_id)
           );
         }
 
