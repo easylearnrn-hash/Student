@@ -3367,8 +3367,72 @@
       }
     }
     
-    function viewNote(id) {
-      window.open(`Protected-PDF-Viewer.html?note=${id}`, '_blank');
+    function buildAdminHtmlCandidates(title, system) {
+      const baseTitle = (title || '').replace(/\.pdf$/i, '').replace(/\.html$/i, '').trim();
+      const safeTitle = baseTitle.replace(/[\\/:*?"<>|]/g, '').trim();
+      const titleDashed = safeTitle.replace(/\s+/g, '-');
+      const titleUnderscore = safeTitle.replace(/\s+/g, '_');
+      const titleLowerDashed = safeTitle.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const titleLowerUnderscore = safeTitle.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+
+      const folders = ['Notes'];
+      if (system && system.trim()) {
+        const s = system.trim();
+        folders.push(`Notes/${s}`);
+      }
+
+      const candidates = [];
+      for (const folder of folders) {
+        if (safeTitle) candidates.push(`${folder}/${safeTitle}.html`);
+        if (titleDashed) candidates.push(`${folder}/${titleDashed}.html`);
+        if (titleUnderscore) candidates.push(`${folder}/${titleUnderscore}.html`);
+        if (titleLowerDashed) candidates.push(`${folder}/${titleLowerDashed}.html`);
+        if (titleLowerUnderscore) candidates.push(`${folder}/${titleLowerUnderscore}.html`);
+      }
+      return Array.from(new Set(candidates));
+    }
+
+    async function resolveAdminHtmlNoteUrl(note) {
+      const rawUrl = (note?.file_path || note?.pdf_url || '').trim();
+      if (rawUrl && rawUrl.split('?')[0].toLowerCase().endsWith('.html')) return rawUrl;
+
+      const candidates = buildAdminHtmlCandidates(note?.title || '', note?.system || '');
+      for (const candidate of candidates) {
+        try {
+          const headRes = await fetch(candidate, { method: 'HEAD', cache: 'no-store' });
+          if (headRes.ok) return candidate;
+          if (headRes.status === 405) {
+            const getRes = await fetch(candidate, { method: 'GET', cache: 'no-store' });
+            if (getRes.ok) return candidate;
+          }
+        } catch (e) {
+          // try next candidate
+        }
+      }
+      return null;
+    }
+
+    async function viewNote(id) {
+      try {
+        const { data: note, error } = await supabaseClient
+          .from('student_notes')
+          .select('id,title,system,pdf_url,file_path')
+          .eq('id', id)
+          .single();
+
+        if (error || !note) throw (error || new Error('Note not found'));
+
+        const htmlUrl = await resolveAdminHtmlNoteUrl(note);
+        if (!htmlUrl) {
+          alert('HTML note not found for this entry. Please verify the note title/path in Notes Manager.');
+          return;
+        }
+
+        window.open(htmlUrl, '_blank');
+      } catch (error) {
+        console.error('Error opening note:', error);
+        alert('Could not open note: ' + (error.message || 'Unknown error'));
+      }
     }
     
     async function deleteNote(id) {
