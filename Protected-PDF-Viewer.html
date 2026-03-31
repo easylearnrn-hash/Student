@@ -319,19 +319,20 @@
     }
 
     // ── Watermark ────────────────────────────────────────────────
-    function drawWatermark(canvas) {
+    function drawWatermark(canvas, printDate = null) {
       const ctx   = canvas.getContext('2d');
       const name  = getStudentName();
       const group = getStudentGroup();
-      const lines = ['ARNOMA University', name, group ? `Group ${group}` : ''].filter(Boolean);
+      const dateLabel = printDate ? `Printed ${printDate}` : null;
+      const lines = ['ARNOMA University', name, group ? `Group ${group}` : '', dateLabel].filter(Boolean);
       const fs    = Math.max(14, Math.round(canvas.width * 0.028));
       const lineH = fs * 1.6;
       const blockH = lines.length * lineH;
-      // Tile every ~300px diagonally
-      const tileW = Math.round(canvas.width  * 0.42);
-      const tileH = Math.round(canvas.height * 0.28);
+      // Tighter tile grid for print (more watermark instances), wider for screen
+      const tileW = printDate ? Math.round(canvas.width  * 0.32) : Math.round(canvas.width  * 0.42);
+      const tileH = printDate ? Math.round(canvas.height * 0.22) : Math.round(canvas.height * 0.28);
       ctx.save();
-      ctx.globalAlpha  = 0.18;
+      ctx.globalAlpha  = printDate ? 0.28 : 0.18;   // heavier on print
       ctx.fillStyle    = '#c4a45f';
       ctx.font         = `600 ${fs}px Inter, Arial, sans-serif`;
       ctx.textAlign    = 'center';
@@ -495,6 +496,8 @@
       const btn = document.getElementById('printBtn');
       if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparing…'; }
       try {
+        // Format print date: "March 31, 2026"
+        const printDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
         const SCALE = 2.5;
         const frame = document.createElement('iframe');
         frame.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
@@ -509,7 +512,7 @@
           const cv  = document.createElement('canvas');
           cv.width  = vp.width; cv.height = vp.height;
           await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
-          drawWatermark(cv);
+          drawWatermark(cv, printDate);
           const img = doc.createElement('img');
           img.src = cv.toDataURL('image/jpeg', 0.92);
           const div = doc.createElement('div'); div.className = 'p';
