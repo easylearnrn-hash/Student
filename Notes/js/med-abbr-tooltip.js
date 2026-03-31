@@ -838,7 +838,44 @@
       }
       if (!matched) continue;
 
+
       var fullTerm = ABBR[matched];
+      if (fullTerm && fullTerm.indexOf(' / ') !== -1) {
+        var path = window.location.pathname.toLowerCase();
+        if (matched === 'RA') {
+          fullTerm = (path.indexOf('cardio') !== -1 || path.indexOf('heart') !== -1) ? 'Right Atrium' : 'Rheumatoid Arthritis';
+        } else if (matched === 'RV') {
+          fullTerm = (path.indexOf('cardio') !== -1 || path.indexOf('heart') !== -1) ? 'Right Ventricle' : 'Rotavirus';
+        } else if (matched === 'MS') {
+          fullTerm = path.indexOf('neuro') !== -1 ? 'Multiple Sclerosis' : 'Mitral Stenosis';
+        } else if (matched === 'PT') {
+          fullTerm = (path.indexOf('blood') !== -1 || path.indexOf('cardio') !== -1 || path.indexOf('pharm') !== -1) ? 'Prothrombin Time' : 'Physical Therapy';
+        } else if (matched === 'PA') {
+          fullTerm = (path.indexOf('cardio') !== -1 || path.indexOf('respiratory') !== -1) ? 'Pulmonary Artery' : 'Physician Assistant';
+        } else if (matched === 'PR') {
+          fullTerm = (path.indexOf('cardio') !== -1 || path.indexOf('ekg') !== -1) ? 'PR Interval (EKG)' : 'Per Rectum';
+        } else if (matched === 'LOC') {
+          fullTerm = (path.indexOf('neuro') !== -1 || path.indexOf('trauma') !== -1) ? 'Loss of Consciousness' : 'Level of Consciousness';
+        } else if (matched === 'AS') {
+          fullTerm = path.indexOf('cardio') !== -1 ? 'Aortic Stenosis' : 'Ankylosing Spondylitis';
+        } else if (matched === 'ASD') {
+          fullTerm = path.indexOf('cardio') !== -1 ? 'Atrial Septal Defect' : 'Autism Spectrum Disorder';
+        } else if (matched === 'PD') {
+          fullTerm = path.indexOf('renal') !== -1 ? 'Peritoneal Dialysis' : 'Pharmacodynamics';
+        } else if (matched === 'OT') {
+          fullTerm = (path.indexOf('maternal') !== -1 || path.indexOf('reproduct') !== -1) ? 'Oxytocin' : 'Occupational Therapy';
+        } else if (matched === 'ST') {
+          fullTerm = (path.indexOf('cardio') !== -1 || path.indexOf('ekg') !== -1) ? 'ST Segment (EKG)' : 'Speech Therapy';
+        } else if (matched === 'CI') {
+          fullTerm = path.indexOf('cardio') !== -1 ? 'Cardiac Index' : 'Contraindication';
+        } else if (matched === 'CO') {
+          fullTerm = (path.indexOf('respir') !== -1 || path.indexOf('tox') !== -1) ? 'Carbon Monoxide' : 'Cardiac Output';
+        } else {
+          // fallback to first part if no rule handles it
+          fullTerm = fullTerm.split(' / ')[0].trim();
+        }
+      }
+
       if (!fullTerm) continue;
 
       didMatch = true;
@@ -850,7 +887,7 @@
 
       // The <abbr> element
       var abbr = document.createElement('abbr');
-      abbr.setAttribute('title', fullTerm);
+      abbr.setAttribute('data-title', fullTerm);
       abbr.textContent = matched;
       frag.appendChild(abbr);
 
@@ -991,10 +1028,15 @@
   }
 
   document.addEventListener('mouseover', function (e) {
-    var el = e.target.closest('abbr[title]');
+    var el = e.target.closest('abbr');
+    if (el && !el.hasAttribute('data-title') && el.hasAttribute('title')) {
+      el.setAttribute('data-title', el.getAttribute('title'));
+      el.removeAttribute('title');
+    }
+    if (!el || !el.hasAttribute('data-title')) return;
     if (!el) return;
     var tip = getOrCreateTooltip();
-    tip.textContent = el.getAttribute('title');
+    tip.textContent = el.getAttribute('data-title');
     tip.style.display = 'block';
   });
 
@@ -1013,7 +1055,12 @@
   });
 
   document.addEventListener('mouseout', function (e) {
-    var el = e.target.closest('abbr[title]');
+    var el = e.target.closest('abbr');
+    if (el && !el.hasAttribute('data-title') && el.hasAttribute('title')) {
+      el.setAttribute('data-title', el.getAttribute('title'));
+      el.removeAttribute('title');
+    }
+    if (!el || !el.hasAttribute('data-title')) return;
     if (!el || !tooltip) return;
     tooltip.style.display = 'none';
   });
