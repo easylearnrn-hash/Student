@@ -592,6 +592,164 @@
     'MEC':      'Minimum Effective Concentration',
     'MTC':      'Minimum Toxic Concentration',
 
+    /* ── Cardiac Rhythms / EKG ── */
+    'QRS':      'QRS Complex (ventricular depolarization on ECG)',
+    'QT':       'QT Interval (ventricular depolarization + repolarization)',
+    'PR':       'PR Interval (atrial depolarization to ventricular)',
+    'ST':       'ST Segment (early ventricular repolarization)',
+    'SA':       'Sinoatrial (node)',
+    'AV':       'Atrioventricular (node)',
+    'NSR':      'Normal Sinus Rhythm',
+    'PEA':      'Pulseless Electrical Activity',
+    'WPW':      'Wolff-Parkinson-White Syndrome',
+    'LBBB':     'Left Bundle Branch Block',
+    'RBBB':     'Right Bundle Branch Block',
+
+    /* ── Medications (Specific) ── */
+    'NPH':      'Neutral Protamine Hagedorn (intermediate-acting insulin)',
+    'PTU':      'Propylthiouracil (antithyroid drug)',
+    'MMI':      'Methimazole (antithyroid drug)',
+    'EPO':      'Erythropoietin',
+    'IVIG':     'Intravenous Immunoglobulin',
+    'DMARD':    'Disease-Modifying Antirheumatic Drug',
+    'DMARDs':   'Disease-Modifying Antirheumatic Drugs',
+    'MTX':      'Methotrexate',
+    'AZA':      'Azathioprine',
+    'CYC':      'Cyclophosphamide',
+    'MMF':      'Mycophenolate Mofetil',
+    'CsA':      'Cyclosporine A',
+    'FK506':    'Tacrolimus',
+    'TNF':      'Tumor Necrosis Factor',
+    'IL':       'Interleukin',
+    'G-CSF':    'Granulocyte Colony-Stimulating Factor',
+    'GM-CSF':   'Granulocyte-Macrophage Colony-Stimulating Factor',
+    'ECT':      'Electroconvulsive Therapy',
+    'TMS':      'Transcranial Magnetic Stimulation',
+
+    /* ── Vaccines / Immunizations ── */
+    'HPV':      'Human Papillomavirus (vaccine)',
+    'MMR':      'Measles, Mumps, Rubella (vaccine)',
+    'DTaP':     'Diphtheria, Tetanus, acellular Pertussis (vaccine)',
+    'Tdap':     'Tetanus, Diphtheria, acellular Pertussis (booster)',
+    'IPV':      'Inactivated Polio Vaccine',
+    'HiB':      'Haemophilus influenzae type b (vaccine)',
+    'PCV':      'Pneumococcal Conjugate Vaccine',
+    'PPSV':     'Pneumococcal Polysaccharide Vaccine',
+    'HZV':      'Herpes Zoster Vaccine',
+    'RV':       'Rotavirus Vaccine',
+    'BCG':      'Bacillus Calmette-Guérin (TB vaccine)',
+
+    /* ── Ophthalmology ── */
+    'IOP':      'Intraocular Pressure',
+    'AMD':      'Age-Related Macular Degeneration',
+    'DR':       'Diabetic Retinopathy',
+    'ARMD':     'Age-Related Macular Degeneration',
+    'VA':       'Visual Acuity',
+    'OD':       'Right Eye (Oculus Dexter)',
+    'OS':       'Left Eye (Oculus Sinister)',
+    'OU':       'Both Eyes (Oculus Uterque)',
+
+    /* ── Infection Control ── */
+    'N95':      'N95 Respirator Mask (filters ≥95% airborne particles)',
+    'PPE':      'Personal Protective Equipment',
+    'AIIR':     'Airborne Infection Isolation Room',
+    'CDC':      'Centers for Disease Control and Prevention',
+    'HAI':      'Hospital-Acquired Infection',
+    'MDRO':     'Multidrug-Resistant Organism',
+
+    /* ── Nursing / Staffing ── */
+    'UAP':      'Unlicensed Assistive Personnel',
+    'CAM':      'Confusion Assessment Method (delirium tool)',
+    'CIWA':     'Clinical Institute Withdrawal Assessment (alcohol)',
+    'COWS':     'Clinical Opiate Withdrawal Scale',
+    'RASSs':    'Richmond Agitation-Sedation Scale',
+    'RASS':     'Richmond Agitation-Sedation Scale',
+    'PAAS':     'Pain, Agitation, and Sedation assessment',
+    'CPOT':     'Critical-Care Pain Observation Tool',
+    'FLACC':    'Face, Legs, Activity, Cry, Consolability (pain scale)',
+    'FACES':    'Wong-Baker FACES Pain Scale',
+
+    /* ── Endocrine (extended) ── */
+    'LH':       'Luteinizing Hormone',
+    'FSH':      'Follicle-Stimulating Hormone',
+    'GH':       'Growth Hormone',
+    'IGF-1':    'Insulin-Like Growth Factor 1',
+    'ACTH':     'Adrenocorticotropic Hormone',
+    'CRH':      'Corticotropin-Releasing Hormone',
+    'GnRH':     'Gonadotropin-Releasing Hormone',
+    'TRH':      'Thyrotropin-Releasing Hormone',
+    'OT':       'Oxytocin',
+    'PRL':      'Prolactin',
+    'MSH':      'Melanocyte-Stimulating Hormone',
+    'RAIU':     'Radioactive Iodine Uptake',
+    'RAI':      'Radioactive Iodine',
+
+    /* ── Genetics / DNA ── */
+    'DNA':      'Deoxyribonucleic Acid',
+    'RNA':      'Ribonucleic Acid',
+    'mRNA':     'Messenger RNA',
+    'tRNA':     'Transfer RNA',
+    'PCR':      'Polymerase Chain Reaction',
+    'FISH':     'Fluorescence In Situ Hybridization',
+    'SNP':      'Single Nucleotide Polymorphism',
+
+    /* ── Cardiology (extended) ── */
+    'CO':       'Cardiac Output',
+    'SV':       'Stroke Volume',
+    'SVR':      'Systemic Vascular Resistance',
+    'PVR':      'Pulmonary Vascular Resistance',
+    'PCWP':     'Pulmonary Capillary Wedge Pressure',
+    'CI':       'Cardiac Index',
+    'TPVR':     'Total Peripheral Vascular Resistance',
+    'DHP':      'Dihydropyridine (calcium channel blocker class)',
+    'CP':       'Chest Pain',
+    'SOB':      'Shortness of Breath',
+    'PND':      'Paroxysmal Nocturnal Dyspnea',
+    'JVD':      'Jugular Venous Distension',
+    'JVP':      'Jugular Venous Pressure',
+    'S3':       'Third Heart Sound (gallop — ventricular filling)',
+    'S4':       'Fourth Heart Sound (atrial gallop)',
+    'PMI':      'Point of Maximal Impulse',
+    'LVEF':     'Left Ventricular Ejection Fraction',
+    'LVHD':     'Left Ventricular Hypertrophy',
+    'LVH':      'Left Ventricular Hypertrophy',
+    'RVH':      'Right Ventricular Hypertrophy',
+
+    /* ── GI (extended) ── */
+    'N/V':      'Nausea and Vomiting',
+    'N/V/D':    'Nausea, Vomiting, and Diarrhea',
+    'BRAT':     'Bananas, Rice, Applesauce, Toast (diet)',
+    'NPO':      'Nothing by Mouth',
+    'PEG':      'Percutaneous Endoscopic Gastrostomy',
+    'TPN':      'Total Parenteral Nutrition',
+    'GIB':      'Gastrointestinal Bleed',
+    'UGIB':     'Upper Gastrointestinal Bleed',
+    'LGIB':     'Lower Gastrointestinal Bleed',
+    'HRS':      'Hepatorenal Syndrome',
+    'SBP':      'Spontaneous Bacterial Peritonitis',
+    'TIPS':     'Transjugular Intrahepatic Portosystemic Shunt',
+    'ALF':      'Acute Liver Failure',
+    'MELD':     'Model for End-Stage Liver Disease (score)',
+
+    /* ── Vitamin / Nutrition ── */
+    'B12':      'Vitamin B12 (Cobalamin)',
+    'B6':       'Vitamin B6 (Pyridoxine)',
+    'B1':       'Vitamin B1 (Thiamine)',
+    'B2':       'Vitamin B2 (Riboflavin)',
+    'B3':       'Vitamin B3 (Niacin)',
+    'B9':       'Vitamin B9 (Folate / Folic Acid)',
+    'VitD':     'Vitamin D',
+    'VitC':     'Vitamin C (Ascorbic Acid)',
+    'VitK':     'Vitamin K',
+    'VitA':     'Vitamin A (Retinol)',
+    'VitE':     'Vitamin E (Tocopherol)',
+    'Fe':       'Iron',
+    'Zn':       'Zinc',
+
+    /* ── COVID / Respiratory Infectious ── */
+    'COVID':    'COVID-19 (Coronavirus Disease 2019)',
+    'SARS-CoV-2':'Severe Acute Respiratory Syndrome Coronavirus 2',
+
     /* ── Miscellaneous / General ── */
     'PMH':      'Past Medical History',
     'PSH':      'Past Surgical History',
@@ -600,7 +758,6 @@
     'CC':       'Chief Complaint',
     'HPI':      'History of Present Illness',
     'ROS':      'Review of Systems',
-    'PE':       'Physical Examination',
     'DDx':      'Differential Diagnosis',
     'WNL':      'Within Normal Limits',
     'NAD':      'No Acute Distress',
@@ -610,7 +767,6 @@
     'W/U':      'Workup',
     'Bx':       'Biopsy',
     'Cx':       'Culture',
-    'Sx':       'Symptoms / Surgery',
     's/p':      'Status Post (after a procedure)',
     'S/P':      'Status Post',
     'c/o':      'Complains of',
@@ -618,28 +774,20 @@
     'r/o':      'Rule Out',
     'R/O':      'Rule Out',
     'n/v':      'Nausea and Vomiting',
-    'N/V':      'Nausea and Vomiting',
-    'N/V/D':    'Nausea, Vomiting, and Diarrhea',
-    'n/a':      'Not Applicable',
-    'N/A':      'Not Applicable',
     'SOC':      'Standard of Care',
     'EBP':      'Evidence-Based Practice',
     'QI':       'Quality Improvement',
-    'PI':       'Performance Improvement',
     'TJC':      'The Joint Commission',
     'CMS':      'Centers for Medicare & Medicaid Services',
-    'CDC':      'Centers for Disease Control and Prevention',
     'FDA':      'U.S. Food and Drug Administration',
     'HIPAA':    'Health Insurance Portability and Accountability Act',
     'EHR':      'Electronic Health Record',
     'EMR':      'Electronic Medical Record',
     'POA':      'Present on Admission',
-    'HAI':      'Hospital-Acquired Infection',
     'CAUTI':    'Catheter-Associated Urinary Tract Infection',
     'CLABSI':   'Central Line-Associated Bloodstream Infection',
     'VAP':      'Ventilator-Associated Pneumonia',
     'SSI':      'Surgical Site Infection',
-    'PPE':      'Personal Protective Equipment',
     'SDS':      'Safety Data Sheet',
     'PCA':      'Patient-Controlled Analgesia',
     'PCO2':     'Partial Pressure of Carbon Dioxide',
@@ -872,8 +1020,16 @@
 
   document.addEventListener('mousemove', function (e) {
     if (!tooltip || tooltip.style.display === 'none') return;
-    tooltip.style.left = (e.pageX + 12) + 'px';
-    tooltip.style.top  = (e.pageY + 12) + 'px';
+    // Use clientX/clientY because tooltip is position:fixed
+    var x = e.clientX + 14;
+    var y = e.clientY + 14;
+    // Keep tooltip within viewport
+    var tw = tooltip.offsetWidth || 200;
+    var th = tooltip.offsetHeight || 30;
+    if (x + tw > window.innerWidth  - 8) x = e.clientX - tw - 10;
+    if (y + th > window.innerHeight - 8) y = e.clientY - th - 10;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top  = y + 'px';
   });
 
   document.addEventListener('mouseout', function (e) {
