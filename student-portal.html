@@ -8233,32 +8233,26 @@
       // 5. ✅ PRIMARY CHECK — mirrors Calendar-NEW green dot logic exactly.
       //    paidDatesSet was built using extractForClassDates() on all payment sources,
       //    so any date showing a green dot on Calendar-NEW will be in this set.
+      //    STRICT: a note with a class_date MUST match an exact green-dot paid date.
+      //    No fallback — a red dot on that date means the note stays locked.
       if (effectiveClassDate) {
         const isGreenDot = paidDatesSet.has(effectiveClassDate);
         debugLog(`[shouldUnlockNote] Note ${note.id} date=${effectiveClassDate} greenDot=${isGreenDot} paidDates=[${Array.from(paidDatesSet).sort().join(', ')}]`);
         if (isGreenDot) {
-          debugDebug(`🔓 Note ${note.id} unlocked: paid/green for ${effectiveClassDate}`);
+          debugDebug(`🔓 Note ${note.id} unlocked: green dot on ${effectiveClassDate}`);
           return true;
         }
 
-        // 5b. ✅ FALLBACK — exact date miss but student has payments recorded.
-        //     This covers: notes uploaded without precise class_date, Zelle payments
-        //     whose for_class_dates were set to a slightly different date, or any
-        //     other date-alignment mismatch. If the student has ANY paid record at all
-        //     they are enrolled and should be able to access their notes.
-        if (paidDatesSet.size > 0) {
-          debugLog(`[shouldUnlockNote] Note ${note.id}: no exact date match for ${effectiveClassDate} but student has ${paidDatesSet.size} paid date(s) — unlocking`);
-          debugDebug(`🔓 Note ${note.id} unlocked: has payments (fallback)`);
-          return true;
-        }
-
-        debugDebug(`🔒 Note ${note.id} LOCKED: no payment found at all`);
+        // No exact date match → note is locked regardless of other payments.
+        // This means: red dot on this date = locked, even if student paid other dates.
+        debugDebug(`🔒 Note ${note.id} LOCKED: no green dot on ${effectiveClassDate}`);
         return false;
       }
 
-      // 6. Note has NO class_date at all — unlock if student has any payment.
+      // 6. Note has NO class_date at all — unlock if student has any paid date.
+      //    (Admin posted the note without specifying a class date.)
       if (paidDatesSet.size > 0) {
-        debugLog(`[shouldUnlockNote] Note ${note.id}: no class_date but student has payments — unlocking`);
+        debugLog(`[shouldUnlockNote] Note ${note.id}: no class_date — unlocking (student has ${paidDatesSet.size} paid date(s))`);
         return true;
       }
 
@@ -8307,9 +8301,8 @@
         const perGroupDate = perGroupDateObj ? perGroupDateObj.dateString : null;
 
         // A note has "permission access" if it was explicitly posted to this student's group
-        // via student_note_permissions (as opposed to free access via note_free_access).
-        // This flag enables the "any payment" fallback in shouldUnlockNote when the note's
-        // stored class_date doesn't precisely match an actual payment date.
+        // via student_note_permissions. This flag is passed through for informational purposes
+        // but no longer enables any fallback — access is strictly date-matched only.
         const hasPermissionAccess = permissionNoteIdSet ? permissionNoteIdSet.has(note.id) : false;
 
         const isPaid = shouldUnlockNote(
@@ -10520,9 +10513,8 @@
         
         // 🔐 PAYMENT-LOCKED NOTES ENGINE: Compute payment status for all notes.
         // Uses Calendar-NEW green dot logic (extractForClassDates) to determine which notes unlock.
-        // permissionNoteIds = notes posted via student_note_permissions (enables any-payment fallback)
-        // IMPORTANT: Only group-wide posts (student_id IS NULL) get the "any-payment fallback".
-        // Individual-student posts (student_id set) must pass the exact class_date payment check.
+        // STRICT: a note is only unlocked when its class_date has a green dot (paid/credit) for this student.
+        // Red dot = locked, even if student has other paid dates.
         const permissionNoteIdSet = new Set(
           (permissions || [])
             .filter(p => p.is_accessible && !p.student_id)  // group-wide only
@@ -10535,7 +10527,7 @@
           currentGroupScheduleData,
           freeNoteIds,
           notePostDateMap,
-          permissionNoteIdSet  // ✅ NEW: enables fallback for permission-posted notes
+          permissionNoteIdSet
         );
         
         if (DEBUG_MODE) {
@@ -12362,14 +12354,14 @@
           const cacheBuster = Date.now();
           // Format date in LOCAL timezone (YYYY-MM-DD) to avoid UTC shift
           const groupPostDate = `${note.date.getFullYear()}-${String(note.date.getMonth() + 1).padStart(2, '0')}-${String(note.date.getDate()).padStart(2, '0')}`;
-          // If the attachment URL is a local HTML note, open it directly in a new tab.
-          // Otherwise route PDFs through the Protected-PDF-Viewer.
+          // If the attachment URL is a local HTML note OR a PDF, route through the Protected-PDF-Viewer.
           const isHtmlNote = attachment.url && attachment.url.split('?')[0].toLowerCase().endsWith('.html');
-          const clickHandler = isHtmlNote
-            ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`
-            : attachment.type === 'pdf'
-              ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&note=${note.id}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&studentId=${currentStudent.id || ''}&classDate=${groupPostDate}&v=${cacheBuster}', '_blank')`
-              : `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`;
+          const isPdfNote = attachment.type === 'pdf';
+          
+          const clickHandler = (isHtmlNote || isPdfNote)
+            ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('Protected-PDF-Viewer.html?url=${encodeURIComponent(attachment.url)}&note=${note.id}&title=${encodeURIComponent(attachment.title)}&studentName=${encodeURIComponent(currentStudent.name)}&studentGroup=${encodeURIComponent(currentStudent.group_name || currentStudent.group || 'N/A')}&studentId=${currentStudent.id || ''}&classDate=${groupPostDate}&v=${cacheBuster}', '_blank')`
+            : `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`;
+
           
           attachmentsHTML += `
             <button style="

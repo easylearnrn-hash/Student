@@ -4175,19 +4175,68 @@
             // If choice is 'add', continue with creating new student (code below)
           }
           
-          // Build notes with registration info
+          // ── Generate a secure temporary password ──────────────────
+          function generateTempPassword() {
+            const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+            const lower = 'abcdefghjkmnpqrstuvwxyz';
+            const digits = '23456789';
+            const special = '!@#$%';
+            const all = upper + lower + digits + special;
+            let pwd = '';
+            // Guarantee at least one of each category
+            pwd += upper[Math.floor(Math.random() * upper.length)];
+            pwd += lower[Math.floor(Math.random() * lower.length)];
+            pwd += digits[Math.floor(Math.random() * digits.length)];
+            pwd += special[Math.floor(Math.random() * special.length)];
+            for (let i = 4; i < 10; i++) {
+              pwd += all[Math.floor(Math.random() * all.length)];
+            }
+            // Shuffle
+            return pwd.split('').sort(() => Math.random() - 0.5).join('');
+          }
+
+          const tempPassword = generateTempPassword();
+          const portalUrl = 'https://student.richyfesta.com';
+
+          // ── Build notes with registration info + credentials ────
           const registrationDate = new Date().toLocaleDateString('en-US', {
             month: 'long',
             day: 'numeric',
             year: 'numeric'
           });
-          
-          const notes = `✅ Registered via waiting list on ${registrationDate}`;
+
+          const credentialNote = `✅ Registered via waiting list on ${registrationDate}\n📧 Portal Login: ${email || 'N/A'}\n🔑 Portal Password: ${tempPassword}`;
 
           // Generate student_id for new student (required by schema)
           const generatedStudentId = Date.now();
-          
-          // Create student record with essential contact information
+
+          // ── Step 1: Create Supabase auth account ────────────────
+          let authUserId = null;
+          if (email) {
+            try {
+              const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
+                email: email.trim().toLowerCase(),
+                password: tempPassword,
+                options: {
+                  data: {
+                    full_name: `${firstName} ${lastName}`,
+                    role: 'student'
+                  }
+                }
+              });
+
+              if (signUpError) {
+                console.warn('⚠️ Auth account creation failed (student will still be created):', signUpError.message);
+              } else if (signUpData?.user) {
+                authUserId = signUpData.user.id;
+                debugLog('✅ Auth account created, uid:', authUserId);
+              }
+            } catch (authErr) {
+              console.warn('⚠️ Auth signUp threw:', authErr);
+            }
+          }
+
+          // ── Step 2: Create student record ───────────────────────
           const { data: newStudent, error: studentError } = await supabaseClient
             .from('students')
             .insert([{
@@ -4199,14 +4248,15 @@
               show_in_grid: true,
               balance: 0,
               price_per_class: 0,
-              notes: notes
+              notes: credentialNote,
+              ...(authUserId ? { auth_user_id: authUserId } : {})
             }])
             .select()
             .single();
-          
+
           if (studentError) throw studentError;
-          
-          // Send welcome email if email is provided
+
+          // ── Step 3: Send credentials email ──────────────────────
           if (email) {
             try {
               const welcomeEmailHTML = `
@@ -4216,52 +4266,60 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh;">
-    <div style="max-width: 600px; margin: 40px auto; background: white; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 32px; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 32px; font-weight: 700; text-shadow: 0 2px 4px rgba(0,0,0,0.2);">🎓 Welcome to ARNOMA!</h1>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;">
+    <div style="max-width:600px;margin:40px auto;background:white;border-radius:24px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:40px 32px;text-align:center;">
+            <h1 style="color:white;margin:0;font-size:32px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,0.2);">Welcome to ARNOMA!</h1>
+            <p style="color:rgba(255,255,255,0.85);margin:12px 0 0;font-size:16px;">Your student portal is ready</p>
         </div>
-        <div style="padding: 40px 32px; line-height: 1.6; color: #374151;">
-            <p style="font-size: 18px; margin-top: 0;">Hi <strong>${firstName}</strong>,</p>
-            <p>Congratulations! Your student account has been approved and is now active. We're excited to have you join ARNOMA! 🎉</p>
-            
-            <div style="background: linear-gradient(135deg, rgba(102,126,234,0.1), rgba(118,75,162,0.1)); border: 2px solid rgba(102,126,234,0.3); border-radius: 16px; padding: 24px; margin: 24px 0;">
-                <h3 style="color: #667eea; margin-top: 0;">📋 Next Steps</h3>
-                <ol style="margin: 16px 0; padding-left: 20px;">
-                    <li style="margin: 8px 0;">Check your email for your student portal login credentials</li>
-                    <li style="margin: 8px 0;">Access your student portal to view notes, tests, and schedule</li>
-                    <li style="margin: 8px 0;">Your teacher will contact you shortly with class schedule details</li>
+        <div style="padding:40px 32px;line-height:1.6;color:#374151;">
+            <p style="font-size:18px;margin-top:0;">Hi <strong>${firstName}</strong>,</p>
+            <p>Your student account has been approved! Here are your login credentials to access the student portal.</p>
+
+            <div style="background:linear-gradient(135deg,#f0f4ff,#f5f0ff);border:2px solid rgba(102,126,234,0.4);border-radius:16px;padding:28px;margin:28px 0;">
+                <h3 style="color:#667eea;margin:0 0 20px;font-size:17px;letter-spacing:0.3px;">Your Login Credentials</h3>
+                <table style="width:100%;border-collapse:collapse;">
+                    <tr>
+                        <td style="padding:10px 14px;background:rgba(102,126,234,0.08);border-radius:8px 0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#667eea;width:120px;">Portal URL</td>
+                        <td style="padding:10px 14px;background:rgba(102,126,234,0.05);border-radius:0 8px 8px 0;font-size:14px;font-weight:600;color:#374151;"><a href="${portalUrl}" style="color:#667eea;text-decoration:none;">${portalUrl}</a></td>
+                    </tr>
+                    <tr><td colspan="2" style="padding:4px;"></td></tr>
+                    <tr>
+                        <td style="padding:10px 14px;background:rgba(102,126,234,0.08);border-radius:8px 0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#667eea;">Login</td>
+                        <td style="padding:10px 14px;background:rgba(102,126,234,0.05);border-radius:0 8px 8px 0;font-size:14px;font-weight:600;color:#374151;">${email}</td>
+                    </tr>
+                    <tr><td colspan="2" style="padding:4px;"></td></tr>
+                    <tr>
+                        <td style="padding:10px 14px;background:rgba(118,75,162,0.1);border-radius:8px 0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#764ba2;">Password</td>
+                        <td style="padding:10px 14px;background:rgba(118,75,162,0.06);border-radius:0 8px 8px 0;font-size:16px;font-weight:800;color:#374151;letter-spacing:2px;font-family:monospace;">${tempPassword}</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div style="background:#fff8e1;border:1px solid #fbbf24;border-radius:12px;padding:16px 20px;margin-bottom:24px;">
+                <p style="margin:0;font-size:13px;color:#92400e;"><strong>Security tip:</strong> You can change your password any time after logging in from your profile settings.</p>
+            </div>
+
+            <div style="background:linear-gradient(135deg,rgba(102,126,234,0.08),rgba(118,75,162,0.08));border:1px solid rgba(102,126,234,0.2);border-radius:14px;padding:20px 24px;margin-bottom:24px;">
+                <h3 style="color:#667eea;margin:0 0 12px;font-size:15px;">Getting Started</h3>
+                <ol style="margin:0;padding-left:18px;color:#4b5563;">
+                    <li style="margin:6px 0;">Visit <a href="${portalUrl}" style="color:#667eea;font-weight:600;">${portalUrl}</a></li>
+                    <li style="margin:6px 0;">Enter your email and password above</li>
+                    <li style="margin:6px 0;">Access your notes, tests, and class schedule</li>
                 </ol>
             </div>
 
-            <div style="background: linear-gradient(135deg, rgba(102,126,234,0.1), rgba(118,75,162,0.1)); border: 2px solid rgba(102,126,234,0.3); border-radius: 16px; padding: 24px; margin: 24px 0;">
-                <h3 style="color: #667eea; margin-top: 0;">📚 Getting Started</h3>
-                <ul style="margin: 16px 0; padding-left: 20px;">
-                    <li style="margin: 8px 0;"><strong>Student Portal:</strong> Access your notes, tests, and class materials</li>
-                    <li style="margin: 8px 0;"><strong>Payment Information:</strong> Payment details will be shared by your teacher</li>
-                    <li style="margin: 8px 0;"><strong>Class Schedule:</strong> You'll receive your personalized schedule soon</li>
-                </ul>
-            </div>
+            <p style="color:#6b7280;font-size:14px;">Questions? Just reply to this email — we're here to help!</p>
 
-            <p style="margin-top: 32px;">If you have any questions, don't hesitate to reach out. We're here to help! 💜</p>
-
-            <div style="margin-top: 40px; padding-top: 24px; border-top: 2px solid rgba(102,126,234,0.2);">
-                <p style="margin: 8px 0;">Best regards,</p>
-                <p style="margin: 8px 0; font-weight: 600; color: #667eea;">ARNOMA Team</p>
-                <div style="margin-top: 20px; padding: 16px; background: linear-gradient(135deg, rgba(102,126,234,0.08), rgba(118,75,162,0.08)); border-radius: 12px; border: 1px solid rgba(102,126,234,0.2);">
-                    <p style="margin: 6px 0; font-size: 13px; color: #6b7280;">
-                        <em>This email was sent automatically from ARNOMA Student Management System</em>
-                    </p>
-                </div>
+            <div style="margin-top:32px;padding-top:20px;border-top:1px solid rgba(102,126,234,0.2);">
+                <p style="margin:4px 0;font-size:14px;">Best regards,</p>
+                <p style="margin:4px 0;font-weight:700;color:#667eea;font-size:15px;">ARNOMA Team</p>
             </div>
         </div>
     </div>
 </body>
 </html>`;
 
-              const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
-              const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
-              
               const emailResponse = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
                 method: 'POST',
                 headers: {
@@ -4270,39 +4328,42 @@
                 },
                 body: JSON.stringify({
                   to: email,
-                  subject: '🎓 Welcome to ARNOMA - Your Account is Active!',
+                  subject: 'Welcome to ARNOMA - Your Login Credentials',
                   html: welcomeEmailHTML
                 })
               });
 
               if (emailResponse.ok) {
-                debugLog('✅ Welcome email sent to:', email);
+                debugLog('✅ Credentials email sent to:', email);
               } else {
-                console.warn('⚠️ Failed to send welcome email, but student was created successfully');
+                console.warn('⚠️ Failed to send credentials email, but student was created successfully');
               }
             } catch (emailError) {
               console.warn('⚠️ Email sending failed:', emailError);
               // Don't throw - student creation succeeded
             }
           }
-          
-          // Delete from waiting list
+
+          // ── Step 4: Remove from waiting list ────────────────────
           const { error: deleteError } = await supabaseClient
             .from('student_waiting_list')
             .delete()
             .eq('id', id);
-          
+
           if (deleteError) throw deleteError;
-          
+
+          const credentialSummary = email
+            ? `Login: ${email}\nPassword: ${tempPassword}\n\nCredentials have been emailed and saved to their profile.`
+            : 'Student added. No email provided — credentials not generated.';
+
           await customAlert(
-            'Success', 
-            `✅ Student account created for ${firstName} ${lastName}!\n\n` +
-            `${email ? 'A welcome email has been sent to ' + email : 'The student has been added to your active students list.'}`
+            'Student Approved',
+            `Student account created for ${firstName} ${lastName}!\n\n${credentialSummary}`
           );
-          
+
           // Reload waiting list
           await loadWaitingList();
-          
+
           // Refresh main student list
           await loadStudents();
           
