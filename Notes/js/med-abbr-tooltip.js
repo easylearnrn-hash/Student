@@ -773,7 +773,54 @@
     'LA':         'Left Atrium',
     'LV':         'Left Ventricle',
     'SVC':        'Superior Vena Cava',
-    'IVC':        'Inferior Vena Cava'
+    'IVC':        'Inferior Vena Cava',
+
+
+    /* ── Found via Audit ── */
+    'NCLEX':      'National Council Licensure Examination',
+    'ACNHS':      'Armenian College of Nursing & Health Sciences',
+    'SNS':        'Sympathetic Nervous System',
+    'IUD':        'Intrauterine Device',
+    'VEGF':       'Vascular Endothelial Growth Factor',
+    'UMN':        'Upper Motor Neuron',
+    'LMN':        'Lower Motor Neuron',
+    'RLQ':        'Right Lower Quadrant',
+    'RUQ':        'Right Upper Quadrant',
+    'LLQ':        'Left Lower Quadrant',
+    'LUQ':        'Left Upper Quadrant',
+    'SCI':        'Spinal Cord Injury',
+    'ILD':        'Interstitial Lung Disease',
+    'SCLC':       'Small Cell Lung Cancer',
+    'NSCLC':      'Non-Small Cell Lung Cancer',
+    'CBT':        'Cognitive Behavioral Therapy',
+    'SLUDGE':     'Salivation, Lacrimation, Urination, Defecation, Gastrointestinal distress, Emesis',
+    'PEP':        'Post-Exposure Prophylaxis / Positive Expiratory Pressure',
+    'PAH':        'Pulmonary Arterial Hypertension',
+    'TORCH':      'Toxoplasmosis, Other, Rubella, Cytomegalovirus, Herpes Simplex',
+    'BCC':        'Basal Cell Carcinoma',
+    'SCC':        'Squamous Cell Carcinoma',
+    'ELISA':      'Enzyme-Linked Immunosorbent Assay',
+    'HIT':        'Heparin-Induced Thrombocytopenia',
+    'PPH':        'Postpartum Hemorrhage',
+    'AACG':       'Acute Angle-Closure Glaucoma',
+    'POAG':       'Primary Open-Angle Glaucoma',
+    'EENT':       'Eyes, Ears, Nose, Throat',
+    'ANA':        'Antinuclear Antibody',
+    'AFP':        'Alpha-Fetoprotein',
+    'C3':         'Complement Component 3 / Cervical Spine 3',
+    'C4':         'Complement Component 4 / Cervical Spine 4',
+    'PDR':        'Proliferative Diabetic Retinopathy',
+    'NPDR':       'Non-Proliferative Diabetic Retinopathy',
+  
+    /* ── Found via General Audit ── */
+    'CN':         'Cranial Nerve',
+    'UI':         'Urinary Incontinence / User Interface',
+    'MG':         'Myasthenia Gravis / Milligram',
+    'UV':         'Ultraviolet',
+    'ART':        'Antiretroviral Therapy',
+    'ASAP':       'As Soon As Possible',
+    'HAP':        'Hospital-Acquired Pneumonia',
+    'CAP':        'Community-Acquired Pneumonia',
   };
 
   /* ─────────────────────────────────────────────────────────────
@@ -868,6 +915,26 @@
           fullTerm = (path.indexOf('cardio') !== -1 || path.indexOf('ekg') !== -1) ? 'ST Segment (EKG)' : 'Speech Therapy';
         } else if (matched === 'CI') {
           fullTerm = path.indexOf('cardio') !== -1 ? 'Cardiac Index' : 'Contraindication';
+        } else if (matched === 'UI') {
+          fullTerm = (path.indexOf('renal') !== -1 || path.indexOf('urin') !== -1) ? 'Urinary Incontinence' : 'User Interface';
+        } else if (matched === 'MG') {
+          fullTerm = path.indexOf('neuro') !== -1 ? 'Myasthenia Gravis' : 'Milligram';
+        } else if (matched === 'PEP') {
+          fullTerm = path.indexOf('respir') !== -1 ? 'Positive Expiratory Pressure' : 'Post-Exposure Prophylaxis';
+        } else if (matched === 'C3') {
+          fullTerm = (path.indexOf('immuno') !== -1 || path.indexOf('renal') !== -1) ? 'Complement Component 3' : 'Cervical Spine 3';
+        } else if (matched === 'C4') {
+          fullTerm = (path.indexOf('immuno') !== -1 || path.indexOf('renal') !== -1) ? 'Complement Component 4' : 'Cervical Spine 4';
+        } else if (matched === 'UI') {
+          fullTerm = (path.indexOf('renal') !== -1 || path.indexOf('urin') !== -1) ? 'Urinary Incontinence' : 'User Interface';
+        } else if (matched === 'MG') {
+          fullTerm = path.indexOf('neuro') !== -1 ? 'Myasthenia Gravis' : 'Milligram';
+        } else if (matched === 'PEP') {
+          fullTerm = path.indexOf('respir') !== -1 ? 'Positive Expiratory Pressure' : 'Post-Exposure Prophylaxis';
+        } else if (matched === 'C3') {
+          fullTerm = (path.indexOf('immuno') !== -1 || path.indexOf('renal') !== -1) ? 'Complement Component 3' : 'Cervical Spine 3';
+        } else if (matched === 'C4') {
+          fullTerm = (path.indexOf('immuno') !== -1 || path.indexOf('renal') !== -1) ? 'Complement Component 4' : 'Cervical Spine 4';
         } else if (matched === 'CO') {
           fullTerm = (path.indexOf('respir') !== -1 || path.indexOf('tox') !== -1) ? 'Carbon Monoxide' : 'Cardiac Output';
         } else {
