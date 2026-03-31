@@ -360,34 +360,55 @@
       '<title>' + noteTitle.replace(/</g,'&lt;') + ' \u2014 Print</title>\n' +
       styleHtml +
       '<style>\n' +
-      /* ── Override dark theme → white paper, black ink ── */
-      ':root{--bg:#fff;--surface:#f7f7f7;--surface2:#efefef;' +
-        '--border:#d0d0d0;--gold:#8a6a1a;--gold-light:#7a5c10;' +
-        '--text:#111;--text-muted:#444;--text-dim:#666;' +
-        '--red:#b91c1c;--green:#166534;--blue:#1d4ed8;' +
-        '--purple:#7e22ce;--orange:#c2410c;--yellow:#92400e;--radius:8px;}\n' +
+      /* ── Nuclear white-paper override: blast every dark bg/color ── */
+      ':root{--bg:#fff!important;--surface:#fff!important;--surface2:#fff!important;' +
+        '--bg-deep:#fff!important;--bg-card:#fff!important;--bg-alt:#fff!important;' +
+        '--border:#d0d0d0!important;--gold:#8a6a1a!important;--gold-light:#7a5c10!important;' +
+        '--text:#111!important;--text-muted:#444!important;--text-dim:#666!important;' +
+        '--red:#b91c1c!important;--green:#166534!important;--blue:#1d4ed8!important;' +
+        '--purple:#7e22ce!important;--orange:#c2410c!important;--yellow:#92400e!important;--radius:8px!important;}\n' +
+      /* Force white bg on everything — this is the nuclear rule */
+      '*{background-color:#fff!important;color:#111!important;' +
+        'border-color:#ccc!important;box-shadow:none!important;' +
+        'text-shadow:none!important;-webkit-print-color-adjust:exact;}\n' +
+      /* Re-allow transparent so layout isn't broken, then selectively re-color */
+      '*[style*="background"]{background-color:#fff!important;}\n' +
       'html,body{background:#fff!important;color:#111!important;margin:0;padding:24px 40px 80px;max-width:860px;margin:0 auto;}\n' +
-      'h1,h2,h3,h4,p,li,td,th{color:inherit!important;}\n' +
+      'h1{color:#111!important;}\n' +
       'h2{color:#7a5c10!important;border-color:#ccc!important;}\n' +
       'h3{color:#1d4ed8!important;}\n' +
-      '.card{background:#f9f9f9!important;border-color:#ccc!important;}\n' +
-      '.card.gold{background:rgba(138,106,26,0.05)!important;border-color:rgba(138,106,26,0.3)!important;}\n' +
-      '.card.red{background:rgba(185,28,28,0.04)!important;border-color:rgba(185,28,28,0.25)!important;}\n' +
-      '.card.blue{background:rgba(29,78,216,0.04)!important;border-color:rgba(29,78,216,0.25)!important;}\n' +
-      '.card.green{background:rgba(22,101,52,0.04)!important;border-color:rgba(22,101,52,0.25)!important;}\n' +
-      '.card.purple{background:rgba(126,34,206,0.04)!important;border-color:rgba(126,34,206,0.25)!important;}\n' +
-      '.badge-red{color:#b91c1c!important;background:rgba(185,28,28,0.07)!important;border-color:rgba(185,28,28,0.2)!important;}\n' +
-      '.badge-blue{color:#1d4ed8!important;background:rgba(29,78,216,0.07)!important;border-color:rgba(29,78,216,0.2)!important;}\n' +
-      '.badge-gold{color:#8a6a1a!important;background:rgba(138,106,26,0.07)!important;border-color:rgba(138,106,26,0.2)!important;}\n' +
-      '.badge-green{color:#166534!important;background:rgba(22,101,52,0.07)!important;border-color:rgba(22,101,52,0.2)!important;}\n' +
-      '.badge-purple{color:#7e22ce!important;background:rgba(126,34,206,0.07)!important;border-color:rgba(126,34,206,0.2)!important;}\n' +
-      '.badge-orange{color:#c2410c!important;background:rgba(194,65,12,0.07)!important;border-color:rgba(194,65,12,0.2)!important;}\n' +
-      '.mini-table th{background:#eee!important;color:#111!important;}\n' +
-      '.mini-table td{border-color:#ddd!important;color:#111!important;}\n' +
-      '.mini-table tr:nth-child(even) td{background:#f5f5f5!important;}\n' +
-      '.alert{background:#f7f7f7!important;border-color:#bbb!important;}\n' +
-      '.alert-title{color:#111!important;}\n' +
-      '.note-tag{color:#8a6a1a!important;background:rgba(138,106,26,0.07)!important;border-color:rgba(138,106,26,0.25)!important;}\n' +
+      'h4,h5,h6,p,li,td,th,span,div{color:#111!important;}\n' +
+      /* Cards — white bg, light border */
+      '.card,.card *{background:#fff!important;border-color:#bbb!important;}\n' +
+      '.card.gold,.card.gold *{background:#fff!important;border-color:rgba(138,106,26,0.4)!important;}\n' +
+      '.card.red,.card.red *{background:#fff!important;border-color:rgba(185,28,28,0.35)!important;}\n' +
+      '.card.blue,.card.blue *{background:#fff!important;border-color:rgba(29,78,216,0.35)!important;}\n' +
+      '.card.green,.card.green *{background:#fff!important;border-color:rgba(22,101,52,0.35)!important;}\n' +
+      '.card.purple,.card.purple *{background:#fff!important;border-color:rgba(126,34,206,0.35)!important;}\n' +
+      /* Restore colored text inside colored cards */
+      '.card.gold h2,.card.gold h3{color:#7a5c10!important;}\n' +
+      '.card.red h2,.card.red h3{color:#b91c1c!important;}\n' +
+      '.card.blue h2,.card.blue h3{color:#1d4ed8!important;}\n' +
+      '.card.green h2,.card.green h3{color:#166534!important;}\n' +
+      '.card.purple h2,.card.purple h3{color:#7e22ce!important;}\n' +
+      /* Badges */
+      '.badge-red{color:#b91c1c!important;background:#fff!important;border-color:rgba(185,28,28,0.4)!important;}\n' +
+      '.badge-blue{color:#1d4ed8!important;background:#fff!important;border-color:rgba(29,78,216,0.4)!important;}\n' +
+      '.badge-gold{color:#8a6a1a!important;background:#fff!important;border-color:rgba(138,106,26,0.4)!important;}\n' +
+      '.badge-green{color:#166534!important;background:#fff!important;border-color:rgba(22,101,52,0.4)!important;}\n' +
+      '.badge-purple{color:#7e22ce!important;background:#fff!important;border-color:rgba(126,34,206,0.4)!important;}\n' +
+      '.badge-orange{color:#c2410c!important;background:#fff!important;border-color:rgba(194,65,12,0.4)!important;}\n' +
+      /* Tables */
+      '.mini-table,.mini-table *{background:#fff!important;border-color:#ccc!important;color:#111!important;}\n' +
+      '.mini-table th{background:#f0f0f0!important;color:#111!important;}\n' +
+      '.mini-table tr:nth-child(even) td{background:#f8f8f8!important;}\n' +
+      /* Alerts, tags */
+      '.alert,.alert *{background:#f8f8f8!important;border-color:#bbb!important;color:#111!important;}\n' +
+      '.alert-title{color:#111!important;font-weight:700;}\n' +
+      '.note-tag{color:#8a6a1a!important;background:#fff!important;border-color:rgba(138,106,26,0.35)!important;}\n' +
+      /* Images keep their look; canvases keep backgrounds for ECG grids etc. */
+      'img{background:transparent!important;}\n' +
+      'canvas{background:#fff!important;}\n' +
       /* ── Print header ── */
       '.arnoma-print-header{display:flex;justify-content:space-between;align-items:flex-end;' +
         'border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:28px;page-break-inside:avoid;}\n' +
