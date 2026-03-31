@@ -4400,18 +4400,30 @@
           if (student.show_in_grid === false || student.show_in_grid === 'false') return;
 
           const unpaidDates = getUnpaidClassDates(student);
-          if (unpaidDates.length === 0) return;
+          const currentBalance = parseFloat(student.balance || 0);
+          const ledgerDebt = currentBalance < 0 ? Math.abs(currentBalance) : 0;
+          
+          if (unpaidDates.length === 0 && ledgerDebt === 0) return;
 
           const pricePerClass = parseFloat(student.price_per_class || 0);
-          const unpaidAmount = unpaidDates.length * pricePerClass;
+          
+          let unpaidAmount = unpaidDates.length * pricePerClass;
+          let unpaidCount = unpaidDates.length;
+
+          // If the ledger indicates larger debt than visible unpaid classes (e.g. from past months)
+          // or they have no visible unpaid classes but still have a negative balance
+          if (ledgerDebt > unpaidAmount) {
+            unpaidAmount = ledgerDebt;
+            unpaidCount = pricePerClass > 0 ? Math.ceil(unpaidAmount / pricePerClass) : unpaidDates.length || 1;
+          }
 
           unpaidDatesByStudent.set(student.id, unpaidDates);
           unpaidStudents.push({
             id: student.id,
             name: student.name,
             group_name: student.group_name,
-            unpaidCount: unpaidDates.length,
-            unpaidAmount
+            unpaidCount: unpaidCount,
+            unpaidAmount: unpaidAmount
           });
         });
 
@@ -4424,8 +4436,12 @@
         if (!selectedIds || selectedIds.length === 0) return;
 
         const records = [];
+        const amountsToCredit = {};
+
         selectedIds.forEach(studentId => {
           const dates = unpaidDatesByStudent.get(studentId) || [];
+          const studentInfo = unpaidStudents.find(s => s.id === studentId);
+          
           dates.forEach(dateStr => {
             if (isExcusedCached(dateStr, studentId)) return;
             records.push({
@@ -4437,52 +4453,53 @@
               notes: 'Bulk excused payment (Calendar)'
             });
           });
+
+          if (studentInfo && studentInfo.unpaidAmount > 0) {
+            amountsToCredit[studentId] = studentInfo.unpaidAmount;
+          }
         });
 
-        if (records.length === 0) {
-          await showConfirmDialog('Bulk Excuse', '<div>No new excused records to add.</div>');
+        if (records.length === 0 && Object.keys(amountsToCredit).length === 0) {
+          await showConfirmDialog('Bulk Excuse', '<div>No new excused records to add or debts to wipe.</div>');
           return;
         }
 
-        const { data: insertedData, error } = await supabaseClient
-          .from('payment_records')
-          .insert(records)
-          .select();
+        // Insert records if any exist
+        if (records.length > 0) {
+          const { data: insertedData, error } = await supabaseClient
+            .from('payment_records')
+            .insert(records)
+            .select();
 
-        if (error) {
-          console.error('❌ Bulk excuse failed:', error);
-          await showConfirmDialog('Bulk Excuse Failed', `<div>${error.message || 'Unable to excuse payments.'}</div>`);
-          return;
-        }
+          if (error) {
+            console.error('❌ Bulk excuse failed:', error);
+            await showConfirmDialog('Bulk Excuse Failed', `<div>${error.message || 'Unable to excuse payments.'}</div>`);
+            return;
+          }
 
-        if (insertedData?.length) {
-          paymentRecordsData.push(...insertedData);
+          if (insertedData?.length) {
+            paymentRecordsData.push(...insertedData);
+          }
+
+          records.forEach(record => {
+            excusedByDateStudent.set(`${record.date}-${record.student_id}`, true);
+            paymentCache.delete(`${record.student_id}-${record.date}`);
+          });
         }
 
         // --- UPDATE STUDENT BALANCE ---
-        // For each student, we must adjust their `balance` by adding the price of the excused classes
+        // For each student, adjusting their `balance` by adding the owed amount
         // so that their "Debt" reduces in Student Manager / Profile.
-        const amountsToCredit = {};
-        records.forEach(record => {
-          const s = studentsData.find(s => s.id === record.student_id);
-          const price = parseFloat(s?.price_per_class || 0);
-          amountsToCredit[record.student_id] = (amountsToCredit[record.student_id] || 0) + price;
-          
-          excusedByDateStudent.set(`${record.date}-${record.student_id}`, true);
-          paymentCache.delete(`${record.student_id}-${record.date}`);
-        });
-
-        // Push updates to database for balance
         for (const [sId, amountOrCredit] of Object.entries(amountsToCredit)) {
           const sIdNum = parseInt(sId);
           const student = studentsData.find(s => s.id === sIdNum);
+          
           if (student && amountOrCredit > 0) {
             const currentBalance = parseFloat(student.balance || 0);
-            // Only increase balance if they are in debt, usually up to 0, but safest to just add the credited amount!
-            // Actually, if we just excuse a class, they no longer OWE it, so their balance goes up by that much.
+            
+            // If they are in debt (-), adding the wiped amount will bring them towards 0
             const newBalance = currentBalance + amountOrCredit;
             
-            // Save to DB
             const { error: balErr } = await supabaseClient
               .from('students')
               .update({ balance: newBalance })
