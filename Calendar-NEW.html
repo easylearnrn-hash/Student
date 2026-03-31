@@ -4338,21 +4338,49 @@
             animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           `;
 
-          const listItems = students.map(s => `
-            <label style="display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);margin-bottom:8px;cursor:pointer;">
-              <input type="checkbox" data-student-id="${s.id}" style="transform:scale(1.1);accent-color:#10b981;">
-              <div style="flex:1;min-width:0;">
-                <div style="color:#fff;font-weight:600;">${s.name}</div>
-                <div style="color:rgba(255,255,255,0.6);font-size:12px;">${s.group_name ? `Group ${s.group_name}` : 'No Group'} • ${s.unpaidCount} unpaid • $${s.unpaidAmount.toFixed(2)}</div>
+          const formatDateForLabel = (dateStr) => {
+            const [y, m, d] = dateStr.split('-').map(n => parseInt(n, 10));
+            const dt = new Date(y, (m || 1) - 1, d || 1);
+            if (Number.isNaN(dt.getTime())) return dateStr;
+            return dt.toLocaleDateString('en-US', {
+              weekday: 'short',
+              month: 'short',
+              day: 'numeric'
+            });
+          };
+
+          const listItems = students.map(s => {
+            const dates = Array.isArray(s.unpaidDates) ? s.unpaidDates : [];
+            const dateRows = dates.length > 0
+              ? dates.map((dateStr) => `
+                  <label style="display:flex;align-items:center;gap:8px;padding:6px 0;color:rgba(255,255,255,0.82);font-size:12px;cursor:pointer;">
+                    <input type="checkbox" data-date-student-id="${s.id}" data-date="${dateStr}" checked style="accent-color:#10b981;">
+                    <span>${formatDateForLabel(dateStr)} <span style="color:rgba(255,255,255,0.55);">(${dateStr})</span></span>
+                  </label>
+                `).join('')
+              : '<div style="color:rgba(255,255,255,0.55);font-size:12px;padding:4px 0;">No unpaid dates found (ledger-only debt).</div>';
+
+            return `
+              <div style="padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);margin-bottom:8px;">
+                <label style="display:flex;align-items:center;gap:12px;cursor:pointer;">
+                  <input type="checkbox" data-student-id="${s.id}" checked style="transform:scale(1.1);accent-color:#10b981;">
+                  <div style="flex:1;min-width:0;">
+                    <div style="color:#fff;font-weight:600;">${s.name}</div>
+                    <div style="color:rgba(255,255,255,0.6);font-size:12px;">${s.group_name ? `Group ${s.group_name}` : 'No Group'} • ${s.unpaidCount} unpaid • $${s.unpaidAmount.toFixed(2)}</div>
+                  </div>
+                </label>
+                <div data-date-list-student-id="${s.id}" style="margin-left:32px;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.08);max-height:130px;overflow:auto;">
+                  ${dateRows}
+                </div>
               </div>
-            </label>
-          `).join('');
+            `;
+          }).join('');
 
           dialog.innerHTML = `
             <h3 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 600; color: #8ab4ff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">Bulk Excuse</h3>
-            <div style="margin-bottom: 16px; color: rgba(255,255,255,0.75); font-size: 14px; line-height: 1.6;">Select students to excuse all unpaid classes.</div>
+            <div style="margin-bottom: 16px; color: rgba(255,255,255,0.75); font-size: 14px; line-height: 1.6;">Choose students, then choose the exact unpaid dates you want to excuse.</div>
             <label style="display:flex;align-items:center;gap:10px;margin-bottom:12px;cursor:pointer;color:rgba(255,255,255,0.75);font-size:13px;">
-              <input type="checkbox" id="bulkExcuseSelectAll" style="accent-color:#8ab4ff;">
+              <input type="checkbox" id="bulkExcuseSelectAll" checked style="accent-color:#8ab4ff;">
               Select all
             </label>
             <div style="max-height:40vh;overflow:auto;padding-right:6px;">
@@ -4368,15 +4396,46 @@
           document.body.appendChild(overlay);
 
           const selectAll = dialog.querySelector('#bulkExcuseSelectAll');
-          const checkboxes = () => Array.from(dialog.querySelectorAll('input[type="checkbox"][data-student-id]'));
+          const studentCheckboxes = () => Array.from(dialog.querySelectorAll('input[type="checkbox"][data-student-id]'));
+          const dateCheckboxesForStudent = (studentId) => Array.from(dialog.querySelectorAll(`input[type="checkbox"][data-date-student-id="${studentId}"]`));
 
           if (selectAll) {
             selectAll.addEventListener('change', () => {
-              checkboxes().forEach(cb => {
+              studentCheckboxes().forEach(cb => {
                 cb.checked = selectAll.checked;
+                dateCheckboxesForStudent(cb.dataset.studentId).forEach(dateCb => {
+                  dateCb.checked = selectAll.checked;
+                });
               });
             });
           }
+
+          studentCheckboxes().forEach(studentCb => {
+            studentCb.addEventListener('change', () => {
+              const dateCbs = dateCheckboxesForStudent(studentCb.dataset.studentId);
+              dateCbs.forEach(cb => {
+                cb.checked = studentCb.checked;
+              });
+
+              const allStudentsChecked = studentCheckboxes().every(cb => cb.checked);
+              if (selectAll) selectAll.checked = allStudentsChecked;
+            });
+          });
+
+          Array.from(dialog.querySelectorAll('input[type="checkbox"][data-date-student-id]')).forEach(dateCb => {
+            dateCb.addEventListener('change', () => {
+              const studentId = dateCb.dataset.dateStudentId;
+              const studentCb = dialog.querySelector(`input[type="checkbox"][data-student-id="${studentId}"]`);
+              const dateCbs = dateCheckboxesForStudent(studentId);
+              const anyDateChecked = dateCbs.some(cb => cb.checked);
+              if (studentCb) {
+                studentCb.checked = anyDateChecked;
+              }
+
+              const allStudentsChecked = studentCheckboxes().every(cb => cb.checked);
+              if (selectAll) selectAll.checked = allStudentsChecked;
+            });
+          });
 
           dialog.querySelector('#bulkExcuseCancel').onclick = () => {
             overlay.remove();
@@ -4384,11 +4443,19 @@
           };
 
           dialog.querySelector('#bulkExcuseApply').onclick = () => {
-            const selectedIds = checkboxes()
+            const selectedIds = studentCheckboxes()
               .filter(cb => cb.checked)
               .map(cb => parseInt(cb.dataset.studentId, 10));
+
+            const selectedDatesByStudent = new Map();
+            selectedIds.forEach(studentId => {
+              const selectedDates = dateCheckboxesForStudent(studentId)
+                .filter(cb => cb.checked)
+                .map(cb => cb.dataset.date);
+              selectedDatesByStudent.set(studentId, selectedDates);
+            });
             overlay.remove();
-            resolve(selectedIds);
+            resolve({ selectedIds, selectedDatesByStudent });
           };
         });
       }
@@ -4430,7 +4497,8 @@
             name: student.name,
             group_name: student.group_name,
             unpaidCount: unpaidCount,
-            unpaidAmount: unpaidAmount
+            unpaidAmount: unpaidAmount,
+            unpaidDates: unpaidDates
           });
         });
 
@@ -4439,14 +4507,22 @@
           return;
         }
 
-        const selectedIds = await showBulkExcuseDialog(unpaidStudents);
-        if (!selectedIds || selectedIds.length === 0) return;
+        const selection = await showBulkExcuseDialog(unpaidStudents);
+        if (!selection || !selection.selectedIds || selection.selectedIds.length === 0) return;
+
+        const selectedIds = selection.selectedIds;
+        const selectedDatesByStudent = selection.selectedDatesByStudent || new Map();
 
         const records = [];
-        const studentsToWipe = []; // always zero-out balance for selected students
+        const balanceAdjustments = new Map();
 
         selectedIds.forEach(studentId => {
-          const dates = unpaidDatesByStudent.get(studentId) || [];
+          const availableDates = unpaidDatesByStudent.get(studentId) || [];
+          const selectedDates = selectedDatesByStudent.get(studentId) || [];
+          const selectedDateSet = new Set(selectedDates);
+          const dates = availableDates.filter(dateStr => selectedDateSet.has(dateStr));
+
+          if (dates.length === 0) return;
           
           dates.forEach(dateStr => {
             // Don't skip already-excused — we may need the record to exist for portal to see it
@@ -4461,12 +4537,11 @@
             });
           });
 
-          // Always queue this student's balance to be zeroed out
-          studentsToWipe.push(studentId);
+          balanceAdjustments.set(studentId, dates.length);
         });
 
-        if (records.length === 0 && studentsToWipe.length === 0) {
-          await showConfirmDialog('Bulk Excuse', '<div>No new excused records to add or debts to wipe.</div>');
+        if (records.length === 0 && balanceAdjustments.size === 0) {
+          await showConfirmDialog('Bulk Excuse', '<div>No dates selected to excuse.</div>');
           return;
         }
 
@@ -4493,26 +4568,37 @@
           });
         }
 
-        // --- ZERO OUT STUDENT BALANCE ---
-        // Directly set balance=0 for every selected student.
-        // Works regardless of whether the DB stores debt as positive or negative.
-        for (const studentId of studentsToWipe) {
+        // --- ADJUST STUDENT BALANCE BASED ON SELECTED DATES ---
+        for (const [studentId, selectedCount] of balanceAdjustments.entries()) {
           const sIdNum = parseInt(studentId);
           const student = studentsData.find(s => s.id === sIdNum);
           if (!student) continue;
 
           const currentBal = parseFloat(student.balance || 0);
-          if (currentBal === 0) continue; // Already zero, skip
+          const pricePerClass = parseFloat(student.price_per_class || 0);
+          if (!Number.isFinite(pricePerClass) || pricePerClass <= 0) continue;
+
+          const reduction = selectedCount * pricePerClass;
+          let newBalance = currentBal;
+
+          // Move balance toward zero according to stored sign convention.
+          if (currentBal > 0) {
+            newBalance = Math.max(0, currentBal - reduction);
+          } else if (currentBal < 0) {
+            newBalance = Math.min(0, currentBal + reduction);
+          }
+
+          if (newBalance === currentBal) continue;
 
           const { error: balErr } = await supabaseClient
             .from('students')
-            .update({ balance: 0 })
+            .update({ balance: newBalance })
             .eq('id', sIdNum);
 
           if (!balErr) {
-            student.balance = 0;
+            student.balance = newBalance;
           } else {
-            console.error('❌ Failed to zero balance for student', sIdNum, balErr);
+            console.error('❌ Failed to adjust balance for student', sIdNum, balErr);
           }
         }
 
