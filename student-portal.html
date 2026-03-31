@@ -7836,11 +7836,18 @@
       let unpaidSource = 'none';
       const ledgerAmount = Number.isFinite(numericBalance) ? numericBalance : null;
 
-      // Use schedule calculation if it's higher than ledger
-      if (!Number.isFinite(numericBalance) && scheduleUnpaidAmount > 0) {
+      // Use schedule calculation only if the ledger has NO explicit value set.
+      // If the admin has set balance=0, that is an intentional "all clear" — do NOT
+      // override it with a higher schedule amount (which would re-show wiped debt).
+      const ledgerIsExplicitlySet = Number.isFinite(numericBalance);
+      const ledgerIsExplicitlyClear = ledgerIsExplicitlySet && numericBalance >= 0; // 0 or positive = no debt
+
+      if (!ledgerIsExplicitlySet && scheduleUnpaidAmount > 0) {
+        // No ledger value at all — fall back to schedule
         displayUnpaidAmount = scheduleUnpaidAmount;
         unpaidSource = 'schedule';
-      } else if (scheduleUnpaidAmount > totalUnpaid) {
+      } else if (!ledgerIsExplicitlyClear && scheduleUnpaidAmount > totalUnpaid) {
+        // Ledger shows debt AND schedule shows more — use higher of the two
         displayUnpaidAmount = scheduleUnpaidAmount;
         unpaidSource = 'schedule';
       } else if (totalUnpaid > 0) {

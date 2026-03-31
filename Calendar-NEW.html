@@ -4439,13 +4439,13 @@
         if (!selectedIds || selectedIds.length === 0) return;
 
         const records = [];
-        const amountsToCredit = {};
+        const studentsToWipe = []; // always zero-out balance for selected students
 
         selectedIds.forEach(studentId => {
           const dates = unpaidDatesByStudent.get(studentId) || [];
-          const studentInfo = unpaidStudents.find(s => s.id === studentId);
           
           dates.forEach(dateStr => {
+            // Don't skip already-excused — we may need the record to exist for portal to see it
             if (isExcusedCached(dateStr, studentId)) return;
             records.push({
               student_id: studentId,
@@ -4457,20 +4457,16 @@
             });
           });
 
-          if (studentInfo && studentInfo.unpaidAmount > 0) {
-            // Always use the live DB balance to avoid stale-data partial wipes
-            const liveStudent = studentsData.find(s => s.id === studentId);
-            const liveBalance = parseFloat(liveStudent?.balance || 0);
-            amountsToCredit[studentId] = liveBalance > 0 ? liveBalance : studentInfo.unpaidAmount;
-          }
+          // Always queue this student's balance to be zeroed out
+          studentsToWipe.push(studentId);
         });
 
-        if (records.length === 0 && Object.keys(amountsToCredit).length === 0) {
+        if (records.length === 0 && studentsToWipe.length === 0) {
           await showConfirmDialog('Bulk Excuse', '<div>No new excused records to add or debts to wipe.</div>');
           return;
         }
 
-        // Insert records if any exist
+        // Insert excused payment records if any exist
         if (records.length > 0) {
           const { data: insertedData, error } = await supabaseClient
             .from('payment_records')
@@ -4493,29 +4489,28 @@
           });
         }
 
-        // --- UPDATE STUDENT BALANCE ---
-        // For each student, adjusting their `balance` by adding the owed amount
-        // so that their "Debt" reduces in Student Manager / Profile.
-        for (const [sId, amountOrCredit] of Object.entries(amountsToCredit)) {
-          const sIdNum = parseInt(sId);
+        // --- ZERO OUT STUDENT BALANCE ---
+        // Set balance to exactly 0 for every selected student.
+        // This is the authoritative fix — the student portal reads balance as the
+        // source of truth, so zeroing it out clears the debt display completely.
+        for (const studentId of studentsToWipe) {
+          const sIdNum = parseInt(studentId);
           const student = studentsData.find(s => s.id === sIdNum);
-          
-          if (student && amountOrCredit > 0) {
-            const currentBalance = parseFloat(student.balance || 0);
-            
-            // Negative balance = debt. Adding the excused amount brings it toward 0.
-            // Clamp at 0 so we never accidentally flip into credit.
-            let newBalance = currentBalance + amountOrCredit;
-            if (currentBalance < 0 && newBalance > 0) newBalance = 0;
-            
-            const { error: balErr } = await supabaseClient
-              .from('students')
-              .update({ balance: newBalance })
-              .eq('id', sIdNum);
-              
-            if (!balErr) {
-              student.balance = newBalance; // Update local state!
-            }
+          if (!student) continue;
+
+          const currentBal = parseFloat(student.balance || 0);
+          // Only update if they actually have debt (negative balance)
+          if (currentBal >= 0) continue;
+
+          const { error: balErr } = await supabaseClient
+            .from('students')
+            .update({ balance: 0 })
+            .eq('id', sIdNum);
+
+          if (!balErr) {
+            student.balance = 0;
+          } else {
+            console.error('❌ Failed to zero balance for student', sIdNum, balErr);
           }
         }
 
