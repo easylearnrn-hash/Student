@@ -1005,11 +1005,21 @@
           }
 
           // Check if this is the hardcoded admin email
-          const ADMIN_EMAIL = 'hrachfilm@gmail.com';
+          const ADMIN_EMAILS = ['hrachfilm@gmail.com', 'narine@arnoma.com'];
           
-          if (data.user.email === ADMIN_EMAIL) {
+          if (ADMIN_EMAILS.includes((data.user.email || '').toLowerCase())) {
             // Admin account - no student record needed
             console.log('✅ Admin login successful:', data.user.email);
+
+            // Persist session to localStorage NOW so shared-auth.js finds it immediately on redirect
+            if (typeof ArnomaAuth !== 'undefined' && ArnomaAuth.saveSessionSnapshot) {
+              ArnomaAuth.saveSessionSnapshot(data.session);
+            }
+            if (rememberMe) {
+              localStorage.setItem('arnoma:remember-me', 'true');
+              localStorage.setItem('arnoma:session-expiry', String(Date.now() + (30 * 24 * 60 * 60 * 1000)));
+            }
+
             showSuccess('Login successful! Redirecting to payment records...');
 
             // Redirect to Payment Records (admin dashboard)
@@ -1048,6 +1058,11 @@
 
           console.log('✅ Admin login successful:', data.user.email);
           showSuccess('Login successful! Redirecting to payment records...');
+
+          // Persist session immediately before redirect
+          if (typeof ArnomaAuth !== 'undefined' && ArnomaAuth.saveSessionSnapshot) {
+            ArnomaAuth.saveSessionSnapshot(data.session);
+          }
 
           // Redirect to Payment Records (admin dashboard)
           setTimeout(() => {
@@ -1296,14 +1311,25 @@
             .eq('auth_user_id', session.user.id)
             .maybeSingle();
 
-          if (adminError || studentError) {
-            console.error('❌ Database check failed, clearing invalid session:', { adminError, studentError });
+          // Only treat studentError as fatal if it's a real error (not just "row not found")
+          // adminError is non-fatal — RLS can block admin_accounts reads even for valid admins
+          const isHardStudentError = studentError && studentError.code !== 'PGRST116';
+          if (isHardStudentError) {
+            console.error('❌ Student DB check failed, clearing invalid session:', studentError);
             await supabase.auth.signOut();
             localStorage.clear();
             sessionStorage.clear();
             console.log('🔄 Session cleared, please log in again');
             return;
           }
+
+          if (adminError) {
+            console.warn('⚠️ admin_accounts query failed (possibly RLS), falling back to email check:', adminError.message);
+          }
+
+          // Also check hardcoded admin email as fallback if DB admin check failed
+          const HARDCODED_ADMIN_EMAILS = ['hrachfilm@gmail.com', 'narine@arnoma.com'];
+          const isHardcodedAdmin = HARDCODED_ADMIN_EMAILS.includes((session.user.email || '').toLowerCase());
 
           if (studentData && studentData.role !== 'admin') {
             // Check for a pending post-login redirect (e.g. from Protected-PDF-Viewer)
@@ -1315,7 +1341,7 @@
               console.log('✅ Student found, redirecting to portal');
               window.location.href = 'student-portal.html';
             }
-          } else if (adminData || (studentData && studentData.role === 'admin')) {
+          } else if (adminData || (studentData && studentData.role === 'admin') || isHardcodedAdmin) {
             console.log('👑 Admin detected, redirecting to Payment Records');
             window.location.href = 'Payment-Records.html';
           } else {
