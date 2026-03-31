@@ -2914,6 +2914,12 @@
       border: 1px solid rgba(138, 112, 64, 0.25);
     }
     
+    .status-badge.excused {
+      background: rgba(16, 185, 129, 0.15);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.28);
+    }
+    
     .payment-amount {
       font-family: var(--font-sans);
       font-weight: 700;
@@ -4635,6 +4641,15 @@
           return null;
         }
         // Admin chat mode is active, continue without student session
+        return null;
+      }
+
+      // Hard admin bypass — if admin flag or admin email, exit student portal
+      const ADMIN_EMAILS = ['hrachfilm@gmail.com', 'narine@arnoma.com'];
+      const isAdminFlagged = localStorage.getItem('arnoma:is_admin') === 'true';
+      const isAdminEmail = ADMIN_EMAILS.includes((session.user.email || '').toLowerCase());
+      if (isAdminFlagged || isAdminEmail) {
+        window.location.href = 'Payment-Records.html';
         return null;
       }
       
@@ -6368,6 +6383,15 @@
         
         if (session && session.user) {
           currentEmail = session.user.email;
+
+          // Hard admin bypass — keep admins out of student portal entirely
+          const ADMIN_EMAILS = ['hrachfilm@gmail.com', 'narine@arnoma.com'];
+          const isAdminFlagged = localStorage.getItem('arnoma:is_admin') === 'true';
+          const isAdminEmail = ADMIN_EMAILS.includes((currentEmail || '').toLowerCase());
+          if (isAdminFlagged || isAdminEmail) {
+            window.location.href = 'Payment-Records.html';
+            return;
+          }
           
           // Check if admin is viewing as a student
           const studentLoginId = sessionStorage.getItem('student_login_id') || localStorage.getItem('student_login_id');
@@ -7673,8 +7697,8 @@
         // Check if there's a payment covering this class
         // 🔧 FIX: Use dateString property directly (no timezone conversion!)
         const hasPaidPayment = payments.some(p => {
-          // 🔥 CRITICAL FIX: Include BOTH paid and credit payments
-          if (p.status !== 'paid' && p.status !== 'credit') return false;
+          // 🔥 CRITICAL FIX: Include paid, credit, and excused payments
+          if (p.status !== 'paid' && p.status !== 'credit' && p.status !== 'excused') return false;
           
           // Use pre-extracted dateString to avoid timezone conversion issues
           const paymentDateStr = p.dateString || (p.date instanceof Date 
@@ -8034,6 +8058,9 @@
                 break;
               case 'absent':
                 statusText = 'Absent';
+                break;
+              case 'excused':
+                statusText = 'Excused';
                 break;
               case 'cancelled':
                 statusText = 'Cancelled';
