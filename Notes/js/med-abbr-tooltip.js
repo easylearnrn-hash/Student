@@ -759,6 +759,82 @@
   }
 
   /* ─────────────────────────────────────────────────────────────
+   *  BACK LINK: rewrite "Back to Notes" to "Back to Portal"
+   * ───────────────────────────────────────────────────────────── */
+
+  function fixBackToPortalLink() {
+    if (!document.body) return;
+
+    // Prefer explicit back buttons by class
+    var backLink = document.querySelector('.back-btn, .back-link, .back_btn');
+    var created = false;
+
+    // If no class-based match, fall back to link text match
+    if (!backLink) {
+      var links = document.querySelectorAll('a');
+      for (var i = 0; i < links.length; i++) {
+        var text = (links[i].textContent || '').trim();
+        if (/back to notes/i.test(text)) {
+          backLink = links[i];
+          break;
+        }
+      }
+    }
+
+    // If nothing exists, create a fixed-position back link so it's always visible
+    if (!backLink) {
+      backLink = document.createElement('a');
+      backLink.className = 'back-btn';
+      document.body.insertBefore(backLink, document.body.firstChild);
+      created = true;
+    }
+
+    // Build the portal URL by walking up the path to the site root.
+    // Notes live at varying depths (Notes/Category/file.html = 2 levels deep,
+    // or Notes/file.html = 1 level deep). We count the number of slashes after
+    // the origin to determine how many "../" we need, then fall back to the
+    // absolute URL from origin as a safety net.
+    var portalUrl;
+    try {
+      // Count path segments (excluding empty first segment from leading slash)
+      var pathParts = window.location.pathname.replace(/^\//, '').split('/');
+      // pathParts.length - 1 = number of directories above the current file
+      var depth = pathParts.length - 1; // e.g. "Notes/Category/file.html" → 2
+      var ups = '';
+      for (var d = 0; d < depth; d++) { ups += '../'; }
+      portalUrl = ups + 'student-portal.html';
+    } catch (err) {
+      portalUrl = '/student-portal.html';
+    }
+    backLink.setAttribute('href', portalUrl);
+    backLink.textContent = '← Back to Portal';
+    backLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      // Resolve to absolute so we always land on the right page
+      var a = document.createElement('a');
+      a.href = portalUrl;
+      window.location.href = a.href;
+    });
+
+    if (created) {
+      backLink.style.position = 'fixed';
+      backLink.style.top = '14px';
+      backLink.style.left = '14px';
+      backLink.style.zIndex = '9999';
+      backLink.style.padding = '6px 12px';
+      backLink.style.borderRadius = '999px';
+      backLink.style.border = '1px solid rgba(45, 212, 191, 0.45)';
+      backLink.style.background = 'rgba(7, 18, 40, 0.65)';
+      backLink.style.color = '#2dd4bf';
+      backLink.style.fontSize = '12px';
+      backLink.style.fontWeight = '600';
+      backLink.style.letterSpacing = '.02em';
+      backLink.style.textDecoration = 'none';
+      backLink.style.backdropFilter = 'blur(6px)';
+    }
+  }
+
+  /* ─────────────────────────────────────────────────────────────
    *  TOOLTIP ENGINE
    * ───────────────────────────────────────────────────────────── */
 
@@ -798,10 +874,14 @@
    * ───────────────────────────────────────────────────────────── */
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', autoWrapAbbreviations);
+    document.addEventListener('DOMContentLoaded', function () {
+      autoWrapAbbreviations();
+      fixBackToPortalLink();
+    });
   } else {
     // DOM is already ready (script loaded with defer or after parse)
     autoWrapAbbreviations();
+    fixBackToPortalLink();
   }
 
 })();
