@@ -303,18 +303,19 @@
       return false;
     }
 
-    // ── Resolve PDF URL (path → public URL) ──────────────────────
+    // ── Resolve PDF URL (storage path → signed URL) ──────────────
+    // The 'student-notes' bucket is PRIVATE — must use createSignedUrl, not getPublicUrl.
     async function resolveURL(raw) {
       if (!raw) throw new Error('No PDF URL provided');
-      // Already a full URL — use as-is
+      // Already a full https URL — use as-is (e.g. already signed, or external link)
       if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
-      // Relative storage path — build public URL
-      // Strip leading slash if present
+      // Storage path — generate a 1-hour signed URL
       const cleanPath = raw.replace(/^\/+/, '');
-      const { data } = supabaseClient.storage.from('student-notes').getPublicUrl(cleanPath);
-      if (data?.publicUrl && data.publicUrl.startsWith('https://')) return data.publicUrl;
-      // Manual fallback construction in case SDK returns empty
-      return `${SUPABASE_URL}/storage/v1/object/public/student-notes/${cleanPath}`;
+      const { data, error } = await supabaseClient.storage
+        .from('student-notes')
+        .createSignedUrl(cleanPath, 3600);
+      if (error || !data?.signedUrl) throw new Error('Could not generate access link for this note. Please try again.');
+      return data.signedUrl;
     }
 
     // ── Watermark ────────────────────────────────────────────────
