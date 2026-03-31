@@ -10622,7 +10622,7 @@
               const rawUrl = note.file_path || note.pdf_url;
               if (!htmlPath && !rawUrl) return [];
               const url = htmlPath || rawUrl;
-              const isHtml = !!(htmlPath || (rawUrl || '').toLowerCase().endsWith('.html'));
+              const isHtml = !!(htmlPath || (rawUrl || '').split('?')[0].toLowerCase().endsWith('.html'));
               return [{
                 title: note.title || 'Note',
                 url: url,
@@ -11316,6 +11316,7 @@
           'placenta previa and abruption': 'Notes/Maternal Health/Placenta-Previa-and-Abruption.html',
           'postpartum and newborn care': 'Notes/Maternal Health/Postpartum-and-Newborn-Care.html',
           'reproductive anatomy and fertilization': 'Notes/Maternal Health/Reproductive-Anatomy-and-Fertilization.html',
+          'fertilization and implantation': 'Notes/Maternal Health/Reproductive-Anatomy-and-Fertilization.html',
           'torch infections and medications': 'Notes/Maternal Health/TORCH-Infections-and-Medications.html',
 
           // ── Medical Terminology ────────────────────────────────────────
@@ -11335,6 +11336,7 @@
           'alzheimers disease': 'Notes/MentalHealth/Alzheimers-Disease.html',
           'anxiety disorders': 'Notes/MentalHealth/Anxiety-Disorders.html',
           'bipolar personality disorders': 'Notes/MentalHealth/Bipolar-Personality-Disorders.html',
+          'bipolar and personality disorders': 'Notes/MentalHealth/Bipolar-Personality-Disorders.html',
           'cognitive impairments adhd': 'Notes/MentalHealth/Cognitive-Impairments-ADHD.html',
           'core ethical principles': 'Notes/MentalHealth/Core-Ethical-Principles.html',
           'defense mechanisms': 'Notes/MentalHealth/Defense-Mechanisms.html',
@@ -11505,35 +11507,44 @@
          */
         function resolveHtmlNotePath(title) {
           if (!title) return null;
-          // Strip emojis, symbols, leading/trailing punctuation, collapse whitespace, lowercase
+          
           function normalise(s) {
-            // Remove emoji via Unicode property escapes (supported in Safari 12+, Chrome 64+)
             let cleaned = s;
             try {
-              cleaned = s.replace(/\p{Emoji_Presentation}/gu, '')
-                         .replace(/\p{Emoji}\uFE0F/gu, '');
+              cleaned = s.replace(/\p{Emoji_Presentation}/gu, '').replace(/\p{Emoji}\uFE0F/gu, '');
             } catch(e) {
-              // Fallback: strip common emoji ranges manually
-              cleaned = s.replace(/[\u{1F000}-\u{1FFFF}]/gu, '')
-                         .replace(/[\u{2600}-\u{27BF}]/gu, '')
-                         .replace(/[\uFE00}-\uFE0F]/g, '');
+              cleaned = s.replace(/[\u{1F000}-\u{1FFFF}]/gu, '').replace(/[\u{2600}-\u{27BF}]/gu, '').replace(/[\uFE00}-\uFE0F]/g, '');
             }
             return cleaned
               .replace(/\.pdf$/i, '')
-              .replace(/[–—]/g, ' ')      // en/em dash → space
+              .replace(/\.html$/i, '') // Also strip .html just in case
+              .replace(/[–—]/g, ' ') // en/em dash → space
+              .replace(/'/g, '') // remove apostrophes completely (e.g. Buerger's -> buergers)
+              .replace(/&/g, ' and ') // replace ampersand with 'and'
               .toLowerCase()
-              .replace(/[^a-z0-9\s']/g, ' ')  // keep letters, digits, apostrophes
+              .replace(/[^a-z0-9\s]/g, ' ') // change all other punctuation to spaces
               .replace(/\s+/g, ' ')
               .trim();
           }
+
           const key = normalise(title);
+          
           // 1. Exact map lookup
           if (HTML_NOTES_MAP[key]) return HTML_NOTES_MAP[key];
-          // 2. Partial match: map key is a substring of the normalised title (handles long/decorated titles)
+          
+          // 2. Exact word-bounded partial match (safest for short keys like "cpr")
+          const paddedKey = ` ${key} `;
           for (const [mapKey, path] of Object.entries(HTML_NOTES_MAP)) {
-            if (key.includes(mapKey) && mapKey.length > 5) return path;
-            if (mapKey.includes(key) && key.length > 5) return path;
+            const paddedMapKey = ` ${mapKey} `;
+            if (paddedKey.includes(paddedMapKey)) return path;
           }
+
+          // 3. Fallback loose match (if we still haven't found it, allow partial word match for longer map keys)
+          for (const [mapKey, path] of Object.entries(HTML_NOTES_MAP)) {
+            if (key.includes(mapKey) && mapKey.length >= 4) return path;
+            if (mapKey.includes(key) && key.length >= 4) return path;
+          }
+
           return null;
         }
 
@@ -12353,7 +12364,7 @@
           const groupPostDate = `${note.date.getFullYear()}-${String(note.date.getMonth() + 1).padStart(2, '0')}-${String(note.date.getDate()).padStart(2, '0')}`;
           // If the attachment URL is a local HTML note, open it directly in a new tab.
           // Otherwise route PDFs through the Protected-PDF-Viewer.
-          const isHtmlNote = attachment.url && attachment.url.toLowerCase().endsWith('.html');
+          const isHtmlNote = attachment.url && attachment.url.split('?')[0].toLowerCase().endsWith('.html');
           const clickHandler = isHtmlNote
             ? `event.stopPropagation(); markNoteAsOpened(${note.id}); window.open('${attachment.url}', '_blank')`
             : attachment.type === 'pdf'
