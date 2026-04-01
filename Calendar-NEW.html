@@ -4105,9 +4105,12 @@
             paymentRecordsData.push(insertedData[0]);
           }
 
-          // Update student balance so Debt decreases (negative balance = debt, add price to bring toward 0)
+          // Update student balance so Debt decreases — only for past/today classes.
+          // Future classes have not been charged yet, so no debt exists to excuse.
           const price = parseFloat(student.price_per_class || 0);
-          if (price > 0) {
+          const excuseDate = new Date(dateStr + 'T00:00:00');
+          const today = new Date(); today.setHours(0,0,0,0);
+          if (price > 0 && excuseDate <= today) {
             const currentBal = parseFloat(student.balance || 0);
             let newBalance = currentBal + price;
             if (currentBal < 0 && newBalance > 0) newBalance = 0;
@@ -4523,6 +4526,8 @@
           const dates = availableDates.filter(dateStr => selectedDateSet.has(dateStr));
 
           if (dates.length === 0) return;
+
+          const today = new Date(); today.setHours(0,0,0,0);
           
           dates.forEach(dateStr => {
             // Don't skip already-excused — we may need the record to exist for portal to see it
@@ -4537,7 +4542,14 @@
             });
           });
 
-          balanceAdjustments.set(studentId, dates.length);
+          // Only count past/today dates for balance adjustment — future classes have no debt yet
+          const pastCount = dates.filter(dateStr => {
+            const d = new Date(dateStr + 'T00:00:00');
+            return d <= today;
+          }).length;
+          if (pastCount > 0) {
+            balanceAdjustments.set(studentId, pastCount);
+          }
         });
 
         if (records.length === 0 && balanceAdjustments.size === 0) {
