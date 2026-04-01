@@ -562,14 +562,17 @@
   opacity:0;
   transition:opacity .12s ease;
   z-index:9999;
-  transform:translateX(-50%);
+  /* always float above the word; left is clamped by JS */
+  transform:translateY(-100%);
+  --caret-left:50%;
  }
  #dc-tip.visible{opacity:1}
  #dc-tip::after{
   content:'';
   position:absolute;
   top:100%;
-  left:50%;
+  /* JS sets --caret-left so the caret always points at the hovered word */
+  left:var(--caret-left,50%);
   transform:translateX(-50%);
   border:5px solid transparent;
   border-top-color:#0d1e35;
@@ -4183,11 +4186,25 @@ document.addEventListener('mouseover', e => {
  clearTimeout(dcTipTimer);
  const rect = el.getBoundingClientRect();
  dcTip.textContent = el.dataset.abbrev || '';
- // Position: centered above the abbreviation word
- dcTip.style.left = (rect.left + rect.width / 2) + 'px';
+
+ // First pass: place at word-center so browser can measure tip width
+ const wordCenterX = rect.left + rect.width / 2;
+ dcTip.style.transform = 'none';
+ dcTip.style.left = wordCenterX + 'px';
  dcTip.style.top  = (rect.top - 10) + 'px';
- dcTip.style.transform = 'translateX(-50%) translateY(-100%)';
  dcTip.classList.add('visible');
+
+ // Second pass: clamp so tooltip stays fully inside the viewport
+ const tipW   = dcTip.offsetWidth;
+ const pad    = 8; // min gap from screen edge
+ let clampedLeft = wordCenterX - tipW / 2;
+ clampedLeft = Math.max(pad, Math.min(clampedLeft, window.innerWidth - tipW - pad));
+ dcTip.style.left = clampedLeft + 'px';
+
+ // Move the caret (::after pseudo) to still point at the word center
+ // using a CSS custom property read by the ::after rule
+ const caretPct = ((wordCenterX - clampedLeft) / tipW * 100).toFixed(1);
+ dcTip.style.setProperty('--caret-left', caretPct + '%');
 });
 
 document.addEventListener('mouseout', e => {
