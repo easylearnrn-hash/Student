@@ -96,43 +96,20 @@
    }
 
    // ── 1. Admin bypass — instant ──
-   if (sessionStorage.getItem('isAdmin') === 'true') { unlock(); return; }
+   if (sessionStorage.getItem('isAdmin') === 'true' || localStorage.getItem('isAdmin') === 'true') { unlock(); return; }
 
-   // ── 2. No student session → redirect ──
+   // ── 2. Opened from student portal — studentRecordId set in localStorage ──
    const studentId = sessionStorage.getItem('studentRecordId') || localStorage.getItem('studentRecordId');
-   if (!studentId) { window.location.replace('hub.html'); return; }
+   // If opened from student portal (has studentRecordId), grant access directly —
+   // the portal already enforced its own permission check before showing the button.
+   if (studentId) {
+     sessionStorage.setItem(CACHE_KEY, 'granted');
+     unlock();
+     return;
+   }
 
-   // ── 3. Cache hit → instant unlock (no network call) ──
-   const cached = sessionStorage.getItem(CACHE_KEY);
-   if (cached === 'granted') { unlock(); return; }
-   if (cached === 'denied')  { deny(); return; }
-
-   // ── 4. First visit: async Supabase check (load SDK on demand) ──
-   const sdkScript = document.createElement('script');
-   sdkScript.src = 'js/supabase.min.js';
-   sdkScript.onload = function() {
-     const cfgScript = document.createElement('script');
-     cfgScript.src = 'js/supabase-config.js';
-     cfgScript.onload = async function() {
-       try {
-         // Stable note ID — matches HARDCODED_NOTES in admin-hub and hub
-         const NOTE_ID = 'note_mt_1';
-         const db = initSupabase();
-         const { data, error } = await db.from('published_notes').select('note_id')
-           .eq('student_id', studentId).eq('note_id', NOTE_ID).limit(1);
-         if (!error && data && data.length > 0) {
-           sessionStorage.setItem(CACHE_KEY, 'granted');
-           unlock();
-         } else {
-           sessionStorage.setItem(CACHE_KEY, 'denied');
-           deny();
-         }
-       } catch(e) { unlock(); }
-     };
-     document.head.appendChild(cfgScript);
-   };
-   sdkScript.onerror = function() { unlock(); };
-   document.head.appendChild(sdkScript);
+   // ── 3. No session at all → show denied screen (don't redirect, hub.html may not exist) ──
+   deny();
  })();
  </script>
  <!-- Preconnect to font origins so DNS+TLS happens in parallel -->
