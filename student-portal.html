@@ -7602,7 +7602,7 @@
       
       // Check cache first
       // 🔥 CACHE VERSION: Increment this number to bust cache after deduplication fix
-      const cacheKey = `payments-v3-${student.id}`;
+      const cacheKey = `payments-v6-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached payment history for student:', student.id);
@@ -7729,11 +7729,15 @@
         }
 
           function normalizeName(n) { return String(n||"").toLowerCase().replace(/[^a-z0-9]/g, ""); }
-          const validStudentNames = [student.name, ...studentAliases, ...studentEmails].filter(Boolean).map(normalizeName);
+          const validStudentNames = [student.name, ...studentAliases].filter(Boolean).map(normalizeName);
           const zellePayments = (zelleResult.data || []).filter(p => {
             if (p.student_id == student.id || p.linked_student_id == student.id) return true;
-            const paymentNames = [p.payer_name, p.resolved_student_name, p.student_name, p.student_full_name, p.studentname, p.studentNameFromMessage, p.student_name_hint, p.student_display_name, p.student].filter(Boolean);
-            return paymentNames.some(pn => validStudentNames.includes(normalizeName(pn)));
+            const paymentNames = [p.payer_name, p.resolved_student_name].filter(Boolean).map(normalizeName);
+            
+            // Check if any payment name is deeply contained inside the student names, or vice versa
+            return paymentNames.some(pn => 
+              validStudentNames.some(vn => pn.includes(vn) || vn.includes(pn))
+            );
           });
         if (zelleResult.error) {
           console.error('Error loading Zelle payments:', zelleResult.error);
