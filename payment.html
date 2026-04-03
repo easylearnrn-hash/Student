@@ -197,6 +197,57 @@
         margin-top: 3px;
       }
 
+      /* ── Amount to pay (editable) ── */
+      .amount-edit-label {
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        margin-bottom: 5px;
+      }
+      .amount-edit-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 9px;
+        padding: 5px 10px;
+        transition: border-color 0.2s;
+      }
+      .amount-edit-row:focus-within {
+        border-color: var(--gold);
+        box-shadow: 0 0 0 2px rgba(201,168,76,0.12);
+      }
+      .amount-edit-prefix {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--gold);
+        flex-shrink: 0;
+      }
+      .amount-edit-input {
+        background: none;
+        border: none;
+        outline: none;
+        font-family: inherit;
+        font-size: 18px;
+        font-weight: 800;
+        color: var(--gold2);
+        width: 90px;
+        text-align: right;
+        -moz-appearance: textfield;
+      }
+      .amount-edit-input::-webkit-inner-spin-button,
+      .amount-edit-input::-webkit-outer-spin-button { -webkit-appearance: none; }
+      .amount-hint {
+        font-size: 9px;
+        color: var(--muted);
+        margin-top: 3px;
+        text-align: right;
+      }
+      .amount-hint.warn { color: #e07060; }
+
       /* ── Divider ── */
       .divider {
         display: flex;
@@ -347,8 +398,20 @@
           <div class="invoice-student" id="displayName">Loading…</div>
         </div>
         <div class="invoice-right">
-          <div class="invoice-amount" id="displayAmount">—</div>
-          <div class="invoice-currency-label" id="displayCurrency">USD</div>
+          <div class="amount-edit-label">Amount to Pay</div>
+          <div class="amount-edit-row">
+            <span class="amount-edit-prefix">$</span>
+            <input
+              class="amount-edit-input"
+              id="amountInput"
+              type="number"
+              min="1"
+              step="0.01"
+              placeholder="0.00"
+              inputmode="decimal"
+            />
+          </div>
+          <div class="amount-hint" id="amountHint">Balance due: —</div>
         </div>
       </div>
 
@@ -394,11 +457,18 @@
       };
 
       /* ── DOM refs ── */
-      const $name   = document.getElementById('displayName');
-      const $amount = document.getElementById('displayAmount');
-      const $msg    = document.getElementById('statusMsg');
-      const $payBtn = document.getElementById('payBtn');
-      const $peSlot = document.getElementById('payment-element');
+      const $name    = document.getElementById('displayName');
+      const $amtInput= document.getElementById('amountInput');
+      const $amtHint = document.getElementById('amountHint');
+      const $msg     = document.getElementById('statusMsg');
+      const $payBtn  = document.getElementById('payBtn');
+      const $peSlot  = document.getElementById('payment-element');
+
+      /* ── Live amount helper ── */
+      function getPayAmount() {
+        const v = parseFloat($amtInput.value);
+        return isNaN(v) ? 0 : Math.round(v * 100) / 100; // 2dp
+      }
 
       /* ── Helpers ── */
       function fmt(dollars, currency) {
@@ -416,27 +486,53 @@
       function clearMsg() { $msg.className = 'status-msg'; $msg.innerHTML = ''; }
       function setBtnLoading(yes) {
         $payBtn.disabled = yes;
+        const amt = getPayAmount();
         $payBtn.innerHTML = yes
           ? `<span class="spinner"></span> Processing…`
-          : `Pay ${fmt(INVOICE.amountDollars, INVOICE.currency)}`;
+          : `Pay ${fmt(amt, INVOICE.currency)}`;
       }
 
       /* ── Render summary ── */
       function renderSummary() {
-        $name.textContent   = INVOICE.studentName;
-        $amount.textContent = INVOICE.amountDollars > 0 ? fmt(INVOICE.amountDollars, INVOICE.currency) : '—';
-        const currLabel = document.getElementById('displayCurrency');
-        if (currLabel) currLabel.textContent = INVOICE.currency.toUpperCase();
+        $name.textContent = INVOICE.studentName;
+        // Pre-fill amount input with full balance
+        if (INVOICE.amountDollars > 0) {
+          $amtInput.value = INVOICE.amountDollars.toFixed(2);
+          $amtInput.max   = INVOICE.amountDollars.toFixed(2);
+        }
+        $amtHint.textContent = `Balance due: ${INVOICE.amountDollars > 0 ? fmt(INVOICE.amountDollars, INVOICE.currency) : '—'}`;
+        // Validate on change
+        $amtInput.addEventListener('input', () => {
+          const v   = getPayAmount();
+          const max = INVOICE.amountDollars;
+          if (v <= 0) {
+            $amtHint.textContent = 'Enter an amount (min $1.00)';
+            $amtHint.className   = 'amount-hint warn';
+            $payBtn.disabled     = true;
+          } else if (max > 0 && v > max) {
+            $amtInput.value      = max.toFixed(2);
+            $amtHint.textContent = `Max: ${fmt(max, INVOICE.currency)}`;
+            $amtHint.className   = 'amount-hint warn';
+            $payBtn.disabled     = false;
+          } else {
+            $amtHint.textContent = `Balance due: ${fmt(max, INVOICE.currency)}`;
+            $amtHint.className   = 'amount-hint';
+            $payBtn.disabled     = false;
+          }
+          // Update button label
+          $payBtn.textContent = `Pay ${fmt(getPayAmount(), INVOICE.currency)}`;
+        });
       }
 
       /* ── Step 1: get clientSecret from Edge Function ── */
       async function fetchClientSecret() {
-        if (INVOICE.amountDollars <= 0) throw new Error('No balance due. Nothing to charge.');
+        const amt = getPayAmount();
+        if (amt < 1) throw new Error('Please enter an amount of at least $1.00.');
         const resp = await fetch(CREATE_PI_ENDPOINT, {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({
-            amount_cents : Math.round(INVOICE.amountDollars * 100),
+            amount_cents : Math.round(amt * 100),
             currency     : INVOICE.currency,
             student_id   : INVOICE.studentId,
             student_name : INVOICE.studentName,
