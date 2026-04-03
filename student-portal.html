@@ -7630,7 +7630,7 @@
           supabaseClient
             .from('payments')
             .select('*')
-            .or(`linked_student_id.eq.${student.id},student_id.eq.${student.id}`)
+            .or(`linked_student_id.eq.${student.id},student_id.eq.${student.id}${(() => { const names = [student.name]; if(student.aliases) { let a = student.aliases; try{ if(typeof a==="string") a=JSON.parse(a); }catch(e){a=[a];} if(Array.isArray(a)) names.push(...a); } return names.filter(Boolean).map(n => ",payer_name.ilike.%"+n.replace(/[^a-zA-Z0-9 ]/g, "")+"%,resolved_student_name.ilike.%"+n.replace(/[^a-zA-Z0-9 ]/g, "")+"%").join(""); })()}`)
             .order('email_date', { ascending: false }),
           // 3. credit_payments
           supabaseClient
@@ -7728,7 +7728,13 @@
           }
         }
 
-        const zellePayments = zelleResult.data || [];
+          function normalizeName(n) { return String(n||"").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+          const validStudentNames = [student.name, ...studentAliases, ...studentEmails].filter(Boolean).map(normalizeName);
+          const zellePayments = (zelleResult.data || []).filter(p => {
+            if (p.student_id == student.id || p.linked_student_id == student.id) return true;
+            const paymentNames = [p.payer_name, p.resolved_student_name, p.student_name, p.student_full_name, p.studentname, p.studentNameFromMessage, p.student_name_hint, p.student_display_name, p.student].filter(Boolean);
+            return paymentNames.some(pn => validStudentNames.includes(normalizeName(pn)));
+          });
         if (zelleResult.error) {
           console.error('Error loading Zelle payments:', zelleResult.error);
         } else if (zellePayments.length > 0) {
@@ -7973,7 +7979,7 @@
 
       // From payment_records (non-excused, non-absent only)
       prRecords.forEach(pr => {
-        if (pr.status === 'excused' || pr.status === 'absent') return;
+        if (pr.status !== 'paid') return; // Only process 'paid' status for paidDates
         const fallback = (pr.date || '').split('T')[0];
         extractForClassDates(pr, fallback).forEach(d => { if (d) paidDates.add(d); });
       });
@@ -8119,16 +8125,21 @@
 
       const pricePerClassValue = student ? (parseFloat(student.price_per_class) || 50) : 50;
 
-      // ✅ SCHEDULE IS THE ONLY SOURCE OF TRUTH — mirrors Calendar-NEW.html exactly.
-      // student.balance (ledger) is NEVER used for the displayed unpaid amount.
+      // ✅ SCHEDULE IS THE ONLY SOURCE OF TRUTH for class attendance/payment match.
+      // But we MUST subtract the student.balance (which tracks unallocated credit) to get the final out-of-pocket debt.
       let displayUnpaidAmount = 0;
+      let creditBalance = 0;
+      
       if (student && groupSchedule) {
         const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
         unpaidClasses   = result.unpaidClasses;
         absentClasses   = result.absentClasses || [];
         scheduleUnpaidAmount = result.unpaidAmount || 0;
-        displayUnpaidAmount  = scheduleUnpaidAmount;
-        totalUnpaid          = scheduleUnpaidAmount;
+        
+        creditBalance = parseFloat(student.balance) || 0;
+        displayUnpaidAmount = Math.max(0, scheduleUnpaidAmount - creditBalance);
+        
+        totalUnpaid = displayUnpaidAmount;
       }
       let unpaidSource = 'schedule';
       
@@ -8183,7 +8194,7 @@
           unpaidSourceNoteEl.style.display = 'none';
         } else if (unpaidClasses.length > 0) {
           const label = unpaidClasses.length === 1 ? 'class' : 'classes';
-          unpaidSourceNoteEl.textContent = `${unpaidClasses.length} ${label} flagged from schedule`;
+          let noteStr = `${unpaidClasses.length} ${label} flagged from schedule`; if(creditBalance>0) noteStr+= ` (-$${creditBalance} credit)`; unpaidSourceNoteEl.textContent = noteStr;
           unpaidSourceNoteEl.style.display = 'block';
           unpaidSourceNoteEl.style.color = '';
         } else {
