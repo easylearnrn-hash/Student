@@ -8332,13 +8332,19 @@
       const ledgerAmount = Number.isFinite(numericBalance) ? numericBalance : null;
 
       // Use schedule calculation only if the ledger has NO explicit value set.
-      // If the admin has set balance=0, that is an intentional "all clear" — do NOT
-      // override it with a higher schedule amount (which would re-show wiped debt).
+      // If the admin has set balance=0, that is an intentional "all clear" for past classes,
+      // BUT new unpaid classes that appeared AFTER the balance was cleared should still show.
+      // Rule: if balance===0 and schedule finds unpaid classes, the schedule wins (new debt).
+      // If balance is explicitly negative (debt set by admin), keep whichever is higher.
       const ledgerIsExplicitlySet = Number.isFinite(numericBalance);
       const ledgerIsExplicitlyClear = ledgerIsExplicitlySet && numericBalance >= 0; // 0 or positive = no debt
 
       if (!ledgerIsExplicitlySet && scheduleUnpaidAmount > 0) {
         // No ledger value at all — fall back to schedule
+        displayUnpaidAmount = scheduleUnpaidAmount;
+        unpaidSource = 'schedule';
+      } else if (ledgerIsExplicitlyClear && numericBalance === 0 && scheduleUnpaidAmount > 0) {
+        // Balance was cleared to $0 by admin, but schedule now shows new unpaid classes — trust schedule
         displayUnpaidAmount = scheduleUnpaidAmount;
         unpaidSource = 'schedule';
       } else if (!ledgerIsExplicitlyClear && scheduleUnpaidAmount > totalUnpaid) {
