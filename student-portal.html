@@ -7655,10 +7655,16 @@
 
         if (paymentRecords.length > 0) {
           paymentRecords.forEach(record => {
-            const normalizedStatus = (record.status || 'unpaid').toLowerCase();
+            const rawStatus = (record.status || 'unpaid').toString();
+            const normalizedStatus = rawStatus.toLowerCase().trim();
+            const canonicalStatus = normalizedStatus.includes('excused')
+              ? 'excused'
+              : normalizedStatus.includes('absent')
+                ? 'absent'
+                : normalizedStatus;
             const fallbackDate = record.date ? record.date.substring(0, 10) : null;
 
-            if (normalizedStatus === 'absent') {
+            if (canonicalStatus === 'absent') {
               allPayments.push({
                 date: new Date(record.date),
                 dateString: fallbackDate,
@@ -7678,7 +7684,7 @@
               allPayments.push({
                 date: new Date(dateStr + 'T00:00:00'),
                 dateString: dateStr,
-                status: normalizedStatus,
+                status: canonicalStatus,
                 amount: parseFloat(record.amount) || 0,
                 payment_method: record.payment_method,
                 notes: record.notes,
@@ -7964,13 +7970,12 @@
             .select('*')
             .eq('student_id', student.id)
         ).catch(err => { debugDebug('⚠️ Could not load absences:', err); return { data: null, error: err }; }),
-        // 2. payment_records absent status
+        // 2. payment_records absent+excused status — these dates have no payment expected
         Promise.resolve(
           supabaseClient
             .from('payment_records')
-            .select('date, status')
+            .select('date, status, for_class, for_class_dates')
             .eq('student_id', student.id)
-            .eq('status', 'absent')
         ).catch(err => { debugDebug('⚠️ Could not load absences from payment_records:', err); return { data: null, error: err }; }),
         // 3. credit_payments
         Promise.resolve(
@@ -8002,12 +8007,21 @@
 
       // Merge absences from payment_records (admin-marked absences)
       if (!absentRecordsResult.error && absentRecordsResult.data && absentRecordsResult.data.length > 0) {
-        const absentFromRecords = absentRecordsResult.data.map(a => a.date ? a.date.substring(0, 10) : a.date);
+        const absentFromRecords = absentRecordsResult.data
+          .filter(record => {
+            const status = (record.status || '').toString().toLowerCase();
+            return status.includes('absent') || status.includes('excused');
+          })
+          .flatMap(record => {
+            const fallback = record.date ? record.date.substring(0, 10) : record.date;
+            return extractForClassDates(record, fallback);
+          })
+          .filter(Boolean);
         debugDebug(`✅ Loaded ${absentFromRecords.length} absences from payment_records table:`, absentFromRecords);
         absentFromRecords.forEach(date => {
           if (!absences.includes(date)) absences.push(date);
         });
-        debugDebug(`� Total absences after merging: ${absences.length}`, absences);
+        debugDebug(`✅ Total absences after merging: ${absences.length}`, absences);
       }
 
       // --- Process credit_payments ---
