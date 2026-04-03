@@ -7887,374 +7887,191 @@
      * @param {Object} groupSchedule - Group schedule with days array
      * @returns {Object} { unpaidAmount, unpaidClasses: [] }
      */
+    /**
+     * ✅ MIRRORS Calendar-NEW.html EXACTLY.
+     * 
+     * Calendar-NEW logic (source of truth):
+     *  - isExcused  → payment_records WHERE status='excused', indexed by pr.date (NOT for_class_dates)
+     *  - isAbsent   → student_absences, indexed by class_date
+     *  - hasPayment → paymentIndex built from extractForClassDates() on both `payments` and
+     *                 `payment_records` (excused rows EXCLUDED), plus credit_payments by applied_class_date
+     *  - unpaid     → scheduled date where: !hasPayment && !isAbsent && !isExcused && date <= today
+     */
     async function calculateUnpaidFromSchedule(student, payments, groupScheduleData) {
-      debugDebug('🔴 Calculating unpaid classes from schedule:', {
-        student: student.name,
-        groupScheduleData: groupScheduleData,
-        payments: payments.length
-      });
-      
       const studentGroup = student.group_name || student.group_letter || student.group;
       if (!studentGroup || !groupScheduleData || !groupScheduleData.schedule) {
-        debugDebug('⚠️ No schedule data to calculate unpaid classes');
-        return { unpaidAmount: 0, unpaidClasses: [], hasSchedule: false };
+        return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
       }
-      
+
       const pricePerClass = parseFloat(student.price_per_class) || 50;
-      
-      // 🔧 FIX: Get LA timezone date/time using Intl.DateTimeFormat (EXACT CALENDAR METHOD)
       const nowParts = getTodayLAParts();
-      if (!nowParts) {
-        debugDebug('⚠️ Could not get LA timezone parts');
-        return { unpaidAmount: 0, unpaidClasses: [] };
-      }
-      
-      // Create today's date at midnight using LA timezone parts
-      const todayLA = new Date(
-        parseInt(nowParts.year),
-        parseInt(nowParts.month) - 1,
-        parseInt(nowParts.day)
-      );
-      
-      // Create nowLA with time for class time comparison
-      const nowLA = new Date(
-        parseInt(nowParts.year),
-        parseInt(nowParts.month) - 1,
-        parseInt(nowParts.day),
-        parseInt(nowParts.hour),
-        parseInt(nowParts.minute),
-        parseInt(nowParts.second) || 0
-      );
-      
-      debugDebug('🕐 LA Time:', {
-        parts: nowParts,
-        todayLA: todayLA.toISOString().split('T')[0],
-        nowLA: nowLA.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' })
-      });
-      
-      // Get student start date (when they joined)
+      if (!nowParts) return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
+
+      const todayLA = new Date(parseInt(nowParts.year), parseInt(nowParts.month) - 1, parseInt(nowParts.day));
+      const nowLA   = new Date(parseInt(nowParts.year), parseInt(nowParts.month) - 1, parseInt(nowParts.day),
+                               parseInt(nowParts.hour), parseInt(nowParts.minute), parseInt(nowParts.second) || 0);
+      const todayDateStr = `${nowParts.year}-${nowParts.month.padStart(2,'0')}-${nowParts.day.padStart(2,'0')}`;
+
+      // Student start date (never count before Dec 1 2025 or their join date)
       let studentStartDate = null;
       if (student.start_date) {
-        // 🔧 FIX: Parse date string correctly to avoid timezone shift
-        const parts = student.start_date.split('-');
-        if (parts.length === 3) {
-          studentStartDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-        } else {
-          studentStartDate = new Date(student.start_date);
-          studentStartDate.setHours(0, 0, 0, 0);
-        }
+        const p = student.start_date.split('-');
+        studentStartDate = p.length === 3
+          ? new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]))
+          : new Date(student.start_date);
       }
-      
-      // 🚀 PARALLEL: Fetch all 4 supporting data sets at once.
-      // student_absences, absent payment_records, credit_payments, skipped_classes
-      // were previously 4 sequential awaits — now fired simultaneously.
+      if (student.created_at) {
+        const createdDate = new Date(student.created_at);
+        createdDate.setHours(0,0,0,0);
+        if (!studentStartDate || createdDate > studentStartDate) studentStartDate = createdDate;
+      }
+
       const normalizedGroup = canonicalizeGroupCode(studentGroup);
       const groupNameForQuery = normalizedGroup ? `Group ${normalizedGroup}` : null;
 
-      debugDebug(`🔍 Loading skipped classes for student group:`, {
-        raw: studentGroup,
-        normalized: normalizedGroup,
-        queryValue: groupNameForQuery
-      });
-
-      const [
-        absencesTableResult,
-        absentRecordsResult,
-        creditPaymentsResult,
-        skippedResult
-      ] = await Promise.all([
-        // 1. student_absences
-        Promise.resolve(
-          supabaseClient
-            .from('student_absences')
-            .select('*')
-            .eq('student_id', student.id)
-        ).catch(err => { debugDebug('⚠️ Could not load absences:', err); return { data: null, error: err }; }),
-        // 2. payment_records absent+excused status — these dates have no payment expected
-        Promise.resolve(
-          supabaseClient
-            .from('payment_records')
-            .select('date, status, for_class_dates, for_class')
-            .eq('student_id', student.id)
-            .in('status', ['absent', 'excused'])
-        ).catch(err => { debugDebug('⚠️ Could not load absences from payment_records:', err); return { data: null, error: err }; }),
-        // 3. credit_payments
-        Promise.resolve(
-          supabaseClient
-            .from('credit_payments')
-            .select('*')
-            .eq('student_id', student.id)
-        ).catch(err => { debugDebug('⚠️ Could not load credit payments:', err); return { data: null, error: err }; }),
-        // 4. skipped_classes (only if we have a valid group)
+      // ── Parallel DB fetches ──────────────────────────────────────────────────
+      const [absencesResult, paymentRecordsResult, creditResult, skippedResult] = await Promise.all([
+        supabaseClient.from('student_absences').select('class_date').eq('student_id', student.id)
+          .catch(() => ({ data: null, error: true })),
+        // ALL payment_records for this student (we need paid + excused + absent)
+        supabaseClient.from('payment_records').select('date, status, for_class_dates, for_class, student_id').eq('student_id', student.id)
+          .catch(() => ({ data: null, error: true })),
+        supabaseClient.from('credit_payments').select('class_date, applied_class_date').eq('student_id', student.id)
+          .catch(() => ({ data: null, error: true })),
         groupNameForQuery
-          ? Promise.resolve(
-              supabaseClient
-                .from('skipped_classes')
-                .select('*')
-                .eq('group_name', groupNameForQuery)
-            ).catch(err => { debugDebug('⚠️ Could not load skipped classes:', err); return { data: null, error: err }; })
+          ? supabaseClient.from('skipped_classes').select('class_date').eq('group_name', groupNameForQuery)
+              .catch(() => ({ data: [], error: null }))
           : Promise.resolve({ data: [], error: null })
       ]);
 
-      // --- Process absences ---
-      let absences = [];
-      if (!absencesTableResult.error && absencesTableResult.data) {
-        absences = absencesTableResult.data.map(a => a.class_date ? a.class_date.substring(0, 10) : a.class_date);
-        debugDebug(`✅ Loaded ${absences.length} absences from student_absences table:`, absences);
-        debugDebug(`📋 Raw absence data:`, absencesTableResult.data);
-      } else if (absencesTableResult.error) {
-        console.error('⚠️ RLS Error loading absences:', absencesTableResult.error.message, absencesTableResult.error);
-      }
+      const prRecords  = (!paymentRecordsResult.error && paymentRecordsResult.data) ? paymentRecordsResult.data : [];
+      const absences   = (!absencesResult.error    && absencesResult.data)   ? absencesResult.data  : [];
+      const credits    = (!creditResult.error       && creditResult.data)     ? creditResult.data    : [];
+      const skipped    = (!skippedResult.error      && skippedResult.data)    ? skippedResult.data   : [];
 
-      // Merge absences from payment_records (admin-marked absences)
-      if (!absentRecordsResult.error && absentRecordsResult.data && absentRecordsResult.data.length > 0) {
-        const absentFromRecords = [];
-        absentRecordsResult.data.forEach(record => {
-          const fallback = record.date ? record.date.substring(0, 10) : null;
-          const classDates = extractForClassDates(record, fallback);
-          classDates.forEach(d => {
-            if (d && !absentFromRecords.includes(d)) absentFromRecords.push(d);
-          });
-        });
-        
-        debugDebug(`✅ Loaded ${absentFromRecords.length} absent/excused dates from payment_records:`, absentFromRecords);
-        absentFromRecords.forEach(date => {
-          if (!absences.includes(date)) absences.push(date);
-        });
-        debugDebug(`✅ Total absences after merging: ${absences.length}`, absences);
-      }
+      // ── Build lookup sets (exactly mirrors Calendar-NEW indexing) ────────────
 
-      // --- Process credit_payments ---
-      let creditPayments = [];
-      if (!creditPaymentsResult.error && creditPaymentsResult.data) {
-        creditPayments = creditPaymentsResult.data.map(cp => cp.class_date ? cp.class_date.substring(0, 10) : cp.class_date);
-      }
+      // 1. Absent dates from student_absences (keyed by class_date)
+      const absentDates = new Set(absences.map(a => (a.class_date || '').split('T')[0]).filter(Boolean));
 
-      // --- Process skipped_classes ---
-      let skippedClassDates = [];
-      if (!groupNameForQuery) {
-        debugDebug('⚠️ No valid group name for student, skipped_classes not queried');
-      } else if (!skippedResult.error && skippedResult.data) {
-        skippedClassDates = skippedResult.data.map(sc => sc.class_date ? sc.class_date.substring(0, 10) : sc.class_date);
-        debugDebug(`✅ Loaded ${skippedClassDates.length} skipped classes for ${groupNameForQuery}:`, skippedClassDates);
-      } else if (skippedResult.error) {
-        console.error('⚠️ RLS Error loading skipped classes:', skippedResult.error.message, skippedResult.error);
-      }
-      
-      // Parse schedule string to extract active days and class time
-      // Format: "Monday, Wednesday, Friday at 7:00 PM" or "Tue, Thu 6:30 PM"
-      const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const scheduleActiveDays = [];
-      
+      // 2. Excused dates from payment_records WHERE status='excused'
+      //    Calendar-NEW uses pr.date directly as the excused class date — NOT for_class_dates
+      const excusedDates = new Set(
+        prRecords.filter(pr => pr.status === 'excused')
+                 .map(pr => (pr.date || '').split('T')[0])
+                 .filter(Boolean)
+      );
+
+      // 3. Paid dates — built from extractForClassDates() on payment_records (skip excused)
+      //    + from the `payments` array passed in (Zelle / manual paid records already processed)
+      //    + from credit_payments.applied_class_date
+      const paidDates = new Set();
+
+      // From payment_records (non-excused, non-absent only)
+      prRecords.forEach(pr => {
+        if (pr.status === 'excused' || pr.status === 'absent') return;
+        const fallback = (pr.date || '').split('T')[0];
+        extractForClassDates(pr, fallback).forEach(d => { if (d) paidDates.add(d); });
+      });
+
+      // From the `payments` array (already contains Zelle + manual, pre-processed by loadPaymentHistory)
+      payments.forEach(p => {
+        if (p.status === 'paid' || p.status === 'credit') {
+          const d = p.dateString || (p.date instanceof Date ? p.date.toISOString().split('T')[0] : (p.date||'').substring(0,10));
+          if (d) paidDates.add(d);
+        }
+      });
+
+      // From credit_payments
+      credits.forEach(cp => {
+        const d = ((cp.applied_class_date || cp.class_date) || '').split('T')[0];
+        if (d) paidDates.add(d);
+      });
+
+      // 4. Skipped class dates
+      const skippedDates = new Set(skipped.map(s => (s.class_date || '').split('T')[0]).filter(Boolean));
+
+      // ── Generate scheduled class dates ──────────────────────────────────────
+      const dec1_2025 = new Date(2025, 11, 1);
+      const startDate = new Date(Math.max(dec1_2025.getTime(), studentStartDate ? studentStartDate.getTime() : dec1_2025.getTime()));
+
       const scheduleStr = groupScheduleData.schedule || '';
-      debugDebug('📝 Parsing schedule string:', scheduleStr);
-      
-      // Extract class time from schedule string
+      const daysOfWeek  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      const fullDayMap  = { Mon:'Monday', Tue:'Tuesday', Wed:'Wednesday', Thu:'Thursday', Fri:'Friday', Sat:'Saturday', Sun:'Sunday' };
+
+      // Parse class time for "hasn't started yet" check
       let classTimeInMinutes = null;
       const timeMatch = scheduleStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
       if (timeMatch) {
-        let hours = parseInt(timeMatch[1]);
-        const minutes = parseInt(timeMatch[2]);
-        const meridiem = timeMatch[3].toUpperCase();
-        
-        // Convert to 24-hour format
-        if (meridiem === 'PM' && hours !== 12) hours += 12;
-        if (meridiem === 'AM' && hours === 12) hours = 0;
-        
-        classTimeInMinutes = hours * 60 + minutes;
-        debugDebug(`⏰ Class time extracted: ${timeMatch[0]} = ${hours}:${String(minutes).padStart(2, '0')} (${classTimeInMinutes} minutes)`);
-      } else {
-        debugDebug('⚠️ No class time found in schedule, will count all past dates as unpaid');
+        let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
+        if (timeMatch[3].toUpperCase() === 'PM' && h !== 12) h += 12;
+        if (timeMatch[3].toUpperCase() === 'AM' && h === 12) h = 0;
+        classTimeInMinutes = h * 60 + m;
       }
-      
-      // Extract day names from schedule string
-      const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-      const fullDayMap = {
-        'Mon': 'Monday', 'Tue': 'Tuesday', 'Wed': 'Wednesday',
-        'Thu': 'Thursday', 'Fri': 'Friday', 'Sat': 'Saturday', 'Sun': 'Sunday'
-      };
-      
-      dayNames.forEach(dayName => {
-        if (scheduleStr.includes(dayName)) {
-          const fullDay = fullDayMap[dayName] || dayName;
-          if (!scheduleActiveDays.includes(fullDay)) {
-            scheduleActiveDays.push(fullDay);
-          }
+      const currentTimeInMinutes = nowLA.getHours() * 60 + nowLA.getMinutes();
+
+      // Collect active days
+      const scheduleActiveDays = [];
+      ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(name => {
+        if (scheduleStr.includes(name)) {
+          const full = fullDayMap[name] || name;
+          if (!scheduleActiveDays.includes(full)) scheduleActiveDays.push(full);
         }
       });
-      
-      debugDebug('📅 Active schedule days:', scheduleActiveDays);
-      
+
       if (scheduleActiveDays.length === 0) {
-        debugDebug('⚠️ No active days found in schedule');
-        return { unpaidAmount: 0, unpaidClasses: [], hasSchedule: false };
+        return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
       }
-      
-      // Generate all past class dates based on schedule
+
       const scheduledDates = [];
-      
-      // 🔴 START FROM DECEMBER 1, 2025 (as requested)
-      const dec1_2025 = new Date(2025, 11, 1); // December 1, 2025 (month is 0-indexed)
-      
-      // ALWAYS use the LATER of: Dec 1 2025 or student start date
-      // This ensures we never count unpaid before Dec 1, even if student started earlier
-      const startDate = new Date(Math.max(dec1_2025.getTime(), studentStartDate ? studentStartDate.getTime() : dec1_2025.getTime()));
-      
-      debugDebug(`📅 Calculating unpaid classes from ${startDate.toISOString().split('T')[0]} to today`);
-      
-      // Get current time in minutes for today's class comparison
-      const currentTimeInMinutes = nowLA.getHours() * 60 + nowLA.getMinutes();
-      const todayDateStr = `${nowLA.getFullYear()}-${String(nowLA.getMonth() + 1).padStart(2, '0')}-${String(nowLA.getDate()).padStart(2, '0')}`;
-      
-      // Generate all scheduled class dates until today
       for (let d = new Date(startDate); d <= todayLA; d.setDate(d.getDate() + 1)) {
-        const dayName = daysOfWeek[d.getDay()];
-        // Use local date format instead of UTC to avoid timezone shift
-        const year = d.getFullYear();
+        const year  = d.getFullYear();
         const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
+        const day   = String(d.getDate()).padStart(2, '0');
         const dateStr = `${year}-${month}-${day}`;
-        debugDebug(`🔍 Checking ${dateStr} (${dayName}, day#${d.getDay()}) - in schedule? ${scheduleActiveDays.includes(dayName)}`);
-        if (scheduleActiveDays.includes(dayName)) {
-          // Skip if this class was cancelled/skipped in the Calendar
-          if (!skippedClassDates.includes(dateStr)) {
-            // 🔴 NEW LOGIC: Skip today's class if it hasn't started yet
-            if (dateStr === todayDateStr && classTimeInMinutes !== null && currentTimeInMinutes < classTimeInMinutes) {
-              debugDebug(`⏭️ ${dateStr}: Today's class hasn't started yet (current: ${currentTimeInMinutes}min, class: ${classTimeInMinutes}min) - not counting as unpaid`);
-              continue;
-            }
-            scheduledDates.push(dateStr);
-            debugDebug(`✅ Added ${dateStr} as scheduled class`);
-          } else {
-            debugDebug(`⏭️ ${dateStr}: Class was skipped/cancelled in Calendar`);
-          }
-        }
+        if (!scheduleActiveDays.includes(daysOfWeek[d.getDay()])) continue;
+        if (skippedDates.has(dateStr)) continue;
+        if (dateStr === todayDateStr && classTimeInMinutes !== null && currentTimeInMinutes < classTimeInMinutes) continue;
+        scheduledDates.push(dateStr);
       }
-      
-      debugDebug(`📅 Generated ${scheduledDates.length} scheduled class dates (after excluding ${skippedClassDates.length} skipped classes)`);
-      
-      // 🔥 ADD ONE-TIME SCHEDULED CLASSES (e.g., makeup classes, rescheduled classes)
-      // These are stored in groups.one_time_schedules as JSON array of objects with date/time/description
-      if (groupScheduleData.one_time_schedules && Array.isArray(groupScheduleData.one_time_schedules)) {
-        groupScheduleData.one_time_schedules.forEach(oneTime => {
-          const oneTimeDate = oneTime.date ? oneTime.date.substring(0, 10) : null;
-          if (!oneTimeDate) return;
-          
-          // Parse the date to compare with today
-          const parts = oneTimeDate.split('-');
-          if (parts.length !== 3) return;
-          
-          const oneTimeClassDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-          
-          // Only include if it's in the past or today (and class has started)
-          if (oneTimeClassDate <= todayLA) {
-            // Check if today and class hasn't started yet
-            if (oneTimeDate === todayDateStr) {
-              // Extract time from one-time schedule
-              const oneTimeMatch = oneTime.time ? oneTime.time.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i) : null;
-              if (oneTimeMatch) {
-                let hours = parseInt(oneTimeMatch[1]);
-                const minutes = parseInt(oneTimeMatch[2]);
-                const meridiem = oneTimeMatch[3].toUpperCase();
-                if (meridiem === 'PM' && hours !== 12) hours += 12;
-                if (meridiem === 'AM' && hours === 12) hours = 0;
-                const oneTimeInMinutes = hours * 60 + minutes;
-                
-                if (currentTimeInMinutes < oneTimeInMinutes) {
-                  debugDebug(`⏭️ One-time class ${oneTimeDate} hasn't started yet - skipping`);
-                  return;
-                }
-              }
-            }
-            
-            // Add to scheduled dates if not already present and not skipped
-            if (!scheduledDates.includes(oneTimeDate) && !skippedClassDates.includes(oneTimeDate)) {
-              scheduledDates.push(oneTimeDate);
-              debugDebug(`✅ Added one-time scheduled class: ${oneTimeDate} (${oneTime.description || 'Makeup class'})`);
-            }
-          }
+
+      // Add one-time classes
+      if (Array.isArray(groupScheduleData.one_time_schedules)) {
+        groupScheduleData.one_time_schedules.forEach(ot => {
+          const otDate = ot.date ? ot.date.substring(0, 10) : null;
+          if (!otDate) return;
+          const [y,mo,dy] = otDate.split('-');
+          if (new Date(+y, +mo-1, +dy) > todayLA) return;
+          if (skippedDates.has(otDate) || scheduledDates.includes(otDate)) return;
+          scheduledDates.push(otDate);
         });
-        
-        // Sort all dates chronologically
         scheduledDates.sort();
-        debugDebug(`📅 Total scheduled dates (including ${groupScheduleData.one_time_schedules.length} one-time classes): ${scheduledDates.length}`);
       }
-      
-      // Check each scheduled date for payment status
-      const unpaidClasses = [];
-      const absentClasses = []; // Track absent classes for display
+
+      // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
+      const unpaidClasses  = [];
+      const absentClasses  = [];
+
       for (const dateStr of scheduledDates) {
-        debugDebug(`🔍 Checking date ${dateStr} against absences:`, absences, `includes? ${absences.includes(dateStr)}`);
-        // Mark if absent (show in payment history but don't count as unpaid)
-        if (absences.includes(dateStr)) {
-          debugDebug(`⚪ ${dateStr}: Student was absent (no payment expected)`);
-          absentClasses.push({
-            date: dateStr,
-            amount: 0, // No payment expected for absences
-            status: 'absent'
-          });
-          continue;
-        }
-        
-        // Skip if paid via credit
-        if (creditPayments.includes(dateStr)) {
-          debugDebug(`🔵 ${dateStr}: Paid via credit`);
-          continue;
-        }
-        
-        // Check if there's a payment covering this class
-        // 🔧 FIX: Use dateString property directly (no timezone conversion!)
-        const hasPaidPayment = payments.some(p => {
-          // 🔥 CRITICAL FIX: Include paid, credit, and excused payments
-          if (p.status !== 'paid' && p.status !== 'credit' && p.status !== 'excused') return false;
-          
-          // Use pre-extracted dateString to avoid timezone conversion issues
-          const paymentDateStr = p.dateString || (p.date instanceof Date 
-            ? p.date.toISOString().split('T')[0] 
-            : (p.date || '').substring(0, 10));
-          
-          debugDebug(`  🔍 Comparing payment date "${paymentDateStr}" with class date "${dateStr}"`);
-          
-          // Payment matches if it's for the SAME date (exact match)
-          // or if it's within 7 days after class (Calendar logic: payment applies to nearest past class)
-          if (paymentDateStr === dateStr) {
-            debugLog(`  ✅ EXACT MATCH: Payment ${paymentDateStr} (status=${p.status}, source=${p.source}) matches class ${dateStr}`);
-            debugDebug(`  ✅ EXACT MATCH: Payment ${paymentDateStr} matches class ${dateStr}`);
-            return true; // Exact date match
-          }
-          
-          const classDate = new Date(dateStr + 'T00:00:00');
-          const paymentDate = new Date(paymentDateStr + 'T00:00:00');
-          const daysDiff = Math.floor((paymentDate - classDate) / (1000 * 60 * 60 * 24));
-          const withinWeek = daysDiff >= 0 && daysDiff <= 7;
-          if (withinWeek) {
-            debugLog(`  ✅ WITHIN 7 DAYS: Payment ${paymentDateStr} (status=${p.status}, source=${p.source}) is ${daysDiff} days after class ${dateStr}`);
-            debugDebug(`  ✅ WITHIN 7 DAYS: Payment ${paymentDateStr} is ${daysDiff} days after class ${dateStr}`);
-          }
-          return withinWeek; // Within a week after class
-        });
-        
-        if (!hasPaidPayment) {
-          unpaidClasses.push({
-            date: dateStr,
-            amount: pricePerClass
-          });
-          debugLog(`🔴 ${dateStr}: UNPAID (no payment found)`);
-          debugDebug(`🔴 ${dateStr}: UNPAID (no payment found)`);
+        const isAbsent  = absentDates.has(dateStr);
+        const isExcused = excusedDates.has(dateStr);
+        const hasPaid   = paidDates.has(dateStr);
+
+        if (isAbsent) {
+          absentClasses.push({ date: dateStr, amount: 0, status: 'absent' });
+        } else if (isExcused) {
+          // excused → no debt, but show in history as excused (already in payment list via loadPaymentHistory)
+          absentClasses.push({ date: dateStr, amount: 0, status: 'excused' });
+        } else if (!hasPaid) {
+          unpaidClasses.push({ date: dateStr, amount: pricePerClass });
+          debugLog(`🔴 ${dateStr}: UNPAID`);
         } else {
           debugLog(`🟢 ${dateStr}: PAID`);
-          debugDebug(`🟢 ${dateStr}: PAID`);
         }
       }
-      
+
       const unpaidAmount = unpaidClasses.length * pricePerClass;
-      debugLog(`💰 FINAL UNPAID CALCULATION: $${unpaidAmount} (${unpaidClasses.length} unpaid classes × $${pricePerClass})`);
-      if (unpaidClasses.length > 0) {
-        debugLog(`📋 Unpaid class dates:`, unpaidClasses.map(c => c.date));
-      }
-      debugDebug(`💰 Total unpaid: $${unpaidAmount} (${unpaidClasses.length} classes × $${pricePerClass})`);
-      debugDebug(`⚪ Total absent: ${absentClasses.length} classes`);
-      
+      debugLog(`💰 FINAL: $${unpaidAmount} (${unpaidClasses.length} unpaid × $${pricePerClass})`);
       return { unpaidAmount, unpaidClasses, absentClasses, hasSchedule: true };
     }
     
@@ -8296,97 +8113,20 @@
         );
       })();
 
-      const numericBalance = student ? Number(student.balance) : NaN;
       const pricePerClassValue = student ? (parseFloat(student.price_per_class) || 50) : 50;
-      
-      let hasSchedule = false;
-      
-      // ✅ USE DATABASE BALANCE AS SOURCE OF TRUTH
-      // The `students.balance` field is managed by admin and is authoritative for ledger tracking.
-      // SIGN CONVENTION: Positive = Credit (overpayment), Negative = Debt (unpaid)
-      // We still surface schedule-detected unpaid classes so nothing slips through, but we keep
-      // the ledger amount for exports/profile modals.
-      if (Number.isFinite(numericBalance)) {
-        // Treat any non-zero balance as debt (absolute value).
-        // Historical data may store debt as positive OR negative — abs() handles both.
-        // Zero means fully cleared by admin.
-        totalUnpaid = numericBalance !== 0 ? Math.abs(numericBalance) : 0;
-        debugDebug(`✅ Using database balance as source of truth: $${numericBalance} (unpaid: $${totalUnpaid})`);
-        
-        // Still calculate unpaid classes for display purposes (e.g., showing which classes are unpaid)
-        // but DON'T use this to override the balance
-        if (student && groupSchedule) {
-          const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
-          hasSchedule = result.hasSchedule || false;
-          unpaidClasses = result.unpaidClasses; // Track which classes are unpaid
-          absentClasses = result.absentClasses || []; // Track absent classes
-          scheduleUnpaidAmount = result.unpaidAmount || 0;
-          debugDebug(`📊 Calculated ${unpaidClasses.length} unpaid classes for reference (not affecting balance)`);
-        }
-      } else {
-        // Fallback if balance is not set in database: calculate from schedule
-        debugDebug('⚠️ No database balance found - falling back to schedule calculation');
-        if (student && groupSchedule) {
-          const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
-          hasSchedule = result.hasSchedule || false;
-          totalUnpaid = result.unpaidAmount;
-          unpaidClasses = result.unpaidClasses;
-          absentClasses = result.absentClasses || [];
-          scheduleUnpaidAmount = result.unpaidAmount || 0;
-        } else {
-          // Last resort: Calculate from payment_records table only
-          debugDebug('⚠️ Using fallback payment_records calculation (no schedule data)');
-          payments.forEach(payment => {
-            const amount = parseFloat(payment.amount) || 0;
-            if (payment.status === 'unpaid' || payment.status === 'pending') {
-              totalUnpaid += amount;
-            }
-          });
-        }
+
+      // ✅ SCHEDULE IS THE ONLY SOURCE OF TRUTH — mirrors Calendar-NEW.html exactly.
+      // student.balance (ledger) is NEVER used for the displayed unpaid amount.
+      let displayUnpaidAmount = 0;
+      if (student && groupSchedule) {
+        const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
+        unpaidClasses   = result.unpaidClasses;
+        absentClasses   = result.absentClasses || [];
+        scheduleUnpaidAmount = result.unpaidAmount || 0;
+        displayUnpaidAmount  = scheduleUnpaidAmount;
+        totalUnpaid          = scheduleUnpaidAmount;
       }
-
-      let displayUnpaidAmount = totalUnpaid;
-      let unpaidSource = 'none';
-      const ledgerAmount = Number.isFinite(numericBalance) ? numericBalance : null;
-
-      // We now COMPLETELY DEFER TO THE SCHEDULE CALCULATION.
-      // If the admin has entered a negative balance (debt) manually, but the schedule calculation
-      // shows a smaller amount (e.g. because they excused some classes), the schedule is more
-      // up-to-date with reality. We trust the schedule over the stale ledger number.
-      const ledgerIsExplicitlySet = Number.isFinite(numericBalance);
-      const ledgerIsExplicitlyClear = ledgerIsExplicitlySet && numericBalance >= 0; // 0 or positive = no debt
-
-      if (!ledgerIsExplicitlySet) {
-        // No ledger value at all — fall back to schedule
-        displayUnpaidAmount = scheduleUnpaidAmount;
-        unpaidSource = 'schedule';
-      } else if (ledgerIsExplicitlyClear && numericBalance > 0) {
-        // Balance is a CREDIT (positive). Student owes nothing. Let credit absorb the scheduled unpaids.
-        displayUnpaidAmount = 0;
-        unpaidSource = 'ledger (credit)';
-      } else {
-        // Either balance is 0 or negative (debt).
-        // Since the schedule is carefully calculated from absences, excused classes,
-        // and skipped classes, we ALWAYS trust the schedule if it has calculated unpaid classes.
-        // This ensures that when an admin marks an old class as "excused", the total drops correctly
-        // instead of getting stuck on the old manual ledger amount.
-        // IF there is NO schedule (hasSchedule === false), 
-        // we should still respect the explicitly set historical ledger debt.
-        if (!hasSchedule && totalUnpaid > 0) {
-          displayUnpaidAmount = totalUnpaid;
-          unpaidSource = 'ledger (no scheduled unpaids)';
-        } else {
-          displayUnpaidAmount = scheduleUnpaidAmount;
-          unpaidSource = 'schedule (overriding ledger)';
-        }
-      }
-
-      if (studentMarkedAbsent && (displayUnpaidAmount > 0 || unpaidClasses.length > 0)) {
-        debugDebug('🚫 Student marked absent — clearing unpaid totals from portal view.');
-        displayUnpaidAmount = 0;
-        unpaidClasses = [];
-        unpaidSource = 'none';
-      }
+      let unpaidSource = 'schedule';
       
       // Store globally for profile modal
       currentTotalUnpaid = displayUnpaidAmount;
@@ -8436,25 +8176,12 @@
       const unpaidSourceNoteEl = document.getElementById('unpaidSourceNote');
       if (unpaidSourceNoteEl) {
         if (displayUnpaidAmount <= 0) {
-          // Hide the note completely - no need to show admin messages to students
           unpaidSourceNoteEl.style.display = 'none';
-          // But still log it for admins viewing console
-          if (unpaidSource === 'schedule-override' && ledgerAmount > 0) {
-            debugLog(`✅ Overriding stale database balance of $${ledgerAmount} for ${student?.name} - schedule shows all classes are paid`);
-          }
-        } else if (unpaidSource === 'schedule' && unpaidClasses.length > 0) {
+        } else if (unpaidClasses.length > 0) {
           const label = unpaidClasses.length === 1 ? 'class' : 'classes';
           unpaidSourceNoteEl.textContent = `${unpaidClasses.length} ${label} flagged from schedule`;
           unpaidSourceNoteEl.style.display = 'block';
-          unpaidSourceNoteEl.style.color = ''; // Reset color
-        } else if (unpaidSource === 'ledger') {
-          unpaidSourceNoteEl.textContent = 'Balance from admin ledger';
-          unpaidSourceNoteEl.style.display = 'block';
-          unpaidSourceNoteEl.style.color = ''; // Reset color
-        } else if (ledgerAmount !== null && ledgerAmount > 0) {
-          unpaidSourceNoteEl.textContent = 'Balance from admin ledger';
-          unpaidSourceNoteEl.style.display = 'block';
-          unpaidSourceNoteEl.style.color = ''; // Reset color
+          unpaidSourceNoteEl.style.color = '';
         } else {
           unpaidSourceNoteEl.style.display = 'none';
         }
