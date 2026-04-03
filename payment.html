@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ARNOMA – Pay Now</title>
+    <script src="https://js.stripe.com/v3/"></script>
+    <style>
+      :root {
+        --bg:#070a14;
+        --surface:rgba(255,255,255,0.06);
+        --border:rgba(255,255,255,0.14);
+        --primary:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+        --text:#eef0f8;
+        --muted:#8893b4;
+        --red:#ef4444;
+        --green:#22c55e;
+        --radius:16px;
+        --blur:14px;
+      }
+      *{margin:0;padding:0;box-sizing:border-box;}
+      body{
+        min-height:100vh;
+        display:flex;align-items:center;justify-content:center;
+        background:var(--bg);
+        font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;
+        color:var(--text);padding:20px;
+      }
+      body::before,body::after{content:'';position:fixed;border-radius:50%;pointer-events:none;z-index:0;}
+      body::before{width:500px;height:500px;top:-180px;right:-120px;background:radial-gradient(circle,rgba(102,126,234,0.25),transparent 70%);filter:blur(70px);}
+      body::after{width:560px;height:560px;bottom:-220px;left:-180px;background:radial-gradient(circle,rgba(118,75,162,0.22),transparent 70%);filter:blur(80px);}
+      .card{
+        position:relative;z-index:1;width:100%;max-width:460px;
+        background:var(--surface);border:1px solid var(--border);border-radius:24px;
+        backdrop-filter:blur(var(--blur));-webkit-backdrop-filter:blur(var(--blur));
+        padding:30px 28px 28px;
+        box-shadow:0 24px 60px rgba(0,0,0,0.45),inset 0 0 0 1px rgba(255,255,255,0.04);
+        animation:fadeUp .35s ease;
+      }
+      @keyframes fadeUp{from{opacity:0;transform:translateY(16px);}to{opacity:1;transform:translateY(0);}}
+      .logo{display:flex;align-items:center;gap:10px;margin-bottom:22px;}
+      .logo-icon{width:38px;height:38px;border-radius:12px;background:var(--primary);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+      .logo-name{font-size:17px;font-weight:700;letter-spacing:.02em;color:var(--text);}
+      .logo-sub{font-size:12px;color:var(--muted);}
+      .invoice-banner{
+        background:rgba(102,126,234,0.1);border:1px solid rgba(102,126,234,0.25);
+        border-radius:14px;padding:14px 16px;margin-bottom:22px;
+        display:flex;justify-content:space-between;align-items:center;gap:10px;
+      }
+      .invoice-info{min-width:0;}
+      .invoice-label{font-size:12px;color:var(--muted);margin-bottom:2px;}
+      .invoice-student{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+      .invoice-amount{
+        font-size:26px;font-weight:800;
+        background:var(--primary);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+        white-space:nowrap;flex-shrink:0;
+      }
+      #payment-element{margin-bottom:20px;min-height:120px;}
+      .status-msg{font-size:13px;padding:10px 14px;border-radius:10px;margin-bottom:16px;display:none;line-height:1.5;}
+      .status-msg.info{display:block;background:rgba(60,75,160,0.75);border:1px solid rgba(102,126,234,0.5);color:#dde4ff;}
+      .status-msg.error{display:block;background:rgba(140,30,30,0.8);border:1px solid rgba(239,68,68,0.5);color:#fecaca;}
+      .status-msg.success{display:block;background:rgba(20,100,60,0.85);border:1px solid rgba(34,197,94,0.5);color:#bbf7d0;text-align:center;font-weight:600;font-size:14px;padding:18px;}
+      .pay-btn{
+        width:100%;padding:15px;border:none;border-radius:14px;
+        background:var(--primary);color:#0b1022;font-size:16px;font-weight:700;
+        cursor:pointer;transition:transform .2s ease,box-shadow .2s ease,opacity .2s ease;letter-spacing:.02em;
+      }
+      .pay-btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 8px 24px rgba(102,126,234,0.45);}
+      .pay-btn:disabled{opacity:.55;cursor:not-allowed;}
+      .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(0,0,0,0.25);border-top-color:#0b1022;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:8px;}
+      @keyframes spin{to{transform:rotate(360deg);}}
+      .footer{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:16px;font-size:12px;color:var(--muted);}
+      .stripe-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(60,50,200,0.75);border:1px solid rgba(99,91,255,0.5);border-radius:6px;padding:2px 8px;font-weight:600;color:#ddd8ff;font-size:11px;}
+      .check-icon{font-size:48px;margin-bottom:10px;display:block;}
+    </style>
+  </head>
+  <body>
+    <div class="card" id="payCard">
+      <div class="logo">
+        <div class="logo-icon">💳</div>
+        <div>
+          <div class="logo-name">ARNOMA</div>
+          <div class="logo-sub">Secure Payment</div>
+        </div>
+      </div>
+
+      <div class="invoice-banner" id="invoiceBanner">
+        <div class="invoice-info">
+          <div class="invoice-label">Paying for</div>
+          <div class="invoice-student" id="displayName">Loading...</div>
+        </div>
+        <div class="invoice-amount" id="displayAmount">—</div>
+      </div>
+
+      <div id="payment-element"></div>
+      <div class="status-msg" id="statusMsg"></div>
+
+      <button class="pay-btn" id="payBtn" disabled>Loading…</button>
+
+      <div class="footer">
+        Secured by <span class="stripe-badge">⚡ Stripe</span>
+      </div>
+    </div>
+
+    <script>
+      /* ── CONFIG ── */
+      const STRIPE_PK = 'pk_live_51HKvyeKHAwZsjk64kBQ6PrmVb409AuCXdDmCPQX3z5y3j4sRc9CZDomsG8TXrBDa6xapO2jtWlpOl8pTR92FlNYX00vCScBYzF';
+      const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+      const CREATE_PI_ENDPOINT = `${SUPABASE_URL}/functions/v1/create-payment-intent`;
+
+      /* ── Parse URL params (set by student-portal.html) ── */
+      const params = new URLSearchParams(window.location.search);
+      const INVOICE = {
+        studentName  : params.get('student')    || params.get('student_name') || 'Student',
+        studentEmail : params.get('email')      || '',
+        studentId    : params.get('student_id') || '',
+        amountDollars: parseFloat(params.get('amount') || '0'),
+        currency     : (params.get('currency')  || 'usd').toLowerCase(),
+        invoiceRef   : params.get('invoice')    || params.get('invoice_ref') || '',
+      };
+
+      /* ── DOM refs ── */
+      const $name   = document.getElementById('displayName');
+      const $amount = document.getElementById('displayAmount');
+      const $msg    = document.getElementById('statusMsg');
+      const $payBtn = document.getElementById('payBtn');
+      const $peSlot = document.getElementById('payment-element');
+
+      /* ── Helpers ── */
+      function fmt(dollars, currency) {
+        return new Intl.NumberFormat('en-US', {
+          style:'currency', currency:(currency||'usd').toUpperCase(), minimumFractionDigits:2
+        }).format(dollars);
+      }
+      function setMsg(kind, text) { $msg.className=`status-msg ${kind}`; $msg.textContent=text; }
+      function clearMsg()         { $msg.className='status-msg'; $msg.textContent=''; }
+      function setBtnLoading(yes) {
+        $payBtn.disabled = yes;
+        $payBtn.innerHTML = yes
+          ? `<span class="spinner"></span> Processing…`
+          : `Pay ${fmt(INVOICE.amountDollars, INVOICE.currency)}`;
+      }
+
+      /* ── Render summary ── */
+      function renderSummary() {
+        $name.textContent   = INVOICE.studentName;
+        $amount.textContent = INVOICE.amountDollars > 0 ? fmt(INVOICE.amountDollars, INVOICE.currency) : '—';
+      }
+
+      /* ── Step 1: get clientSecret from Edge Function ── */
+      async function fetchClientSecret() {
+        if (INVOICE.amountDollars <= 0) throw new Error('No balance due. Nothing to charge.');
+        const resp = await fetch(CREATE_PI_ENDPOINT, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({
+            amount_cents : Math.round(INVOICE.amountDollars * 100),
+            currency     : INVOICE.currency,
+            student_id   : INVOICE.studentId,
+            student_name : INVOICE.studentName,
+            student_email: INVOICE.studentEmail,
+            invoice_ref  : INVOICE.invoiceRef,
+          }),
+        });
+        if (!resp.ok) {
+          const err = await resp.text().catch(() => resp.status);
+          throw new Error(`Server error (${resp.status}): ${String(err).slice(0,180)}`);
+        }
+        const data = await resp.json();
+        if (!data.clientSecret) throw new Error('Server did not return a clientSecret.');
+        return data.clientSecret;
+      }
+
+      /* ── Step 2: mount Payment Element ── */
+      let stripe, elements;
+      async function mountPaymentElement(clientSecret) {
+        stripe   = window.Stripe(STRIPE_PK);
+        elements = stripe.elements({
+          clientSecret,
+          appearance:{
+            theme:'night',
+            variables:{
+              colorPrimary    :'#667eea',
+              colorBackground :'#0d1120',
+              colorText       :'#eef0f8',
+              colorDanger     :'#ef4444',
+              borderRadius    :'10px',
+              fontFamily      :"-apple-system,BlinkMacSystemFont,'Inter',sans-serif",
+            }
+          }
+        });
+        elements.create('payment', { layout:'tabs' }).mount('#payment-element');
+        $payBtn.textContent = `Pay ${fmt(INVOICE.amountDollars, INVOICE.currency)}`;
+        $payBtn.disabled    = false;
+      }
+
+      /* ── Step 3: confirm payment ── */
+      async function handlePay() {
+        if (!stripe || !elements) return;
+        clearMsg();
+        setBtnLoading(true);
+
+        const returnUrl = new URL(window.location.origin + '/student-portal.html');
+        returnUrl.searchParams.set('payment',    'success');
+        returnUrl.searchParams.set('student_id', INVOICE.studentId);
+
+        const { error, paymentIntent } = await stripe.confirmPayment({
+          elements,
+          confirmParams:{
+            return_url   : returnUrl.toString(),
+            receipt_email: INVOICE.studentEmail || undefined,
+          },
+          redirect:'if_required',
+        });
+
+        if (error) {
+          setMsg('error', error.message || 'Payment failed. Please try again.');
+          setBtnLoading(false);
+          return;
+        }
+
+        if (paymentIntent && paymentIntent.status === 'succeeded') {
+          showSuccess();
+          return;
+        }
+
+        setMsg('info', 'Redirecting to complete authentication…');
+      }
+
+      /* ── Success state ── */
+      function showSuccess() {
+        $peSlot.innerHTML = '';
+        $payBtn.style.display = 'none';
+        document.getElementById('invoiceBanner').style.display = 'none';
+        $msg.className = 'status-msg success';
+        $msg.innerHTML = `<span class="check-icon">✅</span>Payment successful!<br><small style="font-weight:400;color:#86efac;font-size:13px;">A receipt will be sent by Stripe.</small>`;
+
+        // Notify parent window (student-portal.html modal)
+        try { window.parent.postMessage({ type:'ARNOMA_PAYMENT_SUCCESS', studentId:INVOICE.studentId }, '*'); } catch(_){}
+        // Auto-close after 3 s
+        setTimeout(() => {
+          try { window.parent.postMessage({ type:'ARNOMA_CLOSE_PAYMENT' }, '*'); } catch(_){}
+        }, 3000);
+      }
+
+      /* ── Boot ── */
+      async function init() {
+        renderSummary();
+        setMsg('info', 'Preparing secure payment form…');
+        try {
+          const cs = await fetchClientSecret();
+          clearMsg();
+          await mountPaymentElement(cs);
+        } catch(e) {
+          setMsg('error', e.message || 'Failed to load payment form.');
+          $payBtn.textContent = 'Retry';
+          $payBtn.disabled    = false;
+          $payBtn.addEventListener('click', init, { once:true });
+          return;
+        }
+        $payBtn.addEventListener('click', handlePay);
+      }
+
+      init();
+    </script>
+  </body>
+</html>
