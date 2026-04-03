@@ -197,6 +197,77 @@
         margin-top: 3px;
       }
 
+      /* ── Amount editor ── */
+      .amount-editor {
+        margin-top: 14px;
+        padding-top: 14px;
+        border-top: 1px solid rgba(201,168,76,0.12);
+      }
+
+      .amount-editor-label {
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--muted2);
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        margin-bottom: 8px;
+      }
+
+      .amount-input-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .amount-input-wrap {
+        position: relative;
+        flex: 1;
+      }
+
+      .amount-input-symbol {
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--gold);
+        pointer-events: none;
+      }
+
+      .amount-input {
+        width: 100%;
+        padding: 9px 12px 9px 26px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        color: var(--text);
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 700;
+        outline: none;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        -moz-appearance: textfield;
+      }
+      .amount-input::-webkit-outer-spin-button,
+      .amount-input::-webkit-inner-spin-button { -webkit-appearance: none; }
+      .amount-input:focus {
+        border-color: var(--gold);
+        box-shadow: 0 0 0 2px rgba(201,168,76,0.15);
+      }
+      .amount-input.invalid {
+        border-color: var(--red);
+        box-shadow: 0 0 0 2px rgba(192,57,43,0.15);
+      }
+
+      .amount-hint {
+        font-size: 10px;
+        color: var(--muted);
+        margin-top: 5px;
+        font-weight: 500;
+      }
+      .amount-hint.error { color: #e07060; }
+
       /* ── Divider ── */
       .divider {
         display: flex;
@@ -350,6 +421,24 @@
           <div class="invoice-amount" id="displayAmount">—</div>
           <div class="invoice-currency-label" id="displayCurrency">USD</div>
         </div>
+
+        <div class="amount-editor">
+          <div class="amount-editor-label">Amount to Pay</div>
+          <div class="amount-input-row">
+            <div class="amount-input-wrap">
+              <span class="amount-input-symbol">$</span>
+              <input
+                type="number"
+                id="payAmountInput"
+                class="amount-input"
+                min="0.50"
+                step="0.01"
+                placeholder="0.00"
+              />
+            </div>
+          </div>
+          <div class="amount-hint" id="amountHint">Balance due: —</div>
+        </div>
       </div>
 
       <div class="divider">
@@ -394,11 +483,13 @@
       };
 
       /* ── DOM refs ── */
-      const $name   = document.getElementById('displayName');
-      const $amount = document.getElementById('displayAmount');
-      const $msg    = document.getElementById('statusMsg');
-      const $payBtn = document.getElementById('payBtn');
-      const $peSlot = document.getElementById('payment-element');
+      const $name       = document.getElementById('displayName');
+      const $amount     = document.getElementById('displayAmount');
+      const $msg        = document.getElementById('statusMsg');
+      const $payBtn     = document.getElementById('payBtn');
+      const $peSlot     = document.getElementById('payment-element');
+      const $amtInput   = document.getElementById('payAmountInput');
+      const $amtHint    = document.getElementById('amountHint');
 
       /* ── Helpers ── */
       function fmt(dollars, currency) {
@@ -414,11 +505,36 @@
           : text;
       }
       function clearMsg() { $msg.className = 'status-msg'; $msg.innerHTML = ''; }
-      function setBtnLoading(yes) {
+      function setBtnLoading(yes, amountDollars) {
         $payBtn.disabled = yes;
         $payBtn.innerHTML = yes
           ? `<span class="spinner"></span> Processing…`
-          : `Pay ${fmt(INVOICE.amountDollars, INVOICE.currency)}`;
+          : `Pay ${fmt(amountDollars || getInputAmount(), INVOICE.currency)}`;
+      }
+
+      /* ── Amount input helpers ── */
+      function getInputAmount() {
+        return parseFloat($amtInput.value) || 0;
+      }
+      function validateAmount() {
+        const val = getInputAmount();
+        const max = INVOICE.amountDollars;
+        if (val < 0.50) {
+          $amtInput.classList.add('invalid');
+          $amtHint.classList.add('error');
+          $amtHint.textContent = 'Minimum payment is $0.50.';
+          return false;
+        }
+        if (max > 0 && val > max) {
+          $amtInput.classList.add('invalid');
+          $amtHint.classList.add('error');
+          $amtHint.textContent = `Cannot exceed balance of ${fmt(max, INVOICE.currency)}.`;
+          return false;
+        }
+        $amtInput.classList.remove('invalid');
+        $amtHint.classList.remove('error');
+        $amtHint.textContent = `Balance due: ${fmt(max, INVOICE.currency)}`;
+        return true;
       }
 
       /* ── Render summary ── */
@@ -427,16 +543,52 @@
         $amount.textContent = INVOICE.amountDollars > 0 ? fmt(INVOICE.amountDollars, INVOICE.currency) : '—';
         const currLabel = document.getElementById('displayCurrency');
         if (currLabel) currLabel.textContent = INVOICE.currency.toUpperCase();
+
+        // Pre-fill input with full balance
+        if (INVOICE.amountDollars > 0) {
+          $amtInput.value = INVOICE.amountDollars.toFixed(2);
+          $amtInput.max   = INVOICE.amountDollars.toFixed(2);
+        }
+        $amtHint.textContent = INVOICE.amountDollars > 0
+          ? `Balance due: ${fmt(INVOICE.amountDollars, INVOICE.currency)}`
+          : 'Balance due: —';
+
+        updatePayBtn();
       }
 
+      function updatePayBtn() {
+        const val = getInputAmount();
+        $payBtn.textContent = val >= 0.50
+          ? `Pay ${fmt(val, INVOICE.currency)}`
+          : 'Pay';
+      }
+
+      /* ── Amount input events ── */
+      $amtInput.addEventListener('input', () => {
+        validateAmount();
+        updatePayBtn();
+        // If Stripe was already mounted, reset so a fresh PI is created with new amount
+        if (stripe && elements) {
+          stripe = null;
+          elements = null;
+          $peSlot.innerHTML = '';
+          clearMsg();
+          setMsg('info', 'Amount changed — click Pay to continue.');
+          $payBtn.disabled = false;
+          $payBtn.removeEventListener('click', handlePay);
+          $payBtn.addEventListener('click', handlePayWithFetch, { once: true });
+        }
+        updatePayBtn();
+      });
+
       /* ── Step 1: get clientSecret from Edge Function ── */
-      async function fetchClientSecret() {
-        if (INVOICE.amountDollars <= 0) throw new Error('No balance due. Nothing to charge.');
+      async function fetchClientSecret(amountDollars) {
+        if (!amountDollars || amountDollars <= 0) throw new Error('No amount specified.');
         const resp = await fetch(CREATE_PI_ENDPOINT, {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({
-            amount_cents : Math.round(INVOICE.amountDollars * 100),
+            amount_cents : Math.round(amountDollars * 100),
             currency     : INVOICE.currency,
             student_id   : INVOICE.studentId,
             student_name : INVOICE.studentName,
@@ -454,7 +606,7 @@
       }
 
       let stripe, elements;
-      async function mountPaymentElement(clientSecret) {
+      async function mountPaymentElement(clientSecret, amountDollars) {
         stripe   = window.Stripe(STRIPE_PK);
         elements = stripe.elements({
           clientSecret,
@@ -478,15 +630,40 @@
           }
         });
         elements.create('payment', { layout:'tabs' }).mount('#payment-element');
-        $payBtn.textContent = `Pay ${fmt(INVOICE.amountDollars, INVOICE.currency)}`;
+        $payBtn.textContent = `Pay ${fmt(amountDollars, INVOICE.currency)}`;
         $payBtn.disabled    = false;
       }
 
-      /* ── Step 3: confirm payment ── */
+      /* ── Pay flow: fetch secret → mount → confirm ── */
+      async function handlePayWithFetch() {
+        if (!validateAmount()) return;
+        const chosenAmount = getInputAmount();
+
+        clearMsg();
+        $payBtn.disabled = true;
+        $payBtn.innerHTML = `<span class="spinner"></span> Preparing…`;
+        $amtInput.disabled = true;
+
+        try {
+          const cs = await fetchClientSecret(chosenAmount);
+          await mountPaymentElement(cs, chosenAmount);
+          clearMsg();
+          $payBtn.addEventListener('click', handlePay, { once: true });
+        } catch(e) {
+          setMsg('error', e.message || 'Failed to load payment form.');
+          $payBtn.textContent = `Pay ${fmt(chosenAmount, INVOICE.currency)}`;
+          $payBtn.disabled    = false;
+          $amtInput.disabled  = false;
+          $payBtn.addEventListener('click', handlePayWithFetch, { once: true });
+        }
+      }
+
+      /* ── Confirm payment ── */
       async function handlePay() {
         if (!stripe || !elements) return;
         clearMsg();
-        setBtnLoading(true);
+        const chosenAmount = getInputAmount();
+        setBtnLoading(true, chosenAmount);
 
         const returnUrl = new URL(window.location.origin + '/student-portal.html');
         returnUrl.searchParams.set('payment',    'success');
@@ -503,7 +680,8 @@
 
         if (error) {
           setMsg('error', error.message || 'Payment failed. Please try again.');
-          setBtnLoading(false);
+          setBtnLoading(false, chosenAmount);
+          $payBtn.addEventListener('click', handlePay, { once: true });
           return;
         }
 
@@ -539,21 +717,10 @@
       }
 
       /* ── Boot ── */
-      async function init() {
+      function init() {
         renderSummary();
-        setMsg('info', 'Preparing secure payment form…');
-        try {
-          const cs = await fetchClientSecret();
-          clearMsg();
-          await mountPaymentElement(cs);
-        } catch(e) {
-          setMsg('error', e.message || 'Failed to load payment form.');
-          $payBtn.textContent = 'Retry';
-          $payBtn.disabled    = false;
-          $payBtn.addEventListener('click', init, { once:true });
-          return;
-        }
-        $payBtn.addEventListener('click', handlePay);
+        validateAmount();
+        $payBtn.addEventListener('click', handlePayWithFetch, { once: true });
       }
 
       init();
