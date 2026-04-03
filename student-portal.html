@@ -7536,14 +7536,17 @@
       
       const filteredPayments = (payments || [])
         .filter(payment => {
-          const isPaidOrCredit = payment.status === 'paid' || payment.status === 'credit' || payment.status === 'excused';
+          // ANY payment record that isn't 'absent' counts as paid/covered
+          // This exactly mirrors Calendar-NEW calculation where manual blanks count as paid
+          if (payment.status === 'absent') return false;
+          
           if (payment.status === 'credit') {
             debugLog(`  ✅ Including CREDIT payment: date=${payment.dateString}, amount=${payment.amount}`);
           }
           if (payment.status === 'excused') {
             debugLog(`  ✅ Including EXCUSED payment: date=${payment.dateString}, amount=${payment.amount}`);
           }
-          return isPaidOrCredit;
+          return true;
         });
         
       debugLog(`  → Filtered to ${filteredPayments.length} paid/credit payments`);
@@ -7990,7 +7993,7 @@
 
       // From the `payments` array (already contains Zelle + manual, pre-processed by loadPaymentHistory)
       payments.forEach(p => {
-        if (p.status === 'paid' || p.status === 'credit') {
+        if (p.status === 'paid' || p.status.startsWith('paid') || p.status === 'credit') {
           const d = p.dateString || (p.date instanceof Date ? p.date.toISOString().split('T')[0] : (p.date||'').substring(0,10));
           if (d) paidDates.add(d);
         }
@@ -8165,7 +8168,7 @@
       payments.forEach(payment => {
         const amount = parseFloat(payment.amount) || 0;
         // 🔥 CRITICAL FIX: Include BOTH paid and credit payments
-        if (payment.status === 'paid' || payment.status === 'credit') {
+        if (payment.status === 'paid' || payment.status.startsWith('paid') || payment.status === 'credit') {
           if (!lastPaidDate || payment.date > lastPaidDate) {
             lastPaidDate = payment.date;
             lastPaidAmount = amount;
@@ -8330,7 +8333,9 @@
             statusText = 'Paid from Credit';
             statusClass = 'credit';
           } else {
-            switch (payment.status) {
+            // Support "paid (stripe)" statuses
+            const baseStatus = payment.status.startsWith('paid') ? 'paid' : payment.status;
+            switch (baseStatus) {
               case 'paid':
                 statusText = 'Paid';
                 break;
@@ -10610,10 +10615,10 @@
           return [];
         }
         
-        // Normalize group to format "Group X"
-        if (studentGroup && !studentGroup.toLowerCase().startsWith('group')) {
-          studentGroup = `Group ${studentGroup}`;
-        }
+        // Normalize group completely safely: extract the letter and force "Group X"
+        const rawG = currentStudent?.group_letter || currentStudent?.group || currentStudent?.group_name;
+        const normLet = rawG ? rawG.toString().replace(/Group\s*/i, '').trim().toUpperCase() : null;
+        studentGroup = normLet ? `Group ${normLet}` : null;
         
         if (DEBUG_MODE) debugLog('📚 Loading notes for Student ID:', studentId, 'Group:', studentGroup);
         
@@ -10900,8 +10905,8 @@
           
           // 🔥 FIX: Free access notes STILL require payment for the specific date
           // Free access just means they CAN see it's there, not that it's unlocked
-          // Student can access if: note doesn't require payment OR has paid for this date
-          const isPaid = !noteRequiresPayment || studentHasPaidForThisNote;
+          // Student can access if: note doesn't require payment, has free access, OR has paid for this date
+          const isPaid = !noteRequiresPayment || hasFreeAccess || studentHasPaidForThisNote;
           
           if (DEBUG_MODE && noteRequiresPayment && !isPaid && !hasFreeAccess) {
             const classDate = note.class_date ? note.class_date.split('T')[0] : 'unknown';

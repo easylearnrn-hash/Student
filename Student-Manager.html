@@ -1666,7 +1666,7 @@
             Add Student
           </button>
           <button class="btn-header-secondary" onclick="openBulkAddModal()">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
             Bulk Add
           </button>
           <button class="btn-header-secondary" onclick="openUploadNotesModal()">
@@ -2115,6 +2115,11 @@
                   <button class="price-btn" onclick="selectAmount('50 $', this)">$50</button>
                   <button class="price-btn" onclick="selectAmount('75 $', this)">$75</button>
                   <button class="price-btn" onclick="selectAmount('100 $', this)">$100</button>
+                  <input type="text" id="customPriceInput" class="profile-field-input" 
+                         placeholder="Custom" 
+                         oninput="this.value = this.value.replace(/[^0-9]/g, '')"
+                         onchange="selectCustomAmount(this.value)" 
+                         style="width: 80px; height: 36px; padding: 0 10px; border-radius: 10px; background: rgba(255,252,240,0.04); font-size: 13px; font-weight: 600; color: #fbbf24; border: 1px solid rgba(196,164,95,0.2); outline: none;">
                 </div>
               </div>
             </div>
@@ -3835,8 +3840,8 @@
                   </div>
 
                 </div>
-              `}).join('')}
-            </div>
+              `}).join('')
+            }
           `;
           
         } catch (error) {
@@ -5090,10 +5095,27 @@
 
         // Price buttons
         const currentPrice = s.price_per_class || 0;
+        let presetFound = false;
         document.querySelectorAll('#amountButtons .price-btn').forEach(btn => {
           const val = parseInt(btn.textContent.replace(/[^0-9]/g, '')) || 0;
-          btn.classList.toggle('active', val === currentPrice);
+          if (val === currentPrice) {
+            btn.classList.add('active');
+            presetFound = true;
+          } else {
+            btn.classList.remove('active');
+          }
         });
+        
+        const customInput = document.getElementById('customPriceInput');
+        if (customInput) {
+          if (!presetFound && currentPrice > 0) {
+            customInput.value = currentPrice;
+            customInput.classList.add('active');
+          } else {
+            customInput.value = '';
+            customInput.classList.remove('active');
+          }
+        }
 
         // Group buttons
         document.querySelectorAll('#groupButtons .group-btn').forEach(btn => {
@@ -5337,23 +5359,38 @@
       }
 
       function selectAmount(amount, btn) {
-        // Remove active from all amount buttons
-        document.querySelectorAll('#amountButtons .price-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+          // Remove active from all amount buttons
+          document.querySelectorAll('#amountButtons .price-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById('customPriceInput').value = '';
 
-        if (currentStudent) {
-          // Parse amount if it's a string like "100 $"
-          const numericAmount = typeof amount === 'string'
-            ? parseInt(amount.replace(/[^0-9]/g, '')) || 0
-            : amount;
-          
-          currentStudent.price_per_class = numericAmount;
-          document.getElementById('modalPrice').textContent = formatPrice(numericAmount);
-          debugLog(`Price per class changed to: ${numericAmount}`);
-          saveStudent(currentStudent);
-          renderStudentCards();
+          if (currentStudent) {
+            // Parse amount if it's a string like "100 $"
+            const numericAmount = typeof amount === 'string'
+              ? parseInt(amount.replace(/[^0-9]/g, '')) || 0
+              : amount;
+            
+            currentStudent.price_per_class = numericAmount;
+            document.getElementById('modalPrice').textContent = formatPrice(numericAmount);
+            debugLog(`Price per class changed to: ${numericAmount}`);
+            saveStudent(currentStudent);
+            renderStudentCards();
+          }
         }
-      }
+
+        function selectCustomAmount(amount) {
+          const numericAmount = parseInt(amount) || 0;
+          document.querySelectorAll('#amountButtons .price-btn').forEach(b => b.classList.remove('active'));
+          document.getElementById('customPriceInput').value = amount ? numericAmount : '';
+
+          if (currentStudent) {
+            currentStudent.price_per_class = numericAmount;
+            document.getElementById('modalPrice').textContent = formatPrice(numericAmount);
+            debugLog(`Price per class changed to custom: ${numericAmount}`);
+            saveStudent(currentStudent);
+            renderStudentCards();
+          }
+        }
 
       async function toggleCalendarVisibility(studentId, isVisible) {
         debugLog(`🔄 toggleCalendarVisibility called: studentId=${studentId}, isVisible=${isVisible}`);
