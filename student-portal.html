@@ -7897,7 +7897,7 @@
       const studentGroup = student.group_name || student.group_letter || student.group;
       if (!studentGroup || !groupScheduleData || !groupScheduleData.schedule) {
         debugDebug('⚠️ No schedule data to calculate unpaid classes');
-        return { unpaidAmount: 0, unpaidClasses: [] };
+        return { unpaidAmount: 0, unpaidClasses: [], hasSchedule: false };
       }
       
       const pricePerClass = parseFloat(student.price_per_class) || 50;
@@ -8083,7 +8083,7 @@
       
       if (scheduleActiveDays.length === 0) {
         debugDebug('⚠️ No active days found in schedule');
-        return { unpaidAmount: 0, unpaidClasses: [] };
+        return { unpaidAmount: 0, unpaidClasses: [], hasSchedule: false };
       }
       
       // Generate all past class dates based on schedule
@@ -8251,7 +8251,7 @@
       debugDebug(`💰 Total unpaid: $${unpaidAmount} (${unpaidClasses.length} classes × $${pricePerClass})`);
       debugDebug(`⚪ Total absent: ${absentClasses.length} classes`);
       
-      return { unpaidAmount, unpaidClasses, absentClasses };
+      return { unpaidAmount, unpaidClasses, absentClasses, hasSchedule: true };
     }
     
     // Load student payment UI only when needed (with DOM caching)
@@ -8295,6 +8295,8 @@
       const numericBalance = student ? Number(student.balance) : NaN;
       const pricePerClassValue = student ? (parseFloat(student.price_per_class) || 50) : 50;
       
+      let hasSchedule = false;
+      
       // ✅ USE DATABASE BALANCE AS SOURCE OF TRUTH
       // The `students.balance` field is managed by admin and is authoritative for ledger tracking.
       // SIGN CONVENTION: Positive = Credit (overpayment), Negative = Debt (unpaid)
@@ -8311,6 +8313,7 @@
         // but DON'T use this to override the balance
         if (student && groupSchedule) {
           const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
+          hasSchedule = result.hasSchedule || false;
           unpaidClasses = result.unpaidClasses; // Track which classes are unpaid
           absentClasses = result.absentClasses || []; // Track absent classes
           scheduleUnpaidAmount = result.unpaidAmount || 0;
@@ -8321,6 +8324,7 @@
         debugDebug('⚠️ No database balance found - falling back to schedule calculation');
         if (student && groupSchedule) {
           const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
+          hasSchedule = result.hasSchedule || false;
           totalUnpaid = result.unpaidAmount;
           unpaidClasses = result.unpaidClasses;
           absentClasses = result.absentClasses || [];
@@ -8341,28 +8345,36 @@
       let unpaidSource = 'none';
       const ledgerAmount = Number.isFinite(numericBalance) ? numericBalance : null;
 
-      // Use schedule calculation only if the ledger has NO explicit value set.
-      // If the admin has set balance=0, that is an intentional "all clear" for past classes,
-      // BUT new unpaid classes that appeared AFTER the balance was cleared should still show.
-      // Rule: if balance===0 and schedule finds unpaid classes, the schedule wins (new debt).
-      // If balance is explicitly negative (debt set by admin), keep whichever is higher.
+      // We now COMPLETELY DEFER TO THE SCHEDULE CALCULATION.
+      // If the admin has entered a negative balance (debt) manually, but the schedule calculation
+      // shows a smaller amount (e.g. because they excused some classes), the schedule is more
+      // up-to-date with reality. We trust the schedule over the stale ledger number.
       const ledgerIsExplicitlySet = Number.isFinite(numericBalance);
       const ledgerIsExplicitlyClear = ledgerIsExplicitlySet && numericBalance >= 0; // 0 or positive = no debt
 
-      if (!ledgerIsExplicitlySet && scheduleUnpaidAmount > 0) {
+      if (!ledgerIsExplicitlySet) {
         // No ledger value at all — fall back to schedule
         displayUnpaidAmount = scheduleUnpaidAmount;
         unpaidSource = 'schedule';
-      } else if (ledgerIsExplicitlyClear && numericBalance === 0 && scheduleUnpaidAmount > 0) {
-        // Balance was cleared to $0 by admin, but schedule now shows new unpaid classes — trust schedule
-        displayUnpaidAmount = scheduleUnpaidAmount;
-        unpaidSource = 'schedule';
-      } else if (!ledgerIsExplicitlyClear && scheduleUnpaidAmount > totalUnpaid) {
-        // Ledger shows debt AND schedule shows more — use higher of the two
-        displayUnpaidAmount = scheduleUnpaidAmount;
-        unpaidSource = 'schedule';
-      } else if (totalUnpaid > 0) {
-        unpaidSource = 'ledger';
+      } else if (ledgerIsExplicitlyClear && numericBalance > 0) {
+        // Balance is a CREDIT (positive). Student owes nothing. Let credit absorb the scheduled unpaids.
+        displayUnpaidAmount = 0;
+        unpaidSource = 'ledger (credit)';
+      } else {
+        // Either balance is 0 or negative (debt).
+        // Since the schedule is carefully calculated from absences, excused classes,
+        // and skipped classes, we ALWAYS trust the schedule if it has calculated unpaid classes.
+        // This ensures that when an admin marks an old class as "excused", the total drops correctly
+        // instead of getting stuck on the old manual ledger amount.
+        // IF there is NO schedule (hasSchedule === false), 
+        // we should still respect the explicitly set historical ledger debt.
+        if (!hasSchedule && totalUnpaid > 0) {
+          displayUnpaidAmount = totalUnpaid;
+          unpaidSource = 'ledger (no scheduled unpaids)';
+        } else {
+          displayUnpaidAmount = scheduleUnpaidAmount;
+          unpaidSource = 'schedule (overriding ledger)';
+        }
       }
 
       if (studentMarkedAbsent && (displayUnpaidAmount > 0 || unpaidClasses.length > 0)) {
