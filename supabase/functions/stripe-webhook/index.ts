@@ -94,35 +94,54 @@ serve(async (req: Request) => {
       id         : string;
       amount     : number;
       currency   : string;
-      metadata   : { student_id?: string; invoice_ref?: string; student_name?: string; for_class?: string };
+      metadata   : { student_id?: string; invoice_ref?: string; student_name?: string; for_class?: string; for_class_dates?: string };
       receipt_email: string | null;
     };
 
-    const { student_id, invoice_ref, for_class } = pi.metadata ?? {};
+    const { student_id, invoice_ref, for_class, for_class_dates } = pi.metadata ?? {};
     const amountDollars = pi.amount / 100;
 
-    console.log(`✅ PaymentIntent succeeded: ${pi.id} | student: ${student_id} | $${amountDollars}`);
+    console.log(`✅ PaymentIntent succeeded: ${pi.id} | student: ${student_id} | $${amountDollars} | for_class: ${for_class} | for_class_dates: ${for_class_dates}`);
 
     if (student_id && SUPABASE_URL && SERVICE_ROLE_KEY) {
       const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-      
-      const forClassArray = for_class ? for_class.split(',').map((d: string) => d.trim()).filter(Boolean) : [];
 
-      // Insert a paid record in payment_records
+      // Build the array of class dates this payment covers.
+      // Prefer for_class_dates (JSON array) over for_class (comma string) — more precise.
+      let forClassArray: string[] = [];
+      if (for_class_dates) {
+        try {
+          const parsed = JSON.parse(for_class_dates);
+          if (Array.isArray(parsed)) forClassArray = parsed.map((d: string) => String(d).trim()).filter(Boolean);
+        } catch {
+          forClassArray = for_class_dates.split(',').map((d: string) => d.trim()).filter(Boolean);
+        }
+      }
+      if (forClassArray.length === 0 && for_class) {
+        forClassArray = for_class.split(',').map((d: string) => d.trim()).filter(Boolean);
+      }
+
+      // Use today's date only as last resort — so Calendar always has an explicit for_class
+      const todayDate = new Date().toISOString().split('T')[0];
+      const primaryClassDate = forClassArray.length > 0 ? forClassArray[0] : todayDate;
+
+      // Insert a paid record in payment_records.
+      // CRITICAL: date = primaryClassDate (the actual class date, NOT the receipt date)
+      // Calendar-NEW matches green dots by payment_records.date === class_date.
+      // payment_records only has: student_id, date, amount, status, payment_method, notes.
       const { error } = await supabaseAdmin.from('payment_records').insert({
-        student_id    : student_id,
-        amount        : amountDollars,
-        status        : 'paid',
-        payment_method: 'Stripe',
-        date          : forClassArray.length > 0 ? forClassArray[0] : new Date().toISOString().split('T')[0],
-        for_class_dates: forClassArray.length > 0 ? forClassArray : undefined,
-        notes         : invoice_ref ? `Stripe PI: ${pi.id} | Ref: ${invoice_ref}` : `Stripe PI: ${pi.id}`,
+        student_id     : student_id,
+        amount         : amountDollars,
+        status         : 'paid',
+        payment_method : 'Stripe',
+        date           : primaryClassDate,
+        notes          : invoice_ref ? `Stripe PI: ${pi.id} | Ref: ${invoice_ref}` : `Stripe PI: ${pi.id}`,
       });
 
       if (error) {
         console.error('❌ Supabase insert error:', error);
       } else {
-        console.log(`✅ payment_records row inserted for student ${student_id}`);
+        console.log(`✅ payment_records inserted for student ${student_id} covering classes: ${forClassArray.join(', ') || primaryClassDate}`);
       }
     }
   }

@@ -1236,24 +1236,8 @@
                   <span style="color:#e05555;">❌ Unpaid</span>
                 </label>
                 <label class="cal-filter-item">
-                  <input type="checkbox" value="credit" style="margin-right:10px;accent-color:#f5c842;" onchange="updateStatusFilter()">
-                  <span style="color:#f5c842;">💳 Credit</span>
-                </label>
-                <label class="cal-filter-item">
                   <input type="checkbox" value="absent" style="margin-right:10px;accent-color:#9e9e9e;" onchange="updateStatusFilter()">
                   <span style="color:#9e9e9e;">🚫 Absent</span>
-                </label>
-                <label class="cal-filter-item">
-                  <input type="checkbox" value="excused" style="margin-right:10px;accent-color:#10b981;" onchange="updateStatusFilter()">
-                  <span style="color:#10b981;">✅ Excused</span>
-                </label>
-                <label class="cal-filter-item">
-                  <input type="checkbox" value="canceled" style="margin-right:10px;accent-color:#6b7280;" onchange="updateStatusFilter()">
-                  <span style="color:#9ca3af;">⭕ Canceled</span>
-                </label>
-                <label class="cal-filter-item">
-                  <input type="checkbox" value="partial" style="margin-right:10px;accent-color:#c4a45f;" onchange="updateStatusFilter()">
-                  <span style="color:#c4a45f;">⚠️ Partial</span>
                 </label>
               </div>
             </div>
@@ -1669,8 +1653,8 @@
       let nameToStudentIds = new Map(); // Key: normalized name/alias, Value: Set(studentIds) for payment index
       
       // Performance: Indexed data structures
-      let absencesByDateStudent = new Map(); // Key: "date-studentId", Value: true
-  let excusedByDateStudent = new Map(); // Key: "date-studentId", Value: true
+    let absencesByDateStudent = new Map(); // Key: "date-studentId", Value: true
+    let excusedByDateStudent = new Map(); // Legacy (excused now treated as paid)
       let skippedClassesByDateGroup = new Map(); // Key: "date-groupName", Value: true
       let studentsByGroup = new Map(); // Key: groupName, Value: students[] (precomputed filter)
       
@@ -1694,8 +1678,7 @@
         paymentCache.clear();
         studentAliasesCache.clear();
         nameToStudentIds.clear();
-        absencesByDateStudent.clear();
-        excusedByDateStudent.clear();
+  absencesByDateStudent.clear();
         skippedClassesByDateGroup.clear();
         studentsByGroup.clear();
         paymentIndex.clear();
@@ -1773,16 +1756,7 @@
           absencesByDateStudent.set(key, true);
         });
 
-        // Index excused records for O(1) lookup
         excusedByDateStudent.clear();
-        paymentRecordsData
-          .filter(pr => pr.status === 'excused')
-          .forEach(pr => {
-            const date = (pr.date || '').split('T')[0];
-            if (!date || !pr.student_id) return;
-            const key = `${date}-${pr.student_id}`;
-            excusedByDateStudent.set(key, true);
-          });
         
         // Index skipped classes for O(1) lookup
         skippedClassesByDateGroup.clear();
@@ -1842,11 +1816,8 @@
           });
         });
         
-        // Index payment_records table (exclude excused)
+        // Index payment_records table (treat excused as paid)
         paymentRecordsData.forEach(pr => {
-          if (pr.status === 'excused') {
-            return;
-          }
           const forClassDates = extractForClassDates(pr, pr.date);
           forClassDates.forEach(dateStr => {
             const normalizedDate = normalizeDateString(dateStr);
@@ -1902,9 +1873,8 @@
         return absencesByDateStudent.has(key);
       }
 
-      function isExcusedCached(dateStr, studentId) {
-        const key = `${dateStr}-${studentId}`;
-        return excusedByDateStudent.has(key);
+      function isExcusedCached() {
+        return false;
       }
       
       function isClassSkippedCached(dateStr, groupName) {
@@ -2441,21 +2411,23 @@
               studentsData.forEach(student => {
                 if (student.group_name === group.group_name && student.show_in_grid !== false && student.show_in_grid !== 'false' && student.status !== 'paused' && student.status !== 'graduated') {
                   // IMPORTANT: Only count classes after student's creation date
-                  if (student.created_at) {
-                    const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
-                    if (dateStr < studentCreatedDate) {
-                      return; // Skip this student for dates before creation
-                    }
+                  let studentStartStr = null;
+                  if (student.start_date) {
+                    studentStartStr = student.start_date.split('T')[0];
+                  } else if (student.created_at) {
+                    studentStartStr = new Date(student.created_at).toISOString().split('T')[0];
+                  }
+                  if (studentStartStr && dateStr < studentStartStr) {
+                    return; // Skip this student for dates before creation
                   }
                   
                   const paymentInfo = hasPaymentCached(student.id, dateStr, student);
-                  const isExcused = isExcusedCached(dateStr, student.id);
                   const isAbsent = isAbsentCached(dateStr, student.id);
                   const pricePerClass = parseFloat(student.price_per_class || 0);
                   
                   if (paymentInfo.hasPayment) {
                     paidTotal += pricePerClass;
-                  } else if (!isAbsent && !isExcused && dateStr <= today) {
+                  } else if (!isAbsent && dateStr <= today) {
                     unpaidTotal += pricePerClass;
                   }
                 }
@@ -2523,11 +2495,14 @@
             // Add a dot for each active student in the scheduled class
             groupStudents.forEach(student => {
               // IMPORTANT: Only show classes after student's creation date
-              if (student.created_at) {
-                const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
-                if (dateStr < studentCreatedDate) {
-                  return; // Skip this student for dates before creation
-                }
+              let studentStartStr = null;
+              if (student.start_date) {
+                studentStartStr = student.start_date.split('T')[0];
+              } else if (student.created_at) {
+                studentStartStr = new Date(student.created_at).toISOString().split('T')[0];
+              }
+              if (studentStartStr && dateStr < studentStartStr) {
+                return; // Skip this student for dates before creation
               }
               
               // Get pre-parsed aliases from cache
@@ -2547,33 +2522,19 @@
 
               // Check absence/excused using indexed lookup
               const isAbsent = isAbsentCached(dateStr, student.id);
-              const isExcused = isExcusedCached(dateStr, student.id);
 
               // Determine dot type and label
               let dotType = 'gray'; // Default scheduled class
               let dotLabel = `${group.group_name}: ${student.name}`;
 
               if (isSkipped) {
-                dotType = 'canceled';
-                dotLabel += ' (Canceled)';
+                return;
               } else if (isAbsent) {
                 dotType = 'absent';
                 dotLabel += ' (Absent)';
-              } else if (isExcused) {
-                dotType = 'excused';
-                dotLabel += ' (Excused)';
               } else if (paymentInfo.hasPayment) {
-                // Gold for credit, blue for cash, green for automated payments
-                if (paymentInfo.isCredit) {
-                  dotType = 'credit';
-                  dotLabel += ' (Credit)';
-                } else if (paymentInfo.isManual) {
-                  dotType = 'manual';
-                  dotLabel += ' (Cash Payment)';
-                } else {
-                  dotType = 'paid';
-                  dotLabel += ' (Paid)';
-                }
+                dotType = 'paid';
+                dotLabel += ' (Paid)';
               } else if (dateStr <= getLATodayISO()) {
                 dotType = 'unpaid';
                 dotLabel += ' (Unpaid)';
@@ -2718,11 +2679,14 @@
               studentsData.forEach(student => {
                 if (student.group_name === group.group_name && student.show_in_grid !== false && student.show_in_grid !== 'false' && student.status !== 'paused' && student.status !== 'graduated') {
                   // IMPORTANT: Only count classes after student's creation date
-                  if (student.created_at) {
-                    const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
-                    if (dateStr < studentCreatedDate) {
-                      return; // Skip this student for dates before creation
-                    }
+                  let studentStartStr = null;
+                  if (student.start_date) {
+                    studentStartStr = student.start_date.split('T')[0];
+                  } else if (student.created_at) {
+                    studentStartStr = new Date(student.created_at).toISOString().split('T')[0];
+                  }
+                  if (studentStartStr && dateStr < studentStartStr) {
+                    return; // Skip this student for dates before creation
                   }
                   
                   const paymentInfo = hasPaymentCached(student.id, dateStr, student);
@@ -2732,9 +2696,8 @@
                   } else if (dateStr <= today) {
                     // Only count unpaid for past/today dates - using cached lookup for performance
                     const isAbsent = isAbsentCached(dateStr, student.id);
-                    const isExcused = isExcusedCached(dateStr, student.id);
                     
-                    if (!isAbsent && !isExcused) {
+                    if (!isAbsent) {
                       unpaidTotal += parseFloat(student.price_per_class || 0);
                     }
                   }
@@ -2800,16 +2763,13 @@
             // Check payment status
             const paymentInfo = hasPaymentCached(student.id, dateStr, student);
             const hasAbsence = isAbsentCached(dateStr, student.id);
-            const isExcused = isExcusedCached(dateStr, student.id);
             const isSkipped = isClassSkippedCached(dateStr, group.group_name);
             
             let status = 'upcoming';
             if (isSkipped) {
-              status = 'canceled';
+              status = 'absent';
             } else if (hasAbsence) {
               status = 'absent';
-            } else if (isExcused) {
-              status = 'excused';
             } else if (paymentInfo.hasPayment) {
               status = 'paid';
             } else {
@@ -2824,7 +2784,6 @@
               isManualCashPayment: paymentInfo.isManual,
               isCreditPayment: paymentInfo.isCredit,
               hasAbsence: hasAbsence,
-              isExcused: isExcused,
               isSkipped: isSkipped
             });
           }
@@ -2945,23 +2904,11 @@
             let statusBg = '';
             let statusBorder = '';
             
-            if (student.status === 'paid') {
-              if (student.isCreditPayment) {
-                statusBadge = 'CREDIT';
-                statusColor = '#fbbf24';
-                statusBg = 'rgba(251,191,36,0.2)';
-                statusBorder = 'rgba(251,191,36,0.5)';
-              } else if (student.isManualCashPayment) {
-                statusBadge = 'CASH';
-                statusColor = '#60a5fa';
-                statusBg = 'rgba(96,165,250,0.2)';
-                statusBorder = 'rgba(96,165,250,0.5)';
-              } else {
-                statusBadge = 'PAID';
-                statusColor = '#4ade80';
-                statusBg = 'rgba(74,222,128,0.2)';
-                statusBorder = 'rgba(74,222,128,0.5)';
-              }
+            if (student.status === 'paid' || student.status === 'manual' || student.status === 'credit' || student.status === 'excused') {
+              statusBadge = 'PAID';
+              statusColor = '#4ade80';
+              statusBg = 'rgba(74,222,128,0.2)';
+              statusBorder = 'rgba(74,222,128,0.5)';
             } else if (student.status === 'unpaid') {
               statusBadge = 'UNPAID';
               statusColor = '#f87171';
@@ -2972,16 +2919,6 @@
               statusColor = '#fbbf24';
               statusBg = 'rgba(251,191,36,0.2)';
               statusBorder = 'rgba(251,191,36,0.5)';
-            } else if (student.status === 'excused') {
-              statusBadge = 'EXCUSED';
-              statusColor = '#10b981';
-              statusBg = 'rgba(16,185,129,0.2)';
-              statusBorder = 'rgba(16,185,129,0.5)';
-            } else if (student.status === 'canceled') {
-              statusBadge = 'CANCELED';
-              statusColor = '#94a3b8';
-              statusBg = 'rgba(148,163,184,0.2)';
-              statusBorder = 'rgba(148,163,184,0.5)';
             }
             
             // Build action buttons based on status
@@ -3038,17 +2975,7 @@
                   </button>
                 </div>
               `;
-              } else if (student.status === 'excused') {
-                actionButtons = `
-                  <div class="student-actions">
-                    <button class="action-icon-btn unmark"
-                            data-tooltip="Remove Excused"
-                            onclick="event.stopPropagation(); unmarkExcused(${student.id}, '${dateStr}')">
-                      <span class="btn-icon">↩️</span>
-                    </button>
-                  </div>
-                `;
-            } else if (student.status === 'paid' && student.isManualCashPayment) {
+              } else if (student.status === 'paid' && student.isManualCashPayment) {
               // Unpay button — only for manual cash payments
               actionButtons = `
                 <div class="student-actions">
@@ -3443,11 +3370,7 @@
           const statusLabels = {
             paid: '✅ Paid',
             unpaid: '❌ Unpaid',
-            credit: '💳 Credit',
-            absent: '🚫 Absent',
-            excused: '✅ Excused',
-            canceled: '⭕ Canceled',
-            partial: '⚠️ Partial'
+            absent: '🚫 Absent'
           };
           label.textContent = statusLabels[status] || status;
         } else {
@@ -3616,14 +3539,14 @@
         // Set payment status
         const statusMap = {
           paid: 'Paid',
-          manual: 'Paid (Cash)',
+          manual: 'Paid',
+          credit: 'Paid',
+          excused: 'Paid',
           unpaid: 'Unpaid',
           absent: 'Absent',
-          excused: 'Excused',
-          credit: 'Credit Applied',
-          skipped: 'Skipped',
-          gray: 'Scheduled',
-          canceled: 'Canceled'
+          skipped: 'Absent',
+          gray: 'Unpaid',
+          canceled: 'Absent'
         };
         const statusValue = statusMap[currentStudentData.status] || 'Unpaid';
         const statusEl = document.getElementById('studentStatus');
@@ -3631,8 +3554,10 @@
         const statusColorMap = {
           paid: '#22c55e',
           manual: '#22c55e',
+          credit: '#22c55e',
+          excused: '#22c55e',
           unpaid: '#ef4444',
-          excused: '#10b981'
+          absent: '#9e9e9e'
         };
         statusEl.style.color = statusColorMap[currentStudentData.status] || 'rgba(255,255,255,0.8)';
         
@@ -3658,23 +3583,7 @@
 
         let html = '';
 
-        if (status === 'manual') {
-          // Cash payment — show Unpay only
-          html = `
-            <button class="action-btn" style="background:linear-gradient(135deg,rgba(239,68,68,0.25)0%,rgba(220,38,38,0.15)100%);border-color:rgba(239,68,68,0.4);"
-              onclick="unpayManually(${studentId},'${classDate}','${studentName}')">
-              <span class="action-btn-icon">↩️</span>
-              <span>Unpay</span>
-            </button>`;
-        } else if (status === 'credit') {
-          // Credit payment — show Undo Credit only
-          html = `
-            <button class="action-btn" style="background:linear-gradient(135deg,rgba(239,68,68,0.25)0%,rgba(220,38,38,0.15)100%);border-color:rgba(239,68,68,0.4);"
-              onclick="undoCreditPayment(${studentId},'${classDate}','${studentName}',${price})">
-              <span class="action-btn-icon">↩️</span>
-              <span>Undo Credit</span>
-            </button>`;
-        } else if (status === 'paid') {
+        if (status === 'paid' || status === 'manual' || status === 'credit' || status === 'excused') {
           // Standard payment — Email only
           html = `
             <button class="action-btn email" onclick="sendEmailReminder()">
@@ -3687,16 +3596,6 @@
             <button class="action-btn email" onclick="sendEmailReminder()">
               <span class="action-btn-icon">📧</span>
               <span>Email</span>
-            </button>`;
-        } else if (status === 'excused') {
-          html = `
-            <button class="action-btn email" onclick="sendEmailReminder()">
-              <span class="action-btn-icon">📧</span>
-              <span>Email</span>
-            </button>
-            <button class="action-btn excused" onclick="unmarkExcused(${studentId},'${classDate}')">
-              <span class="action-btn-icon">↩️</span>
-              <span>Remove Excuse</span>
             </button>`;
         } else {
           // Unpaid (or gray/scheduled) — Email, Absent, Cash Payment, Apply Credit (if balance allows)
@@ -4044,7 +3943,7 @@
             .select('id')
             .eq('student_id', studentId)
             .eq('date', dateStr)
-            .eq('status', 'excused')
+            .eq('payment_method', 'excused')
             .maybeSingle();
 
           if (existing) {
@@ -4062,7 +3961,7 @@
               font-weight: 600;
               animation: slideInRight 0.3s ease;
             `;
-            warnOverlay.textContent = '⚠️ This class is already excused.';
+            warnOverlay.textContent = '⚠️ This class is already paid.';
             document.body.appendChild(warnOverlay);
             setTimeout(() => warnOverlay.remove(), 3000);
             return;
@@ -4074,7 +3973,7 @@
               student_id: studentId,
               date: dateStr,
               amount: 0,
-              status: 'excused',
+              status: 'paid',
               payment_method: 'excused',
               notes: 'Excused payment (Calendar)'
             }])
@@ -4124,9 +4023,8 @@
             }
           }
 
-          const excusedKey = `${dateStr}-${studentId}`;
-          excusedByDateStudent.set(excusedKey, true);
           paymentCache.delete(`${studentId}-${dateStr}`);
+          rebuildAllIndexes();
 
           renderCalendar();
           if (currentModalDate === dateStr) {
@@ -4147,7 +4045,7 @@
             font-weight: 600;
             animation: slideInRight 0.3s ease;
           `;
-          successOverlay.textContent = `✅ ${student.name} marked as excused`;
+          successOverlay.textContent = `✅ ${student.name} marked as paid`;
           document.body.appendChild(successOverlay);
           setTimeout(() => successOverlay.remove(), 3000);
         } catch (err) {
@@ -4186,7 +4084,7 @@
                 <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Student:</strong> ${student.name}</div>
                 <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Date:</strong> ${dateStr}</div>
                 <div style="margin-top: 16px; padding: 12px; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: 8px; font-size: 14px; color: rgba(255,255,255,0.85);">
-                  ↩️ This will remove the excused status.
+                  ↩️ This will remove the paid status created by Excuse.
                 </div>
               </div>
             `
@@ -4198,10 +4096,10 @@
             .delete()
             .eq('student_id', studentId)
             .eq('date', dateStr)
-            .eq('status', 'excused');
+            .eq('payment_method', 'excused');
 
           if (error) {
-            console.error('❌ Error removing excused status:', error);
+            console.error('❌ Error removing paid status:', error);
             const errorOverlay = document.createElement('div');
             errorOverlay.style.cssText = `
               position: fixed;
@@ -4216,13 +4114,13 @@
               font-weight: 600;
               animation: slideInRight 0.3s ease;
             `;
-            errorOverlay.textContent = '❌ Failed to remove excused status. Please try again.';
+            errorOverlay.textContent = '❌ Failed to remove paid status. Please try again.';
             document.body.appendChild(errorOverlay);
             setTimeout(() => errorOverlay.remove(), 4000);
             return;
           }
 
-          paymentRecordsData = paymentRecordsData.filter(pr => !(String(pr.student_id) === String(studentId) && String(pr.date).startsWith(dateStr) && pr.status === 'excused'));
+          paymentRecordsData = paymentRecordsData.filter(pr => !(String(pr.student_id) === String(studentId) && String(pr.date).startsWith(dateStr) && pr.payment_method === 'excused'));
           
           // Revert student balance so Debt increases again
           const price = parseFloat(student.price_per_class || 0);
@@ -4237,8 +4135,8 @@
             }
           }
 
-          excusedByDateStudent.delete(`${dateStr}-${studentId}`);
           paymentCache.delete(`${studentId}-${dateStr}`);
+          rebuildAllIndexes();
 
           renderCalendar();
           if (currentModalDate === dateStr) {
@@ -4259,11 +4157,11 @@
             font-weight: 600;
             animation: slideInRight 0.3s ease;
           `;
-          successOverlay.textContent = `✅ Removed excused status for ${student.name}`;
+          successOverlay.textContent = `✅ Removed paid status for ${student.name}`;
           document.body.appendChild(successOverlay);
           setTimeout(() => successOverlay.remove(), 3000);
         } catch (err) {
-          console.error('❌ Error removing excused status:', err);
+          console.error('❌ Error removing paid status:', err);
         }
       }
 
@@ -4271,36 +4169,41 @@
         const group = groupsData.find(g => g.group_name === student.group_name);
         if (!group) return [];
 
-        const CUTOFF_DATE = new Date('2026-03-29'); // Force baseline to Mar 29, 2026
         const today = getLATodayDate();
-        let startDate = CUTOFF_DATE;
 
-        if (student.created_at) {
-          const createdAt = new Date(student.created_at);
-          if (createdAt > startDate) {
-            startDate = createdAt;
-          }
+        // Floor at Dec 1 2025 to avoid scanning all of history.
+        const ABSOLUTE_FLOOR = new Date('2025-12-01');
+        
+        let _startStr = null;
+        if (student.start_date) {
+            _startStr = student.start_date.split('T')[0];
+        } else if (student.created_at) {
+            _startStr = new Date(student.created_at).toISOString().split('T')[0];
         }
+        
+        let startDate = new Date(ABSOLUTE_FLOOR);
 
         const unpaidDates = [];
+        const oneTimeDates = new Set(
+          Array.isArray(group.one_time_schedules)
+            ? group.one_time_schedules
+                .map(ot => (ot.date || '').split('T')[0])
+                .filter(Boolean)
+            : []
+        );
         for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
           const dateStr = d.toISOString().split('T')[0];
+          
+          if (_startStr && dateStr < _startStr) continue;
 
-          if (student.created_at) {
-            const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
-            if (dateStr < studentCreatedDate) {
-              continue;
-            }
-          }
-
-          if (!isScheduledClassDate(dateStr, group)) continue;
+          const isWeeklyClass = isScheduledClassDate(dateStr, group);
+          const isOneTimeClass = oneTimeDates.has(dateStr);
+          if (!isWeeklyClass && !isOneTimeClass) continue;
           if (isClassSkippedCached(dateStr, group.group_name)) continue;
 
           const paymentInfo = hasPaymentCached(student.id, dateStr, student);
           const hasAbsence = isAbsentCached(dateStr, student.id);
-          const isExcused = isExcusedCached(dateStr, student.id);
-
-          if (!paymentInfo.hasPayment && !hasAbsence && !isExcused) {
+          if (!paymentInfo.hasPayment && !hasAbsence) {
             unpaidDates.push(dateStr);
           }
         }
@@ -4465,8 +4368,8 @@
       }
 
       async function openBulkExcuseModal() {
-        // Always reload fresh student data so we see the real current balance, not stale cache
-        await loadStudents();
+        // Always reload full data so red dots and payment indexes are current
+        await loadAllData();
 
         const unpaidStudents = [];
         const unpaidDatesByStudent = new Map();
@@ -4531,13 +4434,12 @@
           const today = new Date(); today.setHours(0,0,0,0);
           
           dates.forEach(dateStr => {
-            // Don't skip already-excused — we may need the record to exist for portal to see it
-            if (isExcusedCached(dateStr, studentId)) return;
+            if (hasPaymentCached(studentId, dateStr, { id: studentId }).hasPayment) return;
             records.push({
               student_id: studentId,
               date: dateStr,
               amount: 0,
-              status: 'excused',
+              status: 'paid',
               payment_method: 'excused',
               notes: 'Bulk excused payment (Calendar)'
             });
@@ -4558,7 +4460,7 @@
           return;
         }
 
-        // Insert excused payment records if any exist
+  // Insert paid records (excused) if any exist
         if (records.length > 0) {
           const { data: insertedData, error } = await supabaseClient
             .from('payment_records')
@@ -4576,9 +4478,10 @@
           }
 
           records.forEach(record => {
-            excusedByDateStudent.set(`${record.date}-${record.student_id}`, true);
+            paymentCache.delete(`${record.student_id}-${record.date}`);
             paymentCache.delete(`${record.student_id}-${record.date}`);
           });
+          rebuildAllIndexes();
         }
 
         // --- ADJUST STUDENT BALANCE BASED ON SELECTED DATES ---
@@ -5858,64 +5761,35 @@
           try {
             const group = groupsData.find(g => g.group_name === student.group_name);
             if (group) {
-              const CUTOFF_DATE = new Date('2026-03-29'); // Force baseline to Mar 29, 2026
-              const today = new Date();
-              let startDate = CUTOFF_DATE;            if (student.created_at) {
-              const studentCreatedDate = new Date(student.created_at);
-              if (studentCreatedDate > startDate) {
-                startDate = studentCreatedDate;
-                console.log('🆕 Student created after Feb 1, checking from creation date:', startDate.toISOString().split('T')[0]);
-              } else {
-                console.log('📅 Using Feb 1, 2026 cutoff date for unpaid calculation');
+              const unpaidDates = getUnpaidClassDates(student);
+              for (const dateStr of unpaidDates) {
+                const formattedDate = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                });
+
+                unpaidClassDetails.push({
+                  date: dateStr,
+                  formattedDate,
+                  amount: pricePerClass
+                });
+
+                unpaidAmountFromCalendar += pricePerClass;
               }
             }
 
-            for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
-              const dateStr = d.toISOString().split('T')[0];
-
-              if (student.created_at) {
-                const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
-                if (dateStr < studentCreatedDate) {
-                  continue;
-                }
-              }
-
-              if (isScheduledClassDate(dateStr, group)) {
-                const paymentInfo = hasPaymentCached(student.id, dateStr, student);
-                const hasAbsence = isAbsentCached(dateStr, student.id);
-                const isExcused = isExcusedCached(dateStr, student.id);
-                const isSkipped = isClassSkippedCached(dateStr, group.group_name);
-
-                if (!paymentInfo.hasPayment && !hasAbsence && !isExcused && !isSkipped) {
-                  const formattedDate = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  });
-
-                  unpaidClassDetails.push({
-                    date: dateStr,
-                    formattedDate,
-                    amount: pricePerClass
-                  });
-
-                  unpaidAmountFromCalendar += pricePerClass;
-                }
-              }
-            }
-          }
-
-          console.log('💰 Found unpaid classes from calendar logic:', {
-            studentId,
-            studentName: student.name,
-            groupName: student.group_name,
-            createdAt: student.created_at,
-            unpaidClassesCount: unpaidClassDetails.length,
-            unpaidAmount: unpaidAmountFromCalendar,
-            unpaidDates: unpaidClassDetails.map(c => c.date)
-          });
-        } catch (err) {
+            console.log('💰 Found unpaid classes from calendar logic:', {
+              studentId,
+              studentName: student.name,
+              groupName: student.group_name,
+              createdAt: student.created_at,
+              unpaidClassesCount: unpaidClassDetails.length,
+              unpaidAmount: unpaidAmountFromCalendar,
+              unpaidDates: unpaidClassDetails.map(c => c.date)
+            });
+          } catch (err) {
           console.warn('⚠️ Could not calculate unpaid classes, using balance:', err);
         }
 

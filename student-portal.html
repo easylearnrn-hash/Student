@@ -5255,7 +5255,7 @@
        RESULT: SUPER FAST, NO LAGGING, NO HEATING, NO BUGS ✨
        ========================================================================== */
 
-    const DEBUG_MODE = false; // PERFORMANCE: Disabled to reduce CPU usage
+    const DEBUG_MODE = false;
     
     // Wrap console methods to respect DEBUG_MODE
     const debugLog = (...args) => DEBUG_MODE && console.log(...args);
@@ -7520,19 +7520,7 @@
       debugLog('🏗️ Building paidDatesSet from', payments?.length || 0, 'payments');
       
       const filteredPayments = (payments || [])
-        .filter(payment => {
-          // ANY payment record that isn't 'absent' counts as paid/covered
-          // This exactly mirrors Calendar-NEW calculation where manual blanks count as paid
-          if (payment.status === 'absent') return false;
-          
-          if (payment.status === 'credit') {
-            debugLog(`  ✅ Including CREDIT payment: date=${payment.dateString}, amount=${payment.amount}`);
-          }
-          if (payment.status === 'excused') {
-            debugLog(`  ✅ Including EXCUSED payment: date=${payment.dateString}, amount=${payment.amount}`);
-          }
-          return true;
-        });
+        .filter(payment => payment.status === 'paid');
         
       debugLog(`  → Filtered to ${filteredPayments.length} paid/credit payments`);
       
@@ -7579,430 +7567,79 @@
      * // Returns: [{ date: Date, status: 'paid', amount: 50, source: 'payment_records', id: 123 }, ...]
      */
     async function loadPaymentHistory(student) {
-      // PERFORMANCE: Removed console.log to reduce CPU usage
-      debugDebug('Loading payment history for student:', {
+      debugDebug('Loading calendar payment status for student:', {
         id: student.id,
         name: student.name,
-        email: student.email,
-        aliases: student.aliases,
         group: student.group_name || student.group
       });
-      
-      // Check cache first
-      // 🔥 CACHE VERSION: Increment this number to bust cache after deduplication fix
-  const cacheKey = `payments-v16-${student.id}`;
+
+      const cacheKey = `payments-v23-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
-        debugDebug('⚡ Using cached payment history for student:', student.id);
+        debugDebug('⚡ Using cached calendar payment status for student:', student.id);
         return cached;
       }
-      
+
       try {
-        // 🚀 PARALLEL: Fire all 4 DB queries simultaneously instead of sequentially.
-        // This saves 3 round-trip latencies (was ~800-1600ms, now ~200-400ms).
-        const [
-          paymentRecordsResult,
-          zelleResult,
-          creditResult,
-          absencesResult
-        ] = await Promise.all([
-          // 1. payment_records (manual) — wrapped so RLS rejection doesn't abort Promise.all
-          Promise.resolve(
-            supabaseClient
-              .from('payment_records')
-              .select('*')
-              .eq('student_id', student.id)
-              .order('date', { ascending: false })
-          ).catch(() => ({ data: null, error: { message: 'Permission denied' } })),
-          // 2. payments (Zelle)
-          supabaseClient
-            .from('payments')
-            .select('*')
-            .or(`linked_student_id.eq.${student.id},student_id.eq.${student.id}${(() => { const names = [student.name]; if(student.aliases) { let a = student.aliases; try{ if(typeof a==="string") a=JSON.parse(a); }catch(e){a=[a];} if(Array.isArray(a)) names.push(...a); } return names.filter(Boolean).map(n => ",payer_name.ilike.%"+n.replace(/[^a-zA-Z0-9 ]/g, "")+"%,resolved_student_name.ilike.%"+n.replace(/[^a-zA-Z0-9 ]/g, "")+"%").join(""); })()}`)
-            .order('email_date', { ascending: false }),
-          // 3. credit_payments
-          supabaseClient
-            .from('credit_payments')
-            .select('*')
-            .eq('student_id', student.id)
-            .order('class_date', { ascending: false }),
-          // 4. student_absences
-          supabaseClient
-            .from('student_absences')
-            .select('*')
-            .eq('student_id', student.id)
-        ]);
-
-        const allPayments = [];
-
-        // --- Process payment_records ---
-        const paymentRecords = (!paymentRecordsResult.error && paymentRecordsResult.data) ? paymentRecordsResult.data : [];
-        if (paymentRecordsResult.error) {
-          debugDebug('⚠️ Payment records not accessible (expected for students)');
-        }
-
-        if (paymentRecords.length > 0) {
-          // ── Pre-compute orphan allocation for display ──────────────────────
-          // For payment_records with no explicit for_class_dates/for_class, the
-          // display date should be the class date they cover, NOT the receipt date.
-          // We need the group schedule to know what dates are scheduled class days.
-          // We'll resolve this after building the full allPayments array below,
-          // by remapping dateString for orphan manual records.
-          const orphanManualIds = new Set(); // record.id of orphans to remap
-
-          paymentRecords.forEach(record => {
-            const rawStatus = (record.status || 'unpaid').toString();
-            const normalizedStatus = rawStatus.toLowerCase().trim();
-            const canonicalStatus = normalizedStatus.includes('excused')
-              ? 'excused'
-              : normalizedStatus.includes('absent')
-                ? 'absent'
-                : normalizedStatus;
-            const fallbackDate = record.date ? record.date.substring(0, 10) : null;
-
-            if (canonicalStatus === 'absent') {
-              allPayments.push({
-                date: new Date(record.date),
-                dateString: fallbackDate,
-                status: 'absent',
-                amount: 0,
-                payment_method: record.payment_method,
-                notes: record.notes,
-                id: record.id,
-                source: 'absence'
-              });
-              return;
-            }
-
-            // ✅ CALENDAR-MIRRORED: Expand for_class_dates array just like Calendar-NEW does.
-            const classDates = extractForClassDates(record, fallbackDate);
-            const hasExplicitClass = (record.for_class_dates && (Array.isArray(record.for_class_dates) ? record.for_class_dates.length > 0 : (record.for_class_dates !== '[]' && record.for_class_dates !== '{}'))) ||
-                                     (record.for_class && record.for_class.trim() && record.for_class.trim() !== '[]' && record.for_class.trim() !== '{}');
-            const isOrphan = !hasExplicitClass && classDates.length === 1 && classDates[0] === fallbackDate;
-            if (isOrphan) orphanManualIds.add(record.id);
-
-            classDates.forEach(dateStr => {
-              allPayments.push({
-                date: new Date(dateStr + 'T00:00:00'),
-                dateString: dateStr,
-                status: canonicalStatus,
-                amount: parseFloat(record.amount) || 0,
-                payment_method: record.payment_method,
-                notes: record.notes,
-                id: record.id,
-                source: 'manual',
-                isOrphan: isOrphan,
-                receiptDate: fallbackDate,
-              });
-            });
-          });
-        }
-
-        // --- Process Zelle payments ---
-        // Parse student emails (could be array or string) - SAFELY
-        let studentEmails = [];
-        if (Array.isArray(student.email)) {
-          studentEmails = student.email.filter(e => e && typeof e === 'string' && e.trim().length > 0);
-        } else if (student.email && typeof student.email === 'string' && student.email.trim()) {
-          const emailStr = student.email.trim();
-          if (emailStr.startsWith('[') && emailStr.endsWith(']')) {
-            try {
-              const parsed = JSON.parse(emailStr);
-              studentEmails = Array.isArray(parsed) ? parsed.filter(e => e && typeof e === 'string' && e.trim().length > 0) : [emailStr];
-            } catch { studentEmails = [emailStr]; }
-          } else {
-            studentEmails = [emailStr];
+        let scheduleData = currentGroupScheduleData;
+        if (!scheduleData || !scheduleData.schedule) {
+          const groupName = getStudentGroup(student);
+          if (groupName) {
+            scheduleData = await getGroupSchedule(groupName);
+            currentGroupScheduleData = scheduleData || currentGroupScheduleData;
           }
         }
 
-        // Parse student aliases (could be array or string) - SAFELY
-        let studentAliases = [];
-        if (Array.isArray(student.aliases)) {
-          studentAliases = student.aliases.filter(a => a && typeof a === 'string' && a.trim().length > 0);
-        } else if (student.aliases && typeof student.aliases === 'string' && student.aliases.trim()) {
-          const aliasStr = student.aliases.trim();
-          if (aliasStr.startsWith('[') && aliasStr.endsWith(']')) {
-            try {
-              const parsed = JSON.parse(aliasStr);
-              studentAliases = Array.isArray(parsed) ? parsed.filter(a => a && typeof a === 'string' && a.trim().length > 0) : [aliasStr];
-            } catch { studentAliases = [aliasStr]; }
-          } else {
-            studentAliases = [aliasStr];
-          }
+        if (!scheduleData || !scheduleData.schedule) {
+          setCachedData(cacheKey, []);
+          return [];
         }
 
-          function normalizeName(n) { return String(n||"").toLowerCase().replace(/[^a-z0-9]/g, ""); }
-          const validStudentNames = [student.name, ...studentAliases].filter(Boolean).map(normalizeName);
-          const zellePayments = (zelleResult.data || []).filter(p => {
-            if (p.student_id == student.id || p.linked_student_id == student.id) return true;
-            const paymentNames = [p.payer_name, p.resolved_student_name].filter(Boolean).map(normalizeName);
-            
-            // Check if any payment name is deeply contained inside the student names, or vice versa
-            return paymentNames.some(pn => 
-              validStudentNames.some(vn => pn.includes(vn) || vn.includes(pn))
-            );
-          });
-        if (zelleResult.error) {
-          console.error('Error loading Zelle payments:', zelleResult.error);
-        } else if (zellePayments.length > 0) {
-          debugLog(`📧 Loaded ${zellePayments.length} Zelle payments from database`);
-          zellePayments.forEach(payment => {
-            const receiptDateStr = payment.date ? payment.date.substring(0, 10) : null;
-            const classDates = extractForClassDates(payment, receiptDateStr);
-            debugLog(`  Zelle payment ${payment.id}: for_class_dates=${JSON.stringify(payment.for_class_dates)}, for_class=${payment.for_class} → ${classDates.length} class date(s): ${classDates.join(', ')}`);
-            classDates.forEach(dateStr => {
-              allPayments.push({
-                date: new Date(dateStr + 'T00:00:00'),
-                dateString: dateStr,
-                status: 'paid',
-                amount: parseFloat(payment.amount) || 0,
-                payment_method: 'Zelle',
-                notes: payment.payer_name ? `From: ${payment.payer_name}` : payment.memo,
-                id: payment.id,
-                source: 'zelle',
-                receiptDate: receiptDateStr
-              });
-            });
-          });
-        }
+        const scheduleResult = await calculateUnpaidFromSchedule(student, [], scheduleData);
+        const paidDates      = scheduleResult.paidDates      || new Set();
+        const absentDates    = scheduleResult.absentDates    || new Set();
+        // scheduledDates is already floored at Mar 30 — ONLY these dates are shown in history.
+        // paidDates/absentDates are the lookup sets; scheduledDates is the master list.
+        const scheduledDates = scheduleResult.scheduledDates || [];
+        const pricePerClass  = parseFloat(student.price_per_class) || 0;
 
-        // --- Process credit_payments ---
-        debugLog('🔍 Querying credit_payments for student_id:', student.id);
-        const creditPayments = creditResult.data || [];
-        if (creditResult.error) {
-          console.error('❌ Error loading credit payments:', creditResult.error);
-        } else {
-          debugLog(`💳 Raw credit_payments from database (${creditPayments.length} records):`, creditPayments);
-          if (creditPayments.length > 0) {
-            const credits = creditPayments.map(payment => {
-              const dateStr = payment.class_date ? payment.class_date.substring(0, 10) : null;
-              return {
-                date: new Date(payment.class_date),
-                dateString: dateStr,
-                status: 'credit',
-                amount: parseFloat(payment.amount) || 0,
-                payment_method: 'Credit Balance',
-                notes: payment.balance_after != null ? `Balance after: $${payment.balance_after}` : null,
-                id: payment.id,
-                source: 'credit'
-              };
-            });
-            allPayments.push(...credits);
-            debugLog(`✅ Added ${credits.length} credit payments. Total now: ${allPayments.length}`);
-          }
-        }
-
-        // --- Process student_absences ---
-        if (!absencesResult.error && absencesResult.data) {
-          const absenceRecords = absencesResult.data.map(a => {
-            const dateStr = a.class_date ? a.class_date.substring(0, 10) : a.class_date;
-            return {
-              date: new Date(dateStr + 'T00:00:00'),
+        const payments = [];
+        // Iterate scheduledDates (floored, skipped-class-excluded) as the ONLY source of
+        // history entries — exactly what Calendar-NEW uses for dot rendering.
+        scheduledDates.forEach(dateStr => {
+          if (!dateStr) return;
+          if (absentDates.has(dateStr)) {
+            payments.push({
+              date: new Date(`${dateStr}T00:00:00`),
               dateString: dateStr,
               status: 'absent',
               amount: 0,
-              payment_method: null,
-              notes: 'Marked absent',
-              id: `absence-${a.id}`,
-              source: 'absence'
-            };
-          });
-          allPayments.push(...absenceRecords);
-        } else if (absencesResult.error) {
-          console.error('⚠️ RLS Error loading absences:', absencesResult.error.message);
-        }
-        
-        // ── Remap orphan payment display dates to their allocated class date ──
-        // Orphan manual records (Stripe, cash with no for_class set) show the
-        // receipt date in history, but the class they cover is the oldest unpaid
-        // scheduled class. Remap dateString so history shows the class date.
-        const orphanEntries = allPayments.filter(p => p.isOrphan && p.source === 'manual');
-        let scheduleForRemap = currentGroupScheduleData;
-        if (orphanEntries.length > 0 && (!scheduleForRemap || !scheduleForRemap.schedule)) {
-          const groupNameR = getStudentGroup(student);
-          if (groupNameR) {
-            const fetchedSchedule = await getGroupSchedule(groupNameR);
-            if (fetchedSchedule) {
-              scheduleForRemap = fetchedSchedule;
-              currentGroupScheduleData = fetchedSchedule;
-            }
-          }
-        }
-  if (orphanEntries.length > 0 && scheduleForRemap && scheduleForRemap.schedule) {
-          // Build scheduled dates for this student's group
-          const daysOfWeekR = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-          const fullDayMapR = { Mon:'Monday',Tue:'Tuesday',Wed:'Wednesday',Thu:'Thursday',Fri:'Friday',Sat:'Saturday',Sun:'Sunday' };
-          const schedStrR = scheduleForRemap.schedule || '';
-          const activeDaysR = [];
-          ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(name => {
-            const full = fullDayMapR[name] || name;
-            if (schedStrR.includes(name) && !activeDaysR.includes(full)) activeDaysR.push(full);
-          });
-          if (activeDaysR.length > 0) {
-            const CUTOFFR = new Date(2026, 2, 29);
-            const todayR = new Date();
-            const scheduledR = [];
-            for (let d = new Date(CUTOFFR); d <= todayR; d.setDate(d.getDate() + 1)) {
-              if (!activeDaysR.includes(daysOfWeekR[d.getDay()])) continue;
-              const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-              scheduledR.push(ds);
-            }
-            // Track which scheduled dates are already covered by non-orphan paid entries
-            const coveredByNonOrphan = new Set(
-              allPayments.filter(p => !p.isOrphan && (p.status === 'paid' || (p.status && p.status.startsWith('paid')) || p.status === 'credit'))
-                         .map(p => p.dateString)
-                         .filter(Boolean)
-            );
-            // Only hard-block on true absences — excused dates CAN be overridden by a paid entry
-            const hardAbsenceStrings = new Set(
-              allPayments.filter(p => p.status === 'absent')
-                         .map(p => p.dateString).filter(Boolean)
-            );
-            const excusedStrings = new Set(
-              allPayments.filter(p => p.status === 'excused')
-                         .map(p => p.dateString).filter(Boolean)
-            );
-            // Sort orphans oldest first, then allocate greedily
-            orphanEntries.sort((a, b) => (a.receiptDate||'').localeCompare(b.receiptDate||''));
-            const allocatedToOrphan = new Set();
-            orphanEntries.forEach(orphan => {
-              // Only skip remap if the receipt date is a scheduled class that is
-              // already covered by a confirmed paid entry (non-orphan).
-              // If receipt date lands on an excused/unpaid class day, we still need to remap.
-              const receiptIsScheduled = scheduledR.includes(orphan.dateString);
-              const receiptAlreadyCovered = coveredByNonOrphan.has(orphan.dateString);
-              const receiptIsExcused = excusedStrings.has(orphan.dateString);
-              if (receiptIsScheduled && receiptAlreadyCovered && !receiptIsExcused) return;
-              // Prefer oldest uncovered, non-excused scheduled date; fall back to excused dates
-              let target = null;
-              for (const sd of scheduledR) {
-                if (!coveredByNonOrphan.has(sd) && !hardAbsenceStrings.has(sd) && !allocatedToOrphan.has(sd) && !excusedStrings.has(sd)) {
-                  target = sd; break;
-                }
-              }
-              if (!target) {
-                // Fall back: allow excused dates (paid beats excused)
-                for (const sd of scheduledR) {
-                  if (!coveredByNonOrphan.has(sd) && !hardAbsenceStrings.has(sd) && !allocatedToOrphan.has(sd)) {
-                    target = sd; break;
-                  }
-                }
-              }
-              if (target) {
-                allocatedToOrphan.add(target);
-                orphan.dateString = target;
-                orphan.date = new Date(target + 'T00:00:00');
-              }
+              source: 'calendar-absence'
             });
-          }
-        }
-
-        // Fallback: if an orphan still sits on its receipt date, but there are
-        // excused class dates, allocate to the oldest excused date instead.
-        if (orphanEntries.length > 0) {
-          const excusedDates = allPayments
-            .filter(p => p.status === 'excused' && p.dateString)
-            .map(p => p.dateString)
-            .sort();
-          const coveredPaidDates = new Set(
-            allPayments
-              .filter(p => p.status === 'paid' || (p.status && p.status.startsWith('paid')) || p.status === 'credit')
-              .map(p => p.dateString)
-              .filter(Boolean)
-          );
-          const usedExcused = new Set();
-          orphanEntries.forEach(orphan => {
-            if (!orphan.receiptDate) return;
-            if (orphan.dateString !== orphan.receiptDate) return; // already remapped
-            const target = excusedDates.find(d => !coveredPaidDates.has(d) && !usedExcused.has(d));
-            if (target) {
-              usedExcused.add(target);
-              orphan.dateString = target;
-              orphan.date = new Date(target + 'T00:00:00');
-            }
-          });
-        }
-
-        // Sort all payments by date (most recent first)
-        allPayments.sort((a, b) => b.date - a.date);
-        
-        // ---------- DEDUPLICATION: Remove duplicate payments for same date ----------
-        // IMPORTANT: Credit payments are NEVER deduplicated (they're separate transactions)
-        // Absences ARE deduplicated (same date from student_absences + payment_records = one entry)
-        // Only deduplicate Zelle/manual payments if they match on the same day
-  const deduplicatedPayments = [];
-  const seenDates = new Map(); // Track date -> payment mapping (excluding credits)
-  const seenAbsenceDates = new Set(); // Track absence dates to prevent duplicates
-        
-        for (const payment of allPayments) {
-          const dateKey = payment.date.toISOString().split('T')[0]; // YYYY-MM-DD format
-          
-          // ⚠️ ALWAYS include credit payments (don't deduplicate - they're separate transactions)
-          if (payment.source === 'credit') {
-            deduplicatedPayments.push(payment);
-            continue;
-          }
-          
-          // 🔥 FIX: Deduplicate absences (same date from student_absences + payment_records)
-          const isAbsentStatus = (payment.status || '').toLowerCase() === 'absent';
-          if (payment.source === 'absence' || isAbsentStatus) {
-            if (seenAbsenceDates.has(dateKey)) {
-              debugDebug(`⚠️ Skipping duplicate absence for ${dateKey}`);
-              continue; // Skip duplicate absence
-            }
-            seenAbsenceDates.add(dateKey);
-            deduplicatedPayments.push(payment);
-            continue;
-          }
-          
-          if (!seenDates.has(dateKey)) {
-            // First payment for this date - add it
-            deduplicatedPayments.push(payment);
-            seenDates.set(dateKey, payment);
+          } else if (paidDates.has(dateStr)) {
+            payments.push({
+              date: new Date(`${dateStr}T00:00:00`),
+              dateString: dateStr,
+              status: 'paid',
+              amount: pricePerClass,
+              source: 'calendar'
+            });
           } else {
-            // Duplicate date found - paid always beats excused/unpaid; manual beats zelle
-            const existing = seenDates.get(dateKey);
-            const isPaid = s => s && (s === 'paid' || s.startsWith('paid') || s === 'credit');
-            const isExcusedOrUnpaid = s => s && (s === 'excused' || s === 'unpaid');
-            const incomingWins =
-              (isPaid(payment.status) && isExcusedOrUnpaid(existing.status)) ||
-              (payment.source === 'manual' && existing.source === 'zelle' && !isPaid(existing.status));
-            if (incomingWins) {
-              // Replace the existing entry with this more authoritative one
-              const index = deduplicatedPayments.indexOf(existing);
-              if (index !== -1) {
-                deduplicatedPayments[index] = payment;
-                seenDates.set(dateKey, payment);
-              }
-            }
-            // Otherwise skip this duplicate
-            debugDebug(`⚠️ Skipping duplicate payment for ${dateKey}:`, {
-              kept: existing.source,
-              skipped: payment.source,
-              amount: payment.amount
+            payments.push({
+              date: new Date(`${dateStr}T00:00:00`),
+              dateString: dateStr,
+              status: 'unpaid',
+              amount: pricePerClass,
+              source: 'calendar'
             });
           }
-        }
-        
-        debugDebug('💰 Total payments found:', {
-          manual: paymentRecords?.length || 0,
-          zelle: zellePayments?.length || 0,
-          credit: creditPayments?.length || 0,
-          totalBeforeDedup: allPayments.length,
-          totalAfterDedup: deduplicatedPayments.length,
-          duplicatesRemoved: allPayments.length - deduplicatedPayments.length,
-          firstPayment: deduplicatedPayments[0]
         });
-        
-        // PERFORMANCE: Removed console.log statements
-        
-        // Cache the result
-        setCachedData(cacheKey, deduplicatedPayments);
-        
-        return deduplicatedPayments;
-        
+
+        payments.sort((a, b) => b.date - a.date);
+        setCachedData(cacheKey, payments);
+        return payments;
       } catch (error) {
-        console.error('Exception loading payment history:', error);
+        console.error('Exception loading calendar payment status:', error);
         return [];
       }
     }
@@ -8019,12 +7656,11 @@
     /**
      * ✅ MIRRORS Calendar-NEW.html EXACTLY.
      * 
-     * Calendar-NEW logic (source of truth):
-     *  - isExcused  → payment_records WHERE status='excused', indexed by pr.date (NOT for_class_dates)
-     *  - isAbsent   → student_absences, indexed by class_date
-     *  - hasPayment → paymentIndex built from extractForClassDates() on both `payments` and
-     *                 `payment_records` (excused rows EXCLUDED), plus credit_payments by applied_class_date
-     *  - unpaid     → scheduled date where: !hasPayment && !isAbsent && !isExcused && date <= today
+  * Calendar-NEW logic (source of truth):
+  *  - isAbsent   → student_absences, indexed by class_date
+  *  - hasPayment → extractForClassDates() on both `payments` and `payment_records`
+  *                 (excused rows treated as paid), plus credit_payments by applied_class_date
+  *  - unpaid     → scheduled date where: !hasPayment && !isAbsent && date <= today
      */
     async function calculateUnpaidFromSchedule(student, payments, groupScheduleData) {
       const studentGroup = student.group_name || student.group_letter || student.group;
@@ -8052,20 +7688,41 @@
       if (student.created_at) {
         const createdDate = new Date(student.created_at);
         createdDate.setHours(0,0,0,0);
-        if (!studentStartDate || createdDate > studentStartDate) studentStartDate = createdDate;
+        if (!studentStartDate) studentStartDate = createdDate;
       }
 
       const normalizedGroup = canonicalizeGroupCode(studentGroup);
       const groupNameForQuery = normalizedGroup ? `Group ${normalizedGroup}` : null;
 
       // ── Parallel DB fetches ──────────────────────────────────────────────────
-      const [absencesResult, paymentRecordsResult, creditResult, skippedResult] = await Promise.all([
+      const aliasesRaw = student.aliases;
+      let aliases = [];
+      if (Array.isArray(aliasesRaw)) {
+        aliases = aliasesRaw;
+      } else if (typeof aliasesRaw === 'string' && aliasesRaw.trim()) {
+        try {
+          const parsed = JSON.parse(aliasesRaw);
+          aliases = Array.isArray(parsed) ? parsed : [aliasesRaw];
+        } catch (e) {
+          aliases = aliasesRaw.split(',').map(a => a.trim()).filter(Boolean);
+        }
+      }
+
+      const names = [student.name, ...aliases]
+        .filter(Boolean)
+        .map(n => String(n).replace(/[^a-zA-Z0-9 ]/g, '').trim())
+        .filter(Boolean);
+      const nameFilters = names.length
+        ? names.map(n => `,payer_name.ilike.%${n}%,resolved_student_name.ilike.%${n}%`).join('')
+        : '';
+
+      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult] = await Promise.all([
         Promise.resolve(
           supabaseClient.from('student_absences').select('class_date').eq('student_id', student.id)
         ).catch(() => ({ data: null, error: true })),
-        // ALL payment_records for this student (we need paid + excused + absent)
+  // ALL payment_records for this student — ONLY paid/excused, matching Calendar-NEW exactly
         Promise.resolve(
-          supabaseClient.from('payment_records').select('*').eq('student_id', student.id)
+          supabaseClient.from('payment_records').select('*').eq('student_id', student.id).in('status', ['paid', 'excused', 'absent'])
         ).catch(() => ({ data: null, error: true })),
         Promise.resolve(
           supabaseClient.from('credit_payments').select('class_date, applied_class_date').eq('student_id', student.id)
@@ -8074,56 +7731,76 @@
           ? Promise.resolve(
               supabaseClient.from('skipped_classes').select('class_date').eq('group_name', groupNameForQuery)
             ).catch(() => ({ data: [], error: null }))
-          : Promise.resolve({ data: [], error: null })
+          : Promise.resolve({ data: [], error: null }),
+        // Direct payments query — match by linked IDs AND name/alias like Calendar-NEW
+        Promise.resolve(
+          supabaseClient.from('payments')
+            .select('for_class, for_class_dates, email_date, amount, status, payer_name, resolved_student_name, student_id, linked_student_id')
+            .or(`student_id.eq.${student.id},linked_student_id.eq.${student.id}${nameFilters}`)
+        ).catch(() => ({ data: [], error: null }))
       ]);
 
       const prRecords  = (!paymentRecordsResult.error && paymentRecordsResult.data) ? paymentRecordsResult.data : [];
       const absences   = (!absencesResult.error    && absencesResult.data)   ? absencesResult.data  : [];
       const credits    = (!creditResult.error       && creditResult.data)     ? creditResult.data    : [];
       const skipped    = (!skippedResult.error      && skippedResult.data)    ? skippedResult.data   : [];
+      const zelleRaw   = (!zelleResult.error        && zelleResult.data)      ? zelleResult.data     : [];
+
+      const normalizePaymentName = value => String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      const normalizedStudentNames = new Set(
+        [student.name, ...aliases]
+          .filter(Boolean)
+          .map(normalizePaymentName)
+          .filter(Boolean)
+      );
+      const zelleMatched = zelleRaw.filter(p => {
+        if (String(p.student_id) === String(student.id) || String(p.linked_student_id) === String(student.id)) return true;
+        const paymentNames = [p.payer_name, p.resolved_student_name].filter(Boolean).map(normalizePaymentName);
+        return paymentNames.some(name => normalizedStudentNames.has(name));
+      });
 
       // ── Build lookup sets (exactly mirrors Calendar-NEW indexing) ────────────
 
       // 1. Absent dates from student_absences (keyed by class_date)
       const absentDates = new Set(absences.map(a => (a.class_date || '').split('T')[0]).filter(Boolean));
 
-      // 2. Excused dates from payment_records WHERE status='excused'
-      //    Calendar-NEW uses pr.date directly as the excused class date — NOT for_class_dates
-      const excusedDates = new Set(
-        prRecords.filter(pr => pr.status === 'excused')
-                 .map(pr => (pr.date || '').split('T')[0])
-                 .filter(Boolean)
-      );
-
-      // 3. Paid dates — built from extractForClassDates() on payment_records (skip excused)
-      //    + from the `payments` array passed in (Zelle / manual paid records already processed)
+      // 2. Paid dates — built from extractForClassDates() on payment_records (skip absent)
+      //    + directly from the payments (Zelle) table using for_class/for_class_dates
       //    + from credit_payments.applied_class_date
       const paidDates = new Set();
-      // Track raw payment receipt dates that have no for_class pinned to a scheduled date
-      const orphanPaidDates = []; // { date: 'YYYY-MM-DD', amount } — will be allocated later
+      // Receipt-only payments: payment_records rows where the only resolved date is the
+      // receipt date itself (no explicit for_class / for_class_dates). These need to be
+      // allocated to the oldest unpaid scheduled class AFTER scheduledDates is built.
+      // This correctly handles Stripe payments made on a different day than the owed class
+      // (e.g. paid Apr 4 for the Apr 2 class → should credit Apr 2, not Apr 4).
+      const receiptOnlyPayments = []; // { receiptDate, amount }
 
-      // From payment_records (non-excused, non-absent only)
+      // From payment_records (non-absent only)
       prRecords.forEach(pr => {
-        if (pr.status === 'excused' || pr.status === 'absent') return;
+        if (pr.status === 'absent') return;
         const fallback = (pr.date || '').split('T')[0];
-        const resolved = extractForClassDates(pr, fallback);
-        resolved.forEach(d => { if (d) paidDates.add(d); });
-        // If the only resolved date is the receipt date itself (no explicit for_class), track as orphan
-        if (resolved.length === 1 && resolved[0] === fallback) {
-          const hasExplicitClass = (pr.for_class_dates && (Array.isArray(pr.for_class_dates) ? pr.for_class_dates.length > 0 : pr.for_class_dates !== '[]')) ||
-                                   (pr.for_class && pr.for_class.trim() && pr.for_class.trim() !== '[]');
-          if (!hasExplicitClass) {
-            orphanPaidDates.push({ date: fallback, amount: parseFloat(pr.amount) || 0, source: 'payment_record' });
-          }
+        const hasExplicitClass = (pr.for_class_dates && (Array.isArray(pr.for_class_dates) ? pr.for_class_dates.length > 0 : pr.for_class_dates !== '[]')) ||
+                                 (pr.for_class && pr.for_class.trim() && pr.for_class.trim() !== '[]');
+        if (hasExplicitClass) {
+          // Has an explicit for_class — trust it directly
+          const resolved = extractForClassDates(pr, fallback);
+          resolved.forEach(d => { if (d) paidDates.add(d); });
+        } else {
+          // No explicit for_class — this is a receipt-date-only payment (e.g. Stripe)
+          // Defer allocation until scheduledDates is known so we can credit the oldest unpaid class
+          receiptOnlyPayments.push({ receiptDate: fallback, amount: parseFloat(pr.amount) || 0 });
         }
       });
 
-      // From the `payments` array (already contains Zelle + manual, pre-processed by loadPaymentHistory)
-      payments.forEach(p => {
-        if (p.status === 'paid' || p.status.startsWith('paid') || p.status === 'credit') {
-          const d = p.dateString || (p.date instanceof Date ? p.date.toISOString().split('T')[0] : (p.date||'').substring(0,10));
-          if (d) paidDates.add(d);
-        }
+      // From Zelle payments table directly.
+      // CRITICAL: Use null as the fallback — exactly as Calendar-NEW does (p.date on the payments
+      // table is undefined since the column is email_date, so Calendar's fallback resolves to nothing).
+      // Using p.for_class as fallback was incorrectly marking dates as paid when for_class_dates=[].
+      zelleMatched.forEach(p => {
+        const resolved = extractForClassDates(p, null);
+        resolved.forEach(d => { if (d) paidDates.add(d); });
       });
 
       // From credit_payments
@@ -8136,8 +7813,25 @@
       const skippedDates = new Set(skipped.map(s => (s.class_date || '').split('T')[0]).filter(Boolean));
 
       // ── Generate scheduled class dates ──────────────────────────────────────
-      const CUTOFF_DATE = new Date(2026, 2, 29); // March 29, 2026
-      const startDate = new Date(Math.max(CUTOFF_DATE.getTime(), studentStartDate ? studentStartDate.getTime() : CUTOFF_DATE.getTime()));
+      // History floor: Mar 30, 2026. Portal shows payment history from this date only.
+      // This MUST stay in sync with Calendar-NEW's display window.
+      const ABSOLUTE_FLOOR = new Date(2026, 2, 30); // Mar 30, 2026
+
+      // IMPORTANT: Match Calendar-NEW logic strictly.
+      // We start scanning from ABSOLUTE_FLOOR, but will skip any date before the student's created_at (or start_date)
+      // inside the loop.
+      let _studentStartStr = null;
+      if (student.start_date) {
+        _studentStartStr = student.start_date.split('T')[0];
+      } else if (student.created_at) {
+        _studentStartStr = new Date(student.created_at).toISOString().split('T')[0];
+      }
+      // Never start before the floor regardless of student.start_date
+      if (!_studentStartStr || _studentStartStr < '2026-03-30') {
+        _studentStartStr = '2026-03-30';
+      }
+
+      const startDate = new Date(ABSOLUTE_FLOOR.getTime());
 
       const scheduleStr = groupScheduleData.schedule || '';
       const daysOfWeek  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -8173,6 +7867,7 @@
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const day   = String(d.getDate()).padStart(2, '0');
         const dateStr = `${year}-${month}-${day}`;
+        if (_studentStartStr && dateStr < _studentStartStr) continue; // Match Calendar logic
         if (!scheduleActiveDays.includes(daysOfWeek[d.getDay()])) continue;
         if (skippedDates.has(dateStr)) continue;
         if (dateStr === todayDateStr && classTimeInMinutes !== null && currentTimeInMinutes < classTimeInMinutes) continue;
@@ -8184,6 +7879,7 @@
         groupScheduleData.one_time_schedules.forEach(ot => {
           const otDate = ot.date ? ot.date.substring(0, 10) : null;
           if (!otDate) return;
+          if (_studentStartStr && otDate < _studentStartStr) return; // Match Calendar logic
           const [y,mo,dy] = otDate.split('-');
           if (new Date(+y, +mo-1, +dy) > todayLA) return;
           if (skippedDates.has(otDate) || scheduledDates.includes(otDate)) return;
@@ -8193,22 +7889,24 @@
       }
 
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
-      // ── Orphan allocation: assign receipt-date payments to oldest unpaid classes ──
-      // A payment whose date doesn't land on a scheduled class date is allocated
-      // forward (greedy, oldest-first) to cover unpaid scheduled dates.
-      // This handles Stripe payments recorded on the payment date (e.g. Apr 4)
-      // when the actual class was a prior date (e.g. Apr 2).
-      if (orphanPaidDates.length > 0) {
-        // Sort orphans oldest first
-        orphanPaidDates.sort((a, b) => a.date.localeCompare(b.date));
-        orphanPaidDates.forEach(orphan => {
-          // Only allocate if this orphan date is NOT already a scheduled class
-          if (scheduledDates.includes(orphan.date)) return;
-          // Find the oldest scheduled date that is: not already paid, not absent, not excused
+
+      // ── Receipt-only payment allocation ──────────────────────────────────────
+      // For payment_records rows with no explicit for_class (e.g. Stripe payments recorded
+      // on the payment date), allocate each payment to the oldest unpaid scheduled class.
+      // This handles: student paid Apr 4 (Stripe) for the Apr 2 unpaid class → credits Apr 2.
+      // GUARD: Only consider receipt-only payments whose receipt date is on or after the
+      // history floor (2026-03-30). Pre-floor payments (e.g. Dec 4, Dec 18) were for already-
+      // settled classes and must NOT be reallocated to in-window unpaid classes.
+      // Sort oldest receipt first so multiple payments allocate in chronological order.
+      const inWindowReceiptPayments = receiptOnlyPayments.filter(p => p.receiptDate >= '2026-03-30');
+      if (inWindowReceiptPayments.length > 0) {
+        inWindowReceiptPayments.sort((a, b) => a.receiptDate.localeCompare(b.receiptDate));
+        inWindowReceiptPayments.forEach(({ receiptDate }) => {
+          // Find the oldest scheduled class that is not yet paid and not absent
           for (const sd of scheduledDates) {
-            if (!paidDates.has(sd) && !absentDates.has(sd) && !excusedDates.has(sd)) {
+            if (!paidDates.has(sd) && !absentDates.has(sd)) {
               paidDates.add(sd);
-              debugLog(`🔁 Orphan payment ${orphan.date} allocated → ${sd} (oldest unpaid class)`);
+              debugLog(`💳 Receipt-only payment ${receiptDate} → credited to oldest unpaid class ${sd}`);
               break;
             }
           }
@@ -8219,15 +7917,11 @@
       const absentClasses  = [];
 
       for (const dateStr of scheduledDates) {
-        const isAbsent  = absentDates.has(dateStr);
-        const isExcused = excusedDates.has(dateStr);
-        const hasPaid   = paidDates.has(dateStr);
+  const isAbsent  = absentDates.has(dateStr);
+  const hasPaid   = paidDates.has(dateStr);
 
         if (isAbsent) {
           absentClasses.push({ date: dateStr, amount: 0, status: 'absent' });
-        } else if (isExcused) {
-          // excused → no debt, but show in history as excused (already in payment list via loadPaymentHistory)
-          absentClasses.push({ date: dateStr, amount: 0, status: 'excused' });
         } else if (!hasPaid) {
           unpaidClasses.push({ date: dateStr, amount: pricePerClass });
           debugLog(`🔴 ${dateStr}: UNPAID`);
@@ -8238,7 +7932,15 @@
 
       const unpaidAmount = unpaidClasses.length * pricePerClass;
       debugLog(`💰 FINAL: $${unpaidAmount} (${unpaidClasses.length} unpaid × $${pricePerClass})`);
-      return { unpaidAmount, unpaidClasses, absentClasses, hasSchedule: true };
+      return {
+        unpaidAmount,
+        unpaidClasses,
+        absentClasses,
+        paidDates,
+        absentDates,
+        scheduledDates,
+        hasSchedule: true
+      };
     }
     
     // Load student payment UI only when needed (with DOM caching)
@@ -8248,7 +7950,9 @@
       let lastPaidDate = null;
       let unpaidClasses = []; // Track individual unpaid class dates
       let absentClasses = []; // Track absent class dates
-      let scheduleUnpaidAmount = 0; // Amount derived from schedule analysis
+  let scheduleUnpaidAmount = 0; // Amount derived from schedule analysis
+  let paidDatesSet = new Set();
+  let scheduledDatesForUI = [];
       
       // Cache frequently accessed DOM elements
       let lastPaidEl = getCachedDOM('lastPaid') || document.getElementById('lastPaid');
@@ -8287,10 +7991,12 @@
       let creditBalance = 0;
       
       if (student && groupSchedule) {
-        const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
-        unpaidClasses   = result.unpaidClasses;
-        absentClasses   = result.absentClasses || [];
-        scheduleUnpaidAmount = result.unpaidAmount || 0;
+  const result = await calculateUnpaidFromSchedule(student, payments, groupSchedule);
+  unpaidClasses        = result.unpaidClasses;
+  absentClasses        = result.absentClasses || [];
+  scheduleUnpaidAmount = result.unpaidAmount  || 0;
+  paidDatesSet         = result.paidDates     || new Set();
+  scheduledDatesForUI  = result.scheduledDates || [];
         
         creditBalance = parseFloat(student.balance) || 0;
         
@@ -8315,16 +8021,16 @@
       window.currentUnpaidClasses = unpaidClasses.map(c => c.date);
       
       // Calculate last paid
-      payments.forEach(payment => {
-        const amount = parseFloat(payment.amount) || 0;
-        // 🔥 CRITICAL FIX: Include BOTH paid and credit payments
-        if (payment.status === 'paid' || payment.status.startsWith('paid') || payment.status === 'credit') {
-          if (!lastPaidDate || payment.date > lastPaidDate) {
-            lastPaidDate = payment.date;
-            lastPaidAmount = amount;
+      if (paidDatesSet && paidDatesSet.size > 0) {
+        paidDatesSet.forEach(dateStr => {
+          if (!dateStr) return;
+          const paidDateObj = new Date(dateStr + 'T00:00:00');
+          if (!lastPaidDate || paidDateObj > lastPaidDate) {
+            lastPaidDate = paidDateObj;
+            lastPaidAmount = pricePerClassValue;
           }
-        }
-      });
+        });
+      }
       
       let lastPaidDateText = '-';
       if (lastPaidDate) {
@@ -8414,173 +8120,28 @@
       if (!paymentList) return;
       paymentList.innerHTML = '';
       
-      // � COMBINE ALL ENTRIES: unpaid, absent, and paid into single array
-  const allEntries = [];
-  const absenceDisplayDates = new Set();
-      
-      // Add unpaid class entries
-      if (unpaidClasses && unpaidClasses.length > 0) {
-        unpaidClasses.forEach(unpaidClass => {
-          const dateOnlyStr = unpaidClass.date ? unpaidClass.date.substring(0, 10) : unpaidClass.date;
-          const parts = dateOnlyStr.split('-');
-          const classDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-          
-          allEntries.push({
-            date: classDate,
-            type: 'unpaid',
-            amount: unpaidClass.amount,
-            statusText: 'Not Paid',
-            statusClass: 'unpaid'
-          });
-        });
-      }
-      
-      // Add absent class entries
-      if (absentClasses && absentClasses.length > 0) {
-        absentClasses.forEach(absentClass => {
-          const dateOnlyStr = absentClass.date ? absentClass.date.substring(0, 10) : absentClass.date;
-          const parts = dateOnlyStr.split('-');
-          const classDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-          const dateKey = dateOnlyStr;
-          absenceDisplayDates.add(dateKey);
-          
-          allEntries.push({
-            date: classDate,
-            type: 'absent',
-            amount: 0,
-            statusText: 'Absent',
-            statusClass: 'absent'
-          });
-        });
-      }
-      
-      // Add paid payment entries
-      if (payments && payments.length > 0) {
-        // Month names for breakdown note formatting
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        
-        // First, build a map of original receipt dates to see which payments were split
-        const receiptDateMap = new Map(); // receiptDate -> [{amount, forClass}, ...]
-        payments.forEach(payment => {
-          if (payment.receiptDate && payment.forClass && payment.receiptDate !== payment.forClass) {
-            // This payment was reassigned from receiptDate to forClass
-            if (!receiptDateMap.has(payment.receiptDate)) {
-              receiptDateMap.set(payment.receiptDate, []);
-            }
-            receiptDateMap.get(payment.receiptDate).push({
-              amount: parseFloat(payment.amount) || 0,
-              forClass: payment.forClass
-            });
-          }
-        });
-        
-        payments.forEach(payment => {
-          const isCreditPayment = payment.source === 'credit';
-          let statusText = 'Unknown';
-          let statusClass = payment.status || 'unknown';
-          
-          if (isCreditPayment) {
-            statusText = 'Paid from Credit';
-            statusClass = 'credit';
-          } else {
-            // Support "paid (stripe)" statuses
-            const baseStatus = payment.status.startsWith('paid') ? 'paid' : payment.status;
-            switch (baseStatus) {
-              case 'paid':
-                // If this is an orphan (receipt date ≠ class date), show "Paid – {receipt month} {day}"
-                if (payment.isOrphan && payment.receiptDate && payment.receiptDate !== payment.dateString) {
-                  const rParts = payment.receiptDate.split('-');
-                  const rDate = new Date(parseInt(rParts[0]), parseInt(rParts[1]) - 1, parseInt(rParts[2]));
-                  const monthNames2 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                  statusText = `Paid – ${monthNames2[rDate.getMonth()]} ${rDate.getDate()}`;
-                } else {
-                  statusText = 'Paid';
-                }
-                break;
-              case 'unpaid':
-                statusText = 'Not Paid';
-                break;
-              case 'pending':
-                statusText = 'Pending';
-                statusClass = 'unpaid';
-                break;
-              case 'absent':
-                statusText = 'Absent';
-                break;
-              case 'excused':
-                statusText = 'Excused';
-                break;
-              case 'cancelled':
-                statusText = 'Cancelled';
-                break;
-              default:
-                statusText = payment.status || 'Unknown';
-            }
-          }
-          
-          // FIX: Use for_class date (payment.dateString) instead of email_date (payment.date)
-          // This shows when the payment was allocated to, not when it was received
-          let displayDate;
-          let breakdownNote = null;
-          let isOneTimeClass = false;
-          
-          if (payment.dateString) {
-            // payment.dateString is the for_class date (YYYY-MM-DD string)
-            const parts = payment.dateString.split('-');
-            displayDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
-            debugLog(`[Payment Display] Using for_class date: ${payment.dateString}, amount: $${payment.amount}, method: ${payment.payment_method}`);
-            
-            // Check if this date matches a one-time class
-            if (groupSchedule && groupSchedule.one_time_schedules && Array.isArray(groupSchedule.one_time_schedules)) {
-              isOneTimeClass = groupSchedule.one_time_schedules.some(oneTime => oneTime.date === payment.dateString);
-              if (isOneTimeClass) {
-                debugLog(`[Payment Display] ✨ Payment for ONE-TIME CLASS: ${payment.dateString}`);
-              }
-            }
-            
-            // Check if this payment was split from a larger payment
-            if (payment.receiptDate && receiptDateMap.has(payment.receiptDate)) {
-              const splits = receiptDateMap.get(payment.receiptDate);
-              if (splits.length > 1) {
-                // This payment was split - add a breakdown note
-                const totalAmount = splits.reduce((sum, s) => sum + s.amount, 0);
-                const classesText = splits.map(s => {
-                  const date = new Date(s.forClass + 'T00:00:00');
-                  return `${monthNames[date.getMonth()]} ${date.getDate()}`;
-                }).join(', ');
-                breakdownNote = `Received $${totalAmount} on ${payment.receiptDate} for classes: ${classesText}`;
-              }
-            }
-          } else if (payment.date) {
-            // Fallback to payment.date if dateString not available
-            displayDate = payment.date;
-            debugLog(`[Payment Display] No dateString, using payment.date: ${payment.date}, amount: $${payment.amount}`);
-          } else {
-            displayDate = new Date(); // Last resort fallback
-            debugLog(`[Payment Display] No date available, using today`);
-          }
-          
-          const dateKey = payment.dateString || (payment.date ? payment.date.toISOString().split('T')[0] : null);
-          if ((payment.status === 'absent' || statusClass === 'absent') && dateKey) {
-            if (absenceDisplayDates.has(dateKey)) {
-              debugDebug(`⚠️ Skipping duplicate displayed absence entry for ${dateKey}`);
-              return;
-            }
-            absenceDisplayDates.add(dateKey);
-          }
-          
-          allEntries.push({
-            date: displayDate,  // Now uses for_class date instead of email_date
-            type: isCreditPayment ? 'credit' : payment.status,
-            amount: parseFloat(payment.amount) || 0,
-            statusText: statusText,
-            statusClass: statusClass,
-            paymentMethod: payment.payment_method && !isCreditPayment ? ` (${payment.payment_method})` : '',
-            breakdownNote: breakdownNote,  // Add breakdown note if payment was split
-            isOneTimeClass: isOneTimeClass  // Flag for one-time class payment
-          });
-        });
-      }
+      // ── BUILD HISTORY ENTRIES from scheduledDates (the floored master list) ──
+      // scheduledDates comes from calculateUnpaidFromSchedule which floors at Mar 30, 2026.
+      // This is the ONLY source of truth — mirrors Calendar-NEW dot rendering exactly.
+      // paidDatesSet / absentDates are lookup sets only; they do NOT drive what is shown.
+      const allEntries = [];
+      const absenceDisplayDates = new Set();
+      const absentDateSet = new Set((absentClasses || []).map(c => c.date ? c.date.substring(0, 10) : '').filter(Boolean));
+
+      scheduledDatesForUI.forEach(dateStr => {
+        if (!dateStr) return;
+        const parts = dateStr.split('-');
+        const classDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+
+        if (absentDateSet.has(dateStr)) {
+          absenceDisplayDates.add(dateStr);
+          allEntries.push({ date: classDate, type: 'absent',  amount: 0,                statusText: 'Absent',  statusClass: 'absent'  });
+        } else if (paidDatesSet.has(dateStr)) {
+          allEntries.push({ date: classDate, type: 'paid',    amount: pricePerClassValue, statusText: 'Paid',    statusClass: 'paid'    });
+        } else {
+          allEntries.push({ date: classDate, type: 'unpaid',  amount: pricePerClassValue, statusText: 'Unpaid',  statusClass: 'unpaid'  });
+        }
+      });
       
       // 🔁 FINAL SAFETY: Deduplicate by date + status to prevent duplicates from any source
       const uniqueEntryMap = new Map();
@@ -13821,6 +13382,9 @@
        Opens payment.html in a glass iframe overlay when student clicks Pay Now.
        Listens for postMessage events from payment.html to close on success.
   ====================================================================== -->
+  <style>
+    #arnomaPaymentIframe::-webkit-scrollbar { display: none; }
+  </style>
   <div id="arnomaPaymentModalOverlay" style="
     display: none;
     position: fixed;
@@ -13869,6 +13433,8 @@
         border-radius: 24px;
         box-shadow: 0 30px 80px rgba(0,0,0,0.6);
         background: #070a14;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
       "
       allow="payment *; publickey-credentials-get *"
       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
@@ -13889,14 +13455,16 @@
         return;
       }
 
+      const unpaidDates = (window.currentUnpaidClasses || []);
       const params = new URLSearchParams({
-        student_name: student?.name    || '',
-        student_id  : String(student?.id || ''),
-        email       : student?.email   || '',
-        amount      : String(amount),
-        currency    : 'usd',
-        invoice_ref : `balance-${student?.id || 'unknown'}`,
-        for_class   : (window.currentUnpaidClasses || []).join(','),
+        student_name    : student?.name    || '',
+        student_id      : String(student?.id || ''),
+        email           : student?.email   || '',
+        amount          : String(amount),
+        currency        : 'usd',
+        invoice_ref     : `balance-${student?.id || 'unknown'}`,
+        for_class       : unpaidDates.join(','),
+        for_class_dates : JSON.stringify(unpaidDates),
       });
 
       const src = `payment.html?${params.toString()}`;

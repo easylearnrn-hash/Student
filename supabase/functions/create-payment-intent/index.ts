@@ -40,13 +40,14 @@ serve(async (req: Request) => {
   }
 
   let body: {
-    amount_cents : number;
-    currency     : string;
-    student_id   : string;
-    student_name : string;
-    student_email: string;
-    invoice_ref  : string;
-    for_class    ?: string;
+    amount_cents     : number;
+    currency         : string;
+    student_id       : string;
+    student_name     : string;
+    student_email    : string;
+    invoice_ref      : string;
+    for_class       ?: string;
+    for_class_dates ?: string;
   };
 
   try {
@@ -58,7 +59,7 @@ serve(async (req: Request) => {
     );
   }
 
-  const { amount_cents, currency, student_id, student_name, student_email, invoice_ref, for_class } = body;
+  const { amount_cents, currency, student_id, student_name, student_email, invoice_ref, for_class, for_class_dates } = body;
 
   if (!amount_cents || amount_cents < 50) {
     // Stripe minimum is 50 cents
@@ -74,10 +75,11 @@ serve(async (req: Request) => {
     currency             : (currency || 'usd').toLowerCase(),
     'automatic_payment_methods[enabled]': 'true',
     description          : `ARNOMA class payment – ${student_name || 'Student'}`,
-    'metadata[student_id]'  : student_id    || '',
-    'metadata[invoice_ref]' : invoice_ref   || '',
-    'metadata[student_name]': student_name  || '',
-    'metadata[for_class]'   : for_class     || '',
+    'metadata[student_id]'     : student_id      || '',
+    'metadata[invoice_ref]'    : invoice_ref      || '',
+    'metadata[student_name]'   : student_name     || '',
+    'metadata[for_class]'      : for_class        || '',
+    'metadata[for_class_dates]': for_class_dates  || '',
   });
 
   if (student_email) {
