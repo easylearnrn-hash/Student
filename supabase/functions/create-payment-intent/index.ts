@@ -46,6 +46,7 @@ serve(async (req: Request) => {
     student_name : string;
     student_email: string;
     invoice_ref  : string;
+    for_class    ?: string;
   };
 
   try {
@@ -57,7 +58,7 @@ serve(async (req: Request) => {
     );
   }
 
-  const { amount_cents, currency, student_id, student_name, student_email, invoice_ref } = body;
+  const { amount_cents, currency, student_id, student_name, student_email, invoice_ref, for_class } = body;
 
   if (!amount_cents || amount_cents < 50) {
     // Stripe minimum is 50 cents
@@ -76,6 +77,7 @@ serve(async (req: Request) => {
     'metadata[student_id]'  : student_id    || '',
     'metadata[invoice_ref]' : invoice_ref   || '',
     'metadata[student_name]': student_name  || '',
+    'metadata[for_class]'   : for_class     || '',
   });
 
   if (student_email) {

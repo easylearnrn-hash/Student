@@ -94,17 +94,19 @@ serve(async (req: Request) => {
       id         : string;
       amount     : number;
       currency   : string;
-      metadata   : { student_id?: string; invoice_ref?: string; student_name?: string };
+      metadata   : { student_id?: string; invoice_ref?: string; student_name?: string; for_class?: string };
       receipt_email: string | null;
     };
 
-    const { student_id, invoice_ref } = pi.metadata ?? {};
+    const { student_id, invoice_ref, for_class } = pi.metadata ?? {};
     const amountDollars = pi.amount / 100;
 
     console.log(`✅ PaymentIntent succeeded: ${pi.id} | student: ${student_id} | $${amountDollars}`);
 
     if (student_id && SUPABASE_URL && SERVICE_ROLE_KEY) {
       const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+      
+      const forClassArray = for_class ? for_class.split(',').map((d: string) => d.trim()).filter(Boolean) : [];
 
       // Insert a paid record in payment_records
       const { error } = await supabaseAdmin.from('payment_records').insert({
@@ -112,7 +114,8 @@ serve(async (req: Request) => {
         amount        : amountDollars,
         status        : 'paid',
         payment_method: 'Stripe',
-        date          : new Date().toISOString().split('T')[0],
+        date          : forClassArray.length > 0 ? forClassArray[0] : new Date().toISOString().split('T')[0],
+        for_class_dates: forClassArray.length > 0 ? forClassArray : undefined,
         notes         : invoice_ref ? `Stripe PI: ${pi.id} | Ref: ${invoice_ref}` : `Stripe PI: ${pi.id}`,
       });
 
