@@ -7605,7 +7605,7 @@
       
       // Check cache first
       // 🔥 CACHE VERSION: Increment this number to bust cache after deduplication fix
-      const cacheKey = `payments-v12-${student.id}`;
+      const cacheKey = `payments-v14-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached payment history for student:', student.id);
@@ -7858,24 +7858,45 @@
                          .map(p => p.dateString)
                          .filter(Boolean)
             );
-            const absenceStrings = new Set(
-              allPayments.filter(p => p.status === 'absent' || p.status === 'excused')
+            // Only hard-block on true absences — excused dates CAN be overridden by a paid entry
+            const hardAbsenceStrings = new Set(
+              allPayments.filter(p => p.status === 'absent')
+                         .map(p => p.dateString).filter(Boolean)
+            );
+            const excusedStrings = new Set(
+              allPayments.filter(p => p.status === 'excused')
                          .map(p => p.dateString).filter(Boolean)
             );
             // Sort orphans oldest first, then allocate greedily
             orphanEntries.sort((a, b) => (a.receiptDate||'').localeCompare(b.receiptDate||''));
             const allocatedToOrphan = new Set();
             orphanEntries.forEach(orphan => {
-              // Skip if receipt date is itself a scheduled class
-              if (scheduledR.includes(orphan.dateString)) return;
+              // Only skip remap if the receipt date is a scheduled class that is
+              // already covered by a confirmed paid entry (non-orphan).
+              // If receipt date lands on an excused/unpaid class day, we still need to remap.
+              const receiptIsScheduled = scheduledR.includes(orphan.dateString);
+              const receiptAlreadyCovered = coveredByNonOrphan.has(orphan.dateString);
+              const receiptIsExcused = excusedStrings.has(orphan.dateString);
+              if (receiptIsScheduled && receiptAlreadyCovered && !receiptIsExcused) return;
+              // Prefer oldest uncovered, non-excused scheduled date; fall back to excused dates
+              let target = null;
               for (const sd of scheduledR) {
-                if (!coveredByNonOrphan.has(sd) && !absenceStrings.has(sd) && !allocatedToOrphan.has(sd)) {
-                  allocatedToOrphan.add(sd);
-                  // Remap this orphan's dateString + date in-place
-                  orphan.dateString = sd;
-                  orphan.date = new Date(sd + 'T00:00:00');
-                  break;
+                if (!coveredByNonOrphan.has(sd) && !hardAbsenceStrings.has(sd) && !allocatedToOrphan.has(sd) && !excusedStrings.has(sd)) {
+                  target = sd; break;
                 }
+              }
+              if (!target) {
+                // Fall back: allow excused dates (paid beats excused)
+                for (const sd of scheduledR) {
+                  if (!coveredByNonOrphan.has(sd) && !hardAbsenceStrings.has(sd) && !allocatedToOrphan.has(sd)) {
+                    target = sd; break;
+                  }
+                }
+              }
+              if (target) {
+                allocatedToOrphan.add(target);
+                orphan.dateString = target;
+                orphan.date = new Date(target + 'T00:00:00');
               }
             });
           }
