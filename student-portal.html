@@ -7605,7 +7605,7 @@
       
       // Check cache first
       // 🔥 CACHE VERSION: Increment this number to bust cache after deduplication fix
-  const cacheKey = `payments-v15-${student.id}`;
+  const cacheKey = `payments-v16-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached payment history for student:', student.id);
@@ -7843,7 +7843,7 @@
             }
           }
         }
-        if (orphanEntries.length > 0 && scheduleForRemap && scheduleForRemap.schedule) {
+  if (orphanEntries.length > 0 && scheduleForRemap && scheduleForRemap.schedule) {
           // Build scheduled dates for this student's group
           const daysOfWeekR = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
           const fullDayMapR = { Mon:'Monday',Tue:'Tuesday',Wed:'Wednesday',Thu:'Thursday',Fri:'Friday',Sat:'Saturday',Sun:'Sunday' };
@@ -7910,6 +7910,32 @@
               }
             });
           }
+        }
+
+        // Fallback: if an orphan still sits on its receipt date, but there are
+        // excused class dates, allocate to the oldest excused date instead.
+        if (orphanEntries.length > 0) {
+          const excusedDates = allPayments
+            .filter(p => p.status === 'excused' && p.dateString)
+            .map(p => p.dateString)
+            .sort();
+          const coveredPaidDates = new Set(
+            allPayments
+              .filter(p => p.status === 'paid' || (p.status && p.status.startsWith('paid')) || p.status === 'credit')
+              .map(p => p.dateString)
+              .filter(Boolean)
+          );
+          const usedExcused = new Set();
+          orphanEntries.forEach(orphan => {
+            if (!orphan.receiptDate) return;
+            if (orphan.dateString !== orphan.receiptDate) return; // already remapped
+            const target = excusedDates.find(d => !coveredPaidDates.has(d) && !usedExcused.has(d));
+            if (target) {
+              usedExcused.add(target);
+              orphan.dateString = target;
+              orphan.date = new Date(target + 'T00:00:00');
+            }
+          });
         }
 
         // Sort all payments by date (most recent first)
