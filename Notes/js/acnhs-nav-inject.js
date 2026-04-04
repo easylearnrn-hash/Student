@@ -210,17 +210,37 @@
 
   /* ─── 5. MAIN: replace .note-header with premium nav + hero ─── */
   function upgradeHeader() {
+    /* Skip if nav already injected */
+    if (document.querySelector('.acnhs-site-nav')) return;
+
     var oldHeader = document.querySelector('header.note-header');
-    if (!oldHeader) return; // already premium or no old header
+    var category, title, subtitle;
 
-    /* Extract data from old header */
-    var tagEl      = oldHeader.querySelector('.note-tag');
-    var titleEl    = oldHeader.querySelector('h1');
-    var subtitleEl = oldHeader.querySelector('.subtitle, p.subtitle, .note-subtitle');
+    if (oldHeader) {
+      /* ── Old-style header: extract from <header class="note-header"> ── */
+      var tagEl      = oldHeader.querySelector('.note-tag, .category, [class*="tag"]');
+      var titleEl    = oldHeader.querySelector('h1');
+      var subtitleEl = oldHeader.querySelector('.subtitle, p.subtitle, .note-subtitle');
 
-    var category = tagEl      ? tagEl.textContent.trim()      : 'ACNHS Notes';
-    var title    = titleEl    ? titleEl.textContent.trim()     : document.title.replace(/\s*\|.*$/, '').trim();
-    var subtitle = subtitleEl ? subtitleEl.textContent.trim()  : '';
+      category = tagEl      ? tagEl.textContent.trim()      : 'ACNHS Notes';
+      title    = titleEl    ? titleEl.textContent.trim()     : document.title.replace(/\s*[\|–-].*$/, '').trim();
+      subtitle = subtitleEl ? subtitleEl.textContent.trim()  : '';
+    } else {
+      /* ── New-style: bare <h1> + <p class="subtitle"> directly in body ── */
+      var h1El  = document.querySelector('body > div h1, body > h1, .container h1, header h1');
+      var subEl = document.querySelector('body > div p.subtitle, body > p.subtitle, .container p.subtitle, header p.subtitle');
+
+      /* Try to infer category from page title or subtitle text */
+      var rawTitle = document.title || '';
+      var dashIdx  = rawTitle.search(/[\|–-]/);
+      category = dashIdx !== -1 ? rawTitle.slice(dashIdx + 1).trim() : 'ACNHS Notes';
+      title    = h1El  ? h1El.textContent.trim()  : rawTitle.replace(/\s*[\|–-].*$/, '').trim();
+      subtitle = subEl ? subEl.textContent.replace(/^Maternal Health\s*[·\-]\s*/i, '').trim() : '';
+
+      /* Hide the bare h1 + subtitle so they don't double-render under the hero */
+      if (h1El)  h1El.style.display  = 'none';
+      if (subEl) subEl.style.display = 'none';
+    }
 
     var portalUrl = buildPortalUrl();
     var logoUrl   = buildLogoUrl();
@@ -273,11 +293,17 @@
         '<span class="acnhs-hero-pill">Study Guide</span>' +
       '</div>';
 
-    /* ── Replace old header ── */
-    var parent = oldHeader.parentNode;
-    parent.insertBefore(nav, oldHeader);
-    parent.insertBefore(hero, oldHeader);
-    parent.removeChild(oldHeader);
+    /* ── Replace old header OR prepend to body ── */
+    if (oldHeader) {
+      var parent = oldHeader.parentNode;
+      parent.insertBefore(nav, oldHeader);
+      parent.insertBefore(hero, oldHeader);
+      parent.removeChild(oldHeader);
+    } else {
+      /* No old header — prepend nav + hero at the very top of <body> */
+      document.body.insertBefore(hero, document.body.firstChild);
+      document.body.insertBefore(nav, document.body.firstChild);
+    }
 
     /* ── Mark body so padding-top CSS kicks in ── */
     document.body.classList.add('acnhs-nav-injected');
