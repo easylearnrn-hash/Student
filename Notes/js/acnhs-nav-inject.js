@@ -290,6 +290,15 @@
         window.location.href = portalUrl;
       });
     });
+
+    /* ── Rewire any static .back-btn links on the page to go to the portal ── */
+    document.querySelectorAll('a.back-btn').forEach(function (btn) {
+      btn.setAttribute('href', portalUrl);
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        window.location.href = portalUrl;
+      });
+    });
   }
 
   /* ─── 6. HTML-escape helper ─────────────────────────────────── */
