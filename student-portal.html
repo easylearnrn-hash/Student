@@ -7657,6 +7657,14 @@
         }
 
         if (paymentRecords.length > 0) {
+          // ── Pre-compute orphan allocation for display ──────────────────────
+          // For payment_records with no explicit for_class_dates/for_class, the
+          // display date should be the class date they cover, NOT the receipt date.
+          // We need the group schedule to know what dates are scheduled class days.
+          // We'll resolve this after building the full allPayments array below,
+          // by remapping dateString for orphan manual records.
+          const orphanManualIds = new Set(); // record.id of orphans to remap
+
           paymentRecords.forEach(record => {
             const rawStatus = (record.status || 'unpaid').toString();
             const normalizedStatus = rawStatus.toLowerCase().trim();
@@ -7683,6 +7691,11 @@
 
             // ✅ CALENDAR-MIRRORED: Expand for_class_dates array just like Calendar-NEW does.
             const classDates = extractForClassDates(record, fallbackDate);
+            const hasExplicitClass = (record.for_class_dates && (Array.isArray(record.for_class_dates) ? record.for_class_dates.length > 0 : (record.for_class_dates !== '[]' && record.for_class_dates !== '{}'))) ||
+                                     (record.for_class && record.for_class.trim() && record.for_class.trim() !== '[]' && record.for_class.trim() !== '{}');
+            const isOrphan = !hasExplicitClass && classDates.length === 1 && classDates[0] === fallbackDate;
+            if (isOrphan) orphanManualIds.add(record.id);
+
             classDates.forEach(dateStr => {
               allPayments.push({
                 date: new Date(dateStr + 'T00:00:00'),
@@ -7692,7 +7705,9 @@
                 payment_method: record.payment_method,
                 notes: record.notes,
                 id: record.id,
-                source: 'manual'
+                source: 'manual',
+                isOrphan: isOrphan,
+                receiptDate: fallbackDate,
               });
             });
           });
@@ -7812,6 +7827,60 @@
           console.error('⚠️ RLS Error loading absences:', absencesResult.error.message);
         }
         
+        // ── Remap orphan payment display dates to their allocated class date ──
+        // Orphan manual records (Stripe, cash with no for_class set) show the
+        // receipt date in history, but the class they cover is the oldest unpaid
+        // scheduled class. Remap dateString so history shows the class date.
+        const orphanEntries = allPayments.filter(p => p.isOrphan && p.source === 'manual');
+        const scheduleForRemap = currentGroupScheduleData;
+        if (orphanEntries.length > 0 && scheduleForRemap && scheduleForRemap.schedule) {
+          // Build scheduled dates for this student's group
+          const daysOfWeekR = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+          const fullDayMapR = { Mon:'Monday',Tue:'Tuesday',Wed:'Wednesday',Thu:'Thursday',Fri:'Friday',Sat:'Saturday',Sun:'Sunday' };
+          const schedStrR = scheduleForRemap.schedule || '';
+          const activeDaysR = [];
+          ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(name => {
+            const full = fullDayMapR[name] || name;
+            if (schedStrR.includes(name) && !activeDaysR.includes(full)) activeDaysR.push(full);
+          });
+          if (activeDaysR.length > 0) {
+            const CUTOFFR = new Date(2026, 2, 29);
+            const todayR = new Date();
+            const scheduledR = [];
+            for (let d = new Date(CUTOFFR); d <= todayR; d.setDate(d.getDate() + 1)) {
+              if (!activeDaysR.includes(daysOfWeekR[d.getDay()])) continue;
+              const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+              scheduledR.push(ds);
+            }
+            // Track which scheduled dates are already covered by non-orphan paid entries
+            const coveredByNonOrphan = new Set(
+              allPayments.filter(p => !p.isOrphan && (p.status === 'paid' || (p.status && p.status.startsWith('paid')) || p.status === 'credit'))
+                         .map(p => p.dateString)
+                         .filter(Boolean)
+            );
+            const absenceStrings = new Set(
+              allPayments.filter(p => p.status === 'absent' || p.status === 'excused')
+                         .map(p => p.dateString).filter(Boolean)
+            );
+            // Sort orphans oldest first, then allocate greedily
+            orphanEntries.sort((a, b) => (a.receiptDate||'').localeCompare(b.receiptDate||''));
+            const allocatedToOrphan = new Set();
+            orphanEntries.forEach(orphan => {
+              // Skip if receipt date is itself a scheduled class
+              if (scheduledR.includes(orphan.dateString)) return;
+              for (const sd of scheduledR) {
+                if (!coveredByNonOrphan.has(sd) && !absenceStrings.has(sd) && !allocatedToOrphan.has(sd)) {
+                  allocatedToOrphan.add(sd);
+                  // Remap this orphan's dateString + date in-place
+                  orphan.dateString = sd;
+                  orphan.date = new Date(sd + 'T00:00:00');
+                  break;
+                }
+              }
+            });
+          }
+        }
+
         // Sort all payments by date (most recent first)
         allPayments.sort((a, b) => b.date - a.date);
         
