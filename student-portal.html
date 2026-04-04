@@ -7605,7 +7605,7 @@
       
       // Check cache first
       // 🔥 CACHE VERSION: Increment this number to bust cache after deduplication fix
-      const cacheKey = `payments-v11-${student.id}`;
+      const cacheKey = `payments-v12-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached payment history for student:', student.id);
@@ -7918,10 +7918,15 @@
             deduplicatedPayments.push(payment);
             seenDates.set(dateKey, payment);
           } else {
-            // Duplicate date found - keep manual record over zelle if both exist
+            // Duplicate date found - paid always beats excused/unpaid; manual beats zelle
             const existing = seenDates.get(dateKey);
-            if (payment.source === 'manual' && existing.source === 'zelle') {
-              // Replace zelle with manual record (manual is more authoritative)
+            const isPaid = s => s && (s === 'paid' || s.startsWith('paid') || s === 'credit');
+            const isExcusedOrUnpaid = s => s && (s === 'excused' || s === 'unpaid');
+            const incomingWins =
+              (isPaid(payment.status) && isExcusedOrUnpaid(existing.status)) ||
+              (payment.source === 'manual' && existing.source === 'zelle' && !isPaid(existing.status));
+            if (incomingWins) {
+              // Replace the existing entry with this more authoritative one
               const index = deduplicatedPayments.indexOf(existing);
               if (index !== -1) {
                 deduplicatedPayments[index] = payment;
@@ -8440,7 +8445,15 @@
             const baseStatus = payment.status.startsWith('paid') ? 'paid' : payment.status;
             switch (baseStatus) {
               case 'paid':
-                statusText = 'Paid';
+                // If this is an orphan (receipt date ≠ class date), show "Paid – {receipt month} {day}"
+                if (payment.isOrphan && payment.receiptDate && payment.receiptDate !== payment.dateString) {
+                  const rParts = payment.receiptDate.split('-');
+                  const rDate = new Date(parseInt(rParts[0]), parseInt(rParts[1]) - 1, parseInt(rParts[2]));
+                  const monthNames2 = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                  statusText = `Paid – ${monthNames2[rDate.getMonth()]} ${rDate.getDate()}`;
+                } else {
+                  statusText = 'Paid';
+                }
                 break;
               case 'unpaid':
                 statusText = 'Not Paid';
