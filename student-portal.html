@@ -7983,12 +7983,23 @@
       //    + from the `payments` array passed in (Zelle / manual paid records already processed)
       //    + from credit_payments.applied_class_date
       const paidDates = new Set();
+      // Track raw payment receipt dates that have no for_class pinned to a scheduled date
+      const orphanPaidDates = []; // { date: 'YYYY-MM-DD', amount } — will be allocated later
 
       // From payment_records (non-excused, non-absent only)
       prRecords.forEach(pr => {
         if (pr.status === 'excused' || pr.status === 'absent') return;
         const fallback = (pr.date || '').split('T')[0];
-        extractForClassDates(pr, fallback).forEach(d => { if (d) paidDates.add(d); });
+        const resolved = extractForClassDates(pr, fallback);
+        resolved.forEach(d => { if (d) paidDates.add(d); });
+        // If the only resolved date is the receipt date itself (no explicit for_class), track as orphan
+        if (resolved.length === 1 && resolved[0] === fallback) {
+          const hasExplicitClass = (pr.for_class_dates && (Array.isArray(pr.for_class_dates) ? pr.for_class_dates.length > 0 : pr.for_class_dates !== '[]')) ||
+                                   (pr.for_class && pr.for_class.trim() && pr.for_class.trim() !== '[]');
+          if (!hasExplicitClass) {
+            orphanPaidDates.push({ date: fallback, amount: parseFloat(pr.amount) || 0, source: 'payment_record' });
+          }
+        }
       });
 
       // From the `payments` array (already contains Zelle + manual, pre-processed by loadPaymentHistory)
@@ -8066,6 +8077,28 @@
       }
 
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
+      // ── Orphan allocation: assign receipt-date payments to oldest unpaid classes ──
+      // A payment whose date doesn't land on a scheduled class date is allocated
+      // forward (greedy, oldest-first) to cover unpaid scheduled dates.
+      // This handles Stripe payments recorded on the payment date (e.g. Apr 4)
+      // when the actual class was a prior date (e.g. Apr 2).
+      if (orphanPaidDates.length > 0) {
+        // Sort orphans oldest first
+        orphanPaidDates.sort((a, b) => a.date.localeCompare(b.date));
+        orphanPaidDates.forEach(orphan => {
+          // Only allocate if this orphan date is NOT already a scheduled class
+          if (scheduledDates.includes(orphan.date)) return;
+          // Find the oldest scheduled date that is: not already paid, not absent, not excused
+          for (const sd of scheduledDates) {
+            if (!paidDates.has(sd) && !absentDates.has(sd) && !excusedDates.has(sd)) {
+              paidDates.add(sd);
+              debugLog(`🔁 Orphan payment ${orphan.date} allocated → ${sd} (oldest unpaid class)`);
+              break;
+            }
+          }
+        });
+      }
+
       const unpaidClasses  = [];
       const absentClasses  = [];
 
