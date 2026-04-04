@@ -291,14 +291,6 @@
       });
     });
 
-    /* ── Rewire any static .back-btn links on the page to go to the portal ── */
-    document.querySelectorAll('a.back-btn').forEach(function (btn) {
-      btn.setAttribute('href', portalUrl);
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
-        window.location.href = portalUrl;
-      });
-    });
   }
 
   /* ─── 6. HTML-escape helper ─────────────────────────────────── */
@@ -562,6 +554,19 @@
     ensureFonts();
     ensureStyles();
     upgradeHeader();
+
+    /* ── Rewire ALL back-navigation links to go to the portal ──
+       Covers .back-btn (new files) and .note-back (older files).
+       Sets href="#" immediately so Safari never attempts file:// load,
+       then navigates to the portal on click.                         */
+    var portalUrl = buildPortalUrl();
+    document.querySelectorAll('a.back-btn, a.note-back').forEach(function (btn) {
+      btn.setAttribute('href', '#');
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        window.location.href = portalUrl;
+      });
+    });
   }
 
   if (document.readyState === 'loading') {
