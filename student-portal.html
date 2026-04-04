@@ -7605,7 +7605,7 @@
       
       // Check cache first
       // 🔥 CACHE VERSION: Increment this number to bust cache after deduplication fix
-      const cacheKey = `payments-v14-${student.id}`;
+      const cacheKey = `payments-v15-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached payment history for student:', student.id);
@@ -7905,6 +7905,42 @@
         // Sort all payments by date (most recent first)
         allPayments.sort((a, b) => b.date - a.date);
         
+        // ---------- PRE-PASS: paid entries suppress excused entries near the same date ----------
+        // If a student paid (Stripe/manual) within ±7 days of an excused class,
+        // hide the excused entry and show the payment instead.
+        // This handles orphan Stripe payments that land on a different date than the excused class.
+        const paidDateSet = new Set(
+          allPayments
+            .filter(p => p.status === 'paid' || (p.status && p.status.startsWith('paid')))
+            .map(p => p.dateString).filter(Boolean)
+        );
+        // Build a set of all paid receipt dates (for orphan payments their dateString = receipt date still at this point)
+        const paidReceiptSet = new Set(
+          allPayments
+            .filter(p => p.status === 'paid' || (p.status && p.status.startsWith('paid')))
+            .map(p => p.receiptDate || p.dateString).filter(Boolean)
+        );
+        // Remove excused entries that are covered by a paid entry within 7 days
+        const filteredPayments = allPayments.filter(p => {
+          if (p.status !== 'excused') return true;
+          const excusedDate = p.dateString ? new Date(p.dateString + 'T00:00:00') : null;
+          if (!excusedDate) return true;
+          // Check if any paid entry is within 7 days of this excused class
+          const hasCoveringPayment = allPayments.some(paid => {
+            if (paid.status !== 'paid' && !(paid.status && paid.status.startsWith('paid'))) return false;
+            const paidDate = paid.dateString ? new Date(paid.dateString + 'T00:00:00') : 
+                             paid.receiptDate ? new Date(paid.receiptDate + 'T00:00:00') : null;
+            if (!paidDate) return false;
+            const diffDays = Math.abs((paidDate - excusedDate) / (1000 * 60 * 60 * 24));
+            return diffDays <= 7;
+          });
+          if (hasCoveringPayment) {
+            debugDebug(`🔕 Suppressing excused entry for ${p.dateString} — covered by a nearby paid entry`);
+            return false; // drop this excused entry
+          }
+          return true;
+        });
+
         // ---------- DEDUPLICATION: Remove duplicate payments for same date ----------
         // IMPORTANT: Credit payments are NEVER deduplicated (they're separate transactions)
         // Absences ARE deduplicated (same date from student_absences + payment_records = one entry)
@@ -7913,7 +7949,7 @@
   const seenDates = new Map(); // Track date -> payment mapping (excluding credits)
   const seenAbsenceDates = new Set(); // Track absence dates to prevent duplicates
         
-        for (const payment of allPayments) {
+        for (const payment of filteredPayments) {
           const dateKey = payment.date.toISOString().split('T')[0]; // YYYY-MM-DD format
           
           // ⚠️ ALWAYS include credit payments (don't deduplicate - they're separate transactions)
