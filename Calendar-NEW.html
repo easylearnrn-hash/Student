@@ -1882,6 +1882,29 @@
         return skippedClassesByDateGroup.has(key);
       }
 
+      /**
+       * Returns true if the student should generate dots on dateStr.
+       * - Active + show_in_grid → always true
+       * - Paused or hidden → only true for dates BEFORE updated_at (past dots preserved)
+       * - If reactivated → dots resume from next scheduled class (handled naturally
+       *   because active students pass this check for all dates)
+       */
+      function isStudentActiveOnDate(student, dateStr) {
+        const isCurrentlyOff = student.status === 'paused' ||
+                               student.status === 'graduated' ||
+                               student.show_in_grid === false ||
+                               student.show_in_grid === 'false';
+
+        if (!isCurrentlyOff) return true; // Active and visible — always show
+
+        // Student is currently off — only show dots before the effective off date
+        const updatedAt = student.updated_at;
+        if (!updatedAt) return false; // No timestamp → treat as off from beginning
+
+        const offDateStr = updatedAt.split('T')[0]; // YYYY-MM-DD
+        return dateStr < offDateStr;
+      }
+
       function hasPaymentCached(studentId, dateStr, student) {
         const cacheKey = `${studentId}-${dateStr}`;
         
@@ -2409,7 +2432,7 @@
           groupsData.forEach(group => {
             if (isScheduledClassDate(dateStr, group) && !isClassSkippedCached(dateStr, group.group_name)) {
               studentsData.forEach(student => {
-                if (student.group_name === group.group_name && student.show_in_grid !== false && student.show_in_grid !== 'false' && student.status !== 'paused' && student.status !== 'graduated') {
+                if (student.group_name === group.group_name && isStudentActiveOnDate(student, dateStr)) {
                   // IMPORTANT: Only count classes after student's creation date
                   let studentStartStr = null;
                   if (student.start_date) {
@@ -2490,7 +2513,7 @@
             
             // ⚡ OPTIMIZED: Use precomputed studentsByGroup instead of filtering every time
             const groupStudents = (studentsByGroup.get(group.group_name) || [])
-              .filter(s => s.show_in_grid !== false && s.show_in_grid !== 'false' && s.status !== 'paused' && s.status !== 'graduated');
+              .filter(s => isStudentActiveOnDate(s, dateStr));
 
             // Add a dot for each active student in the scheduled class
             groupStudents.forEach(student => {
@@ -2677,7 +2700,7 @@
           groupsData.forEach(group => {
             if (isScheduledClassDate(dateStr, group) && !isClassSkippedCached(dateStr, group.group_name)) {
               studentsData.forEach(student => {
-                if (student.group_name === group.group_name && student.show_in_grid !== false && student.show_in_grid !== 'false' && student.status !== 'paused' && student.status !== 'graduated') {
+                if (student.group_name === group.group_name && isStudentActiveOnDate(student, dateStr)) {
                   // IMPORTANT: Only count classes after student's creation date
                   let studentStartStr = null;
                   if (student.start_date) {
@@ -5036,7 +5059,7 @@
         try {
           // ⚡ OPTIMIZED: Use precomputed studentsByGroup
           const groupStudents = (studentsByGroup.get(groupName) || [])
-            .filter(s => s.show_in_grid !== false && s.show_in_grid !== 'false' && s.status !== 'paused' && s.status !== 'graduated');
+            .filter(s => isStudentActiveOnDate(s, dateStr));
           
           // Show confirmation dialog
           const confirmed = await showConfirmDialog(
