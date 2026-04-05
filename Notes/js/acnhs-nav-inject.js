@@ -521,14 +521,27 @@
       '.alert strong, .alert b { color: inherit !important; }',
 
       /* ── Tables ── */
-      '.mini-table {',
+      /* Apply to both .mini-table and any plain <table> in note content */
+      'table, .mini-table {',
       '  width: 100% !important;',
       '  border-collapse: collapse !important;',
       '  margin: 11px 0 !important;',
       '  font-size: 10.5px !important;',
-      '  break-inside: avoid !important;',
+      '  /* Do NOT set break-inside:avoid on the whole table — large tables must split */',
       '}',
-      '.mini-table th {',
+      /* Each row must never split in the middle — keep entire <tr> on one page */
+      'tr, .mini-table tr {',
+      '  break-inside: avoid !important;',
+      '  page-break-inside: avoid !important;',
+      '}',
+      /* thead repeats on every page so column headers always appear */
+      'thead, .mini-table thead {',
+      '  display: table-header-group !important;',
+      '}',
+      'tbody, .mini-table tbody {',
+      '  display: table-row-group !important;',
+      '}',
+      'table th, .mini-table th {',
       '  background: #f4f0e8 !important;',
       '  color: #2a1a00 !important;',
       '  font-weight: 700 !important;',
@@ -536,15 +549,14 @@
       '  border: 1px solid #ccc0a0 !important;',
       '  text-align: left !important;',
       '}',
-      '.mini-table td {',
+      'table td, .mini-table td {',
       '  padding: 6px 11px !important;',
       '  border: 1px solid #d8d0bc !important;',
       '  color: #1a1612 !important;',
       '  vertical-align: top !important;',
       '  background: #ffffff !important;',
       '}',
-      '.mini-table tr:nth-child(even) td { background: #faf8f3 !important; }',
-      '.mini-table tr:hover td { background: #faf8f3 !important; }',
+      'table tr:nth-child(even) td, .mini-table tr:nth-child(even) td { background: #faf8f3 !important; }',
 
       /* ── Badges ── */
       '.badge {',
