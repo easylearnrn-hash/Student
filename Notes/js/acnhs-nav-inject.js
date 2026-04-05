@@ -368,28 +368,21 @@
     var printDate   = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
     var wmText      = 'ARNOMA \u00b7 ' + studentName + ' \u00b7 ' + printDate;
 
-    /* ── 1. Collect ALL original <style> blocks verbatim ── */
+    /* ── 1. Collect original <style> blocks — skip guard + nav-inject styles ── */
     var styleBlocks = '';
-    document.querySelectorAll('style:not(#acnhs-guard-hide):not(#acnhs-nav-inject-styles)').forEach(function(s) {
+    var SKIP_STYLE_IDS = ['acnhs-guard-hide', 'acnhs-nav-inject-styles'];
+    document.querySelectorAll('style').forEach(function(s) {
+      if (SKIP_STYLE_IDS.indexOf(s.id) !== -1) return;
+      /* Also skip any style whose text contains the guard rule */
+      if (s.textContent.indexOf('display:none!important') !== -1 &&
+          s.textContent.indexOf('body') !== -1 &&
+          s.textContent.length < 80) return;
       styleBlocks += '<style>' + s.textContent + '</style>\n';
     });
 
-    /* ── 2. Collect page <link rel="stylesheet"> hrefs, resolve to absolute ── */
-    var linkBlocks = '';
-    document.querySelectorAll('link[rel="stylesheet"]').forEach(function(lk) {
-      var href = lk.getAttribute('href') || '';
-      if (!href) return;
-      // resolve relative href against document base
-      try {
-        var abs = new URL(href, window.location.href).href;
-        linkBlocks += '<link rel="stylesheet" href="' + abs + '">\n';
-      } catch(e) {
-        linkBlocks += '<link rel="stylesheet" href="' + href + '">\n';
-      }
-    });
-    /* Also add Google Fonts (needed for print rendering) */
-    linkBlocks += '<link rel="preconnect" href="https://fonts.googleapis.com">\n';
-    linkBlocks += '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,700&family=Inter:wght@300;400;500;600;700;800&display=swap">\n';
+    /* ── 2. Google Fonts only — skip external/relative links (may be cross-origin) ── */
+    var linkBlocks = '<link rel="preconnect" href="https://fonts.googleapis.com">\n' +
+      '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,700&family=Inter:wght@300;400;500;600;700;800&display=swap">\n';
 
     /* ── 3. Collect the inner content HTML (skip nav/hero/guard layers) ── */
     var contentHtml = '';
@@ -425,6 +418,9 @@
 
     /* CSS custom-property overrides: remap dark vars to light-paper equivalents */
     var printOverride = [
+      /* ── CRITICAL: force body visible — overrides the note-guard display:none ── */
+      'body { display: block !important; visibility: visible !important; opacity: 1 !important; }',
+
       /* ── @page setup ── */
       '@page { margin: 16mm 14mm; size: A4; }',
 
