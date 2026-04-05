@@ -762,10 +762,10 @@
 
       /* ── Watermark layer ── */
       '<div class="arnoma-wm"><svg id="arnoma-wm-svg" xmlns="http://www.w3.org/2000/svg"><defs>' +
-      '<pattern id="wm-pat" x="0" y="0" width="340" height="120" patternUnits="userSpaceOnUse" ' +
+      '<pattern id="wm-pat" x="0" y="0" width="220" height="60" patternUnits="userSpaceOnUse" ' +
       'patternTransform="rotate(-35)">' +
-      '<text id="wm-t" x="0" y="72" font-family="Inter, Arial, sans-serif" font-size="10" ' +
-      'font-weight="600" fill="rgba(0,0,0,0.07)" letter-spacing="1"></text>' +
+      '<text id="wm-t" x="0" y="40" font-family="Inter, Arial, sans-serif" font-size="9.5" ' +
+      'font-weight="700" fill="rgba(0,0,0,0.09)" letter-spacing="0.8"></text>' +
       '</pattern></defs>' +
       '<rect width="100%" height="100%" fill="url(#wm-pat)"/></svg></div>\n' +
 
