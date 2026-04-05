@@ -350,10 +350,10 @@
   }
 
   /* ─── 6c. PRINT NOTE ────────────────────────────────────────── */
-  // Opens a new window that mirrors the EXACT layout of the live note page:
-  // carries over all <style> and <link> tags from the original page, outputs
-  // the raw content HTML (skipping nav/hero), then overlays a diagonal
-  // watermark (ARNOMA · student name · date) before triggering window.print().
+  // Opens a print-ready popup that mirrors the EXACT live page layout.
+  // All original <style> blocks and <link rel="stylesheet"> are carried
+  // over verbatim so every colour, grid, card, and badge looks identical.
+  // The injected nav/hero are excluded. A diagonal watermark is overlaid.
 
   window.acnhsPrintNote = function () {
     var studentName = _getStudentName();
@@ -363,101 +363,123 @@
     var printDate = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
     var wmText    = 'ARNOMA  \u00b7  ' + studentName + '  \u00b7  ' + printDate;
 
-    /* ── Collect the page's own styles so the layout is identical ── */
-    var styleBlocks = '';
+    /* ── 1. Collect ALL original stylesheets from the source page ── */
+    var styleHtml = '';
 
-    // Carry over every <link rel="stylesheet"> href (skip Google Fonts — optional cosmetic)
+    // Inline <style> blocks (skip the nav-inject style itself)
+    document.querySelectorAll('style').forEach(function (s) {
+      if (s.id === 'acnhs-nav-inject-styles') return;
+      styleHtml += '<style>' + s.textContent + '</style>\n';
+    });
+
+    // External <link rel="stylesheet"> — carry over as absolute URLs
     document.querySelectorAll('link[rel="stylesheet"]').forEach(function (lk) {
-      var href = lk.getAttribute('href') || '';
-      // Resolve relative URLs against the current page location
-      try {
-        href = new URL(href, window.location.href).href;
-      } catch (e) {}
-      styleBlocks += '<link rel="stylesheet" href="' + href.replace(/"/g, '&quot;') + '">\n';
+      var href = lk.href; // already absolute thanks to the browser
+      if (!href) return;
+      styleHtml += '<link rel="stylesheet" href="' + href + '">\n';
     });
 
-    // Carry over every inline <style> block (skip the injected nav styles)
-    document.querySelectorAll('style').forEach(function (st) {
-      if (st.id === 'acnhs-nav-inject-styles') return; // skip nav-only styles
-      styleBlocks += '<style>\n' + st.textContent + '\n</style>\n';
-    });
+    /* ── 2. Collect page body content, skipping injected UI ── */
+    // IDs / classes to exclude from the print body
+    var skipIds     = ['acnhs-guard-hide'];
+    var skipClasses = ['acnhs-site-nav', 'acnhs-doc-hero', 'acnhs-print-btn', 'page-shield'];
 
-    /* ── Collect content HTML — skip nav / hero / guard layers ── */
-    var skipClasses = ['acnhs-site-nav', 'acnhs-doc-hero', 'page-shield', 'acnhs-print-btn'];
-
-    function isNavOrHero(el) {
+    function _shouldSkip(el) {
+      if (!el || el.nodeType !== 1) return false;
+      if (skipIds.indexOf(el.id) !== -1) return true;
       var cls = el.className || '';
       for (var i = 0; i < skipClasses.length; i++) {
         if (cls.indexOf(skipClasses[i]) !== -1) return true;
       }
-      if (el.id === 'acnhs-guard-hide') return true;
       return false;
     }
 
-    var contentRoot = document.querySelector('.note-body')
-                   || document.querySelector('.container')
-                   || document.querySelector('main')
-                   || document.body;
-
-    var contentHtml = '';
-    if (contentRoot === document.body) {
-      // body — skip nav/hero children, collect the rest as raw innerHTML
-      for (var ci = 0; ci < document.body.children.length; ci++) {
-        var child = document.body.children[ci];
-        if (!isNavOrHero(child)) contentHtml += child.outerHTML;
+    // Serialize the live DOM to an HTML string, skipping nav/hero nodes
+    function _serializeNode(node) {
+      if (!node) return '';
+      // Element node
+      if (node.nodeType === 1) {
+        if (_shouldSkip(node)) return '';
+        // Use outerHTML for faithful serialisation (preserves inline styles, data-attrs, etc.)
+        // but we need to exclude children that are nav/hero — clone and strip
+        var clone = node.cloneNode(true);
+        // Remove injected children from the clone
+        skipClasses.forEach(function (sc) {
+          clone.querySelectorAll('.' + sc).forEach(function (el) { el.parentNode.removeChild(el); });
+        });
+        skipIds.forEach(function (sid) {
+          var el = clone.querySelector('#' + sid);
+          if (el) el.parentNode.removeChild(el);
+        });
+        // Also strip all <script> and <style> tags from the clone (styles already collected above)
+        clone.querySelectorAll('script, style, link').forEach(function (el) { el.parentNode.removeChild(el); });
+        return clone.outerHTML;
       }
-    } else {
-      contentHtml = contentRoot.outerHTML;
+      return '';
     }
 
-    var pw = window.open('', '_blank', 'width=960,height=800');
+    var bodyHtml = '';
+    document.body.childNodes.forEach(function (child) {
+      if (child.nodeType === 1 && _shouldSkip(child)) return;
+      if (child.nodeType === 1) {
+        bodyHtml += _serializeNode(child);
+      }
+      // Text / comment nodes at the body root — skip (they're whitespace or injected text)
+    });
+
+    /* ── 3. Open popup and write the mirrored document ── */
+    var pw = window.open('', '_blank', 'width=1024,height=860');
     if (!pw) { alert('Pop-up blocked. Please allow pop-ups for this site and try again.'); return; }
 
     pw.document.write(
       '<!DOCTYPE html>\n<html lang="en">\n<head>\n' +
       '<meta charset="UTF-8"/>\n' +
       '<title>' + noteTitle.replace(/</g, '&lt;') + ' \u2014 Print</title>\n' +
-      /* ── Carry over all original styles ── */
-      styleBlocks +
-      /* ── Small set of print-only overrides: hide interactive chrome ── */
+
+      /* ── Carry over ALL original page styles ── */
+      styleHtml +
+
+      /* ── Minimal print-only overrides (no layout changes) ── */
       '<style>\n' +
-      /* Hide anything that shouldn't appear on paper */
-      '.acnhs-site-nav, .acnhs-doc-hero, .page-shield, .acnhs-print-btn,' +
-        ' .back-btn, .note-back, button { display: none !important; }\n' +
-      /* Watermark layer */
+      /* Hide the fixed nav bar padding that the original body may have */
+      'body { padding-top: 0 !important; }\n' +
+      /* Injected nav/hero never appear in print window — belt-and-suspenders */
+      '.acnhs-site-nav, .acnhs-doc-hero, .acnhs-print-btn, .page-shield { display: none !important; }\n' +
+      /* Print header strip */
+      '.arnoma-print-header { display: flex; justify-content: space-between; align-items: flex-end;' +
+        ' border-bottom: 2px solid #888; padding-bottom: 10px; margin-bottom: 24px;' +
+        ' font-family: Georgia, serif; }\n' +
+      '.arnoma-print-header .ph-title { font-size: 18px; font-weight: 800; color: #111; }\n' +
+      '.arnoma-print-header .ph-meta  { font-size: 10px; color: #555; text-align: right; line-height: 1.8; }\n' +
+      /* Watermark */
       '.arnoma-wm { position: fixed; top: 0; left: 0; right: 0; bottom: 0;' +
         ' pointer-events: none; z-index: 9999; overflow: hidden; }\n' +
       '.arnoma-wm-inner { display: flex; flex-wrap: wrap; align-content: flex-start;' +
         ' width: 200%; height: 200%; transform: rotate(-38deg) translate(-25%, -10%); }\n' +
       '.arnoma-wm span { display: inline-block; font-size: 10px; font-weight: 700;' +
-        ' color: rgba(0,0,0,0.07); padding: 22px 12px; white-space: nowrap;' +
+        ' color: rgba(0,0,0,0.06); padding: 22px 12px; white-space: nowrap;' +
         ' font-family: Arial, sans-serif; letter-spacing: 0.5px; }\n' +
-      /* Print header strip */
-      '.arnoma-print-header { display: flex; justify-content: space-between; align-items: flex-end;' +
-        ' border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 28px;' +
-        ' font-family: Georgia, serif; }\n' +
-      '.arnoma-print-header .ph-title { font-size: 19px; font-weight: 800; color: #111; }\n' +
-      '.arnoma-print-header .ph-meta  { font-size: 10px; color: #555; text-align: right; line-height: 1.8; }\n' +
-      /* Page setup */
-      '@media print {\n' +
-      '  @page { margin: 12mm 10mm; size: A4; }\n' +
-      '  body { padding-top: 0 !important; }\n' +
-      '  .arnoma-wm { position: fixed; }\n' +
-      '  .arnoma-print-header { page-break-inside: avoid; }\n' +
-      '}\n' +
+      /* Page settings — layout unchanged, just set paper size */
+      '@media print { @page { margin: 12mm 10mm; size: A4; }' +
+        ' .arnoma-wm { position: fixed; }' +
+        ' .arnoma-print-header { page-break-inside: avoid; } }\n' +
       '</style>\n' +
       '</head>\n<body>\n' +
-      /* Watermark layer */
+
+      /* Watermark */
       '<div class="arnoma-wm"><div class="arnoma-wm-inner" id="arnoma-wm-inner"></div></div>\n' +
-      /* Header strip */
+
+      /* Print header */
       '<div class="arnoma-print-header">' +
         '<div class="ph-title">' + noteTitle.replace(/</g, '&lt;') + '</div>' +
         '<div class="ph-meta"><strong>ARNOMA University</strong><br>' +
           studentName.replace(/</g, '&lt;') + '<br>Printed ' + printDate +
         '</div>' +
       '</div>\n' +
-      /* ── Raw content — identical to what the student sees on screen ── */
-      contentHtml +
+
+      /* Exact mirrored page content */
+      bodyHtml +
+
       '<script>\n' +
       '(function(){\n' +
       '  var c = document.getElementById("arnoma-wm-inner");\n' +
@@ -469,7 +491,7 @@
       '    window.focus();\n' +
       '    window.print();\n' +
       '    setTimeout(function () { window.close(); }, 1800);\n' +
-      '  }, 400);\n' +
+      '  }, 500);\n' +
       '})();\n' +
       '<\/script>\n' +
       '</body></html>'
