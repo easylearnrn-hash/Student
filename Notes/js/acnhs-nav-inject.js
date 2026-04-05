@@ -350,148 +350,466 @@
   }
 
   /* ─── 6c. PRINT NOTE ────────────────────────────────────────── */
-  // Opens a print-ready popup that mirrors the EXACT live page layout.
-  // All original <style> blocks and <link rel="stylesheet"> are carried
-  // over verbatim so every colour, grid, card, and badge looks identical.
-  // The injected nav/hero are excluded. A diagonal watermark is overlaid.
+  // Opens a print window that mirrors the exact page HTML layout.
+  // Carries ALL original <style> and <link rel=stylesheet> tags verbatim,
+  // then overlays a @media print override that converts the dark theme to
+  // a clean, elite, white-paper university document — preserving all
+  // card/table/badge/grid layout exactly as it appears on screen.
+  // Topped with a premium print cover header (logo, institution, title,
+  // student, date) and a diagonal ARNOMA watermark.
 
   window.acnhsPrintNote = function () {
     var studentName = _getStudentName();
     var noteTitle   = (document.querySelector('.acnhs-hero-title') || document.querySelector('h1') || {}).textContent
                    || document.title || 'Class Notes';
     noteTitle = noteTitle.trim();
-    var printDate = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
-    var wmText    = 'ARNOMA  \u00b7  ' + studentName + '  \u00b7  ' + printDate;
+    var category    = (document.querySelector('.acnhs-hero-eyebrow') || {}).textContent || 'Clinical Notes';
+    category = category.trim();
+    var printDate   = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+    var wmText      = 'ARNOMA \u00b7 ' + studentName + ' \u00b7 ' + printDate;
 
-    /* ── 1. Collect ALL original stylesheets from the source page ── */
-    var styleHtml = '';
-
-    // Inline <style> blocks (skip the nav-inject style itself)
-    document.querySelectorAll('style').forEach(function (s) {
-      if (s.id === 'acnhs-nav-inject-styles') return;
-      styleHtml += '<style>' + s.textContent + '</style>\n';
+    /* ── 1. Collect ALL original <style> blocks verbatim ── */
+    var styleBlocks = '';
+    document.querySelectorAll('style:not(#acnhs-guard-hide):not(#acnhs-nav-inject-styles)').forEach(function(s) {
+      styleBlocks += '<style>' + s.textContent + '</style>\n';
     });
 
-    // External <link rel="stylesheet"> — carry over as absolute URLs
-    document.querySelectorAll('link[rel="stylesheet"]').forEach(function (lk) {
-      var href = lk.href; // already absolute thanks to the browser
+    /* ── 2. Collect page <link rel="stylesheet"> hrefs, resolve to absolute ── */
+    var linkBlocks = '';
+    document.querySelectorAll('link[rel="stylesheet"]').forEach(function(lk) {
+      var href = lk.getAttribute('href') || '';
       if (!href) return;
-      styleHtml += '<link rel="stylesheet" href="' + href + '">\n';
-    });
-
-    /* ── 2. Collect page body content, skipping injected UI ── */
-    // IDs / classes to exclude from the print body
-    var skipIds     = ['acnhs-guard-hide'];
-    var skipClasses = ['acnhs-site-nav', 'acnhs-doc-hero', 'acnhs-print-btn', 'page-shield'];
-
-    function _shouldSkip(el) {
-      if (!el || el.nodeType !== 1) return false;
-      if (skipIds.indexOf(el.id) !== -1) return true;
-      var cls = el.className || '';
-      for (var i = 0; i < skipClasses.length; i++) {
-        if (cls.indexOf(skipClasses[i]) !== -1) return true;
+      // resolve relative href against document base
+      try {
+        var abs = new URL(href, window.location.href).href;
+        linkBlocks += '<link rel="stylesheet" href="' + abs + '">\n';
+      } catch(e) {
+        linkBlocks += '<link rel="stylesheet" href="' + href + '">\n';
       }
-      return false;
+    });
+    /* Also add Google Fonts (needed for print rendering) */
+    linkBlocks += '<link rel="preconnect" href="https://fonts.googleapis.com">\n';
+    linkBlocks += '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,700&family=Inter:wght@300;400;500;600;700;800&display=swap">\n';
+
+    /* ── 3. Collect the inner content HTML (skip nav/hero/guard layers) ── */
+    var contentHtml = '';
+    /* Priority: .note-body > .container > main > all body children */
+    var contentRoot = document.querySelector('.note-body')
+                   || document.querySelector('.container')
+                   || document.querySelector('main');
+
+    if (contentRoot) {
+      contentHtml = contentRoot.outerHTML;
+    } else {
+      /* Walk body children, skip injected chrome */
+      var skipPfx = ['acnhs-site-nav','acnhs-doc-hero','page-shield'];
+      var skipIds  = ['acnhs-guard-hide'];
+      for (var ci = 0; ci < document.body.childNodes.length; ci++) {
+        var ch = document.body.childNodes[ci];
+        if (ch.nodeType !== 1) continue;
+        var chCls = ch.className || '';
+        var chId  = ch.id || '';
+        var skip  = false;
+        for (var si = 0; si < skipPfx.length; si++) { if (chCls.indexOf(skipPfx[si]) !== -1) { skip = true; break; } }
+        for (var si2 = 0; si2 < skipIds.length; si2++) { if (chId === skipIds[si2]) { skip = true; break; } }
+        if (!skip) contentHtml += ch.outerHTML;
+      }
     }
 
-    // Serialize the live DOM to an HTML string, skipping nav/hero nodes
-    function _serializeNode(node) {
-      if (!node) return '';
-      // Element node
-      if (node.nodeType === 1) {
-        if (_shouldSkip(node)) return '';
-        // Use outerHTML for faithful serialisation (preserves inline styles, data-attrs, etc.)
-        // but we need to exclude children that are nav/hero — clone and strip
-        var clone = node.cloneNode(true);
-        // Remove injected children from the clone
-        skipClasses.forEach(function (sc) {
-          clone.querySelectorAll('.' + sc).forEach(function (el) { el.parentNode.removeChild(el); });
-        });
-        skipIds.forEach(function (sid) {
-          var el = clone.querySelector('#' + sid);
-          if (el) el.parentNode.removeChild(el);
-        });
-        // Also strip all <script> and <style> tags from the clone (styles already collected above)
-        clone.querySelectorAll('script, style, link').forEach(function (el) { el.parentNode.removeChild(el); });
-        return clone.outerHTML;
-      }
-      return '';
-    }
+    /* ── 4. Resolve logo URL for the print header ── */
+    var logoUrl = buildLogoUrl();
 
-    var bodyHtml = '';
-    document.body.childNodes.forEach(function (child) {
-      if (child.nodeType === 1 && _shouldSkip(child)) return;
-      if (child.nodeType === 1) {
-        bodyHtml += _serializeNode(child);
-      }
-      // Text / comment nodes at the body root — skip (they're whitespace or injected text)
-    });
-
-    /* ── 3. Open popup and write the mirrored document ── */
-    var pw = window.open('', '_blank', 'width=1024,height=860');
+    /* ── 5. Build the print window ── */
+    var pw = window.open('', '_blank', 'width=1020,height=900,scrollbars=yes');
     if (!pw) { alert('Pop-up blocked. Please allow pop-ups for this site and try again.'); return; }
+
+    /* CSS custom-property overrides: remap dark vars to light-paper equivalents */
+    var printOverride = [
+      /* ── @page setup ── */
+      '@page { margin: 16mm 14mm; size: A4; }',
+
+      /* ── Root variable light-mode remap ── */
+      ':root {',
+      '  --bg: #ffffff !important;',
+      '  --surface: #f8f6f2 !important;',
+      '  --card: #ffffff !important;',
+      '  --border: #d4c9b0 !important;',
+      '  --gold: #8a6318 !important;',
+      '  --gold-dim: #c9a84c !important;',
+      '  --teal: #0f6b72 !important;',
+      '  --teal-dark: #084f55 !important;',
+      '  --text: #1a1612 !important;',
+      '  --muted: #4a4540 !important;',
+      '  --red: #8b1c1c !important;',
+      '  --green: #1a5c30 !important;',
+      '  --yellow: #7a5c10 !important;',
+      '  --blue: #1a3a7a !important;',
+      '}',
+
+      /* ── Base document ── */
+      'html, body {',
+      '  background: #fff !important;',
+      '  color: #1a1612 !important;',
+      '  font-family: "Inter", "Segoe UI", system-ui, sans-serif !important;',
+      '  font-size: 11.5px !important;',
+      '  line-height: 1.72 !important;',
+      '  padding: 0 !important;',
+      '  margin: 0 !important;',
+      '  max-width: none !important;',
+      '}',
+
+      /* ── Hide injected chrome entirely ── */
+      '.acnhs-site-nav, .acnhs-doc-hero, .acnhs-print-btn,',
+      '.note-back, .back-btn, .note-header,',
+      '#acnhs-guard-hide, .page-shield { display: none !important; }',
+
+      /* ── Layout containers ── */
+      '.container, .note-body {',
+      '  max-width: 100% !important;',
+      '  padding: 0 !important;',
+      '  margin: 0 !important;',
+      '}',
+
+      /* ── Section titles ── */
+      '.section-title {',
+      '  color: #8a6318 !important;',
+      '  font-size: 9.5px !important;',
+      '  font-weight: 800 !important;',
+      '  letter-spacing: .14em !important;',
+      '  text-transform: uppercase !important;',
+      '  margin: 20px 0 9px !important;',
+      '  padding-bottom: 5px !important;',
+      '  border-bottom: 1.5px solid #d4c9b0 !important;',
+      '  display: flex !important;',
+      '  align-items: center !important;',
+      '  gap: 8px !important;',
+      '}',
+      '.section-title::after { background: #d4c9b0 !important; }',
+
+      /* ── Cards ── */
+      '.card {',
+      '  background: #fafaf8 !important;',
+      '  border: 1.5px solid #d4c9b0 !important;',
+      '  border-radius: 8px !important;',
+      '  padding: 13px 16px !important;',
+      '  margin-bottom: 11px !important;',
+      '  break-inside: avoid !important;',
+      '}',
+      '.card h3 { color: #1a1612 !important; font-size: 12.5px !important; margin-bottom: 8px !important; }',
+      '.card.gold { border-color: #c9a84c !important; background: #fffdf4 !important; }',
+      '.card.gold h3 { color: #7a5010 !important; }',
+      '.card.red  { border-color: #c0392b !important; background: #fff8f8 !important; }',
+      '.card.red  h3 { color: #8b1c1c !important; }',
+      '.card.green{ border-color: #2e8b57 !important; background: #f5fbf7 !important; }',
+      '.card.green h3 { color: #1a5c30 !important; }',
+      '.card.blue { border-color: #3a60c0 !important; background: #f5f7fc !important; }',
+      '.card.blue h3 { color: #1a3a7a !important; }',
+      '.card.teal { border-color: #2a9d8f !important; background: #f3fbfa !important; }',
+      '.card.teal h3 { color: #0f6b72 !important; }',
+      '.card.purple { border-color: #7c3aed !important; background: #faf5ff !important; }',
+      '.card.purple h3 { color: #5b21b6 !important; }',
+
+      /* ── Alerts ── */
+      '.alert {',
+      '  border-radius: 7px !important;',
+      '  padding: 11px 15px !important;',
+      '  margin-bottom: 11px !important;',
+      '  font-size: 11px !important;',
+      '  break-inside: avoid !important;',
+      '}',
+      '.alert.yellow { background: #fffbf0 !important; border: 1.5px solid #e6b800 !important; color: #5c4000 !important; }',
+      '.alert.red    { background: #fff5f5 !important; border: 1.5px solid #e05c5c !important; color: #7a1a1a !important; }',
+      '.alert.teal   { background: #f0fafb !important; border: 1.5px solid #2a9d8f !important; color: #0a4f55 !important; }',
+      '.alert.green  { background: #f3fbf5 !important; border: 1.5px solid #2e8b57 !important; color: #155226 !important; }',
+      '.alert.blue   { background: #f5f7fc !important; border: 1.5px solid #3a60c0 !important; color: #1a3060 !important; }',
+      '.alert strong, .alert b { color: inherit !important; }',
+
+      /* ── Tables ── */
+      '.mini-table {',
+      '  width: 100% !important;',
+      '  border-collapse: collapse !important;',
+      '  margin: 11px 0 !important;',
+      '  font-size: 10.5px !important;',
+      '  break-inside: avoid !important;',
+      '}',
+      '.mini-table th {',
+      '  background: #f4f0e8 !important;',
+      '  color: #2a1a00 !important;',
+      '  font-weight: 700 !important;',
+      '  padding: 7px 11px !important;',
+      '  border: 1px solid #ccc0a0 !important;',
+      '  text-align: left !important;',
+      '}',
+      '.mini-table td {',
+      '  padding: 6px 11px !important;',
+      '  border: 1px solid #d8d0bc !important;',
+      '  color: #1a1612 !important;',
+      '  vertical-align: top !important;',
+      '  background: #ffffff !important;',
+      '}',
+      '.mini-table tr:nth-child(even) td { background: #faf8f3 !important; }',
+      '.mini-table tr:hover td { background: #faf8f3 !important; }',
+
+      /* ── Badges ── */
+      '.badge {',
+      '  border-radius: 5px !important;',
+      '  font-size: 9.5px !important;',
+      '  font-weight: 700 !important;',
+      '  padding: 2px 7px !important;',
+      '  margin-right: 4px !important;',
+      '  background: #f0ece4 !important;',
+      '  color: #2a1a00 !important;',
+      '  border: 1px solid #ccc0a0 !important;',
+      '}',
+      '.badge.gold   { background: #fdf7e4 !important; color: #6a4a00 !important; border-color: #c9a84c !important; }',
+      '.badge.teal   { background: #e8f9f7 !important; color: #0a5560 !important; border-color: #2a9d8f !important; }',
+      '.badge.red    { background: #fdf0f0 !important; color: #7a1a1a !important; border-color: #e05c5c !important; }',
+      '.badge.blue   { background: #eef1fc !important; color: #1a3060 !important; border-color: #3a60c0 !important; }',
+      '.badge.green  { background: #edf8f1 !important; color: #155226 !important; border-color: #2e8b57 !important; }',
+      '.badge.purple { background: #f5eeff !important; color: #4c1d95 !important; border-color: #7c3aed !important; }',
+
+      /* ── Note tag pill ── */
+      '.note-tag {',
+      '  background: #fdf4e0 !important; color: #7a5010 !important;',
+      '  border: 1px solid #c9a84c !important;',
+      '  border-radius: 20px !important;',
+      '  font-size: 9px !important; font-weight: 700 !important;',
+      '  padding: 2px 10px !important;',
+      '}',
+
+      /* ── Compare / content grids ── */
+      '.compare-grid {',
+      '  display: grid !important;',
+      '  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important;',
+      '  gap: 11px !important;',
+      '  margin: 11px 0 !important;',
+      '}',
+
+      /* ── Insulin rows (Endocrine notes) ── */
+      '.insulin-row {',
+      '  border-radius: 8px !important;',
+      '  padding: 11px 14px !important;',
+      '  margin-bottom: 9px !important;',
+      '  background: #fafaf8 !important;',
+      '  border: 1.5px solid #d4c9b0 !important;',
+      '  break-inside: avoid !important;',
+      '}',
+      '.insulin-row .i-name { color: #2a1a00 !important; font-weight: 800 !important; font-size: 12px !important; margin-bottom: 5px !important; }',
+
+      /* ── General typography ── */
+      'h1 { font-size: 18px !important; color: #1a1612 !important; font-weight: 800 !important; margin: 16px 0 7px !important; }',
+      'h2 { font-size: 15px !important; color: #2a1a00 !important; font-weight: 700 !important; margin: 14px 0 6px !important; }',
+      'h3 { font-size: 12.5px !important; color: #1a1612 !important; font-weight: 700 !important; margin: 11px 0 5px !important; }',
+      'h4, h5, h6 { font-size: 11px !important; color: #1a1612 !important; font-weight: 700 !important; margin: 9px 0 4px !important; }',
+      'p { color: #1a1612 !important; margin: 5px 0 !important; }',
+      'ul, ol { padding-left: 18px !important; margin: 5px 0 5px 0 !important; }',
+      'li { margin-bottom: 3px !important; color: #1a1612 !important; font-size: 11px !important; }',
+      'li::marker { color: #8a6318 !important; }',
+      'strong, b { color: inherit !important; font-weight: 700 !important; }',
+      'em, i { font-style: italic !important; }',
+      '[style*="color:var(--teal)"] { color: #0f6b72 !important; }',
+      '[style*="color:var(--gold)"] { color: #7a5010 !important; }',
+      '[style*="color:var(--red)"]  { color: #8b1c1c !important; }',
+      '[style*="color:var(--green)"]{ color: #1a5c30 !important; }',
+      '[style*="color:var(--blue)"] { color: #1a3a7a !important; }',
+      '[style*="color:var(--yellow)"]{ color: #7a5c10 !important; }',
+
+      /* ── Watermark layer ── */
+      '.arnoma-wm {',
+      '  position: fixed; top:0; left:0; right:0; bottom:0;',
+      '  pointer-events: none; z-index: 9999; overflow: hidden;',
+      '}',
+      '.arnoma-wm-inner {',
+      '  display: flex; flex-wrap: wrap; align-content: flex-start;',
+      '  width: 200%; height: 200%;',
+      '  transform: rotate(-35deg) translate(-25%, -10%);',
+      '}',
+      '.arnoma-wm span {',
+      '  display: inline-block;',
+      '  font-size: 9.5px; font-weight: 600;',
+      '  color: rgba(0,0,0,0.055);',
+      '  padding: 20px 14px;',
+      '  white-space: nowrap;',
+      '  font-family: "Inter", Arial, sans-serif;',
+      '  letter-spacing: 0.6px;',
+      '}',
+
+      /* ── Premium print cover header ── */
+      '.arnoma-cover {',
+      '  display: flex;',
+      '  align-items: stretch;',
+      '  border-bottom: 2.5px solid #1a1612;',
+      '  padding-bottom: 16px;',
+      '  margin-bottom: 30px;',
+      '  gap: 20px;',
+      '  page-break-inside: avoid;',
+      '}',
+      '.arnoma-cover-left {',
+      '  display: flex;',
+      '  align-items: center;',
+      '  gap: 14px;',
+      '  flex: 1;',
+      '}',
+      '.arnoma-cover-seal {',
+      '  width: 54px; height: 54px;',
+      '  border-radius: 50%;',
+      '  border: 1.5px solid #c9a84c;',
+      '  object-fit: contain;',
+      '  flex-shrink: 0;',
+      '}',
+      '.arnoma-cover-inst {',
+      '  line-height: 1.3;',
+      '}',
+      '.arnoma-cover-inst .ci-name {',
+      '  font-family: "Playfair Display", Georgia, "Times New Roman", serif;',
+      '  font-size: 13px;',
+      '  font-weight: 700;',
+      '  color: #1a1612;',
+      '  display: block;',
+      '}',
+      '.arnoma-cover-inst .ci-sub {',
+      '  font-size: 8.5px;',
+      '  font-weight: 700;',
+      '  letter-spacing: .1em;',
+      '  text-transform: uppercase;',
+      '  color: #8a7050;',
+      '  display: block;',
+      '  margin-top: 2px;',
+      '}',
+      '.arnoma-cover-rule {',
+      '  width: 1px;',
+      '  background: #c9a84c;',
+      '  margin: 4px 0;',
+      '  flex-shrink: 0;',
+      '}',
+      '.arnoma-cover-doc {',
+      '  flex: 2;',
+      '  display: flex;',
+      '  flex-direction: column;',
+      '  justify-content: center;',
+      '}',
+      '.arnoma-cover-doc .cd-category {',
+      '  font-size: 8.5px;',
+      '  font-weight: 800;',
+      '  letter-spacing: .14em;',
+      '  text-transform: uppercase;',
+      '  color: #8a6318;',
+      '  margin-bottom: 4px;',
+      '  display: flex;',
+      '  align-items: center;',
+      '  gap: 7px;',
+      '}',
+      '.arnoma-cover-doc .cd-category::before {',
+      '  content: "";',
+      '  display: inline-block;',
+      '  width: 5px; height: 5px;',
+      '  background: #c9a84c;',
+      '  border-radius: 50%;',
+      '}',
+      '.arnoma-cover-doc .cd-title {',
+      '  font-family: "Playfair Display", Georgia, "Times New Roman", serif;',
+      '  font-size: 20px;',
+      '  font-weight: 800;',
+      '  color: #1a1612;',
+      '  line-height: 1.2;',
+      '  margin-bottom: 6px;',
+      '}',
+      '.arnoma-cover-doc .cd-meta {',
+      '  font-size: 9px;',
+      '  color: #6a5a40;',
+      '  letter-spacing: .04em;',
+      '  display: flex;',
+      '  gap: 14px;',
+      '  flex-wrap: wrap;',
+      '}',
+      '.arnoma-cover-doc .cd-meta span::before {',
+      '  content: "· ";',
+      '  color: #c9a84c;',
+      '}',
+      '.arnoma-cover-doc .cd-meta span:first-child::before {',
+      '  content: "";',
+      '}',
+
+      /* ── Footer: page number ── */
+      '@media print {',
+      '  .arnoma-wm { position: fixed !important; }',
+      '  .arnoma-cover { page-break-inside: avoid !important; }',
+      '  body::after {',
+      '    content: "ARNOMA · Armenian College of Nursing & Health Sciences · Confidential Study Material";',
+      '    display: block;',
+      '    text-align: center;',
+      '    font-size: 8px;',
+      '    color: #999;',
+      '    border-top: 1px solid #e0d8cc;',
+      '    padding-top: 8px;',
+      '    margin-top: 30px;',
+      '    letter-spacing: .05em;',
+      '  }',
+      '}'
+    ].join('\n');
+
+    /* ── 6. Assemble the print document ── */
+    var safeTitle  = noteTitle.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    var safeStudent = studentName.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    var safeCat    = category.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     pw.document.write(
       '<!DOCTYPE html>\n<html lang="en">\n<head>\n' +
       '<meta charset="UTF-8"/>\n' +
-      '<title>' + noteTitle.replace(/</g, '&lt;') + ' \u2014 Print</title>\n' +
-
-      /* ── Carry over ALL original page styles ── */
-      styleHtml +
-
-      /* ── Minimal print-only overrides (no layout changes) ── */
-      '<style>\n' +
-      /* Hide the fixed nav bar padding that the original body may have */
-      'body { padding-top: 0 !important; }\n' +
-      /* Injected nav/hero never appear in print window — belt-and-suspenders */
-      '.acnhs-site-nav, .acnhs-doc-hero, .acnhs-print-btn, .page-shield { display: none !important; }\n' +
-      /* Print header strip */
-      '.arnoma-print-header { display: flex; justify-content: space-between; align-items: flex-end;' +
-        ' border-bottom: 2px solid #888; padding-bottom: 10px; margin-bottom: 24px;' +
-        ' font-family: Georgia, serif; }\n' +
-      '.arnoma-print-header .ph-title { font-size: 18px; font-weight: 800; color: #111; }\n' +
-      '.arnoma-print-header .ph-meta  { font-size: 10px; color: #555; text-align: right; line-height: 1.8; }\n' +
-      /* Watermark */
-      '.arnoma-wm { position: fixed; top: 0; left: 0; right: 0; bottom: 0;' +
-        ' pointer-events: none; z-index: 9999; overflow: hidden; }\n' +
-      '.arnoma-wm-inner { display: flex; flex-wrap: wrap; align-content: flex-start;' +
-        ' width: 200%; height: 200%; transform: rotate(-38deg) translate(-25%, -10%); }\n' +
-      '.arnoma-wm span { display: inline-block; font-size: 10px; font-weight: 700;' +
-        ' color: rgba(0,0,0,0.06); padding: 22px 12px; white-space: nowrap;' +
-        ' font-family: Arial, sans-serif; letter-spacing: 0.5px; }\n' +
-      /* Page settings — layout unchanged, just set paper size */
-      '@media print { @page { margin: 12mm 10mm; size: A4; }' +
-        ' .arnoma-wm { position: fixed; }' +
-        ' .arnoma-print-header { page-break-inside: avoid; } }\n' +
-      '</style>\n' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1.0"/>\n' +
+      '<title>' + safeTitle + ' \u2014 Print</title>\n' +
+      linkBlocks +
+      styleBlocks +
+      '<style id="arnoma-print-override">\n' + printOverride + '\n</style>\n' +
       '</head>\n<body>\n' +
 
-      /* Watermark */
+      /* ── Watermark layer ── */
       '<div class="arnoma-wm"><div class="arnoma-wm-inner" id="arnoma-wm-inner"></div></div>\n' +
 
-      /* Print header */
-      '<div class="arnoma-print-header">' +
-        '<div class="ph-title">' + noteTitle.replace(/</g, '&lt;') + '</div>' +
-        '<div class="ph-meta"><strong>ARNOMA University</strong><br>' +
-          studentName.replace(/</g, '&lt;') + '<br>Printed ' + printDate +
+      /* ── Premium cover header ── */
+      '<div class="arnoma-cover">' +
+        '<div class="arnoma-cover-left">' +
+          (logoUrl ? '<img class="arnoma-cover-seal" src="' + logoUrl + '" alt="ACNHS Seal" onerror="this.style.display=\'none\'">' : '') +
+          '<div class="arnoma-cover-inst">' +
+            '<span class="ci-name">Armenian College of Nursing</span>' +
+            '<span class="ci-sub">&amp; Health Sciences &nbsp;·&nbsp; ARNOMA</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="arnoma-cover-rule"></div>' +
+        '<div class="arnoma-cover-doc">' +
+          '<div class="cd-category">' + safeCat + '</div>' +
+          '<div class="cd-title">' + safeTitle + '</div>' +
+          '<div class="cd-meta">' +
+            '<span>' + safeStudent + '</span>' +
+            '<span>Study Guide</span>' +
+            '<span>' + printDate + '</span>' +
+            '<span>ACNHS &copy; 2026</span>' +
+          '</div>' +
         '</div>' +
       '</div>\n' +
 
-      /* Exact mirrored page content */
-      bodyHtml +
+      /* ── Actual note content (verbatim DOM, all original classes preserved) ── */
+      contentHtml +
 
+      /* ── Scripts: populate watermark, then auto-print ── */
       '<script>\n' +
       '(function(){\n' +
       '  var c = document.getElementById("arnoma-wm-inner");\n' +
       '  var t = ' + JSON.stringify(wmText) + ';\n' +
       '  var h = "";\n' +
-      '  for (var i = 0; i < 300; i++) h += "<span>" + t + "</span>";\n' +
+      '  for (var i = 0; i < 280; i++) h += "<span>" + t + "</span>";\n' +
       '  c.innerHTML = h;\n' +
-      '  setTimeout(function () {\n' +
+      '  /* Hide any remaining injected chrome in the cloned content */\n' +
+      '  var selectors = [".acnhs-site-nav",".acnhs-doc-hero",".acnhs-print-btn",\n' +
+      '    ".note-back",".back-btn","#acnhs-guard-hide",".page-shield"];\n' +
+      '  selectors.forEach(function(sel){\n' +
+      '    document.querySelectorAll(sel).forEach(function(el){ el.style.display="none"; });\n' +
+      '  });\n' +
+      '  setTimeout(function() {\n' +
       '    window.focus();\n' +
       '    window.print();\n' +
-      '    setTimeout(function () { window.close(); }, 1800);\n' +
-      '  }, 500);\n' +
+      '    setTimeout(function() { window.close(); }, 2200);\n' +
+      '  }, 650);\n' +
       '})();\n' +
       '<\/script>\n' +
       '</body></html>'
