@@ -622,24 +622,13 @@
       '[style*="color:var(--blue)"] { color: #1a3a7a !important; }',
       '[style*="color:var(--yellow)"]{ color: #7a5c10 !important; }',
 
-      /* ── Watermark layer ── */
+      /* ── Watermark layer — SVG tiled pattern, perfectly symmetrical on every page ── */
       '.arnoma-wm {',
-      '  position: fixed; top:0; left:0; right:0; bottom:0;',
+      '  position: fixed; top:0; left:0; width:100%; height:100%;',
       '  pointer-events: none; z-index: 9999; overflow: hidden;',
       '}',
-      '.arnoma-wm-inner {',
-      '  display: flex; flex-wrap: wrap; align-content: flex-start;',
-      '  width: 200%; height: 200%;',
-      '  transform: rotate(-35deg) translate(-25%, -10%);',
-      '}',
-      '.arnoma-wm span {',
-      '  display: inline-block;',
-      '  font-size: 9.5px; font-weight: 600;',
-      '  color: rgba(0,0,0,0.055);',
-      '  padding: 20px 14px;',
-      '  white-space: nowrap;',
-      '  font-family: "Inter", Arial, sans-serif;',
-      '  letter-spacing: 0.6px;',
+      '.arnoma-wm svg {',
+      '  width: 100%; height: 100%;',
       '}',
 
       /* ── Premium print cover header ── */
@@ -772,7 +761,13 @@
       '</head>\n<body>\n' +
 
       /* ── Watermark layer ── */
-      '<div class="arnoma-wm"><div class="arnoma-wm-inner" id="arnoma-wm-inner"></div></div>\n' +
+      '<div class="arnoma-wm"><svg id="arnoma-wm-svg" xmlns="http://www.w3.org/2000/svg"><defs>' +
+      '<pattern id="wm-pat" x="0" y="0" width="340" height="120" patternUnits="userSpaceOnUse" ' +
+      'patternTransform="rotate(-35)">' +
+      '<text id="wm-t" x="0" y="72" font-family="Inter, Arial, sans-serif" font-size="10" ' +
+      'font-weight="600" fill="rgba(0,0,0,0.07)" letter-spacing="1"></text>' +
+      '</pattern></defs>' +
+      '<rect width="100%" height="100%" fill="url(#wm-pat)"/></svg></div>\n' +
 
       /* ── Premium cover header ── */
       '<div class="arnoma-cover">' +
@@ -802,11 +797,9 @@
       /* ── Scripts: populate watermark, then auto-print ── */
       '<script>\n' +
       '(function(){\n' +
-      '  var c = document.getElementById("arnoma-wm-inner");\n' +
-      '  var t = ' + JSON.stringify(wmText) + ';\n' +
-      '  var h = "";\n' +
-      '  for (var i = 0; i < 280; i++) h += "<span>" + t + "</span>";\n' +
-      '  c.innerHTML = h;\n' +
+      '  /* Set SVG watermark text */\n' +
+      '  var wmEl = document.getElementById("wm-t");\n' +
+      '  if (wmEl) wmEl.textContent = ' + JSON.stringify(wmText) + ';\n' +
       '  /* Hide any remaining injected chrome in the cloned content */\n' +
       '  var selectors = [".acnhs-site-nav",".acnhs-doc-hero",".acnhs-print-btn",\n' +
       '    ".note-back",".back-btn","#acnhs-guard-hide",".page-shield"];\n' +
