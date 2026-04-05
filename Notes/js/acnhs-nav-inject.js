@@ -349,6 +349,25 @@
     } catch (e) { return 'Student'; }
   }
 
+  /* ─── 6c. Check if the current session is the admin — no watermark ── */
+  var ADMIN_EMAILS_NO_WM = ['hrachfilm@gmail.com'];
+  function _isAdminSession() {
+    try {
+      // Check URL param first (admin panel passes ?adminView=1 as a hint)
+      if (new URLSearchParams(window.location.search).get('adminView') === '1') return true;
+      // Check localStorage session email
+      var sessionRaw = localStorage.getItem('arnoma:auth:session');
+      if (sessionRaw) {
+        var session = JSON.parse(sessionRaw);
+        var email = session && session.user && session.user.email;
+        if (email && ADMIN_EMAILS_NO_WM.indexOf(email.toLowerCase().trim()) !== -1) return true;
+      }
+      var plainEmail = localStorage.getItem('arnoma:auth:user');
+      if (plainEmail && ADMIN_EMAILS_NO_WM.indexOf(plainEmail.toLowerCase().trim()) !== -1) return true;
+      return false;
+    } catch (e) { return false; }
+  }
+
   /* ─── 6c. PRINT NOTE ────────────────────────────────────────── */
   // Opens a print window that mirrors the exact page HTML layout.
   // Carries ALL original <style> and <link rel=stylesheet> tags verbatim,
@@ -359,6 +378,7 @@
   // student, date) and a diagonal ARNOMA watermark.
 
   window.acnhsPrintNote = function () {
+    var isAdmin     = _isAdminSession();
     var studentName = _getStudentName();
     var noteTitle   = (document.querySelector('.acnhs-hero-title') || document.querySelector('h1') || {}).textContent
                    || document.title || 'Class Notes';
@@ -366,7 +386,7 @@
     var category    = (document.querySelector('.acnhs-hero-eyebrow') || {}).textContent || 'Clinical Notes';
     category = category.trim();
     var printDate   = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
-    var wmText      = 'ARNOMA \u00b7 ' + studentName + ' \u00b7 ' + printDate;
+    var wmText      = isAdmin ? '' : ('ARNOMA \u00b7 ' + studentName + ' \u00b7 ' + printDate);
 
     /* ── 1. Collect original <style> blocks — skip guard + nav-inject styles ── */
     var styleBlocks = '';
@@ -622,7 +642,8 @@
       '[style*="color:var(--blue)"] { color: #1a3a7a !important; }',
       '[style*="color:var(--yellow)"]{ color: #7a5c10 !important; }',
 
-      /* ── Watermark layer — SVG tiled pattern, perfectly symmetrical on every page ── */
+      /* ── Watermark layer — SVG tiled pattern (only when not admin) ── */
+    ].concat(isAdmin ? [] : [
       '.arnoma-wm {',
       '  position: fixed; top:0; left:0; width:100%; height:100%;',
       '  pointer-events: none; z-index: 9999; overflow: hidden;',
@@ -630,6 +651,7 @@
       '.arnoma-wm svg {',
       '  width: 100%; height: 100%;',
       '}',
+    ]).concat([
 
       /* ── Premium print cover header ── */
       '.arnoma-cover {',
@@ -727,10 +749,11 @@
       '  content: "";',
       '}',
 
-      /* ── Footer: page number ── */
+      /* ── Footer: page number (skipped for admin) ── */
       '@media print {',
       '  .arnoma-wm { position: fixed !important; }',
-      '  .arnoma-cover { page-break-inside: avoid !important; }',
+      '  .arnoma-cover { page-break-inside: avoid !important; }'
+    ]).concat(isAdmin ? [] : [
       '  body::after {',
       '    content: "ARNOMA · Armenian College of Nursing & Health Sciences · Confidential Study Material";',
       '    display: block;',
@@ -741,9 +764,10 @@
       '    padding-top: 8px;',
       '    margin-top: 30px;',
       '    letter-spacing: .05em;',
-      '  }',
+      '  }'
+    ]).concat([
       '}'
-    ].join('\n');
+    ]).join('\n');
 
     /* ── 6. Assemble the print document ── */
     var safeTitle  = noteTitle.replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -760,14 +784,16 @@
       '<style id="arnoma-print-override">\n' + printOverride + '\n</style>\n' +
       '</head>\n<body>\n' +
 
-      /* ── Watermark layer ── */
-      '<div class="arnoma-wm"><svg id="arnoma-wm-svg" xmlns="http://www.w3.org/2000/svg"><defs>' +
-      '<pattern id="wm-pat" x="0" y="0" width="220" height="60" patternUnits="userSpaceOnUse" ' +
-      'patternTransform="rotate(-35)">' +
-      '<text id="wm-t" x="0" y="40" font-family="Inter, Arial, sans-serif" font-size="9.5" ' +
-      'font-weight="700" fill="rgba(0,0,0,0.09)" letter-spacing="0.8"></text>' +
-      '</pattern></defs>' +
-      '<rect width="100%" height="100%" fill="url(#wm-pat)"/></svg></div>\n' +
+      /* ── Watermark layer (skipped for admin) ── */
+      (isAdmin ? '' :
+        '<div class="arnoma-wm"><svg id="arnoma-wm-svg" xmlns="http://www.w3.org/2000/svg"><defs>' +
+        '<pattern id="wm-pat" x="0" y="0" width="220" height="60" patternUnits="userSpaceOnUse" ' +
+        'patternTransform="rotate(-35)">' +
+        '<text id="wm-t" x="0" y="40" font-family="Inter, Arial, sans-serif" font-size="9.5" ' +
+        'font-weight="700" fill="rgba(0,0,0,0.09)" letter-spacing="0.8"></text>' +
+        '</pattern></defs>' +
+        '<rect width="100%" height="100%" fill="url(#wm-pat)"/></svg></div>\n'
+      ) +
 
       /* ── Premium cover header ── */
       '<div class="arnoma-cover">' +
@@ -785,7 +811,7 @@
           '<div class="cd-meta">' +
             '<span>' + safeStudent + '</span>' +
             '<span>Study Guide</span>' +
-            '<span>' + printDate + '</span>' +
+            (isAdmin ? '' : '<span>' + printDate + '</span>') +
             '<span>ACNHS &copy; 2026</span>' +
           '</div>' +
         '</div>' +
