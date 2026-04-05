@@ -350,100 +350,10 @@
   }
 
   /* ─── 6c. PRINT NOTE ────────────────────────────────────────── */
-  // Builds a completely fresh, clean white-paper HTML document from the
-  // live DOM content — NO original styles are carried over. Then overlays
-  // a dense diagonal watermark: ARNOMA · student name · date.
-
-  /* Walk a DOM element and convert it to clean print HTML */
-  function _domToCleanHtml(el) {
-    if (!el) return '';
-    // Skip hidden, script, nav, hero, guard elements
-    var tag = el.tagName ? el.tagName.toLowerCase() : '';
-    var skipTags = ['script','noscript','style','link','meta','head'];
-    if (skipTags.indexOf(tag) !== -1) return '';
-    var skipClasses = ['acnhs-site-nav','acnhs-doc-hero','page-shield','acnhs-print-btn'];
-    var cls = el.className || '';
-    for (var si = 0; si < skipClasses.length; si++) {
-      if (cls.indexOf(skipClasses[si]) !== -1) return '';
-    }
-    if (el.id === 'acnhs-guard-hide') return '';
-
-    // Text nodes
-    if (el.nodeType === 3) {
-      var t = el.textContent || '';
-      return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    }
-
-    // Map original class list to clean print classes
-    var classList = (cls || '').trim().split(/\s+/);
-    var printClass = _mapPrintClass(classList, tag);
-    var attrs = printClass ? ' class="' + printClass + '"' : '';
-
-    // Preserve src on images, colspan/rowspan on cells
-    if (tag === 'img') {
-      var src = el.getAttribute('src') || '';
-      var alt = (el.getAttribute('alt') || '').replace(/"/g,'&quot;');
-      return '<img src="' + src + '" alt="' + alt + '" style="max-width:100%;height:auto;">';
-    }
-    if (tag === 'td' || tag === 'th') {
-      var cs = el.getAttribute('colspan'); var rs = el.getAttribute('rowspan');
-      attrs += (cs ? ' colspan="'+cs+'"' : '') + (rs ? ' rowspan="'+rs+'"' : '');
-    }
-    if (tag === 'a') {
-      // keep links as plain spans — no href leaking
-      tag = 'span';
-    }
-
-    // Self-closing
-    var selfClose = ['br','hr','img'];
-    if (selfClose.indexOf(tag) !== -1) return '<' + tag + attrs + '>';
-
-    // Block / inline elements — recurse children
-    var inner = '';
-    for (var ci = 0; ci < el.childNodes.length; ci++) {
-      inner += _domToCleanHtml(el.childNodes[ci]);
-    }
-    return '<' + tag + attrs + '>' + inner + '</' + tag + '>';
-  }
-
-  /* Map source class names to print-friendly equivalents */
-  function _mapPrintClass(classList, tag) {
-    var out = [];
-    var colorMap = {
-      'gold':'gold','red':'red','blue':'blue','green':'green',
-      'purple':'purple','teal':'blue','orange':'orange','pink':'red'
-    };
-    if (classList.indexOf('card') !== -1 || classList.indexOf('note-body') !== -1
-        || classList.indexOf('note-back') !== -1) {
-      out.push('pc-card');
-      for (var k in colorMap) {
-        if (classList.indexOf(k) !== -1) { out.push('pc-'+colorMap[k]); break; }
-      }
-    } else if (classList.indexOf('mini-table') !== -1) {
-      out.push('pc-table');
-    } else if (classList.indexOf('alert') !== -1) {
-      out.push('pc-alert');
-      for (var k2 in colorMap) {
-        if (classList.indexOf(k2) !== -1) { out.push('pc-'+colorMap[k2]); break; }
-      }
-    } else if (classList.indexOf('badge') !== -1 || classList.indexOf('note-tag') !== -1
-               || classList.indexOf('label') !== -1) {
-      out.push('pc-badge');
-      for (var k3 in colorMap) {
-        if (classList.indexOf(k3) !== -1 || classList.indexOf('badge-'+k3) !== -1) {
-          out.push('pc-'+colorMap[k3]); break;
-        }
-      }
-    } else if (classList.indexOf('section-title') !== -1 || classList.indexOf('i-name') !== -1
-               || classList.indexOf('subtitle') !== -1) {
-      out.push('pc-section');
-    } else if (classList.indexOf('compare-grid') !== -1) {
-      out.push('pc-grid');
-    } else if (classList.indexOf('container') !== -1) {
-      out.push('pc-container');
-    }
-    return out.join(' ');
-  }
+  // Opens a new window that mirrors the EXACT layout of the live note page:
+  // carries over all <style> and <link> tags from the original page, outputs
+  // the raw content HTML (skipping nav/hero), then overlays a diagonal
+  // watermark (ARNOMA · student name · date) before triggering window.print().
 
   window.acnhsPrintNote = function () {
     var studentName = _getStudentName();
@@ -453,125 +363,117 @@
     var printDate = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
     var wmText    = 'ARNOMA  \u00b7  ' + studentName + '  \u00b7  ' + printDate;
 
-    /* ── Build clean content from live DOM ── */
-    // Find the main content root (skip nav/hero wrappers)
+    /* ── Collect the page's own styles so the layout is identical ── */
+    var styleBlocks = '';
+
+    // Carry over every <link rel="stylesheet"> href (skip Google Fonts — optional cosmetic)
+    document.querySelectorAll('link[rel="stylesheet"]').forEach(function (lk) {
+      var href = lk.getAttribute('href') || '';
+      // Resolve relative URLs against the current page location
+      try {
+        href = new URL(href, window.location.href).href;
+      } catch (e) {}
+      styleBlocks += '<link rel="stylesheet" href="' + href.replace(/"/g, '&quot;') + '">\n';
+    });
+
+    // Carry over every inline <style> block (skip the injected nav styles)
+    document.querySelectorAll('style').forEach(function (st) {
+      if (st.id === 'acnhs-nav-inject-styles') return; // skip nav-only styles
+      styleBlocks += '<style>\n' + st.textContent + '\n</style>\n';
+    });
+
+    /* ── Collect content HTML — skip nav / hero / guard layers ── */
+    var skipClasses = ['acnhs-site-nav', 'acnhs-doc-hero', 'page-shield', 'acnhs-print-btn'];
+
+    function isNavOrHero(el) {
+      var cls = el.className || '';
+      for (var i = 0; i < skipClasses.length; i++) {
+        if (cls.indexOf(skipClasses[i]) !== -1) return true;
+      }
+      if (el.id === 'acnhs-guard-hide') return true;
+      return false;
+    }
+
     var contentRoot = document.querySelector('.note-body')
                    || document.querySelector('.container')
                    || document.querySelector('main')
                    || document.body;
 
-    // If contentRoot is body, skip nav/hero children manually
-    var cleanHtml = '';
+    var contentHtml = '';
     if (contentRoot === document.body) {
-      for (var ci = 0; ci < document.body.childNodes.length; ci++) {
-        var child = document.body.childNodes[ci];
-        var childCls = (child.className || '');
-        if (childCls.indexOf('acnhs-site-nav') !== -1) continue;
-        if (childCls.indexOf('acnhs-doc-hero') !== -1) continue;
-        cleanHtml += _domToCleanHtml(child);
+      // body — skip nav/hero children, collect the rest as raw innerHTML
+      for (var ci = 0; ci < document.body.children.length; ci++) {
+        var child = document.body.children[ci];
+        if (!isNavOrHero(child)) contentHtml += child.outerHTML;
       }
     } else {
-      cleanHtml = _domToCleanHtml(contentRoot);
+      contentHtml = contentRoot.outerHTML;
     }
 
     var pw = window.open('', '_blank', 'width=960,height=800');
     if (!pw) { alert('Pop-up blocked. Please allow pop-ups for this site and try again.'); return; }
 
-    /* ── Write a brand-new, zero-dark-CSS document ── */
-    pw.document.write('<!DOCTYPE html>\n<html lang="en">\n<head>\n' +
+    pw.document.write(
+      '<!DOCTYPE html>\n<html lang="en">\n<head>\n' +
       '<meta charset="UTF-8"/>\n' +
-      '<title>' + noteTitle.replace(/</g,'&lt;') + ' \u2014 Print</title>\n' +
+      '<title>' + noteTitle.replace(/</g, '&lt;') + ' \u2014 Print</title>\n' +
+      /* ── Carry over all original styles ── */
+      styleBlocks +
+      /* ── Small set of print-only overrides: hide interactive chrome ── */
       '<style>\n' +
-      /* ── Reset everything — this document has NO original styles ── */
-      '*{margin:0;padding:0;box-sizing:border-box;}\n' +
-      'html,body{background:#fff;color:#111;font-family:Georgia,"Times New Roman",serif;' +
-        'font-size:13px;line-height:1.75;padding:28px 44px 80px;max-width:880px;margin:0 auto;}\n' +
-      'h1{font-size:22px;font-weight:800;color:#111;margin:20px 0 8px;font-family:Georgia,serif;}\n' +
-      'h2{font-size:17px;font-weight:700;color:#7a5c10;margin:18px 0 6px;border-bottom:1px solid #ccc;padding-bottom:4px;}\n' +
-      'h3{font-size:15px;font-weight:700;color:#1d4ed8;margin:14px 0 5px;}\n' +
-      'h4,h5,h6{font-size:13px;font-weight:700;color:#111;margin:10px 0 4px;}\n' +
-      'p{margin:6px 0;}\n' +
-      'ul,ol{margin:6px 0 6px 22px;}\n' +
-      'li{margin:3px 0;}\n' +
-      'strong,b{font-weight:700;color:#111;}\n' +
-      'em,i{font-style:italic;color:#333;}\n' +
-      /* Cards */
-      '.pc-card{background:#fff;border:1.5px solid #bbb;border-radius:7px;padding:14px 18px;margin:12px 0;}\n' +
-      '.pc-card.pc-gold{border-color:#c9a84c;}\n' +
-      '.pc-card.pc-red{border-color:#e87474;}\n' +
-      '.pc-card.pc-blue{border-color:#7090d8;}\n' +
-      '.pc-card.pc-green{border-color:#5aad7a;}\n' +
-      '.pc-card.pc-purple{border-color:#a06cd5;}\n' +
-      '.pc-card.pc-teal{border-color:#4eb8c0;}\n' +
-      /* Alerts */
-      '.pc-alert{background:#f8f8f8;border-left:4px solid #bbb;padding:10px 14px;margin:10px 0;border-radius:4px;}\n' +
-      '.pc-alert.pc-red{border-left-color:#e87474;}\n' +
-      '.pc-alert.pc-blue{border-left-color:#7090d8;}\n' +
-      '.pc-alert.pc-gold{border-left-color:#c9a84c;}\n' +
-      '.pc-alert.pc-green{border-left-color:#5aad7a;}\n' +
-      '.pc-alert.pc-teal{border-left-color:#4eb8c0;}\n' +
-      /* Badges / tags */
-      '.pc-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;' +
-        'border:1px solid #bbb;border-radius:99px;margin:2px 3px;color:#333;background:#f5f5f5;}\n' +
-      '.pc-badge.pc-gold{color:#7a5c10;border-color:#c9a84c;background:#fdf8ec;}\n' +
-      '.pc-badge.pc-red{color:#b91c1c;border-color:#e87474;background:#fff5f5;}\n' +
-      '.pc-badge.pc-blue{color:#1d4ed8;border-color:#7090d8;background:#f0f4ff;}\n' +
-      '.pc-badge.pc-green{color:#166534;border-color:#5aad7a;background:#f0fff5;}\n' +
-      '.pc-badge.pc-purple{color:#7e22ce;border-color:#a06cd5;background:#f8f0ff;}\n' +
-      /* Section titles */
-      '.pc-section{font-weight:700;font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:#555;margin:12px 0 4px;}\n' +
-      /* Tables */
-      '.pc-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;}\n' +
-      '.pc-table th{background:#efefef;color:#111;font-weight:700;padding:6px 10px;' +
-        'border:1px solid #ccc;text-align:left;}\n' +
-      '.pc-table td{padding:5px 10px;border:1px solid #ddd;color:#111;vertical-align:top;}\n' +
-      '.pc-table tr:nth-child(even) td{background:#f9f9f9;}\n' +
-      /* Grid */
-      '.pc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:10px 0;}\n' +
-      /* Container wrapper */
-      '.pc-container{padding:0;}\n' +
-      /* ── Print header ── */
-      '.arnoma-print-header{display:flex;justify-content:space-between;align-items:flex-end;' +
-        'border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:28px;}\n' +
-      '.arnoma-print-header .ph-title{font-size:19px;font-weight:800;color:#111;font-family:Georgia,serif;}\n' +
-      '.arnoma-print-header .ph-meta{font-size:10px;color:#555;text-align:right;line-height:1.8;}\n' +
-      /* ── Watermark ── */
-      '.arnoma-wm{position:fixed;top:0;left:0;right:0;bottom:0;' +
-        'pointer-events:none;z-index:9999;overflow:hidden;}\n' +
-      '.arnoma-wm-inner{display:flex;flex-wrap:wrap;align-content:flex-start;' +
-        'width:200%;height:200%;transform:rotate(-38deg) translate(-25%,-10%);}\n' +
-      '.arnoma-wm span{display:inline-block;font-size:10px;font-weight:700;' +
-        'color:rgba(0,0,0,0.07);padding:22px 12px;white-space:nowrap;' +
-        'font-family:Arial,sans-serif;letter-spacing:0.5px;}\n' +
-      /* ── Page ── */
-      '@media print{@page{margin:12mm 10mm;size:A4;}' +
-        'body{padding:0!important;font-size:12px;}' +
-        '.arnoma-wm{position:fixed;}' +
-        '.arnoma-print-header{page-break-inside:avoid;}}\n' +
+      /* Hide anything that shouldn't appear on paper */
+      '.acnhs-site-nav, .acnhs-doc-hero, .page-shield, .acnhs-print-btn,' +
+        ' .back-btn, .note-back, button { display: none !important; }\n' +
+      /* Watermark layer */
+      '.arnoma-wm { position: fixed; top: 0; left: 0; right: 0; bottom: 0;' +
+        ' pointer-events: none; z-index: 9999; overflow: hidden; }\n' +
+      '.arnoma-wm-inner { display: flex; flex-wrap: wrap; align-content: flex-start;' +
+        ' width: 200%; height: 200%; transform: rotate(-38deg) translate(-25%, -10%); }\n' +
+      '.arnoma-wm span { display: inline-block; font-size: 10px; font-weight: 700;' +
+        ' color: rgba(0,0,0,0.07); padding: 22px 12px; white-space: nowrap;' +
+        ' font-family: Arial, sans-serif; letter-spacing: 0.5px; }\n' +
+      /* Print header strip */
+      '.arnoma-print-header { display: flex; justify-content: space-between; align-items: flex-end;' +
+        ' border-bottom: 2px solid #111; padding-bottom: 10px; margin-bottom: 28px;' +
+        ' font-family: Georgia, serif; }\n' +
+      '.arnoma-print-header .ph-title { font-size: 19px; font-weight: 800; color: #111; }\n' +
+      '.arnoma-print-header .ph-meta  { font-size: 10px; color: #555; text-align: right; line-height: 1.8; }\n' +
+      /* Page setup */
+      '@media print {\n' +
+      '  @page { margin: 12mm 10mm; size: A4; }\n' +
+      '  body { padding-top: 0 !important; }\n' +
+      '  .arnoma-wm { position: fixed; }\n' +
+      '  .arnoma-print-header { page-break-inside: avoid; }\n' +
+      '}\n' +
       '</style>\n' +
       '</head>\n<body>\n' +
       /* Watermark layer */
       '<div class="arnoma-wm"><div class="arnoma-wm-inner" id="arnoma-wm-inner"></div></div>\n' +
-      /* Header */
+      /* Header strip */
       '<div class="arnoma-print-header">' +
-        '<div class="ph-title">' + noteTitle.replace(/</g,'&lt;') + '</div>' +
+        '<div class="ph-title">' + noteTitle.replace(/</g, '&lt;') + '</div>' +
         '<div class="ph-meta"><strong>ARNOMA University</strong><br>' +
-          studentName.replace(/</g,'&lt;') + '<br>Printed ' + printDate +
+          studentName.replace(/</g, '&lt;') + '<br>Printed ' + printDate +
         '</div>' +
       '</div>\n' +
-      /* Clean content — no original dark styles */
-      cleanHtml +
+      /* ── Raw content — identical to what the student sees on screen ── */
+      contentHtml +
       '<script>\n' +
       '(function(){\n' +
-      '  var c=document.getElementById("arnoma-wm-inner");\n' +
-      '  var t=' + JSON.stringify(wmText) + ';\n' +
-      '  var h="";\n' +
-      '  for(var i=0;i<300;i++) h+="<span>"+t+"</span>";\n' +
-      '  c.innerHTML=h;\n' +
-      '  setTimeout(function(){window.focus();window.print();setTimeout(function(){window.close();},1800);},400);\n' +
+      '  var c = document.getElementById("arnoma-wm-inner");\n' +
+      '  var t = ' + JSON.stringify(wmText) + ';\n' +
+      '  var h = "";\n' +
+      '  for (var i = 0; i < 300; i++) h += "<span>" + t + "</span>";\n' +
+      '  c.innerHTML = h;\n' +
+      '  setTimeout(function () {\n' +
+      '    window.focus();\n' +
+      '    window.print();\n' +
+      '    setTimeout(function () { window.close(); }, 1800);\n' +
+      '  }, 400);\n' +
       '})();\n' +
       '<\/script>\n' +
-      '</body></html>');
+      '</body></html>'
+    );
     pw.document.close();
   };
 
