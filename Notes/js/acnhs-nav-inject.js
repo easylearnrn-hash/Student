@@ -844,8 +844,20 @@
     pw.document.close();
   };
 
-  /* ─── 7. INIT ────────────────────────────────────────────────── */
+  /* ─── 7. GUARD REMOVAL — always runs, even before full init ─── */
+  /* Ensures the body-hide guard is removed regardless of load order
+     or whether note-guard.js loaded successfully.                    */
+  function removeGuard() {
+    var g = document.getElementById('acnhs-guard-hide');
+    if (g) g.parentNode.removeChild(g);
+    document.body.style.setProperty('display', 'block', 'important');
+    document.body.style.setProperty('visibility', 'visible', 'important');
+    document.body.style.setProperty('opacity', '1', 'important');
+  }
+
+  /* ─── 8. INIT ────────────────────────────────────────────────── */
   function init() {
+    removeGuard();   /* ← first thing: always unlock the page */
     ensureFonts();
     ensureStyles();
     upgradeHeader();
