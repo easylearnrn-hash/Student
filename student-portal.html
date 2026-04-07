@@ -5090,10 +5090,10 @@
             return null;
           }
 
-          // ── DROP admin session → sign out so ALL subsequent queries run under
-          //    anon/student RLS — exactly what the real student experiences. ──
-          await supabaseClient.auth.signOut();
-          console.log('✅ Admin impersonation: dropped admin session — queries now run under student RLS');
+          // ── Keep admin session active so all DB queries succeed (RLS allows admin reads).
+          //    The note-unlock logic (shouldUnlockNote / computeNotePaymentStatus) already
+          //    applies student-equivalent payment rules regardless of auth context,
+          //    so impersonation now shows the true student experience without breaking queries.
           console.log('✅ Admin viewing as student:', studentData.name);
 
           // Show the 👁️ impersonation indicator immediately
@@ -10368,10 +10368,11 @@
           return [];
         }
         
-        // Normalize group completely safely: extract the letter and force "Group X"
+        // Normalize group completely safely: extract the BARE LETTER only.
+        // student_note_permissions.group_name stores "A", "B", etc. — NOT "Group A".
         const rawG = currentStudent?.group_letter || currentStudent?.group || currentStudent?.group_name;
         const normLet = rawG ? rawG.toString().replace(/Group\s*/i, '').trim().toUpperCase() : null;
-        studentGroup = normLet ? `Group ${normLet}` : null;
+        studentGroup = normLet || null;  // bare letter, e.g. "A"
         
         if (DEBUG_MODE) debugLog('📚 Loading notes for Student ID:', studentId, 'Group:', studentGroup);
         
