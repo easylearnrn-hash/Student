@@ -8116,26 +8116,58 @@
       window.currentTotalUnpaid = displayUnpaidAmount;
       window.currentUnpaidClasses = unpaidClasses.map(c => c.date);
       
-      // Calculate last paid — find the most recent payment_records receipt date,
-      // then sum all rows paid on that same receipt date and list their class dates.
+      // Calculate last paid — group by the latest payment transaction time (created_at)
+      // so one Stripe payment that covers multiple classes shows all covered class dates.
+      window._lastPaidClassDates = [];
       if (prRecordsForUI && prRecordsForUI.length > 0) {
         const paidRows = prRecordsForUI.filter(r => r.status === 'paid' || r.status === 'excused');
         if (paidRows.length > 0) {
-          // Find the most recent receipt date (pr.date = when payment was received)
-          const mostRecentReceiptDate = paidRows.reduce((max, r) => {
-            const d = (r.date || '').split('T')[0];
-            return d > max ? d : max;
-          }, '');
-          // All rows paid on that receipt date = one payment transaction
-          const lastBatch = paidRows.filter(r => (r.date || '').split('T')[0] === mostRecentReceiptDate);
+          const rowsWithMeta = paidRows.map(r => {
+            const classDate = (r.date || '').split('T')[0];
+            const createdAtMs = r.created_at ? new Date(r.created_at).getTime() : NaN;
+            return {
+              row: r,
+              classDate,
+              createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : null,
+            };
+          });
+
+          // Prefer created_at for transaction grouping; fallback to class date if missing.
+          const latestRow = rowsWithMeta.reduce((latest, current) => {
+            if (!latest) return current;
+            const latestKey = latest.createdAtMs ?? new Date(`${latest.classDate || '1970-01-01'}T00:00:00`).getTime();
+            const currentKey = current.createdAtMs ?? new Date(`${current.classDate || '1970-01-01'}T00:00:00`).getTime();
+            return currentKey > latestKey ? current : latest;
+          }, null);
+
+          let lastBatch = [];
+          if (latestRow && latestRow.createdAtMs !== null) {
+            const txWindowMs = 2 * 60 * 1000; // same transaction insert window
+            const latestMethod = latestRow.row.payment_method || '';
+            lastBatch = rowsWithMeta
+              .filter(item => item.createdAtMs !== null)
+              .filter(item => Math.abs(item.createdAtMs - latestRow.createdAtMs) <= txWindowMs)
+              .filter(item => !latestMethod || (item.row.payment_method || '') === latestMethod)
+              .map(item => item.row);
+          }
+
+          if (!lastBatch.length && latestRow) {
+            const fallbackDate = latestRow.classDate;
+            lastBatch = paidRows.filter(r => ((r.date || '').split('T')[0]) === fallbackDate);
+          }
+
           lastPaidAmount = lastBatch.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-          lastPaidDate   = new Date(mostRecentReceiptDate + 'T00:00:00');
-          // The class dates covered = each row's own date (Calendar-NEW uses pr.date as class date)
-          const batchClassDates = lastBatch
-            .map(r => (r.date || '').split('T')[0])
-            .filter(Boolean)
-            .sort();
-          // Store for rendering below
+          if (latestRow) {
+            lastPaidDate = latestRow.createdAtMs !== null
+              ? new Date(latestRow.createdAtMs)
+              : new Date(`${latestRow.classDate || '1970-01-01'}T00:00:00`);
+          }
+
+          const batchClassDates = Array.from(new Set(
+            lastBatch
+              .map(r => (r.date || '').split('T')[0])
+              .filter(Boolean)
+          )).sort();
           window._lastPaidClassDates = batchClassDates;
         }
       }
