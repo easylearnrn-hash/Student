@@ -7972,6 +7972,29 @@
         scheduledDates.sort();
       }
 
+      // Defensive parity guard: always include TODAY if it's a scheduled class day.
+      // This prevents timezone/format edge cases from silently dropping today's debt row.
+      if (!scheduledDates.includes(todayDateStr)) {
+        const todayWeekday = nowParts.weekday || '';
+        const todayAbbrev = todayWeekday ? todayWeekday.slice(0, 3) : '';
+        const isRecurringToday = [todayWeekday, todayAbbrev]
+          .filter(Boolean)
+          .some(name => scheduleStr.includes(name));
+
+        const hasOneTimeToday = Array.isArray(groupScheduleData.one_time_schedules) &&
+          groupScheduleData.one_time_schedules.some(ot => {
+            const otDate = ot?.date ? ot.date.substring(0, 10) : null;
+            return otDate === todayDateStr;
+          });
+
+        const isEligibleToday = (!_studentStartStr || todayDateStr >= _studentStartStr) && !skippedDates.has(todayDateStr);
+        if (isEligibleToday && (isRecurringToday || hasOneTimeToday)) {
+          scheduledDates.push(todayDateStr);
+          scheduledDates.sort();
+          debugLog(`📌 Forced include of today's scheduled class date: ${todayDateStr}`);
+        }
+      }
+
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
 
       const unpaidClasses  = [];
