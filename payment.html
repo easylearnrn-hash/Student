@@ -473,6 +473,8 @@
         forClassDates: params.get('for_class_dates')  || '',
       };
 
+      const STRIPE_TAX_RATE = 0.05; // 5%
+
       /* ── DOM refs ── */
       const $name    = document.getElementById('displayName');
       const $amtInput= document.getElementById('amountInput');
@@ -481,10 +483,25 @@
       const $payBtn  = document.getElementById('payBtn');
       const $peSlot  = document.getElementById('payment-element');
 
-      /* ── Live amount helper ── */
+      /* ── Live amount helpers ── */
+      function roundMoney(value) {
+        return Math.round((Number(value) || 0) * 100) / 100;
+      }
+      function getEnteredAmount() {
+        return roundMoney(parseFloat($amtInput.value));
+      }
+      function getTaxAmount(subtotal = getEnteredAmount()) {
+        return roundMoney(subtotal * STRIPE_TAX_RATE);
+      }
       function getPayAmount() {
-        const v = parseFloat($amtInput.value);
-        return isNaN(v) ? 0 : Math.round(v * 100) / 100; // 2dp
+        const subtotal = getEnteredAmount();
+        return roundMoney(subtotal + getTaxAmount(subtotal));
+      }
+      function getAmountBreakdown() {
+        const subtotal = getEnteredAmount();
+        const tax = getTaxAmount(subtotal);
+        const total = roundMoney(subtotal + tax);
+        return { subtotal, tax, total };
       }
 
       /* ── Helpers ── */
@@ -503,10 +520,10 @@
       function clearMsg() { $msg.className = 'status-msg'; $msg.innerHTML = ''; }
       function setBtnLoading(yes) {
         $payBtn.disabled = yes;
-        const amt = getPayAmount();
+        const { total } = getAmountBreakdown();
         $payBtn.innerHTML = yes
           ? `<span class="spinner"></span> Processing…`
-          : `Pay ${fmt(amt, INVOICE.currency)}`;
+          : `Pay ${fmt(total, INVOICE.currency)} (incl. 5% tax)`;
       }
 
       /* ── Render summary ── */
@@ -517,10 +534,12 @@
           $amtInput.value = INVOICE.amountDollars.toFixed(2);
           $amtInput.max   = INVOICE.amountDollars.toFixed(2);
         }
-        $amtHint.textContent = `Balance due: ${INVOICE.amountDollars > 0 ? fmt(INVOICE.amountDollars, INVOICE.currency) : '—'}`;
+        const initialTax = getTaxAmount(INVOICE.amountDollars);
+        const initialTotal = roundMoney(INVOICE.amountDollars + initialTax);
+        $amtHint.textContent = `Subtotal due: ${INVOICE.amountDollars > 0 ? fmt(INVOICE.amountDollars, INVOICE.currency) : '—'} • Tax (5%): ${fmt(initialTax, INVOICE.currency)} • Total: ${fmt(initialTotal, INVOICE.currency)}`;
         // Validate on change
         $amtInput.addEventListener('input', () => {
-          const v   = getPayAmount();
+          const v   = getEnteredAmount();
           const max = INVOICE.amountDollars;
           if (v <= 0) {
             $amtHint.textContent = 'Enter an amount (min $1.00)';
@@ -528,28 +547,33 @@
             $payBtn.disabled     = true;
           } else if (max > 0 && v > max) {
             $amtInput.value      = max.toFixed(2);
-            $amtHint.textContent = `Max: ${fmt(max, INVOICE.currency)}`;
+            const maxTax = getTaxAmount(max);
+            const maxTotal = roundMoney(max + maxTax);
+            $amtHint.textContent = `Max subtotal: ${fmt(max, INVOICE.currency)} • Tax (5%): ${fmt(maxTax, INVOICE.currency)} • Total: ${fmt(maxTotal, INVOICE.currency)}`;
             $amtHint.className   = 'amount-hint warn';
             $payBtn.disabled     = false;
           } else {
-            $amtHint.textContent = `Balance due: ${fmt(max, INVOICE.currency)}`;
+            const { subtotal, tax, total } = getAmountBreakdown();
+            $amtHint.textContent = `Subtotal: ${fmt(subtotal, INVOICE.currency)} • Tax (5%): ${fmt(tax, INVOICE.currency)} • Total: ${fmt(total, INVOICE.currency)}`;
             $amtHint.className   = 'amount-hint';
             $payBtn.disabled     = false;
           }
           // Update button label
-          $payBtn.textContent = `Pay ${fmt(getPayAmount(), INVOICE.currency)}`;
+          $payBtn.textContent = `Pay ${fmt(getPayAmount(), INVOICE.currency)} (incl. 5% tax)`;
         });
       }
 
       /* ── Step 1: get clientSecret from Edge Function ── */
       async function fetchClientSecret() {
-        const amt = getPayAmount();
-        if (amt < 1) throw new Error('Please enter an amount of at least $1.00.');
+        const subtotal = getEnteredAmount();
+        const total = getPayAmount();
+        const tax = getTaxAmount(subtotal);
+        if (subtotal < 1) throw new Error('Please enter an amount of at least $1.00.');
         const resp = await fetch(CREATE_PI_ENDPOINT, {
           method:'POST',
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({
-            amount_cents    : Math.round(amt * 100),
+            amount_cents    : Math.round(total * 100),
             currency        : INVOICE.currency,
             student_id      : INVOICE.studentId,
             student_name    : INVOICE.studentName,
@@ -557,6 +581,9 @@
             invoice_ref     : INVOICE.invoiceRef,
             for_class       : INVOICE.forClass,
             for_class_dates : INVOICE.forClassDates,
+            subtotal_dollars: subtotal,
+            tax_dollars     : tax,
+            tax_rate        : STRIPE_TAX_RATE,
           }),
         });
         if (!resp.ok) {
@@ -593,7 +620,7 @@
           }
         });
         elements.create('payment', { layout:'tabs' }).mount('#payment-element');
-        $payBtn.textContent = `Pay ${fmt(INVOICE.amountDollars, INVOICE.currency)}`;
+        $payBtn.textContent = `Pay ${fmt(getPayAmount(), INVOICE.currency)} (incl. 5% tax)`;
         $payBtn.disabled    = false;
       }
 
@@ -658,10 +685,14 @@
         // Notify parent window (student-portal.html modal) — parent writes payment_records
         // using its own authenticated Supabase session, avoiding RLS issues with anon key.
         try {
+          const { subtotal, tax, total } = getAmountBreakdown();
           window.parent.postMessage({
             type           : 'ARNOMA_PAYMENT_SUCCESS',
             studentId      : INVOICE.studentId,
-            amount         : getPayAmount(),
+            amount         : subtotal,
+            taxAmount      : tax,
+            totalAmount    : total,
+            taxRate        : STRIPE_TAX_RATE,
             forClass       : forClassDatesArr.length ? forClassDatesArr[0] : today,
             forClassDates  : forClassDatesArr.length ? forClassDatesArr : [today],
             date           : today,
