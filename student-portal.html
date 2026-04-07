@@ -5055,6 +5055,40 @@
         return null;
       }
 
+      // ── IMPERSONATION REFRESH: session already established in this tab ──
+      // After verifyOtp succeeds, we store impersonate_active + auth_user_id in sessionStorage.
+      // On refresh, the token_hash is gone (one-time use) but the Supabase session is still
+      // alive in localStorage. We just re-read it and return the student record.
+      const impersonateActive = sessionStorage.getItem('impersonate_active');
+      const impersonateAuthUserId = sessionStorage.getItem('impersonate_auth_user_id');
+      if (impersonateActive === 'true' && impersonateAuthUserId) {
+        try {
+          const { data: { session: existingSession } } = await supabaseClient.auth.getSession();
+          if (existingSession && existingSession.user.id === impersonateAuthUserId) {
+            console.log('✅ Impersonation refresh: reusing live student session', existingSession.user.email);
+            const { data: studentData, error: studentErr } = await supabaseClient
+              .from('students')
+              .select('*')
+              .eq('auth_user_id', impersonateAuthUserId)
+              .single();
+            if (!studentErr && studentData) {
+              setTimeout(() => {
+                const circle = document.getElementById('impersonationBanner');
+                if (circle) { circle.style.display = 'flex'; circle.title = `Viewing as: ${studentData.name} — Click to exit`; }
+                const backBtn = document.getElementById('backToAdminBtn');
+                if (backBtn) backBtn.style.display = 'flex';
+              }, 0);
+              return studentData;
+            }
+          }
+        } catch (err) {
+          console.error('❌ Impersonation refresh error:', err);
+        }
+        // Session expired or mismatch — clear and fall through
+        sessionStorage.removeItem('impersonate_active');
+        sessionStorage.removeItem('impersonate_auth_user_id');
+      }
+
       // ── TRUE IMPERSONATION: admin generated a one-time token_hash via generateLink ──
       // We call verifyOtp({ token_hash, type:'email' }) which silently signs in as
       // the student with NO redirect — unlike type:'magiclink' which redirects to SITE_URL.
@@ -5080,6 +5114,11 @@
             // Fall through to admin-session path
           } else {
             console.log('✅ Impersonation: student session active', otpData.session.user.email);
+
+            // Persist session identity in sessionStorage so refreshes don't lose impersonation
+            sessionStorage.setItem('impersonate_active', 'true');
+            sessionStorage.setItem('impersonate_auth_user_id', otpData.session.user.id);
+
             // Fetch the student record — supabaseClient now runs as the student
             const { data: studentData, error: studentErr } = await supabaseClient
               .from('students')
@@ -8590,6 +8629,8 @@
         sessionStorage.removeItem('student_login_id');
         sessionStorage.removeItem('student_login_name');
         sessionStorage.removeItem('is_admin_viewing');
+        sessionStorage.removeItem('impersonate_active');
+        sessionStorage.removeItem('impersonate_auth_user_id');
         localStorage.removeItem('student_login_id');
         localStorage.removeItem('student_login_name');
         localStorage.removeItem('is_admin_viewing');
