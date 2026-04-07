@@ -7980,7 +7980,7 @@
         if (_studentStartStr && dateStr < _studentStartStr) continue; // Match Calendar logic
         if (!scheduleActiveDays.includes(daysOfWeek[d.getDay()])) continue;
         if (skippedDates.has(dateStr)) continue;
-        if (dateStr === todayDateStr && classTimeInMinutes !== null && currentTimeInMinutes < classTimeInMinutes) continue;
+        // Always include today — debt is owed for today's class regardless of whether it has started yet
         scheduledDates.push(dateStr);
       }
 
@@ -8155,16 +8155,13 @@
           }, '');
           // All rows paid on that receipt date = one payment transaction
           const lastBatch = paidRows.filter(r => (r.date || '').split('T')[0] === mostRecentReceiptDate);
-          // Deduplicate by date for both amount and display (avoids double-counting duplicate DB rows)
-          const seenForAmount = new Map();
-          lastBatch.forEach(r => {
-            const d = (r.date || '').split('T')[0];
-            if (!seenForAmount.has(d)) seenForAmount.set(d, parseFloat(r.amount) || 0);
-          });
-          lastPaidAmount = Array.from(seenForAmount.values()).reduce((s, v) => s + v, 0);
+          lastPaidAmount = lastBatch.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
           lastPaidDate   = new Date(mostRecentReceiptDate + 'T00:00:00');
-          // The class dates covered (deduplicated for display)
-          const batchClassDates = [...seenForAmount.keys()].sort();
+          // The class dates covered = each row's own date (Calendar-NEW uses pr.date as class date)
+          const batchClassDates = lastBatch
+            .map(r => (r.date || '').split('T')[0])
+            .filter(Boolean)
+            .sort();
           // Store for rendering below
           window._lastPaidClassDates = batchClassDates;
         }
