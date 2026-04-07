@@ -7879,32 +7879,17 @@
       // 1. Absent dates from student_absences (keyed by class_date)
       const absentDates = new Set(absences.map(a => (a.class_date || '').split('T')[0]).filter(Boolean));
 
-      // 2. Paid dates — built from extractForClassDates() on payment_records (skip absent)
-      //    + directly from the payments (Zelle) table using for_class/for_class_dates
-      //    + from credit_payments.applied_class_date
-      const paidDates = new Set();
-      // Receipt-only payments: payment_records rows where the only resolved date is the
-      // receipt date itself (no explicit for_class / for_class_dates). These need to be
-      // allocated to the oldest unpaid scheduled class AFTER scheduledDates is built.
-      // This correctly handles Stripe payments made on a different day than the owed class
-      // (e.g. paid Apr 4 for the Apr 2 class → should credit Apr 2, not Apr 4).
-      const receiptOnlyPayments = []; // { receiptDate, amount }
+  // 2. Paid dates — built from extractForClassDates() on payment_records (skip absent)
+  //    + directly from the payments (Zelle) table using for_class/for_class_dates
+  //    + from credit_payments.applied_class_date
+  const paidDates = new Set();
 
       // From payment_records (non-absent only)
       prRecords.forEach(pr => {
         if (pr.status === 'absent') return;
         const fallback = (pr.date || '').split('T')[0];
-        const hasExplicitClass = (pr.for_class_dates && (Array.isArray(pr.for_class_dates) ? pr.for_class_dates.length > 0 : pr.for_class_dates !== '[]')) ||
-                                 (pr.for_class && pr.for_class.trim() && pr.for_class.trim() !== '[]');
-        if (hasExplicitClass) {
-          // Has an explicit for_class — trust it directly
-          const resolved = extractForClassDates(pr, fallback);
-          resolved.forEach(d => { if (d) paidDates.add(d); });
-        } else {
-          // No explicit for_class — this is a receipt-date-only payment (e.g. Stripe)
-          // Defer allocation until scheduledDates is known so we can credit the oldest unpaid class
-          receiptOnlyPayments.push({ receiptDate: fallback, amount: parseFloat(pr.amount) || 0 });
-        }
+        const resolved = extractForClassDates(pr, fallback);
+        resolved.forEach(d => { if (d) paidDates.add(d); });
       });
 
       // From Zelle payments table directly.
@@ -7947,17 +7932,6 @@
       const daysOfWeek  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
       const fullDayMap  = { Mon:'Monday', Tue:'Tuesday', Wed:'Wednesday', Thu:'Thursday', Fri:'Friday', Sat:'Saturday', Sun:'Sunday' };
 
-      // Parse class time for "hasn't started yet" check
-      let classTimeInMinutes = null;
-      const timeMatch = scheduleStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-      if (timeMatch) {
-        let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
-        if (timeMatch[3].toUpperCase() === 'PM' && h !== 12) h += 12;
-        if (timeMatch[3].toUpperCase() === 'AM' && h === 12) h = 0;
-        classTimeInMinutes = h * 60 + m;
-      }
-      const currentTimeInMinutes = nowLA.getHours() * 60 + nowLA.getMinutes();
-
       // Collect active days
       const scheduleActiveDays = [];
       ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(name => {
@@ -7999,30 +7973,6 @@
       }
 
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
-
-      // ── Receipt-only payment allocation ──────────────────────────────────────
-      // For payment_records rows with no explicit for_class (e.g. Stripe payments recorded
-      // on the payment date), allocate each payment to the oldest unpaid scheduled class.
-      // This handles: student paid Apr 4 (Stripe) for the Apr 2 unpaid class → credits Apr 2.
-      // GUARD: Only consider receipt-only payments whose receipt date is on or after the
-      // debt cutoff (2026-03-30). Pre-floor payments were for already-settled classes and
-      // must NOT be reallocated to in-window unpaid classes.
-      // Sort oldest receipt first so multiple payments allocate in chronological order.
-      const inWindowReceiptPayments = receiptOnlyPayments.filter(p => p.receiptDate >= DEBT_CUTOFF_STR);
-      if (inWindowReceiptPayments.length > 0) {
-        inWindowReceiptPayments.sort((a, b) => a.receiptDate.localeCompare(b.receiptDate));
-        inWindowReceiptPayments.forEach(({ receiptDate }) => {
-          // Find the oldest scheduled class ON OR AFTER the cutoff that is not yet paid and not absent
-          for (const sd of scheduledDates) {
-            if (sd < DEBT_CUTOFF_STR) continue;
-            if (!paidDates.has(sd) && !absentDates.has(sd)) {
-              paidDates.add(sd);
-              debugLog(`💳 Receipt-only payment ${receiptDate} → credited to oldest unpaid class ${sd}`);
-              break;
-            }
-          }
-        });
-      }
 
       const unpaidClasses  = [];
       const absentClasses  = [];
