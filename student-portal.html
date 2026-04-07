@@ -13680,10 +13680,33 @@
     }
 
     /* Listen for postMessage from payment.html iframe */
-    window.addEventListener('message', function(e) {
+    window.addEventListener('message', async function(e) {
       if (!e.data || typeof e.data !== 'object') return;
 
       if (e.data.type === 'ARNOMA_PAYMENT_SUCCESS') {
+        // Write payment_records row using authenticated session (bypasses RLS correctly)
+        try {
+          const record = {
+            student_id      : e.data.studentId      || (window.currentStudent && window.currentStudent.id) || null,
+            date            : e.data.date            || new Date().toISOString().split('T')[0],
+            amount          : e.data.amount          || 0,
+            status          : 'paid',
+            payment_method  : 'stripe',
+            for_class       : e.data.forClass        || (e.data.date || new Date().toISOString().split('T')[0]),
+            for_class_dates : e.data.forClassDates   || [e.data.date || new Date().toISOString().split('T')[0]],
+          };
+          const { error: dbErr } = await supabaseClient
+            .from('payment_records')
+            .insert(record);
+          if (dbErr) {
+            console.error('[ARNOMA] Stripe payment_records insert failed:', dbErr.message);
+          } else {
+            console.log('[ARNOMA] ✅ Stripe payment recorded in payment_records:', record);
+          }
+        } catch (writeErr) {
+          console.error('[ARNOMA] Failed to write Stripe payment_records:', writeErr);
+        }
+
         // Refresh payment display after 3 s (payment.html auto-closes itself)
         setTimeout(() => {
           closePaymentModal();

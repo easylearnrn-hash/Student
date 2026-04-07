@@ -622,7 +622,7 @@
         }
 
         if (paymentIntent && paymentIntent.status === 'succeeded') {
-          showSuccess();
+          await showSuccess();
           return;
         }
 
@@ -630,7 +630,7 @@
       }
 
       /* ── Success state ── */
-      function showSuccess() {
+      async function showSuccess() {
         $peSlot.innerHTML = '';
         $payBtn.style.display = 'none';
         document.getElementById('invoiceBanner').style.display = 'none';
@@ -644,8 +644,30 @@
           <div class="success-sub">Your payment has been processed.<br>A receipt will be sent to your email by Stripe.</div>
         `;
 
-        // Notify parent window (student-portal.html modal)
-        try { window.parent.postMessage({ type:'ARNOMA_PAYMENT_SUCCESS', studentId:INVOICE.studentId }, '*'); } catch(_){}
+        // Parse for_class_dates JSON array sent by student-portal.html
+        let forClassDatesArr = [];
+        if (INVOICE.forClassDates) {
+          try { forClassDatesArr = JSON.parse(INVOICE.forClassDates); } catch(_) {}
+        }
+        // Fall back to the comma-separated for_class string
+        if (!forClassDatesArr.length && INVOICE.forClass) {
+          forClassDatesArr = INVOICE.forClass.split(',').map(d => d.trim()).filter(Boolean);
+        }
+        const today = new Date().toISOString().split('T')[0];
+
+        // Notify parent window (student-portal.html modal) — parent writes payment_records
+        // using its own authenticated Supabase session, avoiding RLS issues with anon key.
+        try {
+          window.parent.postMessage({
+            type           : 'ARNOMA_PAYMENT_SUCCESS',
+            studentId      : INVOICE.studentId,
+            amount         : getPayAmount(),
+            forClass       : forClassDatesArr.length ? forClassDatesArr[0] : today,
+            forClassDates  : forClassDatesArr.length ? forClassDatesArr : [today],
+            date           : today,
+          }, '*');
+        } catch(_){}
+
         // Auto-close after 3 s
         setTimeout(() => {
           try { window.parent.postMessage({ type:'ARNOMA_CLOSE_PAYMENT' }, '*'); } catch(_){}
@@ -668,7 +690,7 @@
             $payBtn.disabled = false;
             $payBtn.addEventListener('click', () => { window.location.search = ''; }, { once: true });
           } else if (paymentIntent.status === 'succeeded') {
-            showSuccess();
+            await showSuccess();
           } else {
             setMsg('error', `Payment status: ${paymentIntent.status}. Please try again.`);
           }
