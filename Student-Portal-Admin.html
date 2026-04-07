@@ -3835,23 +3835,21 @@
           return;
         }
 
-        // 2. Use a service-role Supabase client to call auth.admin.generateLink()
-        // This uses the JS SDK's correct versioned endpoint — avoids raw-fetch URL guessing.
+        // 2. Use a service-role client to create a real session for the student.
+        // auth.admin.createSession() issues a genuine access_token + refresh_token
+        // for the student's account — no magic link redirect involved at all.
         const serviceClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
           auth: { autoRefreshToken: false, persistSession: false }
         });
 
-        const { data: linkData, error: linkError } = await serviceClient.auth.admin.generateLink({
-          type: 'magiclink',
-          email: studentRow.email
+        const { data: sessionData, error: sessionErr } = await serviceClient.auth.admin.createSession({
+          user_id: studentRow.auth_user_id
         });
 
-        const hashedToken = linkData?.properties?.hashed_token;
-
-        if (linkError || !hashedToken) {
-          console.error('Magic link generation failed:', linkError || linkData);
+        if (sessionErr || !sessionData?.session) {
+          console.error('admin.createSession failed:', sessionErr);
           // Fall back to admin-session view
-          console.warn('⚠️ Magic link failed — falling back to admin-session impersonation');
+          console.warn('⚠️ createSession failed — falling back to admin-session impersonation');
           sessionStorage.setItem('student_login_id', String(numericStudentId));
           localStorage.setItem('student_login_id', String(numericStudentId));
           sessionStorage.setItem('student_login_name', studentName);
@@ -3862,17 +3860,18 @@
           return;
         }
 
-        const magicToken = hashedToken;
-        const studentEmail = studentRow.email;
-
-        sessionStorage.setItem('impersonate_magic_token', magicToken);
-        localStorage.setItem('impersonate_magic_token', magicToken);
-        sessionStorage.setItem('impersonate_magic_email', studentEmail);
-        localStorage.setItem('impersonate_magic_email', studentEmail);
+        // Store the student's real tokens — portal will call setSession() with these
+        const studentSession = sessionData.session;
+        sessionStorage.setItem('impersonate_access_token', studentSession.access_token);
+        localStorage.setItem('impersonate_access_token', studentSession.access_token);
+        sessionStorage.setItem('impersonate_refresh_token', studentSession.refresh_token);
+        localStorage.setItem('impersonate_refresh_token', studentSession.refresh_token);
+        sessionStorage.setItem('impersonate_student_email', studentRow.email);
+        localStorage.setItem('impersonate_student_email', studentRow.email);
         sessionStorage.setItem('is_admin_viewing', 'true');
         localStorage.setItem('is_admin_viewing', 'true');
 
-        console.log('✅ Magic link generated for:', studentRow.name);
+        console.log('✅ Student session created for:', studentRow.name);
         window.location.href = 'student-portal.html';
 
       } catch (error) {
