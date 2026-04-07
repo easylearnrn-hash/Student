@@ -1,7 +1,9 @@
 -- Allow authenticated students to insert their own payment_records rows.
--- Required for Stripe payments: student-portal.html writes a payment_records row
--- after a successful Stripe charge using the student's own JWT session.
--- Without this, the insert silently fails (RLS blocks it) and the green dot
+-- Required for Stripe payments: student-portal.html writes one payment_records row
+-- per class date after a successful Stripe charge, using the student's own JWT session.
+-- payment_records schema: student_id, date, amount, status, payment_method
+-- (NO for_class / for_class_dates columns — Calendar-NEW uses pr.date as the class date)
+-- Without this policy, the insert silently fails (RLS blocks it) and the green dot
 -- never appears in Calendar-NEW.
 --
 -- Run this in Supabase SQL Editor.

@@ -13684,24 +13684,33 @@
       if (!e.data || typeof e.data !== 'object') return;
 
       if (e.data.type === 'ARNOMA_PAYMENT_SUCCESS') {
-        // Write payment_records row using authenticated session (bypasses RLS correctly)
+        // Write one payment_records row per class date covered by this Stripe payment.
+        // payment_records has no for_class/for_class_dates columns — the row's own `date`
+        // field IS the class date (Calendar-NEW falls back to pr.date in extractForClassDates).
         try {
-          const record = {
-            student_id      : e.data.studentId      || (window.currentStudent && window.currentStudent.id) || null,
-            date            : e.data.date            || new Date().toISOString().split('T')[0],
-            amount          : e.data.amount          || 0,
-            status          : 'paid',
-            payment_method  : 'stripe',
-            for_class       : e.data.forClass        || (e.data.date || new Date().toISOString().split('T')[0]),
-            for_class_dates : e.data.forClassDates   || [e.data.date || new Date().toISOString().split('T')[0]],
-          };
+          const today = e.data.date || new Date().toISOString().split('T')[0];
+          const classDates = (e.data.forClassDates && e.data.forClassDates.length)
+            ? e.data.forClassDates
+            : [today];
+          const studentId = e.data.studentId || (window.currentStudent && window.currentStudent.id) || null;
+          const amount    = e.data.amount || 0;
+          const perClass  = classDates.length > 1 ? +(amount / classDates.length).toFixed(2) : amount;
+
+          const rows = classDates.map(d => ({
+            student_id    : studentId,
+            date          : d,
+            amount        : perClass,
+            status        : 'paid',
+            payment_method: 'stripe',
+          }));
+
           const { error: dbErr } = await supabaseClient
             .from('payment_records')
-            .insert(record);
+            .insert(rows);
           if (dbErr) {
             console.error('[ARNOMA] Stripe payment_records insert failed:', dbErr.message);
           } else {
-            console.log('[ARNOMA] ✅ Stripe payment recorded in payment_records:', record);
+            console.log('[ARNOMA] ✅ Stripe payment recorded — rows:', rows);
           }
         } catch (writeErr) {
           console.error('[ARNOMA] Failed to write Stripe payment_records:', writeErr);
