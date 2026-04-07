@@ -4623,6 +4623,7 @@
           <div class="stat-label">Last Paid</div>
           <div class="stat-value" style="color: #22c55e;" id="lastPaid">$0</div>
               <div class="stat-date" id="lastPaidDate">-</div>
+              <div class="stat-date" id="lastPaidClasses" style="margin-top:3px;font-size:10px;opacity:0.7;line-height:1.4;"></div>
             </div>
             <div class="stat-card credit-card" id="creditCard" style="border-color: #f59e0b; display: none;">
               <div class="stat-label">Credit</div>
@@ -8139,16 +8140,17 @@
       window.currentTotalUnpaid = displayUnpaidAmount;
       window.currentUnpaidClasses = unpaidClasses.map(c => c.date);
       
-      // Calculate last paid
+      // Calculate last paid — find all paid class dates, show total + list of dates
       if (paidDatesSet && paidDatesSet.size > 0) {
         paidDatesSet.forEach(dateStr => {
           if (!dateStr) return;
           const paidDateObj = new Date(dateStr + 'T00:00:00');
           if (!lastPaidDate || paidDateObj > lastPaidDate) {
             lastPaidDate = paidDateObj;
-            lastPaidAmount = pricePerClassValue;
           }
         });
+        // Total paid = number of paid class dates × price per class
+        lastPaidAmount = paidDatesSet.size * pricePerClassValue;
       }
       
       let lastPaidDateText = '-';
@@ -8172,6 +8174,25 @@
       
       document.getElementById('lastPaid').textContent = `$${lastPaidAmount.toFixed(0)}`;
       document.getElementById('lastPaidDate').textContent = lastPaidDateText;
+
+      // Show class dates covered in the last paid card
+      const lastPaidClassesEl = document.getElementById('lastPaidClasses');
+      if (lastPaidClassesEl) {
+        if (paidDatesSet && paidDatesSet.size > 0) {
+          const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const sortedPaidDates = Array.from(paidDatesSet)
+            .filter(Boolean)
+            .sort()
+            .map(d => {
+              const [y, m, day] = d.split('-');
+              return `${monthNames[parseInt(m,10)-1]} ${parseInt(day,10)}`;
+            });
+          lastPaidClassesEl.textContent = `for ${sortedPaidDates.join(', ')}`;
+        } else {
+          lastPaidClassesEl.textContent = '';
+        }
+      }
+
       document.getElementById('totalUnpaid').textContent = `$${displayUnpaidAmount.toFixed(0)}`;
 
       // Show / hide Pay Now button based on balance
