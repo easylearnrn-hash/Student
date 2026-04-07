@@ -8004,15 +8004,16 @@
       // on the payment date), allocate each payment to the oldest unpaid scheduled class.
       // This handles: student paid Apr 4 (Stripe) for the Apr 2 unpaid class → credits Apr 2.
       // GUARD: Only consider receipt-only payments whose receipt date is on or after the
-      // history floor (2026-03-30). Pre-floor payments (e.g. Dec 4, Dec 18) were for already-
-      // settled classes and must NOT be reallocated to in-window unpaid classes.
+      // debt cutoff (2026-03-30). Pre-floor payments were for already-settled classes and
+      // must NOT be reallocated to in-window unpaid classes.
       // Sort oldest receipt first so multiple payments allocate in chronological order.
-      const inWindowReceiptPayments = receiptOnlyPayments.filter(p => p.receiptDate >= '2025-12-01');
+      const inWindowReceiptPayments = receiptOnlyPayments.filter(p => p.receiptDate >= DEBT_CUTOFF_STR);
       if (inWindowReceiptPayments.length > 0) {
         inWindowReceiptPayments.sort((a, b) => a.receiptDate.localeCompare(b.receiptDate));
         inWindowReceiptPayments.forEach(({ receiptDate }) => {
-          // Find the oldest scheduled class that is not yet paid and not absent
+          // Find the oldest scheduled class ON OR AFTER the cutoff that is not yet paid and not absent
           for (const sd of scheduledDates) {
+            if (sd < DEBT_CUTOFF_STR) continue;
             if (!paidDates.has(sd) && !absentDates.has(sd)) {
               paidDates.add(sd);
               debugLog(`💳 Receipt-only payment ${receiptDate} → credited to oldest unpaid class ${sd}`);
