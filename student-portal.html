@@ -8059,6 +8059,7 @@
         paidDates,
         absentDates,
         scheduledDates,
+        prRecords,
         hasSchedule: true
       };
     }
@@ -8073,6 +8074,7 @@
   let scheduleUnpaidAmount = 0; // Amount derived from schedule analysis
   let paidDatesSet = new Set();
   let scheduledDatesForUI = [];
+  let prRecordsForUI = [];
       
       // Cache frequently accessed DOM elements
       let lastPaidEl = getCachedDOM('lastPaid') || document.getElementById('lastPaid');
@@ -8117,6 +8119,7 @@
   scheduleUnpaidAmount = result.unpaidAmount  || 0;
   paidDatesSet         = result.paidDates     || new Set();
   scheduledDatesForUI  = result.scheduledDates || [];
+  prRecordsForUI       = result.prRecords     || [];
         
         creditBalance = parseFloat(student.balance) || 0;
         
@@ -8140,17 +8143,28 @@
       window.currentTotalUnpaid = displayUnpaidAmount;
       window.currentUnpaidClasses = unpaidClasses.map(c => c.date);
       
-      // Calculate last paid — find all paid class dates, show total + list of dates
-      if (paidDatesSet && paidDatesSet.size > 0) {
-        paidDatesSet.forEach(dateStr => {
-          if (!dateStr) return;
-          const paidDateObj = new Date(dateStr + 'T00:00:00');
-          if (!lastPaidDate || paidDateObj > lastPaidDate) {
-            lastPaidDate = paidDateObj;
-          }
-        });
-        // Total paid = number of paid class dates × price per class
-        lastPaidAmount = paidDatesSet.size * pricePerClassValue;
+      // Calculate last paid — find the most recent payment_records receipt date,
+      // then sum all rows paid on that same receipt date and list their class dates.
+      if (prRecordsForUI && prRecordsForUI.length > 0) {
+        const paidRows = prRecordsForUI.filter(r => r.status === 'paid' || r.status === 'excused');
+        if (paidRows.length > 0) {
+          // Find the most recent receipt date (pr.date = when payment was received)
+          const mostRecentReceiptDate = paidRows.reduce((max, r) => {
+            const d = (r.date || '').split('T')[0];
+            return d > max ? d : max;
+          }, '');
+          // All rows paid on that receipt date = one payment transaction
+          const lastBatch = paidRows.filter(r => (r.date || '').split('T')[0] === mostRecentReceiptDate);
+          lastPaidAmount = lastBatch.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+          lastPaidDate   = new Date(mostRecentReceiptDate + 'T00:00:00');
+          // The class dates covered = each row's own date (Calendar-NEW uses pr.date as class date)
+          const batchClassDates = lastBatch
+            .map(r => (r.date || '').split('T')[0])
+            .filter(Boolean)
+            .sort();
+          // Store for rendering below
+          window._lastPaidClassDates = batchClassDates;
+        }
       }
       
       let lastPaidDateText = '-';
@@ -8175,19 +8189,17 @@
       document.getElementById('lastPaid').textContent = `$${lastPaidAmount.toFixed(0)}`;
       document.getElementById('lastPaidDate').textContent = lastPaidDateText;
 
-      // Show class dates covered in the last paid card
+      // Show class dates covered by the last payment transaction
       const lastPaidClassesEl = document.getElementById('lastPaidClasses');
       if (lastPaidClassesEl) {
-        if (paidDatesSet && paidDatesSet.size > 0) {
+        const classDates = window._lastPaidClassDates || [];
+        if (classDates.length > 0) {
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-          const sortedPaidDates = Array.from(paidDatesSet)
-            .filter(Boolean)
-            .sort()
-            .map(d => {
-              const [y, m, day] = d.split('-');
-              return `${monthNames[parseInt(m,10)-1]} ${parseInt(day,10)}`;
-            });
-          lastPaidClassesEl.textContent = `for ${sortedPaidDates.join(', ')}`;
+          const labels = classDates.map(d => {
+            const [, m, day] = d.split('-');
+            return `${monthNames[parseInt(m,10)-1]} ${parseInt(day,10)}`;
+          });
+          lastPaidClassesEl.textContent = `for ${labels.join(', ')}`;
         } else {
           lastPaidClassesEl.textContent = '';
         }
