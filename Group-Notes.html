@@ -4731,13 +4731,23 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             .in('note_id', noteIds).in('group_name', currentGroupNames).is('student_id', null);
           permissions = permissions.filter(p => !(noteIds.includes(p.note_id) && currentGroupNames.includes(String(p.group_name || '').trim()) && !p.student_id));
 
-          const records = noteIds.map(noteId => ({
-            note_id: noteId,
-            group_name: groupName,
-            is_accessible: true,
-            class_date: classDate,
-            granted_by: adminEmail
-          }));
+          const records = [];
+          noteIds.forEach(noteId => {
+            records.push({
+              note_id: noteId,
+              group_name: groupName,
+              is_accessible: true,
+              class_date: classDate,
+              granted_by: adminEmail
+            });
+            records.push({
+              note_id: noteId,
+              group_name: legacyGroupName,
+              is_accessible: true,
+              class_date: classDate,
+              granted_by: adminEmail
+            });
+          });
           const { data: inserted, error } = await supabaseClient.from('student_note_permissions').insert(records).select();
           if (error) throw error;
           if (inserted) inserted.forEach(r => permissions.push(r));
@@ -4896,17 +4906,24 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             // Since we deleted all matching permissions above, always INSERT new ones
             const { data, error } = await supabaseClient
               .from('student_note_permissions')
-              .insert([{
-                note_id: noteId,
-                group_name: groupLetter,
-                is_accessible: true,
-                class_date: classDate  // 🔥 DATE PER-GROUP!
-              }])
-              .select()
-              .single();
+              .insert([
+                {
+                  note_id: noteId,
+                  group_name: groupLetter,
+                  is_accessible: true,
+                  class_date: classDate  // 🔥 DATE PER-GROUP!
+                },
+                {
+                  note_id: noteId,
+                  group_name: `Group ${groupLetter}`,
+                  is_accessible: true,
+                  class_date: classDate
+                }
+              ])
+              .select();
 
             if (error) throw error;
-            permissions.push(data);
+            data.forEach(d => permissions.push(d));
             successCount++;
           } catch (error) {
             console.error(`Error showing note ${noteId}:`, error);
