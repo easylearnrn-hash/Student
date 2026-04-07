@@ -3836,8 +3836,9 @@
         }
 
         // 2. Call Admin REST API to generate a magic link OTP for this user
+        // Correct endpoint: POST /auth/v1/admin/generate-link  (email in body, not user-id in path)
         const magicResp = await fetch(
-          `${SUPABASE_URL}/auth/v1/admin/users/${studentRow.auth_user_id}/generate-link`,
+          `${SUPABASE_URL}/auth/v1/admin/generate-link`,
           {
             method: 'POST',
             headers: {
@@ -3845,13 +3846,17 @@
               'apikey': SUPABASE_SERVICE_KEY,
               'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
             },
-            body: JSON.stringify({ type: 'magiclink' })
+            body: JSON.stringify({ type: 'magiclink', email: studentRow.email })
           }
         );
 
         const magicData = await magicResp.json();
 
-        if (!magicResp.ok || !magicData.properties?.hashed_token) {
+        // Supabase returns the token at the top-level `hashed_token` field
+        // (not nested under `properties`). Accept either location for safety.
+        const hashedToken = magicData.hashed_token || magicData.properties?.hashed_token;
+
+        if (!magicResp.ok || !hashedToken) {
           console.error('Magic link generation failed:', magicData);
           // Fall back to admin-session view
           console.warn('⚠️ Magic link failed — falling back to admin-session impersonation');
@@ -3865,8 +3870,8 @@
           return;
         }
 
-        // 3. Store the magic token + student ID for the portal to pick up
-        const magicToken = magicData.properties.hashed_token;
+        // 3. Store the magic token + student email for the portal to pick up
+        const magicToken = hashedToken;
         const studentEmail = studentRow.email;
 
         sessionStorage.setItem('impersonate_magic_token', magicToken);
