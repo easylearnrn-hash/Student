@@ -3835,21 +3835,23 @@
           return;
         }
 
-        // 2. Use a service-role client to create a real session for the student.
-        // auth.admin.createSession() issues a genuine access_token + refresh_token
-        // for the student's account — no magic link redirect involved at all.
+        // 2. Use service-role to generate a one-time sign-in link for the student.
+        // generateLink() is available in supabase-js v2.45.1+ (CDN version in use).
+        // We then pass the token_hash + type:'email' to the portal, which calls
+        // verifyOtp({ token_hash, type:'email' }) — this does NOT cause a redirect.
         const serviceClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
           auth: { autoRefreshToken: false, persistSession: false }
         });
 
-        const { data: sessionData, error: sessionErr } = await serviceClient.auth.admin.createSession({
-          user_id: studentRow.auth_user_id
+        const { data: linkData, error: linkErr } = await serviceClient.auth.admin.generateLink({
+          type: 'magiclink',
+          email: studentRow.email
         });
 
-        if (sessionErr || !sessionData?.session) {
-          console.error('admin.createSession failed:', sessionErr);
+        if (linkErr || !linkData?.properties?.hashed_token) {
+          console.error('admin.generateLink failed:', linkErr, linkData);
           // Fall back to admin-session view
-          console.warn('⚠️ createSession failed — falling back to admin-session impersonation');
+          console.warn('⚠️ generateLink failed — falling back to admin-session impersonation');
           sessionStorage.setItem('student_login_id', String(numericStudentId));
           localStorage.setItem('student_login_id', String(numericStudentId));
           sessionStorage.setItem('student_login_name', studentName);
@@ -3860,18 +3862,17 @@
           return;
         }
 
-        // Store the student's real tokens — portal will call setSession() with these
-        const studentSession = sessionData.session;
-        sessionStorage.setItem('impersonate_access_token', studentSession.access_token);
-        localStorage.setItem('impersonate_access_token', studentSession.access_token);
-        sessionStorage.setItem('impersonate_refresh_token', studentSession.refresh_token);
-        localStorage.setItem('impersonate_refresh_token', studentSession.refresh_token);
+        // Store the token_hash — portal will call verifyOtp({ token_hash, type:'email' })
+        // which silently logs in as the student with NO redirect.
+        const tokenHash = linkData.properties.hashed_token;
+        sessionStorage.setItem('impersonate_token_hash', tokenHash);
+        localStorage.setItem('impersonate_token_hash', tokenHash);
         sessionStorage.setItem('impersonate_student_email', studentRow.email);
         localStorage.setItem('impersonate_student_email', studentRow.email);
         sessionStorage.setItem('is_admin_viewing', 'true');
         localStorage.setItem('is_admin_viewing', 'true');
 
-        console.log('✅ Student session created for:', studentRow.name);
+        console.log('✅ Impersonation token generated for:', studentRow.name);
         window.location.href = 'student-portal.html';
 
       } catch (error) {

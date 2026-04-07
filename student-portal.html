@@ -5055,37 +5055,36 @@
         return null;
       }
 
-      // ── TRUE IMPERSONATION: admin created a real student session via service role ──
-      // Admin side stored access_token + refresh_token for the student.
-      // We call setSession() here — no OTP, no redirect, no magic link involved.
-      const impAccessToken = sessionStorage.getItem('impersonate_access_token') || localStorage.getItem('impersonate_access_token');
-      const impRefreshToken = sessionStorage.getItem('impersonate_refresh_token') || localStorage.getItem('impersonate_refresh_token');
-      const isImpersonating = (sessionStorage.getItem('is_admin_viewing') === 'true') && impAccessToken && impRefreshToken;
+      // ── TRUE IMPERSONATION: admin generated a one-time token_hash via generateLink ──
+      // We call verifyOtp({ token_hash, type:'email' }) which silently signs in as
+      // the student with NO redirect — unlike type:'magiclink' which redirects to SITE_URL.
+      const impTokenHash = sessionStorage.getItem('impersonate_token_hash') || localStorage.getItem('impersonate_token_hash');
+      const isImpersonating = (sessionStorage.getItem('is_admin_viewing') === 'true') && impTokenHash;
 
       if (isImpersonating) {
-        // Clear tokens immediately — one-time use
-        ['impersonate_access_token', 'impersonate_refresh_token', 'impersonate_student_email',
-         'impersonate_magic_token', 'impersonate_magic_email'].forEach(k => {
+        // Clear token immediately — one-time use
+        ['impersonate_token_hash', 'impersonate_access_token', 'impersonate_refresh_token',
+         'impersonate_student_email', 'impersonate_magic_token', 'impersonate_magic_email'].forEach(k => {
           sessionStorage.removeItem(k); localStorage.removeItem(k);
         });
 
         try {
-          // Switch the Supabase client to the student's real session
-          const { data: setData, error: setError } = await supabaseClient.auth.setSession({
-            access_token: impAccessToken,
-            refresh_token: impRefreshToken
+          // Verify the hashed token — signs in as the student, no redirect
+          const { data: otpData, error: otpError } = await supabaseClient.auth.verifyOtp({
+            token_hash: impTokenHash,
+            type: 'email'
           });
 
-          if (setError || !setData?.session) {
-            console.error('❌ setSession for student failed:', setError);
+          if (otpError || !otpData?.session) {
+            console.error('❌ verifyOtp for student failed:', otpError);
             // Fall through to admin-session path
           } else {
-            console.log('✅ Impersonation: student session active', setData.session.user.email);
+            console.log('✅ Impersonation: student session active', otpData.session.user.email);
             // Fetch the student record — supabaseClient now runs as the student
             const { data: studentData, error: studentErr } = await supabaseClient
               .from('students')
               .select('*')
-              .eq('auth_user_id', setData.session.user.id)
+              .eq('auth_user_id', otpData.session.user.id)
               .single();
 
             if (studentErr || !studentData) {
@@ -5103,7 +5102,7 @@
             }
           }
         } catch (err) {
-          console.error('❌ Impersonation setSession error:', err);
+          console.error('❌ Impersonation verifyOtp error:', err);
         }
       }
 
