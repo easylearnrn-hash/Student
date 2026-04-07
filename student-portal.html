@@ -7589,7 +7589,7 @@
         group: student.group_name || student.group
       });
 
-      const cacheKey = `payments-v24-${student.id}`;
+      const cacheKey = `payments-v25-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached calendar payment status for student:', student.id);
@@ -7831,22 +7831,19 @@
       const skippedDates = new Set(skipped.map(s => (s.class_date || '').split('T')[0]).filter(Boolean));
 
       // ── Generate scheduled class dates ──────────────────────────────────────
-      // History floor: Mar 30, 2026. Portal shows payment history from this date only.
-      // This MUST stay in sync with Calendar-NEW's display window.
-      const ABSOLUTE_FLOOR = new Date(2026, 2, 30); // Mar 30, 2026
+      // History floor: Dec 1, 2025. Matches Calendar-NEW exactly.
+      const ABSOLUTE_FLOOR = new Date('2025-12-01');
 
-      // IMPORTANT: Match Calendar-NEW logic strictly.
-      // We start scanning from ABSOLUTE_FLOOR, but will skip any date before the student's created_at (or start_date)
-      // inside the loop.
+      // Match Calendar-NEW logic: respect student's start_date/created_at, no forced floor on _studentStartStr.
       let _studentStartStr = null;
       if (student.start_date) {
         _studentStartStr = student.start_date.split('T')[0];
       } else if (student.created_at) {
         _studentStartStr = new Date(student.created_at).toISOString().split('T')[0];
       }
-      // Never start before the floor regardless of student.start_date
-      if (!_studentStartStr || _studentStartStr < '2026-03-30') {
-        _studentStartStr = '2026-03-30';
+      // Never start before the absolute floor
+      if (!_studentStartStr || _studentStartStr < '2025-12-01') {
+        _studentStartStr = '2025-12-01';
       }
 
       const startDate = new Date(ABSOLUTE_FLOOR.getTime());
@@ -7916,7 +7913,7 @@
       // history floor (2026-03-30). Pre-floor payments (e.g. Dec 4, Dec 18) were for already-
       // settled classes and must NOT be reallocated to in-window unpaid classes.
       // Sort oldest receipt first so multiple payments allocate in chronological order.
-      const inWindowReceiptPayments = receiptOnlyPayments.filter(p => p.receiptDate >= '2026-03-30');
+      const inWindowReceiptPayments = receiptOnlyPayments.filter(p => p.receiptDate >= '2025-12-01');
       if (inWindowReceiptPayments.length > 0) {
         inWindowReceiptPayments.sort((a, b) => a.receiptDate.localeCompare(b.receiptDate));
         inWindowReceiptPayments.forEach(({ receiptDate }) => {
@@ -8303,7 +8300,7 @@
         //     doesn't go back that far. If the admin explicitly posted this note to the
         //     student's group (hasPermissionAccess = true), that IS the payment confirmation.
         //     Unlock it so students who paid for older classes can access their notes.
-        const PAYMENT_FLOOR = '2026-03-30';
+        const PAYMENT_FLOOR = '2025-12-01';
         if (effectiveClassDate < PAYMENT_FLOOR && hasPermissionAccess) {
           debugDebug(`🔓 Note ${note.id} unlocked: pre-floor date ${effectiveClassDate} with permission access`);
           return true;
