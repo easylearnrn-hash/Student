@@ -3835,29 +3835,21 @@
           return;
         }
 
-        // 2. Call Admin REST API to generate a magic link OTP for this user
-        // Correct endpoint: POST /auth/v1/admin/generate-link  (email in body, not user-id in path)
-        const magicResp = await fetch(
-          `${SUPABASE_URL}/auth/v1/admin/generate-link`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': SUPABASE_SERVICE_KEY,
-              'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
-            },
-            body: JSON.stringify({ type: 'magiclink', email: studentRow.email })
-          }
-        );
+        // 2. Use a service-role Supabase client to call auth.admin.generateLink()
+        // This uses the JS SDK's correct versioned endpoint — avoids raw-fetch URL guessing.
+        const serviceClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+          auth: { autoRefreshToken: false, persistSession: false }
+        });
 
-        const magicData = await magicResp.json();
+        const { data: linkData, error: linkError } = await serviceClient.auth.admin.generateLink({
+          type: 'magiclink',
+          email: studentRow.email
+        });
 
-        // Supabase returns the token at the top-level `hashed_token` field
-        // (not nested under `properties`). Accept either location for safety.
-        const hashedToken = magicData.hashed_token || magicData.properties?.hashed_token;
+        const hashedToken = linkData?.properties?.hashed_token;
 
-        if (!magicResp.ok || !hashedToken) {
-          console.error('Magic link generation failed:', magicData);
+        if (linkError || !hashedToken) {
+          console.error('Magic link generation failed:', linkError || linkData);
           // Fall back to admin-session view
           console.warn('⚠️ Magic link failed — falling back to admin-session impersonation');
           sessionStorage.setItem('student_login_id', String(numericStudentId));
@@ -3870,7 +3862,6 @@
           return;
         }
 
-        // 3. Store the magic token + student email for the portal to pick up
         const magicToken = hashedToken;
         const studentEmail = studentRow.email;
 
