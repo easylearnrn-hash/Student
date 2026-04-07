@@ -2555,7 +2555,7 @@ Kind regards,
     
     // Toggle ongoing status for a system in Group Notes
     async function toggleSystemOngoing(systemName, isChecked) {
-      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+  const groupLetter = currentGroup.replace('Group ', '').trim(); // "Group A" -> "A"
       let ongoingSystemsMap = JSON.parse(localStorage.getItem('arnoma-ongoing-systems') || '{}');
       
       if (isChecked) {
@@ -4200,7 +4200,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       // Check if all selected notes have free access for current group
       if (selectedNoteIds.size === 0) return;
       
-      const groupLetter = currentGroup.replace('Group ', ''); // "Group A" -> "A"
+  const groupLetter = currentGroup.replace('Group ', '').trim(); // "Group A" -> "A"
       
       // Check if ALL selected notes have free access
       const allHaveFreeAccess = Array.from(selectedNoteIds).every(noteId => {
@@ -4235,9 +4235,13 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
     function updatePostButton() {
       if (selectedNoteIds.size === 0) return;
 
+      const currentGroupNames = [groupLetter, `Group ${groupLetter}`, currentGroup]
+        .filter(Boolean)
+        .map(v => String(v).trim());
+
       // All selected notes posted to current group via student_note_permissions?
       const allPosted = Array.from(selectedNoteIds).every(noteId =>
-        permissions.some(p => p.note_id === noteId && p.group_name === currentGroup && !p.student_id)
+        permissions.some(p => p.note_id === noteId && currentGroupNames.includes(String(p.group_name || '').trim()) && !p.student_id)
       );
 
       const postBtn = document.getElementById('globalPostBtn');
@@ -4272,18 +4276,22 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
       try {
         const noteIds = Array.from(selectedNoteIds);
+        const groupLetter = currentGroup.replace('Group ', '').trim();
+        const currentGroupNames = [groupLetter, `Group ${groupLetter}`, currentGroup]
+          .filter(Boolean)
+          .map(v => String(v).trim());
 
         const { error } = await supabaseClient
           .from('student_note_permissions')
           .delete()
           .in('note_id', noteIds)
-          .eq('group_name', currentGroup);
+          .in('group_name', currentGroupNames);
 
         if (error) throw error;
 
         // Update local permissions array
         permissions = permissions.filter(p =>
-          !(noteIds.includes(p.note_id) && p.group_name === currentGroup)
+          !(noteIds.includes(p.note_id) && currentGroupNames.includes(String(p.group_name || '').trim()))
         );
 
         await customAlert('Done', `${noteIds.length} note(s) unposted from ${currentGroup}.`);
@@ -4311,17 +4319,22 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       if (!confirmed) return;
 
       try {
+        const groupLetter = currentGroup.replace('Group ', '').trim();
+        const currentGroupNames = [groupLetter, `Group ${groupLetter}`, currentGroup]
+          .filter(Boolean)
+          .map(v => String(v).trim());
+
         const { error } = await supabaseClient
           .from('student_note_permissions')
           .delete()
           .in('note_id', noteIds)
-          .eq('group_name', currentGroup);
+          .in('group_name', currentGroupNames);
 
         if (error) throw error;
 
         // Update local permissions array
         permissions = permissions.filter(p =>
-          !(noteIds.includes(p.note_id) && p.group_name === currentGroup)
+          !(noteIds.includes(p.note_id) && currentGroupNames.includes(String(p.group_name || '').trim()))
         );
 
         await customAlert('Done', `${noteIds.length} note(s) unposted from ${currentGroup}.`);
@@ -4710,11 +4723,13 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         const noteIds = snapshotNoteIds;
 
         if (snapshotPostType === 'group') {
-          const groupName = `Group ${groupLetter}`;
+          const groupName = groupLetter; // store bare letter in DB for student portal/RLS parity
+          const legacyGroupName = `Group ${groupLetter}`;
+          const currentGroupNames = [groupName, legacyGroupName].filter(Boolean);
           // Delete existing permissions for these notes+group first
           await supabaseClient.from('student_note_permissions').delete()
-            .in('note_id', noteIds).eq('group_name', groupName).is('student_id', null);
-          permissions = permissions.filter(p => !(noteIds.includes(p.note_id) && p.group_name === groupName && !p.student_id));
+            .in('note_id', noteIds).in('group_name', currentGroupNames).is('student_id', null);
+          permissions = permissions.filter(p => !(noteIds.includes(p.note_id) && currentGroupNames.includes(String(p.group_name || '').trim()) && !p.student_id));
 
           const records = noteIds.map(noteId => ({
             note_id: noteId,
@@ -4729,7 +4744,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
           // Email students in this group
           try {
-            await sendNotePostedEmail(groupName, `${noteIds.length} new note(s)`, 'Various');
+            await sendNotePostedEmail(groupLetter, `${noteIds.length} new note(s)`, 'Various');
           } catch (e) { /* non-fatal */ }
 
           await customAlert('✅ Posted!', `${noteIds.length} note(s) posted to Group ${groupLetter} for ${classDate}`);
@@ -4851,20 +4866,24 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       const confirmed = await customConfirm(`Show ${selectedNoteIds.size} note(s) to ${currentGroup} for ${classDate}?`);
       if (!confirmed) return;
 
+      const currentGroupNames = [groupLetter, `Group ${groupLetter}`, currentGroup]
+        .filter(Boolean)
+        .map(v => String(v).trim());
+
       try {
         // 🔥 FIRST: Delete old permissions for these notes+group (to remove old date associations)
         const { error: deleteError } = await supabaseClient
           .from('student_note_permissions')
           .delete()
           .in('note_id', Array.from(selectedNoteIds))
-          .eq('group_name', currentGroup);
+          .in('group_name', currentGroupNames);
 
         if (deleteError) {
           console.warn('⚠️ Error deleting old permissions (may not exist):', deleteError);
         } else {
           // 🔥 CRITICAL FIX: Remove deleted permissions from local array
           permissions = permissions.filter(p => 
-            !(selectedNoteIds.has(p.note_id) && p.group_name === currentGroup && !p.student_id)
+            !(selectedNoteIds.has(p.note_id) && currentGroupNames.includes(String(p.group_name || '').trim()) && !p.student_id)
           );
         }
 
@@ -4879,7 +4898,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
               .from('student_note_permissions')
               .insert([{
                 note_id: noteId,
-                group_name: currentGroup,
+                group_name: groupLetter,
                 is_accessible: true,
                 class_date: classDate  // 🔥 DATE PER-GROUP!
               }])
@@ -4900,7 +4919,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         // Send email notifications to students in the group
         if (successCount > 0) {
           try {
-            const emailResult = await sendNotePostedEmail(currentGroup, `${successCount} new note(s)`, 'Various');
+            const emailResult = await sendNotePostedEmail(groupLetter, `${successCount} new note(s)`, 'Various');
           } catch (emailError) {
             console.error('❌ Student email notification failed:', emailError);
           }
@@ -4912,7 +4931,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             .in('id', Array.from(selectedNoteIds));
           
           if (postedNotes && postedNotes.length > 0) {
-            await sendAdminNotification(currentGroup, classDate, postedNotes);
+            await sendAdminNotification(`Group ${groupLetter}`, classDate, postedNotes);
           }
         }
         
@@ -4935,6 +4954,11 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       const confirmed = await customConfirm(`Hide ${selectedNoteIds.size} note(s) from ${currentGroup}?`);
       if (!confirmed) return;
 
+      const groupLetter = currentGroup.replace('Group ', '').trim();
+      const currentGroupNames = [groupLetter, `Group ${groupLetter}`, currentGroup]
+        .filter(Boolean)
+        .map(v => String(v).trim());
+
       try {
         const noteIds = Array.from(selectedNoteIds);
 
@@ -4942,13 +4966,13 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           .from('student_note_permissions')
           .delete()
           .in('note_id', noteIds)
-          .eq('group_name', currentGroup);
+          .in('group_name', currentGroupNames);
 
         if (error) throw error;
 
         // Update local permissions array
         permissions = permissions.filter(p =>
-          !(noteIds.includes(p.note_id) && p.group_name === currentGroup)
+          !(noteIds.includes(p.note_id) && currentGroupNames.includes(String(p.group_name || '').trim()))
         );
 
         await customAlert(`✓ ${noteIds.length} note(s) hidden from ${currentGroup}`);
