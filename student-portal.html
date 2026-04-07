@@ -10523,19 +10523,41 @@
         
         if (DEBUG_MODE) debugLog('📚 Loading notes for Student ID:', studentId, 'Group:', studentGroup);
         
-        // Fetch permissions for this student (both group and individual access)
-        // 🔥 FIX: Also fetch class_date and granted_at for per-group posting dates
+        // Fetch permissions for this student (both individual and group access).
+        // IMPORTANT: Group Notes may store group_name as either "A" or "Group A".
+        // We must support both formats so posted paid notes always appear (locked if unpaid).
+        const groupNameCandidates = studentGroup
+          ? [studentGroup, `Group ${studentGroup}`]
+          : [];
+
         console.log('🔍 Querying student_note_permissions with:', {
           studentId,
           studentGroup,
-          query: `student_id.eq.${studentId},and(group_name.eq.${studentGroup},student_id.is.null)`
+          groupNameCandidates
         });
-        
-        const { data: permissions, error: permError} = await supabaseClient
-          .from('student_note_permissions')
-          .select('note_id, is_accessible, class_date, granted_at, group_name, student_id')
-          .or(`student_id.eq.${studentId},and(group_name.eq.${studentGroup},student_id.is.null)`)
-          .eq('is_accessible', true);
+
+        const [studentPermRes, groupPermRes] = await Promise.all([
+          supabaseClient
+            .from('student_note_permissions')
+            .select('id, note_id, is_accessible, class_date, granted_at, group_name, student_id')
+            .eq('student_id', studentId)
+            .eq('is_accessible', true),
+
+          groupNameCandidates.length > 0
+            ? supabaseClient
+                .from('student_note_permissions')
+                .select('id, note_id, is_accessible, class_date, granted_at, group_name, student_id')
+                .is('student_id', null)
+                .in('group_name', groupNameCandidates)
+                .eq('is_accessible', true)
+            : Promise.resolve({ data: [], error: null })
+        ]);
+
+        const permError = studentPermRes.error || groupPermRes.error;
+        const permissions = [
+          ...(studentPermRes.data || []),
+          ...(groupPermRes.data || [])
+        ];
         
         if (permError) {
           console.error('❌ Error loading permissions:', permError);
@@ -10546,7 +10568,7 @@
           permissions: permissions
         });
         
-        const permissionNoteIds = permissions?.map(p => p.note_id) || [];
+  const permissionNoteIds = Array.from(new Set((permissions || []).map(p => p.note_id).filter(Boolean)));
         
         if (DEBUG_MODE) debugLog(`✅ Found ${permissionNoteIds.length} notes via permissions`);
         
