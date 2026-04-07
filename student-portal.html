@@ -5055,6 +5055,58 @@
         return null;
       }
 
+      // ── MAGIC LINK IMPERSONATION: admin generated a real OTP for this student ──
+      // This signs in AS the student → all Supabase queries run under their real JWT/RLS.
+      const magicToken = sessionStorage.getItem('impersonate_magic_token') || localStorage.getItem('impersonate_magic_token');
+      const magicEmail = sessionStorage.getItem('impersonate_magic_email') || localStorage.getItem('impersonate_magic_email');
+      const isMagicImpersonation = (sessionStorage.getItem('is_admin_viewing') === 'true') && magicToken && magicEmail;
+
+      if (isMagicImpersonation) {
+        // Clear the one-time token immediately so it can't be replayed
+        sessionStorage.removeItem('impersonate_magic_token');
+        localStorage.removeItem('impersonate_magic_token');
+        sessionStorage.removeItem('impersonate_magic_email');
+        localStorage.removeItem('impersonate_magic_email');
+
+        try {
+          // Sign in as the student using their hashed magic-link token
+          const { data: magicSession, error: magicError } = await supabaseClient.auth.verifyOtp({
+            email: magicEmail,
+            token: magicToken,
+            type: 'magiclink'
+          });
+
+          if (magicError || !magicSession?.session) {
+            console.error('❌ Magic link sign-in failed:', magicError);
+            // Fall through to the existing admin-session path below
+          } else {
+            console.log('✅ Magic link: signed in as student', magicEmail, '— real JWT active');
+            // Now fetch the student record (session is now the student's)
+            const { data: studentData, error: studentErr } = await supabaseClient
+              .from('students')
+              .select('*')
+              .eq('auth_user_id', magicSession.session.user.id)
+              .single();
+
+            if (studentErr || !studentData) {
+              console.error('❌ Could not find student by auth_user_id after magic login:', studentErr);
+              // Fall through
+            } else {
+              // Show impersonation banner
+              setTimeout(() => {
+                const circle = document.getElementById('impersonationBanner');
+                if (circle) { circle.style.display = 'flex'; circle.title = `Viewing as: ${studentData.name} — Click to exit`; }
+                const backBtn = document.getElementById('backToAdminBtn');
+                if (backBtn) backBtn.style.display = 'flex';
+              }, 0);
+              return studentData;
+            }
+          }
+        } catch (err) {
+          console.error('❌ Magic link impersonation error:', err);
+        }
+      }
+
       // Admin viewing as student (real data, no impersonation tokens)
       const studentLoginId = sessionStorage.getItem('student_login_id') || localStorage.getItem('student_login_id');
       const isAdminViewing = (sessionStorage.getItem('is_admin_viewing') === 'true') || (localStorage.getItem('is_admin_viewing') === 'true');
@@ -8532,7 +8584,11 @@
         localStorage.removeItem('student_login_id');
         localStorage.removeItem('student_login_name');
         localStorage.removeItem('is_admin_viewing');
-        
+
+        // If we signed in via magic link we are currently holding the student's real JWT.
+        // Sign out first so we can restore the admin session cleanly.
+        try { await supabaseClient.auth.signOut(); } catch (_) {}
+
         // Restore admin session if saved
         const adminBackup = sessionStorage.getItem('admin_session_backup') || localStorage.getItem('admin_session_backup');
         if (adminBackup) {
@@ -8544,7 +8600,7 @@
           sessionStorage.removeItem('admin_session_backup');
           localStorage.removeItem('admin_session_backup');
         }
-        
+
         // Redirect back to admin panel
         window.location.href = 'Student-Portal-Admin.html?select_student=true';
       } catch (error) {

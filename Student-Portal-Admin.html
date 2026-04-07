@@ -2533,6 +2533,7 @@
     // Supabase Configuration
     const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const SUPABASE_SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjgxMTMxNywiZXhwIjoyMDc4Mzg3MzE3fQ.QN1asduC--73-QjFY5bvWQbYQ5GE3_9ppf1hJO7r8yw';
     
     // Create Supabase client without shadowing global window.supabase
   const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3785,25 +3786,17 @@
 
     async function startImpersonation(studentId, studentName) {
       try {
-        // Close selector modal
         closeStudentSelector();
-        
-        // Ensure studentId is a number (not string)
+
         const numericStudentId = parseInt(studentId);
-        if (isNaN(numericStudentId)) {
-          alert('Invalid student ID');
-          return;
-        }
-        
-        // ADMIN VIEW-AS-STUDENT: Keep the admin's own auth session alive.
-        // Save it to sessionStorage so student-portal can restore it on exit.
+        if (isNaN(numericStudentId)) { alert('Invalid student ID'); return; }
+
+        // Save admin session so we can restore it when they exit impersonation
         const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
         if (sessionError || !session) {
           alert('Admin session not found. Please refresh and try again.');
           return;
         }
-
-        // Stash admin session so student-portal can restore it on exit
         sessionStorage.setItem('admin_session_backup', JSON.stringify({
           access_token: session.access_token,
           refresh_token: session.refresh_token
@@ -3813,22 +3806,82 @@
           refresh_token: session.refresh_token
         }));
 
-        // Tell student-portal which student to load and that this is admin view
-        sessionStorage.setItem('student_login_id', String(numericStudentId));
-        localStorage.setItem('student_login_id', String(numericStudentId));
-        
-        sessionStorage.setItem('student_login_name', studentName);
-        localStorage.setItem('student_login_name', studentName);
-        
+        // ── MAGIC LINK: use service role to fetch student's auth_user_id,
+        //    then generate a one-time login token for their account so the
+        //    student portal runs under their REAL JWT / RLS context. ──
+
+        // 1. Look up student email + auth_user_id
+        const { data: studentRow, error: studentErr } = await supabaseClient
+          .from('students')
+          .select('id, name, email, auth_user_id')
+          .eq('id', numericStudentId)
+          .single();
+
+        if (studentErr || !studentRow) {
+          alert('Could not find student record.');
+          return;
+        }
+
+        if (!studentRow.auth_user_id) {
+          // Student has no Supabase auth account yet — fall back to admin-session view
+          console.warn('⚠️ Student has no auth_user_id — falling back to admin-session impersonation');
+          sessionStorage.setItem('student_login_id', String(numericStudentId));
+          localStorage.setItem('student_login_id', String(numericStudentId));
+          sessionStorage.setItem('student_login_name', studentName);
+          localStorage.setItem('student_login_name', studentName);
+          sessionStorage.setItem('is_admin_viewing', 'true');
+          localStorage.setItem('is_admin_viewing', 'true');
+          window.location.href = 'student-portal.html';
+          return;
+        }
+
+        // 2. Call Admin REST API to generate a magic link OTP for this user
+        const magicResp = await fetch(
+          `${SUPABASE_URL}/auth/v1/admin/users/${studentRow.auth_user_id}/generate-link`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': SUPABASE_SERVICE_KEY,
+              'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+            },
+            body: JSON.stringify({ type: 'magiclink' })
+          }
+        );
+
+        const magicData = await magicResp.json();
+
+        if (!magicResp.ok || !magicData.properties?.hashed_token) {
+          console.error('Magic link generation failed:', magicData);
+          // Fall back to admin-session view
+          console.warn('⚠️ Magic link failed — falling back to admin-session impersonation');
+          sessionStorage.setItem('student_login_id', String(numericStudentId));
+          localStorage.setItem('student_login_id', String(numericStudentId));
+          sessionStorage.setItem('student_login_name', studentName);
+          localStorage.setItem('student_login_name', studentName);
+          sessionStorage.setItem('is_admin_viewing', 'true');
+          localStorage.setItem('is_admin_viewing', 'true');
+          window.location.href = 'student-portal.html';
+          return;
+        }
+
+        // 3. Store the magic token + student ID for the portal to pick up
+        const magicToken = magicData.properties.hashed_token;
+        const studentEmail = studentRow.email;
+
+        sessionStorage.setItem('impersonate_magic_token', magicToken);
+        localStorage.setItem('impersonate_magic_token', magicToken);
+        sessionStorage.setItem('impersonate_magic_email', studentEmail);
+        localStorage.setItem('impersonate_magic_email', studentEmail);
         sessionStorage.setItem('is_admin_viewing', 'true');
         localStorage.setItem('is_admin_viewing', 'true');
 
-        // Navigate to student portal — stays within the same tab so admin can return
+        console.log('✅ Magic link generated for:', studentRow.name);
         window.location.href = 'student-portal.html';
-        
+
       } catch (error) {
-        console.error('Error starting admin view:', error);
-        alert('Failed to view student portal: ' + error.message);
+        console.error('Error starting impersonation:', error);
+        alert('Failed to start impersonation: ' + error.message);
       }
     }
     
