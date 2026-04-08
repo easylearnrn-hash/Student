@@ -1,6 +1,6 @@
 /**
  * content-protection.js
- * Additional layer: disables print, drag, and developer shortcut keys.
+ * Additional layer: disables print, drag, right-click, and developer shortcut keys.
  */
 (function () {
   // Disable print via Ctrl/Cmd+P
@@ -12,8 +12,16 @@
     }
   });
 
+  // Block right-click context menu on the entire page (prevents "Save Image As")
+  document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
   // Prevent drag of images/text
   document.addEventListener('dragstart', function (e) { e.preventDefault(); });
+
+  // Disable long-press save on images (iOS/Android)
+  document.addEventListener('touchstart', function (e) {
+    if (e.target.tagName === 'IMG') { e.preventDefault(); }
+  }, { passive: false });
 
   // Overlay transparent div to block long-press select on mobile
   var shield = document.createElement('div');
