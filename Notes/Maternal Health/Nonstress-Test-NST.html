@@ -496,6 +496,226 @@ p{font-size:.9rem;margin-bottom:8px}
   </table>
 </div>
 
+<style>
+.nst-wrap{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;margin-top:32px}
+.nst-wrap h2{font-size:1.15rem;color:var(--gold);margin:0 0 16px;display:flex;align-items:center;gap:8px}
+.nst-icon{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle}
+.nst-icon svg{display:block}
+.nst-score-bar{display:flex;align-items:center;gap:16px;margin-bottom:18px;font-size:.88rem;color:var(--muted)}
+.nst-score-bar span{display:flex;align-items:center;gap:5px}
+.nst-prog{flex:1;height:5px;background:var(--card);border-radius:99px;overflow:hidden}
+.nst-prog-fill{height:100%;background:var(--teal);border-radius:99px;transition:width .4s}
+.nst-streak{font-size:.8rem;color:var(--gold);font-weight:700;min-width:80px;text-align:right}
+.nst-q-num{font-size:.78rem;color:var(--muted);margin-bottom:8px}
+.nst-q-text{font-size:.97rem;margin-bottom:14px;line-height:1.55}
+.nst-opts{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.nst-opt{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:10px 14px;font-size:.9rem;cursor:pointer;text-align:left;color:var(--text);transition:border-color .15s,background .15s}
+.nst-opt:hover:not(:disabled){border-color:var(--teal);background:rgba(45,212,191,.07)}
+.nst-opt.sel{border-color:var(--blue);background:rgba(96,165,250,.1)}
+.nst-opt.correct{border-color:#22c55e;background:rgba(34,197,94,.1);color:#22c55e}
+.nst-opt.wrong{border-color:var(--red);background:rgba(248,113,113,.1);color:var(--red)}
+.nst-opt.reveal{border-color:#22c55e;background:rgba(34,197,94,.07);color:#22c55e}
+.nst-btn-check{background:var(--teal);color:#020d1a;border:none;border-radius:9px;padding:10px 22px;font-size:.9rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px}
+.nst-btn-check:disabled{opacity:.4;cursor:not-allowed}
+.nst-fb{border-radius:10px;padding:14px;margin-top:14px;font-size:.88rem;line-height:1.5;display:none}
+.nst-fb.correct{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3)}
+.nst-fb.wrong{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3)}
+.nst-fb-title{font-weight:700;font-size:.95rem;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.nst-fb-title.c{color:#22c55e}.nst-fb-title.w{color:var(--red)}
+.nst-fb-explain{color:var(--text)}
+.nst-summary{text-align:center;padding:10px 0}
+.nst-sum-icon{margin-bottom:12px}
+.nst-sum-icon svg{width:52px;height:52px}
+.nst-sum-pct{font-size:2.4rem;font-weight:800;color:var(--gold);margin-bottom:4px}
+.nst-sum-label{font-size:1.05rem;font-weight:700;margin-bottom:6px}
+.nst-sum-score{font-size:.9rem;color:var(--muted);margin-bottom:20px}
+.nst-dots{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin-bottom:20px}
+.nst-dot{width:13px;height:13px;border-radius:50%}
+.nst-dot.c{background:#22c55e}.nst-dot.w{background:var(--red)}
+.nst-btn-restart{background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:10px 22px;font-size:.9rem;color:var(--teal);cursor:pointer;font-weight:600}
+.nst-btn-restart:hover{background:var(--card)}
+</style>
+
+<div class="nst-wrap" id="nst-game">
+  <h2>
+    <span class="nst-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg></span>
+    NCLEX Practice — Nonstress Test &amp; BPP
+  </h2>
+
+  <div class="nst-score-bar">
+    <span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      <b id="nst-correct">0</b>
+    </span>
+    <span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      <b id="nst-wrong">0</b>
+    </span>
+    <div class="nst-prog"><div class="nst-prog-fill" id="nst-prog-fill" style="width:0%"></div></div>
+    <span class="nst-streak" id="nst-streak"></span>
+  </div>
+
+  <div id="nst-q-area">
+    <div class="nst-q-num" id="nst-q-num"></div>
+    <div class="nst-q-text" id="nst-q-text"></div>
+    <div class="nst-opts" id="nst-opts"></div>
+    <button class="nst-btn-check" id="nst-btn-check" disabled onclick="nstCheck()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      Check Answer
+    </button>
+    <div class="nst-fb" id="nst-fb">
+      <div class="nst-fb-title" id="nst-fb-title"></div>
+      <div class="nst-fb-explain" id="nst-fb-explain"></div>
+    </div>
+    <div style="text-align:right;margin-top:14px">
+      <button class="nst-btn-check" id="nst-btn-next" style="display:none;margin-left:auto" onclick="nstNext()">
+        Next
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="nst-summary" id="nst-summary" style="display:none">
+    <div class="nst-sum-icon" id="nst-sum-icon"></div>
+    <div class="nst-sum-pct" id="nst-sum-pct"></div>
+    <div class="nst-sum-label" id="nst-sum-label"></div>
+    <div class="nst-sum-score" id="nst-sum-score"></div>
+    <div class="nst-dots" id="nst-dots"></div>
+    <button class="nst-btn-restart" onclick="nstRestart()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-right:5px"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.5"/></svg>
+      Try Again
+    </button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const QS=[
+    {q:"A reactive NST requires at least how many accelerations within a 20-minute window?",o:["1 acceleration","2 accelerations","3 accelerations","4 accelerations"],a:1,e:"A reactive (normal) NST requires ≥2 accelerations of ≥15 bpm above baseline, each lasting ≥15 seconds, within a 20-minute window."},
+    {q:"Each acceleration on a reactive NST must rise at least how many beats per minute above baseline?",o:["5 bpm","10 bpm","15 bpm","20 bpm"],a:2,e:"The standard definition of a reactive NST requires each acceleration to rise ≥15 bpm above the FHR baseline."},
+    {q:"Each acceleration on a reactive NST must last at least how long?",o:["5 seconds","10 seconds","15 seconds","30 seconds"],a:2,e:"Each acceleration must last ≥15 seconds to count toward the reactive criteria."},
+    {q:"Before 32 weeks gestation, what is the modified reactive NST criteria?",o:["1 acceleration of ≥15 bpm × ≥15 sec","2 accelerations of ≥10 bpm × ≥10 sec","2 accelerations of ≥15 bpm × ≥10 sec","3 accelerations of ≥5 bpm × ≥5 sec"],a:1,e:"Before 32 weeks, modified criteria apply: ≥2 accelerations of ≥10 bpm × ≥10 seconds are acceptable because preterm fetuses have neurologic immaturity."},
+    {q:"What does a nonreactive NST mean?",o:["The fetus is definitely in distress","The fetus is dead","Criteria not met — further evaluation is needed","Delivery must occur within 1 hour"],a:2,e:"A nonreactive NST means the fetus did not demonstrate the expected FHR accelerations. It does not confirm distress — the fetus may be in a sleep cycle. Further evaluation is always required."},
+    {q:"What is the most common next step after a nonreactive NST?",o:["Immediate cesarean section","Biophysical profile (BPP)","Contraction stress test (CST)","Delivery with oxytocin"],a:1,e:"The most common next step after a nonreactive NST is a biophysical profile (BPP), which adds ultrasound assessment of fetal breathing, movement, tone, and amniotic fluid to the NST data."},
+    {q:"Why might a healthy fetus produce a nonreactive NST result?",o:["Placental abruption","Fetal sleep cycle","Cord prolapse","Preeclampsia"],a:1,e:"The most common benign cause of a nonreactive NST is a fetal sleep cycle. The fetus may simply be in a quiet state. Extending the monitoring period or vibroacoustic stimulation can arouse the fetus."},
+    {q:"What maternal position is preferred during an NST?",o:["Prone","Supine","Semi-Fowler's with left lateral tilt","Trendelenburg"],a:2,e:"Semi-Fowler's position with a left lateral tilt prevents aortocaval compression by the gravid uterus, ensuring adequate uteroplacental blood flow during the test."},
+    {q:"What is the primary purpose of the TOCO transducer during an NST?",o:["Detect fetal heart rate","Detect uterine activity and contractions","Measure amniotic fluid volume","Detect fetal breathing movements"],a:1,e:"The tocotransducer (TOCO) monitors uterine activity and contractions. The ultrasound transducer separately detects the fetal heart rate. Both are applied externally to the abdomen."},
+    {q:"How long is a standard NST tracing?",o:["10 minutes","20 minutes","40 minutes","60 minutes"],a:1,e:"A standard NST runs for 20 minutes. If the fetus appears to be sleeping and does not meet reactive criteria, monitoring may be extended up to 40 minutes."},
+    {q:"What intervention may be used to arouse a sleeping fetus during a nonreactive NST?",o:["Oxytocin infusion","Fetal scalp electrode","Vibroacoustic stimulation","Amniocentesis"],a:2,e:"Vibroacoustic stimulation — applying an acoustic device (artificial larynx) to the abdomen — can rouse a sleeping fetus. If the fetus becomes reactive after stimulation, the NST may then be interpreted as reactive."},
+    {q:"The NST is an example of what type of fetal surveillance?",o:["Intrapartum monitoring","Antepartum monitoring","Postpartum monitoring","Neonatal monitoring"],a:1,e:"The NST is an antepartum surveillance tool used before labor to assess fetal well-being. It does not induce contractions or stress the fetus in any way."},
+    {q:"A patient is at 30 weeks gestation with decreased fetal movement. The NST shows no accelerations in 20 minutes. What is the priority nursing action?",o:["Document and discharge the patient","Prepare for immediate cesarean","Extend monitoring and notify the provider","Start oxytocin to induce contractions"],a:2,e:"The priority action is to extend the monitoring period (up to 40 minutes) and notify the provider of the nonreactive result. A nonreactive NST at 20 minutes is not automatically an emergency — the fetus may be sleeping."},
+    {q:"What is the BPP total possible score?",o:["5","8","10","12"],a:2,e:"The BPP scores 5 parameters — each worth 0 or 2 points — for a maximum total of 10 points."},
+    {q:"A BPP score of 8–10 indicates:",o:["Abnormal — immediate delivery","Equivocal — repeat in 24 hours","Normal — reassuring result","Nonreactive — needs further testing"],a:2,e:"A BPP score of 8–10 is normal and reassuring. Routine monitoring continues as scheduled."},
+    {q:"A BPP score of 6 is interpreted as:",o:["Normal — no action needed","Equivocal — may repeat in 24 hours or consider delivery if ≥36 weeks","Abnormal — immediate delivery indicated","Reassuring — continue current plan"],a:1,e:"A BPP score of 6 is equivocal (questionable). Management depends on gestational age — the test is typically repeated in 24 hours, or delivery may be considered if the patient is ≥36 weeks."},
+    {q:"A BPP score of 4 or less indicates:",o:["Reassuring — continue monitoring","Equivocal — repeat the BPP","Abnormal — immediate evaluation and likely delivery","Normal variation at this gestational age"],a:2,e:"A BPP score of ≤4 is abnormal and concerning. It requires immediate further evaluation and likely delivery, depending on gestational age and clinical context."},
+    {q:"Which mnemonic can help you remember the 5 parameters of the BPP?",o:["REACT","FAME+T","PAVIR","NACLS"],a:1,e:"FAME + T stands for: Fluid (amniotic fluid), Activity (body movement), Movement of breathing (fetal breathing), Extension (tone), and Test (NST). All 5 parameters are scored 0 or 2 points each."},
+    {q:"What is a negative (normal) contraction stress test (CST)?",o:["Late decelerations present with contractions","No late decelerations during contractions","Fetal heart rate below 110 bpm","No accelerations within 20 minutes"],a:1,e:"A negative CST means no late decelerations occurred in response to contractions — this is the normal, reassuring result. Remember: Negative CST = GOOD."},
+    {q:"What is a positive (abnormal) contraction stress test (CST)?",o:["No late decelerations","Late decelerations with ≥50% of contractions","Fetal heart rate accelerations with contractions","Two accelerations in 20 minutes"],a:1,e:"A positive CST means late decelerations occur with ≥50% of contractions — this is abnormal and suggests uteroplacental insufficiency. Remember: Positive CST = BAD."}
+  ];
+
+  const TOTAL=20;
+  let pool=[],qIdx=0,correctCount=0,wrongCount=0,streak=0,results=[],selected=null,checked=false;
+
+  function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+
+  function renderDots(){
+    const c=document.getElementById('nst-dots');c.innerHTML='';
+    results.forEach(r=>{const d=document.createElement('div');d.className='nst-dot '+(r?'c':'w');c.appendChild(d);});
+  }
+
+  function loadQ(q){
+    selected=null;checked=false;
+    document.getElementById('nst-q-num').textContent=`Question ${qIdx+1} of ${TOTAL}`;
+    document.getElementById('nst-q-text').textContent=q.q;
+    const opts=document.getElementById('nst-opts');opts.innerHTML='';
+    q.o.forEach((o,i)=>{
+      const b=document.createElement('button');
+      b.className='nst-opt';b.textContent=o;
+      b.onclick=()=>{
+        if(checked)return;
+        selected=i;
+        opts.querySelectorAll('.nst-opt').forEach(x=>x.classList.remove('sel'));
+        b.classList.add('sel');
+        document.getElementById('nst-btn-check').disabled=false;
+      };
+      opts.appendChild(b);
+    });
+    document.getElementById('nst-btn-check').disabled=true;
+    document.getElementById('nst-btn-next').style.display='none';
+    const fb=document.getElementById('nst-fb');fb.style.display='none';fb.className='nst-fb';
+  }
+
+  window.nstCheck=function(){
+    if(selected===null||checked)return;
+    checked=true;
+    const q=pool[qIdx];
+    const isCorrect=selected===q.a;
+    const opts=document.getElementById('nst-opts').querySelectorAll('.nst-opt');
+    opts.forEach((b,i)=>{
+      b.disabled=true;
+      if(i===q.a)b.classList.add('correct');
+      else if(i===selected&&!isCorrect)b.classList.add('wrong');
+    });
+    if(isCorrect){correctCount++;streak++;document.getElementById('nst-correct').textContent=correctCount;}
+    else{wrongCount++;streak=0;document.getElementById('nst-wrong').textContent=wrongCount;}
+    results.push(isCorrect);
+    document.getElementById('nst-prog-fill').style.width=((qIdx+1)/TOTAL*100)+'%';
+    document.getElementById('nst-streak').textContent=streak>=3?`🔥 ${streak} streak`:'';
+    const fb=document.getElementById('nst-fb');
+    fb.style.display='block';
+    fb.className='nst-fb '+(isCorrect?'correct':'wrong');
+    const title=document.getElementById('nst-fb-title');
+    title.className='nst-fb-title '+(isCorrect?'c':'w');
+    const SVG_CHECK=`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+    const SVG_X=`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+    title.innerHTML=(isCorrect?SVG_CHECK:SVG_X)+(isCorrect?' Correct!':" Incorrect — let\'s review");
+    document.getElementById('nst-fb-explain').textContent=q.e;
+    document.getElementById('nst-btn-check').disabled=true;
+    document.getElementById('nst-btn-next').style.display='flex';
+  };
+
+  window.nstNext=function(){
+    qIdx++;
+    if(qIdx>=TOTAL){showSummary();return;}
+    loadQ(pool[qIdx]);
+  };
+
+  function showSummary(){
+    document.getElementById('nst-q-area').style.display='none';
+    const pct=Math.round(correctCount/TOTAL*100);
+    document.getElementById('nst-sum-pct').textContent=pct+'%';
+    const SVG_TROPHY=`<svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H3a1 1 0 0 1-1-1V5h4M18 9h3a1 1 0 0 0 1-1V5h-4M12 17v4M8 21h8M5 5h14v4a7 7 0 0 1-14 0V5z"/></svg>`;
+    const SVG_STAR=`<svg viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+    const SVG_TREND=`<svg viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`;
+    const SVG_BOOK=`<svg viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`;
+    let icon=SVG_BOOK,label='Keep Practicing!';
+    if(pct>=90){icon=SVG_TROPHY;label='Outstanding!';}
+    else if(pct>=70){icon=SVG_STAR;label='Great Job!';}
+    else if(pct>=50){icon=SVG_TREND;label='Good Effort!';}
+    document.getElementById('nst-sum-icon').innerHTML=icon;
+    document.getElementById('nst-sum-label').textContent=label;
+    document.getElementById('nst-sum-score').textContent=`${correctCount} / ${TOTAL} correct (${pct}%)`;
+    document.getElementById('nst-summary').style.display='block';
+    renderDots();
+  }
+
+  window.nstRestart=function(){
+    qIdx=0;correctCount=0;wrongCount=0;streak=0;results=[];
+    pool=shuffle([...QS]).slice(0,TOTAL);
+    document.getElementById('nst-correct').textContent='0';
+    document.getElementById('nst-wrong').textContent='0';
+    document.getElementById('nst-streak').textContent='';
+    document.getElementById('nst-prog-fill').style.width='0%';
+    document.getElementById('nst-summary').style.display='none';
+    document.getElementById('nst-q-area').style.display='';
+    loadQ(pool[0]);
+  };
+
+  pool=shuffle([...QS]).slice(0,TOTAL);
+  loadQ(pool[0]);
+})();
+</script>
+
 <script src="../js/content-protection.js"></script>
 <script src="../js/acnhs-nav-inject.js" defer></script>
 <script src="../js/note-guard.js"></script>
