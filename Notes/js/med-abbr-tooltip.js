@@ -1136,6 +1136,15 @@
    *  INIT: run auto-wrap after DOM is ready
    * ───────────────────────────────────────────────────────────── */
 
+  /* ─────────────────────────────────────────────────────────────
+   *  PUBLIC API: expose walkNode so dynamic content (games, etc.)
+   *  can re-run abbreviation wrapping after innerHTML injection.
+   *  Usage: window.medAbbrWrap(element)
+   * ───────────────────────────────────────────────────────────── */
+  window.medAbbrWrap = function(el) {
+    if (el) walkNode(el);
+  };
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
       autoWrapAbbreviations();
