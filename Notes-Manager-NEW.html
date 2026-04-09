@@ -629,6 +629,9 @@
         <button class="tab-btn" onclick="switchTab('bulk')">
           📦 Bulk Upload
         </button>
+        <button class="tab-btn" onclick="switchTab('htmlnote')">
+          🌐 HTML Note
+        </button>
         <button class="tab-btn" onclick="switchTab('library')">
           📚 Notes Library
         </button>
@@ -880,7 +883,68 @@
       </div>
     </div>
 
-    <!-- TAB 3: Notes Library -->
+    <!-- TAB 3: HTML Note (no PDF required) -->
+    <div id="tab-htmlnote" class="tab-content">
+      <div class="upload-card">
+        <h3>🌐 Register HTML Note</h3>
+        <p style="color: rgba(255, 255, 255, 0.6); font-size: 14px; margin-bottom: 20px;">
+          Add an interactive HTML note (no PDF needed). Students will be linked directly to the note page. The title must match exactly how it appears in the student portal routing.
+        </p>
+        <form id="htmlNoteForm" onsubmit="handleHtmlNoteRegister(event)">
+          <div class="form-group">
+            <label>📋 System/Topic *</label>
+            <select id="htmlSystem" required>
+              <option value="">Select System</option>
+              <option value="Medical Terminology">Medical Terminology</option>
+              <option value="Human Anatomy">Human Anatomy</option>
+              <option value="Medication Suffixes and Drug Classes">Medication Suffixes and Drug Classes</option>
+              <option value="Cardiovascular System">Cardiovascular System</option>
+              <option value="Endocrine System">Endocrine System</option>
+              <option value="Gastrointestinal &amp; Hepatic System">Gastrointestinal &amp; Hepatic System</option>
+              <option value="Respiratory System">Respiratory System</option>
+              <option value="Renal">Renal</option>
+              <option value="Fluids, Electrolytes &amp; Nutrition">Fluids, Electrolytes &amp; Nutrition</option>
+              <option value="Maternal Health">Maternal Health</option>
+              <option value="Pediatrics">Pediatrics</option>
+              <option value="Mental Health">Mental Health</option>
+              <option value="Neurology">Neurology</option>
+              <option value="Pharmacology">Pharmacology</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>📝 Title * <span style="color:rgba(255,255,255,.45);font-weight:400;font-size:12px">(must match the portal route exactly, e.g. "BPP and CST")</span></label>
+            <input type="text" id="htmlTitle" required placeholder="e.g. BPP and CST">
+          </div>
+          <div class="form-group">
+            <label>📄 Description (Optional)</label>
+            <textarea id="htmlDescription" placeholder="Short description shown to students..."></textarea>
+          </div>
+          <div class="form-group">
+            <label>📅 Class Date *</label>
+            <input type="date" id="htmlClassDate" required>
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;justify-content:space-between;">
+              <span>🔒 Requires Payment to View</span>
+              <label class="toggle-switch" style="margin:0;">
+                <input type="checkbox" id="htmlRequiresPayment" checked>
+                <span class="toggle-slider"></span>
+              </label>
+            </label>
+            <div style="font-size:12px;color:rgba(255,255,255,.5);margin-top:8px;">When enabled, students must have paid to access this note.</div>
+          </div>
+          <div id="htmlNoteProgress" class="upload-progress">
+            <div class="progress-bar"><div class="progress-fill" id="htmlNoteProgressFill" style="width:0%"></div></div>
+            <div class="progress-text" id="htmlNoteProgressText">Saving…</div>
+          </div>
+          <button type="submit" class="btn-primary" id="htmlNoteBtn" style="width:100%;margin-top:20px;">
+            🌐 Register HTML Note
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- TAB 4: Notes Library -->
     <div id="tab-library" class="tab-content">
       <div class="library-header">
         <h3 style="color: #8ab4ff; margin: 0;">📚 All Notes</h3>
@@ -1019,6 +1083,7 @@
         const today = new Date(laDate).toISOString().split('T')[0];
         document.getElementById('singleClassDate').value = today;
         document.getElementById('bulkClassDate').value = today;
+        document.getElementById('htmlClassDate').value = today;
 
         // Setup drag & drop
         setupDragAndDrop();
@@ -1305,6 +1370,70 @@
       // Load notes when switching to library
       if (tab === 'library') {
         await loadNotes();
+      }
+    }
+
+    // ===== HTML NOTE REGISTER (no PDF upload) =====
+    async function handleHtmlNoteRegister(event) {
+      event.preventDefault();
+      const btn = document.getElementById('htmlNoteBtn');
+      const progress = document.getElementById('htmlNoteProgress');
+      const progressFill = document.getElementById('htmlNoteProgressFill');
+      const progressText = document.getElementById('htmlNoteProgressText');
+
+      const systemName = document.getElementById('htmlSystem').value;
+      const title = document.getElementById('htmlTitle').value.trim();
+      const description = document.getElementById('htmlDescription').value.trim();
+      const classDate = document.getElementById('htmlClassDate').value;
+      const requiresPayment = document.getElementById('htmlRequiresPayment').checked;
+
+      if (!systemName || !title || !classDate) {
+        alert('Please fill in System, Title, and Class Date.');
+        return;
+      }
+
+      try {
+        btn.disabled = true;
+        btn.textContent = '⏳ Saving…';
+        progress.classList.add('active');
+        progressFill.style.width = '40%';
+        progressText.textContent = 'Saving to database…';
+
+        const { error } = await supabaseClient
+          .from('student_notes')
+          .insert({
+            title,
+            description: description || title,
+            group_name: systemName,
+            category: systemName,
+            class_date: classDate,
+            pdf_url: null,
+            requires_payment: requiresPayment,
+            is_system_note: true,
+            deleted: false
+          });
+
+        if (error) throw error;
+
+        progressFill.style.width = '100%';
+        progressText.textContent = '✅ Saved!';
+        alert(`✅ "${title}" registered successfully!\n\nGo to Group-Notes to assign it to a group and class date.`);
+
+        document.getElementById('htmlNoteForm').reset();
+        const laDate = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+        document.getElementById('htmlClassDate').value = new Date(laDate).toISOString().split('T')[0];
+        document.getElementById('htmlRequiresPayment').checked = true;
+
+      } catch (err) {
+        console.error('❌ HTML note register error:', err);
+        alert('Failed to register note: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🌐 Register HTML Note';
+        setTimeout(() => {
+          progress.classList.remove('active');
+          progressFill.style.width = '0%';
+        }, 2000);
       }
     }
 
