@@ -6,7 +6,7 @@
 -- ============================================================
 
 INSERT INTO student_notes
-  (title, description, group_name, category, system_category, class_date, pdf_url, requires_payment, is_system_note, deleted)
+  (title, description, group_name, category, system_category, class_date, pdf_url, file_name, file_size, requires_payment, is_system_note, deleted)
 VALUES
   (
     'BPP and CST',
@@ -15,10 +15,8 @@ VALUES
     'Maternal Health',
     'Maternal Health',
     '2026-04-09',
-    '',
-    true,
-    true,
-    false
+    '', '', 0,
+    true, true, false
   ),
   (
     'Nonstress Test NST',
@@ -27,10 +25,8 @@ VALUES
     'Maternal Health',
     'Maternal Health',
     '2026-04-09',
-    '',
-    true,
-    true,
-    false
+    '', '', 0,
+    true, true, false
   ),
   (
     'Antepartum Care',
@@ -39,9 +35,7 @@ VALUES
     'Maternal Health',
     'Maternal Health',
     '2026-04-09',
-    '',
-    true,
-    true,
-    false
+    '', '', 0,
+    true, true, false
   )
 ON CONFLICT DO NOTHING;
