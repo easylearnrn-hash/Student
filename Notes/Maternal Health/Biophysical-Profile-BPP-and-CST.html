@@ -641,6 +641,210 @@ p{font-size:.9rem;margin-bottom:8px}
 <script src="../js/content-protection.js"></script>
 <script src="../js/acnhs-nav-inject.js" defer></script>
 <script src="../js/note-guard.js"></script>
+
+<!-- ===== BPP & CST PRACTICE QUIZ ===== -->
+<style>
+.bpc-wrap{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:24px;margin-top:32px}
+.bpc-wrap h2{font-size:1.15rem;color:var(--gold);margin:0 0 16px;display:flex;align-items:center;gap:8px}
+.bpc-icon{display:inline-flex;align-items:center;justify-content:center;vertical-align:middle}
+.bpc-icon svg{display:block}
+.bpc-score-bar{display:flex;align-items:center;gap:16px;margin-bottom:18px;font-size:.88rem;color:var(--muted)}
+.bpc-score-bar span{display:flex;align-items:center;gap:5px}
+.bpc-prog{flex:1;height:5px;background:var(--card);border-radius:99px;overflow:hidden}
+.bpc-prog-fill{height:100%;background:var(--teal);border-radius:99px;transition:width .4s}
+.bpc-streak{font-size:.8rem;color:var(--gold);font-weight:700;min-width:80px;text-align:right}
+.bpc-q-num{font-size:.78rem;color:var(--muted);margin-bottom:8px}
+.bpc-q-text{font-size:.97rem;margin-bottom:14px;line-height:1.55}
+.bpc-opts{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.bpc-opt{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:10px 14px;font-size:.9rem;cursor:pointer;text-align:left;color:var(--text);transition:border-color .15s,background .15s}
+.bpc-opt:hover:not(:disabled){border-color:var(--teal);background:rgba(45,212,191,.07)}
+.bpc-opt.sel{border-color:var(--blue);background:rgba(96,165,250,.1)}
+.bpc-opt.correct{border-color:#22c55e;background:rgba(34,197,94,.1);color:#22c55e}
+.bpc-opt.wrong{border-color:var(--red);background:rgba(248,113,113,.1);color:var(--red)}
+.bpc-opt.reveal{border-color:#22c55e;background:rgba(34,197,94,.07);color:#22c55e}
+.bpc-btn-check{background:var(--teal);color:#020d1a;border:none;border-radius:9px;padding:10px 22px;font-size:.9rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px}
+.bpc-btn-check:disabled{opacity:.4;cursor:not-allowed}
+.bpc-fb{border-radius:10px;padding:14px;margin-top:14px;font-size:.88rem;line-height:1.5;display:none}
+.bpc-fb.correct{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3)}
+.bpc-fb.wrong{background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3)}
+.bpc-fb-title{font-weight:700;font-size:.95rem;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.bpc-fb-title.c{color:#22c55e}.bpc-fb-title.w{color:var(--red)}
+.bpc-fb-explain{color:var(--text)}
+.bpc-summary{text-align:center;padding:10px 0}
+.bpc-sum-icon{margin-bottom:12px}
+.bpc-sum-icon svg{width:52px;height:52px}
+.bpc-sum-pct{font-size:2.4rem;font-weight:800;color:var(--gold);margin-bottom:4px}
+.bpc-sum-title{font-size:1.1rem;color:var(--text);margin-bottom:16px}
+.bpc-sum-detail{font-size:.88rem;color:var(--muted);margin-bottom:20px}
+.bpc-btn-restart{background:transparent;border:1px solid var(--border);border-radius:9px;padding:10px 22px;font-size:.9rem;color:var(--teal);cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.bpc-btn-restart:hover{background:var(--card)}
+</style>
+
+<div class="bpc-wrap" id="bpc-game">
+  <h2>
+    <span class="bpc-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+    BPP &amp; CST — Practice Quiz
+  </h2>
+
+  <div id="bpc-quiz">
+    <div class="bpc-score-bar">
+      <span class="bpc-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+      <span id="bpc-correct">0</span>
+      <span style="margin-left:6px" class="bpc-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
+      <span id="bpc-wrong">0</span>
+      <div class="bpc-prog"><div class="bpc-prog-fill" id="bpc-prog-fill" style="width:0%"></div></div>
+      <div class="bpc-streak" id="bpc-streak"></div>
+    </div>
+    <div class="bpc-q-num" id="bpc-q-num">Question 1 of 20</div>
+    <div class="bpc-q-text" id="bpc-q-text"></div>
+    <div class="bpc-opts" id="bpc-opts"></div>
+    <button class="bpc-btn-check" id="bpc-check-btn" onclick="bpcCheck()" disabled>
+      Check
+      <span class="bpc-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#020d1a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>
+    </button>
+    <div class="bpc-fb" id="bpc-fb"></div>
+  </div>
+
+  <div class="bpc-summary" id="bpc-summary" style="display:none">
+    <div class="bpc-sum-icon" id="bpc-sum-icon"></div>
+    <div class="bpc-sum-pct" id="bpc-sum-pct"></div>
+    <div class="bpc-sum-title" id="bpc-sum-title"></div>
+    <div class="bpc-sum-detail" id="bpc-sum-detail"></div>
+    <button class="bpc-btn-restart" onclick="bpcInit()">
+      <span class="bpc-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.5"/></svg></span>
+      Play Again
+    </button>
+  </div>
+</div>
+
+<script>
+(function(){
+const TOTAL=20;
+const POOL=[
+  {q:'What does BPP stand for?',opts:['Biophysical Profile','Biophysical Parameter','Blood Pressure Profile','Birth Preparation Panel'],ans:0,explain:'BPP stands for Biophysical Profile — a noninvasive antepartum test combining ultrasound with an NST to evaluate fetal well-being.'},
+  {q:'How many parameters does the BPP assess?',opts:['3','4','5','6'],ans:2,explain:'The BPP assesses 5 parameters: fetal breathing, amniotic fluid, gross body movement, extension/tone, and the NST. Each scores 0 or 2.'},
+  {q:'The mnemonic FAME + T is used to remember the BPP parameters. What does the "A" stand for?',opts:['Activity','Amniotic fluid','Acceleration','Apical pulse'],ans:1,explain:'"A" in FAME + T stands for Amniotic fluid volume. The ultrasound must show at least one adequate pocket of fluid \u22652 cm.'},
+  {q:'What is the maximum possible BPP score?',opts:['5','8','10','12'],ans:2,explain:'The maximum BPP score is 10. There are 5 parameters, each scoring either 0 or 2, giving a maximum of 10 points.'},
+  {q:'A BPP score of 8\u201310 indicates:',opts:['Immediate delivery required','Equivocal result \u2014 repeat in 24 hours','Normal/reassuring result','Severe fetal compromise'],ans:2,explain:'A BPP score of 8\u201310 is considered normal and reassuring. No immediate intervention is required; continue routine monitoring.'},
+  {q:'A BPP score of 6 is considered:',opts:['Normal','Equivocal \u2014 may need repeat testing','Severely abnormal \u2014 deliver immediately','Incompatible with fetal life'],ans:1,explain:'A score of 6 is equivocal. The BPP should be repeated within 24 hours. Delivery may be considered if the patient is \u226536 weeks or the clinical picture is concerning.'},
+  {q:'A BPP score of 4 or less indicates:',opts:['Mildly decreased fetal activity \u2014 recheck in 1 week','Normal for gestational age','Nonreassuring \u2014 immediate evaluation and possible delivery','Reactive NST only'],ans:2,explain:'A BPP score of 4 or less is abnormal and nonreassuring. Immediate evaluation is required and delivery may be necessary regardless of gestational age.'},
+  {q:'To earn 2 points for fetal breathing in the BPP, the fetus must show:',opts:['Continuous breathing movements lasting \u226530 seconds within 30 minutes','At least 5 breathing movements in 10 minutes','Chest rise in response to sound stimulation','Breathing movements during uterine contractions'],ans:0,explain:'To score 2 points for fetal breathing, the fetus must show at least one continuous breathing movement lasting 30 seconds or more within the 30-minute observation window.'},
+  {q:'For the amniotic fluid parameter to earn 2 points in the BPP:',opts:['AFI must be \u226520 cm','There must be at least one fluid pocket \u22652 cm (AFI \u22655 cm)','Fluid must surround the entire fetus','No minimum required \u2014 any fluid present counts'],ans:1,explain:'To score 2 points, there must be at least one adequate amniotic fluid pocket measuring \u22652 cm on ultrasound (corresponding to an AFI \u22655 cm). Less than this suggests oligohydramnios.'},
+  {q:'To earn 2 points for fetal movement (gross body movement) in the BPP:',opts:['1 limb movement in 30 minutes','At least 3 separate body or limb movements in 30 minutes','Continuous rolling movements for 10 seconds','5 or more hiccup episodes'],ans:1,explain:'To score 2 points for gross body movement, the fetus must show at least 3 separate body or limb movements within the 30-minute observation period.'},
+  {q:'Which BPP parameter requires the fetus to demonstrate extension with return to flexion?',opts:['Amniotic fluid','Fetal breathing','Extension/tone','NST component'],ans:2,explain:'Extension/tone (the "E" in FAME + T) requires the fetus to show at least one episode of active extension followed by return to flexion \u2014 demonstrating normal neuromuscular tone.'},
+  {q:'The NST component of the BPP earns 2 points when:',opts:['FHR baseline is between 110\u2013160 bpm','The NST is reactive','No decelerations occur','FHR variability exceeds 25 bpm'],ans:1,explain:'The NST component earns 2 points when the NST is reactive (at least 2 accelerations of \u226515 bpm lasting \u226515 seconds within 20 minutes). A nonreactive NST earns 0 points.'},
+  {q:'What does CST stand for?',opts:['Cervical Stress Test','Contraction Stress Test','Chronic Surveillance Test','Cord Stimulation Test'],ans:1,explain:'CST stands for Contraction Stress Test. It evaluates fetal heart rate response to uterine contractions to assess placental reserve and uteroplacental sufficiency.'},
+  {q:'A negative CST result means:',opts:['The test failed to produce adequate contractions','Late decelerations occurred with \u226550% of contractions','No late decelerations were observed \u2014 reassuring result','The fetus is in immediate danger'],ans:2,explain:'A negative CST is GOOD \u2014 it means no late decelerations occurred with contractions, indicating the fetus can likely tolerate labor. Negative = No problem = Reassuring.'},
+  {q:'A positive CST result indicates:',opts:['The fetus passed the contraction challenge','No late decelerations were seen','Late decelerations occurred with \u226550% of contractions','Early decelerations are present'],ans:2,explain:'A positive CST is ABNORMAL \u2014 late decelerations occurred with 50% or more of contractions, suggesting uteroplacental insufficiency. The fetus may not tolerate the stress of labor.'},
+  {q:'Which type of deceleration is the CST specifically designed to detect?',opts:['Early decelerations','Variable decelerations','Prolonged decelerations','Late decelerations'],ans:3,explain:'The CST looks for late decelerations \u2014 slowing of the FHR that begins after the peak of a contraction and recovers slowly. Late decelerations signal uteroplacental insufficiency.'},
+  {q:'How are contractions induced during a CST? (Select the best answer)',opts:['Artificial rupture of membranes','IV oxytocin or nipple stimulation','Fetal scalp electrode placement','Amnioinfusion'],ans:1,explain:'Contractions for the CST are induced using IV oxytocin (also called an oxytocin challenge test) or nipple stimulation (which releases endogenous oxytocin). The goal is 3 contractions per 10 minutes.'},
+  {q:'Which condition is a contraindication to the CST?',opts:['Post-term pregnancy','Nonreactive NST','Placenta previa','Gestational diabetes'],ans:2,explain:'Placenta previa is a contraindication to the CST because uterine contractions can cause catastrophic bleeding. Other contraindications include prior classical cesarean, multiple gestation, and preterm labor history.'},
+  {q:'During a CST, uterine hyperstimulation occurs. What is the priority nursing action?',opts:['Increase the oxytocin infusion rate','Document and continue monitoring','Discontinue oxytocin and notify the provider','Administer IV fluid bolus only'],ans:2,explain:'If uterine hyperstimulation occurs (contractions >90 seconds or >5 in 10 minutes), the nurse must immediately stop the oxytocin infusion and notify the provider. Hyperstimulation makes the CST result unreliable and can harm the fetus.'},
+  {q:'Which statement correctly compares the BPP and CST?',opts:['Both tests intentionally stress the fetus with contractions','The BPP uses induced contractions; the CST uses ultrasound','The BPP is noninvasive; the CST is the only antepartum test that stresses the fetus','Both tests score results on the same 0\u201310 scale'],ans:2,explain:'The BPP is noninvasive (ultrasound + NST, no contractions). The CST is the only antepartum fetal surveillance test that intentionally stresses the fetus by inducing uterine contractions. Their scoring systems are completely different.'}
+];
+
+let deck=[],qIdx=0,correct=0,wrong=0,streak=0,selected=null,answered=false,currentQ=null;
+
+function bpcShuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+
+window.bpcInit=function(){
+  deck=bpcShuffle([...POOL]).slice(0,TOTAL);
+  qIdx=0;correct=0;wrong=0;streak=0;
+  document.getElementById('bpc-correct').textContent=0;
+  document.getElementById('bpc-wrong').textContent=0;
+  document.getElementById('bpc-streak').textContent='';
+  document.getElementById('bpc-summary').style.display='none';
+  document.getElementById('bpc-quiz').style.display='block';
+  bpcRender();
+};
+
+function bpcRender(){
+  currentQ=deck[qIdx];
+  answered=false;selected=null;
+  document.getElementById('bpc-q-num').textContent='Question '+(qIdx+1)+' of '+TOTAL;
+  const qt=document.getElementById('bpc-q-text');
+  qt.textContent=currentQ.q;
+  if(window.medAbbrWrap) window.medAbbrWrap(qt);
+  const fb=document.getElementById('bpc-fb');
+  fb.style.display='none';fb.className='bpc-fb';fb.innerHTML='';
+  const oc=document.getElementById('bpc-opts');
+  oc.innerHTML='';
+  const shuffled=currentQ.opts.map((t,i)=>({t,i}));
+  bpcShuffle(shuffled);
+  currentQ._shuffled=shuffled;
+  shuffled.forEach(function(o){
+    const btn=document.createElement('button');
+    btn.className='bpc-opt';
+    btn.textContent=o.t;
+    btn.dataset.idx=o.i;
+    btn.onclick=function(){bpcSelect(this);};
+    oc.appendChild(btn);
+  });
+  document.getElementById('bpc-check-btn').disabled=true;
+  document.getElementById('bpc-prog-fill').style.width=(qIdx/TOTAL*100)+'%';
+}
+
+window.bpcSelect=function(btn){
+  if(answered) return;
+  selected=parseInt(btn.dataset.idx);
+  document.querySelectorAll('.bpc-opt').forEach(function(b){b.classList.remove('sel');});
+  btn.classList.add('sel');
+  document.getElementById('bpc-check-btn').disabled=false;
+};
+
+window.bpcCheck=function(){
+  if(selected===null||answered) return;
+  answered=true;
+  const isRight=selected===currentQ.ans;
+  document.querySelectorAll('.bpc-opt').forEach(function(b){
+    b.disabled=true;
+    const idx=parseInt(b.dataset.idx);
+    if(idx===currentQ.ans) b.classList.add('correct');
+    else if(idx===selected&&!isRight) b.classList.add('wrong');
+  });
+  if(isRight){correct++;streak++;document.getElementById('bpc-correct').textContent=correct;}
+  else{wrong++;streak=0;document.getElementById('bpc-wrong').textContent=wrong;}
+  const s=document.getElementById('bpc-streak');
+  s.textContent=streak>=2?'\u25c6 '+streak+' streak':'';
+  const fb=document.getElementById('bpc-fb');
+  fb.style.display='block';
+  fb.className='bpc-fb '+(isRight?'correct':'wrong');
+  const nextLabel=qIdx+1>=TOTAL?'See Results \u2192':'Next \u2192';
+  const chkSvg='<span class="bpc-icon" style="margin-left:4px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg></span>';
+  const xSvg='<span class="bpc-icon" style="margin-right:5px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
+  fb.innerHTML='<div class="bpc-fb-title '+(isRight?'c':'w')+'">'+(isRight?chkSvg+'Correct':xSvg+'Not quite')+'</div><div class="bpc-fb-explain">'+currentQ.explain+'</div><button class="bpc-btn-check" style="margin-top:10px" onclick="bpcNext()">'+nextLabel+'</button>';
+  if(window.medAbbrWrap) window.medAbbrWrap(fb);
+};
+
+window.bpcNext=function(){
+  qIdx++;
+  if(qIdx>=TOTAL){bpcSummary();return;}
+  bpcRender();
+};
+
+function bpcSummary(){
+  document.getElementById('bpc-quiz').style.display='none';
+  document.getElementById('bpc-summary').style.display='block';
+  document.getElementById('bpc-prog-fill').style.width='100%';
+  const pct=Math.round(correct/TOTAL*100);
+  document.getElementById('bpc-sum-pct').textContent=pct+'%';
+  document.getElementById('bpc-sum-detail').textContent=correct+' correct out of '+TOTAL+' questions';
+  const SVG_TROPHY='<svg viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H3a1 1 0 0 1-1-1V5h4M18 9h3a1 1 0 0 0 1-1V5h-4M12 17v4M8 21h8M5 5h14v4a7 7 0 0 1-14 0V5z"/></svg>';
+  const SVG_STAR='<svg viewBox="0 0 24 24" fill="none" stroke="var(--teal)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+  const SVG_TREND='<svg viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>';
+  const SVG_BOOK='<svg viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>';
+  let icon=SVG_BOOK,title='Keep Practicing!';
+  if(pct>=90){icon=SVG_TROPHY;title='Outstanding!';}
+  else if(pct>=70){icon=SVG_STAR;title='Great Job!';}
+  else if(pct>=50){icon=SVG_TREND;title='Good Effort!';}
+  document.getElementById('bpc-sum-icon').innerHTML=icon;
+  document.getElementById('bpc-sum-title').textContent=title;
+}
+
+bpcInit();
+})();
+</script>
+
 </div>
 </body>
 </html>
