@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Study Notes — ARNOMA University</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📖</text></svg>">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:           #0c0f1a;
+      --glass-border: rgba(196,164,95,0.22);
+      --gold:         #c4a45f;
+      --text:         #f5f0e8;
+      --text-muted:   rgba(245,240,232,0.55);
+      --font-serif:   'Playfair Display', Georgia, serif;
+      --font-sans:    'Inter', -apple-system, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-sans); overflow-y: auto; overflow-x: hidden; user-select: none; -webkit-user-select: none; touch-action: pan-y; }
+
+    /* Loading */
+    #loadingScreen { position:fixed; inset:0; z-index:9999; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; }
+    #loadingScreen .spinner { width:48px; height:48px; border:3px solid rgba(196,164,95,0.2); border-top-color:var(--gold); border-radius:50%; animation:spin 0.9s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    #loadingScreen .loading-title { font-family:var(--font-serif); font-size:22px; color:var(--gold); letter-spacing:1px; }
+    #loadingScreen .loading-status { font-size:13px; color:var(--text-muted); }
+
+    /* Error */
+    #errorPanel { display:none; position:fixed; inset:0; z-index:10000; background:var(--bg); align-items:center; justify-content:center; flex-direction:column; gap:16px; padding:40px; }
+    #errorPanel .error-icon { font-size:52px; }
+    #errorPanel .error-msg { font-size:18px; font-weight:600; text-align:center; max-width:500px; line-height:1.55; }
+
+    /* Top Bar */
+    #topBar { position:fixed; top:0; left:0; right:0; z-index:100; height:56px; background:rgba(12,15,26,0.92); backdrop-filter:blur(12px); border-bottom:1px solid var(--glass-border); display:flex; align-items:center; padding:0 20px; gap:14px; }
+    #topBar .brand { font-family:var(--font-serif); font-size:15px; font-weight:600; color:var(--gold); white-space:nowrap; }
+    #topBar .note-title { flex:1; font-size:13px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    #topBar .student-badge { font-size:12px; color:var(--text-muted); padding:4px 10px; border:1px solid var(--glass-border); border-radius:20px; white-space:nowrap; }
+
+    /* Controls */
+    #controlsBar { position:fixed; top:56px; left:0; right:0; z-index:99; height:48px; background:rgba(12,15,26,0.88); backdrop-filter:blur(8px); border-bottom:1px solid rgba(196,164,95,0.12); display:none; align-items:center; justify-content:center; gap:8px; padding:0 16px; }
+    .ctrl-btn { height:32px; min-width:32px; padding:0 12px; background:rgba(196,164,95,0.1); border:1px solid rgba(196,164,95,0.25); border-radius:8px; color:var(--text); font-size:13px; font-weight:500; cursor:pointer; transition:background 0.15s; display:flex; align-items:center; gap:5px; }
+    .ctrl-btn:hover { background:rgba(196,164,95,0.22); }
+    .ctrl-btn:disabled { opacity:0.4; cursor:default; }
+    #pageInfo { font-size:13px; color:var(--text-muted); min-width:80px; text-align:center; }
+    #zoomDisplay { font-size:12px; color:var(--text-muted); min-width:44px; text-align:center; }
+
+    /* PDF Area */
+  #pdfArea { position:relative; margin-top:104px; min-height:calc(100vh - 104px); overflow:visible; background:#111520; display:flex; flex-direction:column; align-items:center; padding:24px 0 80px; gap:16px; }
+    .pdf-page-wrapper { position:relative; box-shadow:0 8px 40px rgba(0,0,0,0.6); border-radius:4px; overflow:hidden; }
+    .pdf-page-wrapper canvas { display:block; }
+    .page-shield { position:absolute; inset:0; z-index:1; }
+
+    /* Media Button */
+    #mediaPanelToggle { display:none; position:fixed; bottom:24px; right:24px; z-index:200; width:52px; height:52px; border-radius:50%; background:linear-gradient(135deg,var(--gold),#a07830); border:none; cursor:pointer; font-size:22px; box-shadow:0 4px 20px rgba(196,164,95,0.4); align-items:center; justify-content:center; transition:transform 0.2s; }
+    #mediaPanelToggle:hover { transform:scale(1.08); }
+
+    /* Media Panel */
+    #mediaPanel { position:fixed; top:0; right:-360px; bottom:0; z-index:300; width:340px; background:rgba(14,19,34,0.97); backdrop-filter:blur(18px); border-left:1px solid var(--glass-border); padding:72px 20px 20px; overflow-y:auto; transition:right 0.28s ease; }
+    #mediaPanel.open { right:0; }
+    #mediaPanel .panel-title { font-family:var(--font-serif); font-size:18px; color:var(--gold); margin-bottom:16px; }
+    .media-item { background:rgba(255,255,255,0.04); border:1px solid var(--glass-border); border-radius:10px; padding:14px 16px; margin-bottom:12px; }
+    .media-item h4 { font-size:14px; color:var(--text); margin-bottom:8px; }
+    .media-item p  { font-size:13px; color:var(--text-muted); line-height:1.5; }
+    .media-item iframe { width:100%; border-radius:8px; border:none; margin-top:8px; }
+    .media-item img { max-width:100%; border-radius:8px; margin-top:8px; }
+
+    /* DevTools Alert */
+    .devtools-overlay { position:fixed; inset:0; z-index:9998; background:rgba(0,0,0,0.85); backdrop-filter:blur(12px); display:flex; align-items:center; justify-content:center; }
+    .devtools-modal { background:rgba(14,19,34,0.98); border:1px solid var(--glass-border); border-radius:16px; padding:36px 32px; max-width:420px; text-align:center; }
+    .devtools-modal .dt-icon { font-size:42px; margin-bottom:12px; }
+    .devtools-modal .dt-title { font-family:var(--font-serif); font-size:22px; color:var(--gold); margin-bottom:12px; }
+    .devtools-modal .dt-msg { font-size:14px; color:var(--text-muted); line-height:1.7; margin-bottom:24px; }
+    .devtools-modal button { padding:10px 28px; border-radius:8px; background:linear-gradient(135deg,var(--gold),#a07830); border:none; color:#0c0f1a; font-weight:700; font-size:14px; cursor:pointer; }
+  </style>
+</head>
+<body>
+
+  <div id="loadingScreen">
+    <div class="spinner"></div>
+    <div class="loading-title">ARNOMA University</div>
+    <div class="loading-status" id="loadingStatus">Preparing your notes…</div>
+  </div>
+
+  <div id="errorPanel">
+    <div class="error-icon">🔒</div>
+    <div class="error-msg" id="errorMsg">An error occurred.</div>
+    <button onclick="window.close()" style="margin-top:20px; padding:10px 20px; background:rgba(196,164,95,0.15); border:1px solid rgba(196,164,95,0.4); border-radius:8px; color:var(--text); cursor:pointer; font-family:var(--font-sans); font-weight:500;">Close Tab</button>
+  </div>
+
+  <div id="topBar">
+    <div class="brand">ARNOMA</div>
+    <div class="note-title" id="noteTitle">—</div>
+    <div class="student-badge" id="studentBadge">—</div>
+  </div>
+
+  <div id="controlsBar">
+    <button class="ctrl-btn" id="btnPrev" onclick="changePage(-1)">◀ Prev</button>
+    <div id="pageInfo">— / —</div>
+    <button class="ctrl-btn" id="btnNext" onclick="changePage(1)">Next ▶</button>
+    <button class="ctrl-btn" onclick="changeZoom(-0.25)">−</button>
+    <div id="zoomDisplay">150%</div>
+    <button class="ctrl-btn" onclick="changeZoom(0.25)">+</button>
+    <button class="ctrl-btn" id="printBtn" onclick="printNote()">🖨 Print</button>
+  </div>
+
+  <div id="pdfArea"></div>
+
+  <button id="mediaPanelToggle" onclick="toggleMediaPanel()">🎬</button>
+
+  <div id="mediaPanel">
+    <div class="panel-title">📚 Study Resources</div>
+    <div id="mediaPanelContent">
+      <div class="media-item"><p style="text-align:center;padding:20px 0;">Loading…</p></div>
+    </div>
+  </div>
+
+  <script>
+    // ── Supabase ─────────────────────────────────────────────────
+    const SUPABASE_URL      = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+    const supabaseClient    = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // ── PDF.js ───────────────────────────────────────────────────
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+    // ── State ────────────────────────────────────────────────────
+    let pdfDoc          = null;
+    let currentPage     = 1;
+    let totalPages      = 0;
+    let zoom            = 1.5;
+    let currentStudent  = null;
+    let fallbackStudent = null;
+    let noteData        = null;
+    let isPrinting      = false;
+    let isHtmlNote      = false;   // true when content is an HTML note in an iframe
+    let htmlNoteIframe  = null;    // reference to the HTML-note iframe
+
+    // ── UI helpers ───────────────────────────────────────────────
+    function setStatus(msg) { const e = document.getElementById('loadingStatus'); if (e) e.textContent = msg; }
+    function showLoading(msg) { if (msg) setStatus(msg); document.getElementById('loadingScreen').style.display = 'flex'; }
+    function hideLoading() { document.getElementById('loadingScreen').style.display = 'none'; }
+    function showError(msg) {
+      hideLoading();
+      document.getElementById('errorPanel').style.display = 'flex';
+      document.getElementById('errorMsg').textContent = msg;
+    }
+
+    // ── Student helpers ──────────────────────────────────────────
+    function getStudentName()  { return currentStudent?.name  || fallbackStudent?.name  || 'Authorized Student'; }
+    function getStudentGroup() {
+      const raw = currentStudent?.group_letter || currentStudent?.group_name || currentStudent?.group
+                || fallbackStudent?.group_letter || fallbackStudent?.group_name || fallbackStudent?.group || '';
+      return raw.toString().trim().toUpperCase().replace(/^GROUP\s*/i,'').charAt(0);
+    }
+    function isAdmin() { return currentStudent?.role === 'admin'; }
+
+    // ── DevTools alert ───────────────────────────────────────────
+    function showCustomAlert() {
+      if (document.querySelector('.devtools-overlay')) return;
+      const o = document.createElement('div');
+      o.className = 'devtools-overlay';
+      o.innerHTML = `<div class="devtools-modal">
+        <div class="dt-icon">⚠️</div>
+        <div class="dt-title">ATTENTION</div>
+        <div class="dt-msg">This document belongs to <strong>ARNOMA</strong> and is provided exclusively for <strong>${getStudentName()}</strong>.<br><br>Kindly respect the copyright and do not share it.</div>
+        <button onclick="this.closest('.devtools-overlay').remove()">I Understand</button>
+      </div>`;
+      document.body.appendChild(o);
+    }
+
+    // ── Security ─────────────────────────────────────────────────
+    document.addEventListener('contextmenu', e => { e.preventDefault(); return false; }, true);
+    document.addEventListener('selectstart', e => { e.preventDefault(); return false; }, true);
+    document.addEventListener('dragstart',   e => { e.preventDefault(); return false; }, true);
+    document.addEventListener('copy',  e => { e.preventDefault(); e.clipboardData?.setData('text/plain',''); return false; }, true);
+    document.addEventListener('cut',   e => { e.preventDefault(); return false; }, true);
+    document.addEventListener('keydown', e => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && /^[scauSCAU]$/.test(e.key)) { e.preventDefault(); return false; }
+      if (mod && /^[pP]$/.test(e.key)) { e.preventDefault(); printNote(); return false; }
+      if (e.key === 'F12' || (mod && e.shiftKey)) { e.preventDefault(); return false; }
+    }, true);
+    let dtOpen = false;
+    setInterval(() => {
+      const open = window.outerWidth - window.innerWidth > 160 || window.outerHeight - window.innerHeight > 160;
+      if (open && !dtOpen) { dtOpen = true; showCustomAlert(); } else if (!open) dtOpen = false;
+    }, 3000);
+
+    // ── Payment date helpers (mirrors Calendar-NEW) ───────────────
+    function normalizeDate(v) {
+      if (!v) return null;
+      const s = String(v).trim();
+      if (!s || s === 'null') return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      if (s.includes('T')) return s.split('T')[0];
+      const sep = s.includes('/') ? '/' : s.includes('-') ? '-' : null;
+      if (sep) {
+        const p = s.split(sep).map(x => x.trim());
+        if (p.length === 3) {
+          if (p[0].length === 4) return `${p[0]}-${p[1].padStart(2,'0')}-${p[2].padStart(2,'0')}`;
+          if (p[2].length === 4) return `${p[2]}-${p[0].padStart(2,'0')}-${p[1].padStart(2,'0')}`;
+        }
+      }
+      return s;
+    }
+    function extractDates(record, fallback) {
+      if (!record) return [];
+      let raw = record.for_class_dates != null ? record.for_class_dates : record.for_class != null ? record.for_class : [];
+      if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch { raw = raw.split(','); } }
+      if (!Array.isArray(raw)) raw = [raw];
+      const normalized = raw.map(normalizeDate).filter(Boolean);
+      if (normalized.length === 0 && fallback) { const fb = normalizeDate(fallback); return fb ? [fb] : []; }
+      return normalized;
+    }
+    function buildPaidDates(manual, auto, credit) {
+      const s = new Set();
+      (manual || []).forEach(p => extractDates(p, p.date).forEach(d => s.add(d)));
+      (auto   || []).forEach(p => extractDates(p, p.date).forEach(d => s.add(d)));
+      (credit || []).forEach(p => { if (p.class_date) { const d = normalizeDate(p.class_date); if (d) s.add(d); } });
+      return s;
+    }
+
+    // ── Resolve current student ──────────────────────────────────
+    async function resolveStudent(parsedStudentId, nameParam, groupParam) {
+      // 1. URL params — portal always passes studentName; that is sufficient identity.
+      //    If studentId is also present we enrich with a DB lookup so permissions work.
+      if (nameParam) {
+        const gl = groupParam ? groupParam.toString().trim().toUpperCase().replace(/^GROUP\s*/i,'').charAt(0) : null;
+        fallbackStudent = { id: parsedStudentId || undefined, name: nameParam, group_name: groupParam, group: groupParam, group_letter: gl || undefined };
+        currentStudent  = fallbackStudent;
+
+        // Try to enrich with DB record so we have a real numeric id for permission checks
+        if (parsedStudentId) {
+          try {
+            const { data: rows } = await supabaseClient.from('students').select('*').eq('id', parsedStudentId).limit(1);
+            if (rows?.length > 0) { currentStudent = rows[0]; return; }
+          } catch {}
+        }
+        // No numeric id but we have name/group — enough to render, just skip id-based permission DB calls
+        return;
+      }
+
+      // 2. Impersonation token (admin viewing as student in same tab — rare for viewer)
+      const tok = sessionStorage.getItem('impersonation_token') || localStorage.getItem('impersonation_token');
+      if (tok) {
+        try {
+          const td = JSON.parse(tok);
+          if (td.studentId) {
+            const { data: rows } = await supabaseClient.from('students').select('*').eq('id', td.studentId).limit(1);
+            if (rows?.length > 0) { currentStudent = rows[0]; return; }
+          }
+        } catch {}
+      }
+
+      // 3. Auth session — with a small retry because new tabs can take a tick to restore the session
+      let session = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await supabaseClient.auth.getSession();
+        if (!error && data?.session) { session = data.session; break; }
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      if (!session) {
+        showError('Please log in to view this note.');
+        setTimeout(() => { window.location.href = 'index.html'; }, 2500);
+        throw new Error('Not authenticated');
+      }
+      const { data: rows, error: stuErr } = await supabaseClient.from('students').select('*').eq('email', session.user.email).limit(1);
+      if (stuErr || !rows?.length) { showError('Student profile not found.'); throw new Error('No student record'); }
+      currentStudent = rows[0];
+    }
+
+    // ── Note access check ────────────────────────────────────────
+    // Only used for FREE notes — checks if this student's group has access.
+    // For PAID notes, payment is the only gate (see checkPayment).
+    async function checkNoteGroupAccess(noteId, noteRecord) {
+      // Group access is fully enforced by student-portal.html before the viewer is opened.
+      // The viewer trusts the URL it received — no second group gate here.
+      return true;
+    }
+
+    // ── Payment check ────────────────────────────────────────────
+    // Returns true ONLY when the student has a paid/credit record for the exact class date.
+    // Mirrors the green-dot logic in Calendar-NEW.html and shouldUnlockNote() in student-portal.html.
+    async function checkPayment(checkDate) {
+      if (isAdmin()) return true;
+      if (!currentStudent?.id) return true;
+      const sid = currentStudent.id;
+      const [mr, ar, cr] = await Promise.all([
+        supabaseClient.from('payment_records').select('date,for_class_dates,for_class,status').eq('student_id', sid).eq('status','paid'),
+        supabaseClient.from('payments').select('date,for_class_dates,for_class').or(`student_id.eq.${sid},linked_student_id.eq.${sid}`),
+        supabaseClient.from('credit_payments').select('class_date').eq('student_id', sid)
+      ]);
+      const paid = buildPaidDates(mr?.data || [], ar?.data || [], cr?.data || []);
+      // Exact date match required — green dot = paid, no dot = locked
+      if (checkDate && paid.has(checkDate)) return true;
+      // No exact match → locked (red dot or no dot)
+      return false;
+    }
+
+    // ── Resolve PDF URL (storage path → signed URL) ──────────────
+    // The 'student-notes' bucket is PRIVATE — must use createSignedUrl, not getPublicUrl.
+    async function resolveURL(raw) {
+      if (!raw) throw new Error('No PDF URL provided');
+      // Already a full https URL — use as-is (e.g. already signed, or external link)
+      if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+      // Storage path — generate a 1-hour signed URL
+      const cleanPath = raw.replace(/^\/+/, '');
+      const { data, error } = await supabaseClient.storage
+        .from('student-notes')
+        .createSignedUrl(cleanPath, 3600);
+      if (error || !data?.signedUrl) throw new Error('Could not generate access link for this note. Please try again.');
+      return data.signedUrl;
+    }
+
+    // ── Watermark ────────────────────────────────────────────────
+    function drawWatermark(canvas, printDate = null) {
+      const ctx   = canvas.getContext('2d');
+      const name  = getStudentName();
+      const group = getStudentGroup();
+      const dateLabel = printDate ? `Printed ${printDate}` : null;
+      const lines = ['ARNOMA University', name, group ? `Group ${group}` : '', dateLabel].filter(Boolean);
+      const fs    = Math.max(14, Math.round(canvas.width * 0.028));
+      const lineH = fs * 1.6;
+      const blockH = lines.length * lineH;
+      // Tighter tile grid for print (more watermark instances), wider for screen
+      const tileW = printDate ? Math.round(canvas.width  * 0.32) : Math.round(canvas.width  * 0.42);
+      const tileH = printDate ? Math.round(canvas.height * 0.22) : Math.round(canvas.height * 0.28);
+      ctx.save();
+      ctx.globalAlpha  = printDate ? 0.28 : 0.18;   // heavier on print
+      ctx.fillStyle    = '#c4a45f';
+      ctx.font         = `600 ${fs}px Inter, Arial, sans-serif`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      for (let y = -tileH; y < canvas.height + tileH; y += tileH) {
+        for (let x = -tileW; x < canvas.width + tileW; x += tileW) {
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate(-Math.PI / 7);
+          lines.forEach((ln, i) => {
+            ctx.fillText(ln, 0, (i - (lines.length - 1) / 2) * lineH);
+          });
+          ctx.restore();
+        }
+      }
+      ctx.restore();
+    }
+
+    // ── PDF render ───────────────────────────────────────────────
+    async function loadAndRenderPDF(url) {
+      if (url.split('?')[0].toLowerCase().endsWith('.html')) {
+        return loadAndRenderHTML(url);
+      }
+
+      setStatus('Rendering pages…');
+      pdfDoc     = await pdfjsLib.getDocument({ url, withCredentials: false }).promise;
+      totalPages = pdfDoc.numPages;
+      updatePageUI();
+
+      const area = document.getElementById('pdfArea');
+      area.innerHTML = '';
+
+      for (let i = 1; i <= totalPages; i++) {
+        setStatus(`Rendering page ${i} of ${totalPages}…`);
+        await renderPage(i, area);
+      }
+
+      hideLoading();
+      document.getElementById('controlsBar').style.display = 'flex';
+      document.getElementById('mediaPanelToggle').style.display = 'flex';
+    }
+
+    async function loadAndRenderHTML(url) {
+      setStatus('Loading Document…');
+      isHtmlNote     = true;
+      htmlNoteIframe = null;
+      
+      const area = document.getElementById('pdfArea');
+      area.innerHTML = '';
+      area.style.display = 'block'; // Remove flex centering
+      area.style.padding = '0';
+      area.style.overflow = 'hidden';
+      
+      // Hide PDF controls (Prev/Next, Zoom) — not needed for HTML notes
+      const hideIds = ['btnPrev','btnNext','pageInfo','zoomDisplay'];
+      hideIds.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+      // Hide the zoom +/- buttons (they have no id — hide all ctrl-btn except Print)
+      document.querySelectorAll('#controlsBar .ctrl-btn:not(#printBtn)').forEach(b => b.style.display = 'none');
+      
+      const wrapper = document.createElement('div');
+      wrapper.className = 'html-page-wrapper';
+      wrapper.style.position = 'relative';
+      wrapper.style.width = '100%';
+      wrapper.style.height = '100%';
+      wrapper.style.background = 'var(--bg)';
+      
+      const iframe = document.createElement('iframe');
+      iframe.src = url;
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.style.border = 'none';
+      htmlNoteIframe = iframe;   // save reference for print
+      
+      // Add secure overlay for watermarking via pattern
+      const watermarkOverlay = document.createElement('div');
+      watermarkOverlay.style.position = 'absolute';
+      watermarkOverlay.style.top = '0';
+      watermarkOverlay.style.left = '0';
+      watermarkOverlay.style.right = '0';
+      watermarkOverlay.style.bottom = '0';
+      watermarkOverlay.style.pointerEvents = 'none';
+      watermarkOverlay.style.zIndex = '100';
+      watermarkOverlay.style.display = 'flex';
+      watermarkOverlay.style.flexWrap = 'wrap';
+      watermarkOverlay.style.alignContent = 'center';
+      watermarkOverlay.style.justifyContent = 'center';
+      watermarkOverlay.style.overflow = 'hidden';
+      watermarkOverlay.style.opacity = '0.08';
+      
+      const p = new URLSearchParams(window.location.search);
+      const studentNameText = p.get('studentName') || 'Guest';
+      const studentGroupText = p.get('studentGroup') || '';
+      const wText = `ARNOMA ${studentNameText} Group ${studentGroupText}`;
+      
+      let wHtml = '';
+      for (let i = 0; i < 40; i++) {
+         wHtml += `<span style="font-size:26px; font-weight:bold; color:#000; transform: rotate(-30deg); display:inline-block; padding: 40px;">${wText}</span>`;
+      }
+      watermarkOverlay.innerHTML = wHtml;
+      
+      wrapper.appendChild(iframe);
+      wrapper.appendChild(watermarkOverlay);
+      area.appendChild(wrapper);
+      
+      iframe.onload = () => {
+        hideLoading();
+        document.getElementById('controlsBar').style.display = 'flex';
+        document.getElementById('mediaPanelToggle').style.display = 'flex';
+      };
+    }
+
+    async function renderPage(pageNum, container) {
+      const page     = await pdfDoc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: zoom });
+      const wrapper  = document.createElement('div');
+      wrapper.className = 'pdf-page-wrapper';
+      wrapper.id = `page-${pageNum}`;
+
+      const canvas  = document.createElement('canvas');
+      canvas.width  = viewport.width;
+      canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      drawWatermark(canvas);
+      wrapper.appendChild(canvas);
+
+      // Transparent shield prevents right-click > save on canvas
+      const shield = document.createElement('div');
+      shield.className = 'page-shield';
+      wrapper.appendChild(shield);
+
+      if (container) container.appendChild(wrapper);
+      return wrapper;
+    }
+
+    async function reRenderAll() {
+      if (!pdfDoc) return;
+      const area = document.getElementById('pdfArea');
+      area.innerHTML = '';
+      for (let i = 1; i <= totalPages; i++) await renderPage(i, area);
+    }
+
+    // ── Page / zoom controls ─────────────────────────────────────
+    function updatePageUI() {
+      document.getElementById('pageInfo').textContent = `${currentPage} / ${totalPages}`;
+      document.getElementById('btnPrev').disabled = currentPage <= 1;
+      document.getElementById('btnNext').disabled = currentPage >= totalPages;
+    }
+    function changePage(delta) {
+      const t = currentPage + delta;
+      if (t < 1 || t > totalPages) return;
+      currentPage = t; updatePageUI();
+      document.getElementById(`page-${currentPage}`)?.scrollIntoView({ behavior:'smooth', block:'start' });
+    }
+    async function changeZoom(delta) {
+      zoom = Math.min(4, Math.max(0.5, zoom + delta));
+      document.getElementById('zoomDisplay').textContent = Math.round(zoom * 100) + '%';
+      await reRenderAll();
+    }
+
+    // ── Print ────────────────────────────────────────────────────
+    async function printNote() {
+      if (isPrinting) return;
+      if (isHtmlNote) { printHtmlNote(); return; }
+      if (!pdfDoc) return;
+      isPrinting = true;
+      const btn = document.getElementById('printBtn');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparing…'; }
+      try {
+        // Format print date: "March 31, 2026"
+        const printDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        const SCALE = 2.5;
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;';
+        document.body.appendChild(frame);
+        const doc = frame.contentDocument;
+        doc.open();
+        doc.write('<!DOCTYPE html><html><head><style>*{margin:0;padding:0;box-sizing:border-box}body{background:#fff}.p{page-break-after:always}img{display:block;width:100%}@media print{@page{margin:0}}</style></head><body></body></html>');
+        doc.close();
+        for (let i = 1; i <= pdfDoc.numPages; i++) {
+          const pg  = await pdfDoc.getPage(i);
+          const vp  = pg.getViewport({ scale: SCALE });
+          const cv  = document.createElement('canvas');
+          cv.width  = vp.width; cv.height = vp.height;
+          await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+          drawWatermark(cv, printDate);
+          const img = doc.createElement('img');
+          img.src = cv.toDataURL('image/jpeg', 0.92);
+          const div = doc.createElement('div'); div.className = 'p';
+          div.appendChild(img); doc.body.appendChild(div);
+        }
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+        const cleanup = () => {
+          if (frame.parentNode) document.body.removeChild(frame);
+          isPrinting = false;
+          if (btn) { btn.disabled = false; btn.textContent = '🖨 Print'; }
+        };
+        frame.contentWindow.onafterprint = cleanup;
+        setTimeout(cleanup, 2000);
+      } catch (err) {
+        console.error('Print error:', err);
+        isPrinting = false;
+        if (btn) { btn.disabled = false; btn.textContent = '🖨 Print'; }
+        alert('Print failed. Please try again.');
+      }
+    }
+
+    // ── Print HTML Note ──────────────────────────────────────────
+    // Grabs the HTML note content from the iframe, strips the dark theme,
+    // injects a clean white/black print stylesheet and a dense CSS watermark
+    // (ARNOMA · student name · print date), then opens the browser print dialog.
+    function printHtmlNote() {
+      if (isPrinting || !htmlNoteIframe) return;
+      isPrinting = true;
+      const btn = document.getElementById('printBtn');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Preparing…'; }
+
+      try {
+        const studentName = getStudentName();
+        const noteTitle   = document.getElementById('noteTitle')?.textContent || 'Class Notes';
+        const printDate   = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        const wmText      = `ARNOMA  ·  ${studentName}  ·  ${printDate}`;
+
+        // Get the note body HTML from the iframe (same-origin)
+        let bodyHtml = '';
+        try {
+          const iDoc = htmlNoteIframe.contentDocument || htmlNoteIframe.contentWindow?.document;
+          if (iDoc && iDoc.body) {
+            bodyHtml = iDoc.body.innerHTML;
+          }
+        } catch(e) {
+          console.warn('Could not read iframe content — cross-origin?', e);
+        }
+
+        // Build a clean white-paper print window
+        const printWindow = window.open('', '_blank', 'width=900,height=700');
+        if (!printWindow) {
+          isPrinting = false;
+          if (btn) { btn.disabled = false; btn.textContent = '🖨 Print'; }
+          alert('Pop-up blocked. Please allow pop-ups for this site and try again.');
+          return;
+        }
+
+        printWindow.document.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>${noteTitle} — Print</title>
+  <style>
+    /* ── Reset all dark-theme variables to white paper ── */
+    :root {
+      --bg:#ffffff; --surface:#f8f8f8; --surface2:#f0f0f0;
+      --border:#d0d0d0; --gold:#8a6a1a; --gold-light:#7a5c10;
+      --text:#111111; --text-muted:#444444; --text-dim:#666666;
+      --red:#b91c1c; --green:#166534; --blue:#1d4ed8;
+      --purple:#7e22ce; --orange:#c2410c; --yellow:#92400e; --radius:8px;
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body {
+      background:#fff; color:#111;
+      font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      font-size:13px; line-height:1.7;
+      padding:32px 40px 80px; max-width:860px; margin:0 auto;
+    }
+
+    /* ── Print watermark — CSS only, repeating diagonal ── */
+    body::before {
+      content:'';
+      position:fixed; top:0; left:0; right:0; bottom:0;
+      background-image: repeating-linear-gradient(
+        -40deg,
+        transparent 0px,
+        transparent 80px,
+        rgba(0,0,0,0.04) 80px,
+        rgba(0,0,0,0.04) 82px
+      );
+      pointer-events:none; z-index:9999;
+    }
+    .arnoma-watermark {
+      position:fixed; top:0; left:0; right:0; bottom:0;
+      display:flex; flex-wrap:wrap; align-content:flex-start;
+      gap:0; overflow:hidden; pointer-events:none; z-index:9998;
+    }
+    .arnoma-watermark span {
+      display:inline-block;
+      font-size:11px; font-weight:700; letter-spacing:0.5px;
+      color:rgba(0,0,0,0.09);
+      transform:rotate(-38deg);
+      padding:28px 18px;
+      white-space:nowrap;
+      font-family:'Inter',Arial,sans-serif;
+    }
+
+    /* ── Print header strip ── */
+    .print-header {
+      display:flex; justify-content:space-between; align-items:flex-end;
+      border-bottom:2px solid #111; padding-bottom:10px; margin-bottom:24px;
+    }
+    .print-header .ph-title { font-size:18px; font-weight:800; color:#111; }
+    .print-header .ph-meta  { font-size:10px; color:#555; text-align:right; line-height:1.6; }
+
+    /* ── Force dark-theme note elements → black on white ── */
+    .note-tag { color:#8a6a1a !important; background:rgba(138,106,26,0.08) !important;
+                border-color:rgba(138,106,26,0.3) !important; }
+    h1  { color:#111 !important; }
+    h2  { color:#7a5c10 !important; border-color:#ccc !important; }
+    h3  { color:#1d4ed8 !important; }
+    h4  { color:#333 !important; }
+    .card        { background:#f9f9f9 !important; border-color:#ccc !important; }
+    .card.gold   { background:rgba(138,106,26,0.05) !important; border-color:rgba(138,106,26,0.35) !important; }
+    .card.red    { background:rgba(185,28,28,0.04)  !important; border-color:rgba(185,28,28,0.3)   !important; }
+    .card.blue   { background:rgba(29,78,216,0.04)  !important; border-color:rgba(29,78,216,0.3)   !important; }
+    .card.green  { background:rgba(22,101,52,0.04)  !important; border-color:rgba(22,101,52,0.3)   !important; }
+    .card.purple { background:rgba(126,34,206,0.04) !important; border-color:rgba(126,34,206,0.3)  !important; }
+    .badge-red    { color:#b91c1c !important; background:rgba(185,28,28,0.08)  !important; border-color:rgba(185,28,28,0.25)   !important; }
+    .badge-blue   { color:#1d4ed8 !important; background:rgba(29,78,216,0.08)  !important; border-color:rgba(29,78,216,0.25)   !important; }
+    .badge-gold   { color:#8a6a1a !important; background:rgba(138,106,26,0.08) !important; border-color:rgba(138,106,26,0.25)  !important; }
+    .badge-green  { color:#166534 !important; background:rgba(22,101,52,0.08)  !important; border-color:rgba(22,101,52,0.25)   !important; }
+    .badge-purple { color:#7e22ce !important; background:rgba(126,34,206,0.08) !important; border-color:rgba(126,34,206,0.25)  !important; }
+    .badge-orange { color:#c2410c !important; background:rgba(194,65,12,0.08)  !important; border-color:rgba(194,65,12,0.25)   !important; }
+    .mini-table th { background:#ececec !important; color:#111 !important; }
+    .mini-table td { border-color:#ddd !important; color:#111 !important; }
+    .mini-table tr:nth-child(even) td { background:#f5f5f5 !important; }
+    .alert        { background:#f7f7f7 !important; border-color:#bbb !important; }
+    .alert-title  { color:#111 !important; }
+    .pill-row .pill { background:#efefef !important; color:#111 !important; border-color:#ccc !important; }
+    /* Hide scripts & protection overlays in print */
+    script, noscript, .page-shield, #acnhs-guard-hide { display:none !important; }
+
+    @media print {
+      @page { margin:15mm 12mm; }
+      body { padding:0; }
+      .arnoma-watermark { position:fixed; }
+      body::before { position:fixed; }
+    }
+  </style>
+</head>
+<body>
+  <div class="arnoma-watermark" id="wmContainer"></div>
+  <div class="print-header">
+    <div class="ph-title">${noteTitle}</div>
+    <div class="ph-meta">
+      <strong>ARNOMA University</strong><br>
+      ${studentName}<br>
+      Printed ${printDate}
+    </div>
+  </div>
+  ${bodyHtml || '<p style="color:#666;text-align:center;padding:40px 0;">Note content could not be loaded for printing.</p>'}
+  <script>
+    // Fill watermark tiles
+    (function(){
+      var c = document.getElementById('wmContainer');
+      var t = ${JSON.stringify(wmText)};
+      var n = 180;
+      var h = '';
+      for(var i=0;i<n;i++) h += '<span>'+t+'</span>';
+      c.innerHTML = h;
+      // Auto-print after brief delay to allow render
+      setTimeout(function(){
+        window.focus();
+        window.print();
+        setTimeout(function(){ window.close(); }, 1500);
+      }, 400);
+    })();
+  <\/script>
+</body>
+</html>`);
+        printWindow.document.close();
+
+        // Re-enable button after a delay (print window has taken over)
+        setTimeout(() => {
+          isPrinting = false;
+          if (btn) { btn.disabled = false; btn.textContent = '🖨 Print'; }
+        }, 3000);
+
+      } catch (err) {
+        console.error('HTML print error:', err);
+        isPrinting = false;
+        if (btn) { btn.disabled = false; btn.textContent = '🖨 Print'; }
+        alert('Print failed. Please try again.');
+      }
+    }
+
+    // ── Media panel ──────────────────────────────────────────────
+    function toggleMediaPanel() { document.getElementById('mediaPanel').classList.toggle('open'); }
+    document.addEventListener('click', e => {
+      const panel  = document.getElementById('mediaPanel');
+      const toggle = document.getElementById('mediaPanelToggle');
+      if (panel?.classList.contains('open') && !panel.contains(e.target) && !toggle.contains(e.target)) panel.classList.remove('open');
+    });
+
+    async function loadMediaContent() {
+      const container = document.getElementById('mediaPanelContent');
+      if (!noteData) {
+        container.innerHTML = '<div class="media-item"><p style="text-align:center;padding:20px 0;color:var(--text-muted);">No resources available.</p></div>';
+        return;
+      }
+      const accessMode  = noteData.accessMode || 'unknown';
+      const isFreeAccess = !isAdmin() && (accessMode === 'free-note' || accessMode === 'free-grant');
+      if (isFreeAccess) {
+        container.innerHTML = '<div class="media-item"><p style="text-align:center;padding:20px 0;color:var(--text-muted);">🔒 Videos are only available to paid students in approved groups.</p></div>';
+        return;
+      }
+      if (!isAdmin()) {
+        const allowed = noteData.video_allowed_groups;
+        if (allowed?.length > 0) {
+          const sg = getStudentGroup();
+          const ok = allowed.some(g => g.toString().trim().toUpperCase().replace(/^GROUP\s*/i,'').charAt(0) === sg);
+          if (!ok) {
+            container.innerHTML = '<div class="media-item"><p style="text-align:center;padding:20px 0;color:var(--text-muted);">🔒 Media not available for your group.</p></div>';
+            return;
+          }
+        }
+      }
+      try {
+        const { data: items, error } = await supabaseClient.from('pdf_media').select('*').eq('note_id', noteData.id).order('created_at', { ascending: true });
+        if (error) throw error;
+        let html = '';
+        (items || []).forEach(item => {
+          if (item.type === 'image') {
+            html += `<div class="media-item"><h4>📸 ${item.title}</h4>${item.description ? `<p>${item.description}</p>` : ''}<img src="${item.url}" alt="${item.title}"></div>`;
+          } else if (item.type === 'video') {
+            const src = embedURL(item.url);
+            html += `<div class="media-item"><h4>🎬 ${item.title}</h4>${item.description ? `<p>${item.description}</p>` : ''}<iframe src="${src}" height="180" allowfullscreen></iframe></div>`;
+          } else if (item.type === 'link') {
+            html += `<div class="media-item"><h4>🔗 ${item.title}</h4>${item.description ? `<p>${item.description}</p>` : ''}<p style="margin-top:8px"><a href="${item.url}" target="_blank" rel="noopener" style="color:var(--gold)">Open →</a></p></div>`;
+          }
+        });
+        if (noteData.video_url) {
+          html += `<div class="media-item"><h4>🎬 ${noteData.video_title || noteData.title || 'Study Video'}</h4><iframe src="${embedURL(noteData.video_url)}" height="180" allowfullscreen></iframe></div>`;
+        }
+        container.innerHTML = html || '<div class="media-item"><p style="text-align:center;padding:20px 0;color:var(--text-muted);">No additional media for this note.</p></div>';
+      } catch (err) {
+        console.error('Media error:', err);
+        container.innerHTML = '<div class="media-item"><p style="text-align:center;padding:20px 0;color:var(--text-muted);">Could not load media.</p></div>';
+      }
+    }
+
+    function embedURL(url) {
+      if (!url) return '';
+      const yt = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([A-Za-z0-9_-]{11})/);
+      if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
+      const vm = url.match(/vimeo\.com\/(\d+)/);
+      if (vm) return `https://player.vimeo.com/video/${vm[1]}`;
+      return url;
+    }
+
+    // ── MAIN INIT ────────────────────────────────────────────────
+    async function init() {
+      // Guard: file:// blocks all network requests — must be served via https
+      if (window.location.protocol === 'file:') {
+        showError('⚠️ This viewer must be accessed via the website URL (https://), not as a local file. Please open it from the student portal.');
+        return;
+      }
+      try {
+        const p              = new URLSearchParams(window.location.search);
+        const pdfUrl         = p.get('url');
+        const noteId         = p.get('note');
+        const titleParam     = p.get('title') || 'Class Notes';
+        const nameParam      = p.get('studentName');
+        const groupParam     = p.get('studentGroup');
+        const classDate      = p.get('classDate');
+        const studentIdParam = p.get('studentId');
+        const parsedId       = studentIdParam && !isNaN(Number(studentIdParam)) ? Number(studentIdParam) : null;
+
+        if (!pdfUrl && !noteId) { showError('No note specified.'); return; }
+
+        // 1. Resolve viewer identity
+        setStatus('Verifying identity…');
+        await resolveStudent(parsedId, nameParam, groupParam);
+        if (!currentStudent) { showError('Could not identify viewer.'); return; }
+
+        document.getElementById('studentBadge').textContent = getStudentName();
+        document.getElementById('noteTitle').textContent    = titleParam.replace(/\.pdf$/i, '');
+
+        // 2. URL mode (new notes system)
+        if (pdfUrl) {
+          if (noteId) {
+            setStatus('Loading note details…');
+            const { data: note, error } = await supabaseClient.from('student_notes').select('*').eq('id', noteId).single();
+            if (error || !note) { showError('Note not found.'); return; }
+            document.getElementById('noteTitle').textContent = (note.title || titleParam).replace(/\.pdf$/i, '');
+
+            if (!isAdmin()) {
+              if (note.requires_payment) {
+                setStatus('Verifying payment…');
+                const checkDate = classDate || (note.class_date ? note.class_date.split('T')[0] : null);
+                if (!(await checkPayment(checkDate))) { showError('🔒 Payment required to access this note.'); return; }
+              } else {
+                // Free note — check group access
+                if (!(await checkNoteGroupAccess(noteId, note))) {
+                  showError('� This note is not available for your group.'); return;
+                }
+              }
+              const accessMode = note.requires_payment ? 'paid' : 'free-note';
+              noteData = { ...note, accessMode };
+            } else {
+              noteData = { ...note, accessMode: 'paid' };
+            }
+          } else {
+            noteData = { title: titleParam, class_date: null, accessMode: 'paid' };
+          }
+
+          setStatus('Fetching PDF…');
+          const resolvedUrl = await resolveURL(pdfUrl);
+          await Promise.all([ loadAndRenderPDF(resolvedUrl), loadMediaContent() ]);
+          return;
+        }
+
+        // 3. Note-ID only mode (legacy / admin shortcut)
+        if (noteId) {
+          setStatus('Loading note…');
+          const { data: note, error } = await supabaseClient.from('student_notes').select('*').eq('id', noteId).single();
+          if (error || !note) { showError('Note not found.'); return; }
+
+          if (!isAdmin()) {
+            const sg = getStudentGroup();
+            const ng = (note.group_letter || note.group_name || note.group || '').toString().trim().toUpperCase().replace(/^GROUP\s*/i,'');
+            // Group check removed — portal enforces group access before opening viewer
+            if (note.requires_payment) {
+              setStatus('Verifying payment…');
+              const cd = note.class_date ? note.class_date.split('T')[0] : null;
+              if (!(await checkPayment(cd))) { showError('🔒 Payment required to access this note.'); return; }
+            }
+          }
+
+          document.getElementById('noteTitle').textContent = (note.title || 'Class Notes').replace(/\.pdf$/i, '');
+          noteData = { ...note, accessMode: note.requires_payment ? 'paid' : 'free-note' };
+
+          setStatus('Fetching PDF…');
+          const resolvedUrl = await resolveURL(note.pdf_url);
+          await Promise.all([ loadAndRenderPDF(resolvedUrl), loadMediaContent() ]);
+        }
+
+      } catch (err) {
+        console.error('Init error:', err);
+        if (!document.getElementById('errorPanel').style.display.includes('flex')) showError('Failed to load note: ' + (err.message || 'Unknown error'));
+      }
+    }
+
+    window.addEventListener('unhandledrejection', e => {
+      console.error('Unhandled rejection:', e.reason);
+      if (!document.getElementById('errorPanel').style.display.includes('flex')) showError('An unexpected error occurred. Please refresh.');
+      e.preventDefault();
+    });
+
+    init();
+  </script>
+</body>
+</html>

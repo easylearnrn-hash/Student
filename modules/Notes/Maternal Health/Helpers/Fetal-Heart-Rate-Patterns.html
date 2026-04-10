@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Fetal Heart Rate Patterns — VEAL CHOP</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html, body {
+      width: 100%; min-height: 100%;
+      background: #000b00;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: #c8ffc8;
+    }
+
+    /* ── Page header ── */
+    .page-header {
+      text-align: center;
+      padding: 28px 20px 10px;
+    }
+
+    .page-header .eyebrow {
+      font-size: 0.68rem;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: rgba(0,255,120,0.55);
+      margin-bottom: 8px;
+    }
+
+    .page-header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #2bff6b;
+      letter-spacing: 0.04em;
+      text-shadow: 0 0 18px rgba(43,255,107,0.45);
+      margin-bottom: 6px;
+    }
+
+    .page-header .subtitle {
+      font-size: 0.82rem;
+      color: rgba(0,255,120,0.50);
+      letter-spacing: 0.08em;
+    }
+
+    /* ── Mnemonic banner ── */
+    .mnemonic {
+      display: flex;
+      justify-content: center;
+      gap: 0;
+      margin: 22px auto 28px;
+      max-width: 820px;
+      border: 1px solid rgba(43,255,107,0.20);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .mnemonic-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 14px 10px;
+      border-right: 1px solid rgba(43,255,107,0.15);
+      gap: 4px;
+    }
+
+    .mnemonic-col:last-child { border-right: none; }
+
+    .mnemonic-col .letter {
+      font-size: 1.9rem;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .mnemonic-col .word {
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.10em;
+      text-transform: uppercase;
+    }
+
+    .mnemonic-col .arrow {
+      font-size: 0.80rem;
+      color: rgba(43,255,107,0.40);
+      margin: 2px 0;
+    }
+
+    .mnemonic-col .cause {
+      font-size: 0.68rem;
+      color: rgba(200,255,200,0.65);
+      text-align: center;
+      letter-spacing: 0.04em;
+    }
+
+    /* color coding */
+    .col-v  { background: rgba(43,255,107,0.05); }
+    .col-e  { background: rgba(255,200,43,0.05); }
+    .col-a  { background: rgba(43,180,255,0.05); }
+    .col-l  { background: rgba(255,80,80,0.05);  }
+
+    .col-v  .letter { color: #2bff6b; }
+    .col-e  .letter { color: #ffc82b; }
+    .col-a  .letter { color: #2bb4ff; }
+    .col-l  .letter { color: #ff5050; }
+
+    .col-v  .word { color: rgba(43,255,107,0.75); }
+    .col-e  .word { color: rgba(255,200,43,0.75); }
+    .col-a  .word { color: rgba(43,180,255,0.75); }
+    .col-l  .word { color: rgba(255,80,80,0.75);  }
+
+    /* ── Strip panels ── */
+    .strips {
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .panel {
+      border-top: 1px solid rgba(43,255,107,0.12);
+      position: relative;
+    }
+
+    .panel-label {
+      position: absolute;
+      top: 10px;
+      left: 16px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      pointer-events: none;
+    }
+
+    .panel-label .name {
+      font-size: 1rem;
+      font-weight: 700;
+      text-shadow: 0 0 10px currentColor;
+      letter-spacing: 0.06em;
+    }
+
+    .panel-label .mnemonic-tag {
+      font-size: 0.62rem;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      opacity: 0.70;
+    }
+
+    .panel-label .cause-tag {
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      opacity: 0.60;
+    }
+
+    /* panel accent colors */
+    .panel-v .panel-label .name  { color: #2bff6b; }
+    .panel-v .panel-label .mnemonic-tag { color: #2bff6b; }
+    .panel-v .panel-label .cause-tag    { color: #c8ffc8; }
+
+    .panel-e .panel-label .name  { color: #ffc82b; }
+    .panel-e .panel-label .mnemonic-tag { color: #ffc82b; }
+    .panel-e .panel-label .cause-tag    { color: #fff0c8; }
+
+    .panel-a .panel-label .name  { color: #2bb4ff; }
+    .panel-a .panel-label .mnemonic-tag { color: #2bb4ff; }
+    .panel-a .panel-label .cause-tag    { color: #c8e8ff; }
+
+    .panel-l .panel-label .name  { color: #ff5050; }
+    .panel-l .panel-label .mnemonic-tag { color: #ff5050; }
+    .panel-l .panel-label .cause-tag    { color: #ffc8c8; }
+
+    canvas { display: block; width: 100%; height: 190px; }
+
+    /* ── Footer ── */
+    .page-footer {
+      text-align: center;
+      padding: 18px 20px 28px;
+      font-size: 0.68rem;
+      color: rgba(0,255,120,0.28);
+      letter-spacing: 0.08em;
+      border-top: 1px solid rgba(43,255,107,0.10);
+    }
+  </style>
+</head>
+<body>
+
+<!-- Page Header -->
+<div class="page-header">
+  <div class="eyebrow">Fetal Monitoring · CTG Interpretation</div>
+  <h1>Fetal Heart Rate Patterns</h1>
+  <div class="subtitle">FHR baseline: 110–160 bpm · Standard 3 cm/min paper speed</div>
+</div>
+
+<!-- VEAL CHOP Mnemonic Banner -->
+<div class="mnemonic">
+  <div class="mnemonic-col col-v">
+    <span class="letter">V</span>
+    <span class="word">Variable</span>
+    <span class="arrow">↕</span>
+    <span class="cause">C — Cord compression</span>
+  </div>
+  <div class="mnemonic-col col-e">
+    <span class="letter">E</span>
+    <span class="word">Early</span>
+    <span class="arrow">↕</span>
+    <span class="cause">H — Head compression</span>
+  </div>
+  <div class="mnemonic-col col-a">
+    <span class="letter">A</span>
+    <span class="word">Acceleration</span>
+    <span class="arrow">↕</span>
+    <span class="cause">O — Ok / Oxygenated</span>
+  </div>
+  <div class="mnemonic-col col-l">
+    <span class="letter">L</span>
+    <span class="word">Late</span>
+    <span class="arrow">↕</span>
+    <span class="cause">P — Placental insufficiency</span>
+  </div>
+</div>
+
+<!-- Strips -->
+<div class="strips">
+
+  <!-- 1. Variable Deceleration -->
+  <div class="panel panel-v">
+    <div class="panel-label">
+      <span class="name">Variable Deceleration</span>
+      <span class="mnemonic-tag">V — Cord Compression</span>
+      <span class="cause-tag">Abrupt onset &lt;30 sec · Unpredictable timing · Mirror varies</span>
+    </div>
+    <canvas id="c-variable"></canvas>
+  </div>
+
+  <!-- 2. Early Deceleration -->
+  <div class="panel panel-e">
+    <div class="panel-label">
+      <span class="name">Early Deceleration</span>
+      <span class="mnemonic-tag">E — Head Compression (Vagal)</span>
+      <span class="cause-tag">Gradual onset · Mirrors contraction · Nadir at peak of contraction</span>
+    </div>
+    <canvas id="c-early"></canvas>
+  </div>
+
+  <!-- 3. Acceleration -->
+  <div class="panel panel-a">
+    <div class="panel-label">
+      <span class="name">Acceleration</span>
+      <span class="mnemonic-tag">A — Oxygenated / Reassuring</span>
+      <span class="cause-tag">≥15 bpm above baseline · ≥15 sec · Fetal movement reactive</span>
+    </div>
+    <canvas id="c-accel"></canvas>
+  </div>
+
+  <!-- 4. Late Deceleration -->
+  <div class="panel panel-l">
+    <div class="panel-label">
+      <span class="name">Late Deceleration</span>
+      <span class="mnemonic-tag">L — Placental Insufficiency (Uteroplacental)</span>
+      <span class="cause-tag">Gradual onset · Begins after peak of contraction · Non-reassuring</span>
+    </div>
+    <canvas id="c-late"></canvas>
+  </div>
+
+</div>
+
+<div class="page-footer">
+  Fetal Heart Rate Monitoring · VEAL CHOP Mnemonic · Standard CTG Interpretation
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  SHARED SETUP
+// ═══════════════════════════════════════════════════════════════
+const DPR      = window.devicePixelRatio || 1;
+const MM       = 3.78;
+const CH       = 190;                      // canvas height px
+const CW       = window.innerWidth;
+const STRIP_S  = 6;                        // seconds shown
+const SPEED    = CW / STRIP_S;            // px per second
+
+// FHR baseline sits at 120–160 bpm center
+const BASE_BPM = 140;
+// We'll show the FHR waveform as a smooth line on a CTG-style grid
+// Y-axis: 60 bpm (top) → 210 bpm (bottom), so 150 bpm range in CH px
+const BPM_MIN  = 60;
+const BPM_MAX  = 210;
+const BPM_RANGE = BPM_MAX - BPM_MIN;
+
+function bpmToY(bpm) {
+  return CH * (1 - (bpm - BPM_MIN) / BPM_RANGE);
+}
+
+// ── CTG grid with BPM axis labels ────────────────────────────
+function drawCTGGrid(ctx, accentColor) {
+  ctx.fillStyle = '#000b00';
+  ctx.fillRect(0, 0, CW, CH);
+
+  // Minor grid every 10 bpm horizontal
+  ctx.strokeStyle = 'rgba(0,160,0,0.10)';
+  ctx.lineWidth = 0.6;
+  for (let bpm = BPM_MIN; bpm <= BPM_MAX; bpm += 10) {
+    const y = bpmToY(bpm);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke();
+  }
+  // Minor vertical every 0.5 s
+  const minorX = SPEED * 0.5;
+  for (let x = 0; x <= CW; x += minorX) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke();
+  }
+
+  // Major grid every 30 bpm + every 1 s
+  ctx.strokeStyle = accentColor ? `rgba(${accentColor},0.18)` : 'rgba(0,255,120,0.18)';
+  ctx.lineWidth = 1;
+  for (let bpm = BPM_MIN; bpm <= BPM_MAX; bpm += 30) {
+    const y = bpmToY(bpm);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(CW, y); ctx.stroke();
+  }
+  const majX = SPEED * 1;
+  for (let x = 0; x <= CW; x += majX) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, CH); ctx.stroke();
+  }
+
+  // Dashed baseline at 140 bpm
+  ctx.strokeStyle = 'rgba(0,255,80,0.30)';
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([6, 4]);
+  const baseY = bpmToY(BASE_BPM);
+  ctx.beginPath(); ctx.moveTo(0, baseY); ctx.lineTo(CW, baseY); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // BPM axis labels on left edge
+  ctx.font = '600 10px "Segoe UI", system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(0,255,120,0.45)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  [60, 90, 120, 150, 180, 210].forEach(bpm => {
+    const y = bpmToY(bpm);
+    ctx.fillText(bpm, 4, y);
+  });
+
+  // "bpm" unit label
+  ctx.font = '500 9px "Segoe UI", system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(0,255,120,0.25)';
+  ctx.fillText('bpm', 4, 10);
+}
+
+// ── Gaussian helper ──────────────────────────────────────────
+function gauss(x, mu, sig) {
+  return Math.exp(-0.5 * ((x - mu) / sig) ** 2);
+}
+
+// ── Generic strip renderer ────────────────────────────────────
+function makeStrip(canvasId, traceColor, fhrFn, contraFn) {
+  const canvas = document.getElementById(canvasId);
+  canvas.width  = Math.round(CW * DPR);
+  canvas.height = Math.round(CH * DPR);
+  canvas.style.width  = CW + 'px';
+  canvas.style.height = CH + 'px';
+
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.scale(DPR, DPR);
+
+  // Tile width = 6 seconds of pixels
+  const TILE_W = Math.round(SPEED * STRIP_S);
+
+  // Bake FHR trace into offscreen tile
+  const tile = new OffscreenCanvas(TILE_W, CH);
+  const g    = tile.getContext('2d');
+
+  // Draw uterine contraction at bottom of tile — tall and clearly visible
+  if (contraFn) {
+    g.beginPath();
+    const CONTRA_H = 48;          // taller contraction hill
+    const baseContra = CH - 4;
+    for (let i = 0; i <= TILE_W * 2; i++) {
+      const x = i / 2;
+      const t = x / TILE_W;
+      const cv = contraFn(t) * CONTRA_H;
+      const y  = baseContra - cv;
+      i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+    }
+    g.strokeStyle = 'rgba(220,220,220,0.55)';
+    g.lineWidth   = 2.2;
+    g.lineJoin    = 'round';
+    g.stroke();
+
+    // Fill under contraction for readability
+    g.lineTo(TILE_W, CH);
+    g.lineTo(0, CH);
+    g.closePath();
+    g.fillStyle = 'rgba(180,180,180,0.06)';
+    g.fill();
+  }
+
+  // Draw FHR trace — bolder
+  g.beginPath();
+  for (let i = 0; i <= TILE_W * 4; i++) {
+    const x   = i / 4;
+    const t   = x / TILE_W;
+    const bpm = fhrFn(t);
+    const y   = bpmToY(bpm);
+    i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+  }
+  g.strokeStyle = traceColor;
+  g.lineWidth   = 3;
+  g.lineJoin    = 'round';
+  g.lineCap     = 'round';
+  g.stroke();
+
+  // Animate
+  let t0 = null;
+  // parse rgb string for grid accent
+  const rgb = traceColor.match(/\d+/g) ? traceColor.match(/\d+/g).join(',') : '0,255,120';
+
+  function frame(ts) {
+    if (!t0) t0 = ts;
+    const elapsed   = (ts - t0) * 0.001;
+    const scrollPx  = (elapsed * SPEED) % TILE_W;
+
+    drawCTGGrid(ctx, rgb);
+
+    let srcX = scrollPx, dstX = 0;
+    while (dstX < CW) {
+      const sliceW = Math.min(TILE_W - srcX, CW - dstX);
+      ctx.drawImage(tile, srcX, 0, sliceW, CH, dstX, 0, sliceW, CH);
+      dstX += sliceW;
+      srcX = 0;
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  1. VARIABLE DECELERATION  (V — Cord Compression)
+//  Abrupt V-shape drop, classic shoulders, NOT aligned to contraction
+// ═══════════════════════════════════════════════════════════════
+function fhrVariable(t) {
+  // Calm, nearly flat baseline with minimal noise so the V-shapes are clear
+  let bpm = BASE_BPM + 1.5 * Math.sin(7 * Math.PI * t);
+
+  // Three sharp V-shaped decelerations — abrupt drop and abrupt return
+  const decels = [
+    { c: 0.16, w: 0.06, depth: 60 },
+    { c: 0.48, w: 0.075, depth: 75 },
+    { c: 0.78, w: 0.055, depth: 55 },
+  ];
+
+  for (const d of decels) {
+    const dt  = t - d.c;
+    const abs = Math.abs(dt);
+    if (abs < d.w) {
+      // Sharp V: linear drop in, linear recovery out
+      bpm -= d.depth * (1 - abs / d.w);
+    }
+    // Classic shoulders: small acceleration bump just before and just after
+    bpm += 12 * gauss(t, d.c - d.w * 1.15, 0.013);
+    bpm += 12 * gauss(t, d.c + d.w * 1.15, 0.013);
+  }
+
+  return Math.max(60, bpm);
+}
+
+// Contractions deliberately offset — NO relationship to variable decels
+function contraVariable(t) {
+  return 0.9 * gauss(t, 0.32, 0.055) + 0.9 * gauss(t, 0.72, 0.055);
+}
+
+makeStrip('c-variable', 'rgb(43,255,107)', fhrVariable, contraVariable);
+
+
+// ═══════════════════════════════════════════════════════════════
+//  2. EARLY DECELERATION  (E — Head Compression / Vagal)
+//  Smooth mirror of contraction; nadir exactly at contraction peak
+// ═══════════════════════════════════════════════════════════════
+function contraEarly(t) {
+  return 0.9 * gauss(t, 0.27, 0.07) + 0.9 * gauss(t, 0.74, 0.07);
+}
+
+function fhrEarly(t) {
+  // Very stable baseline — the mirror dip is the only feature
+  let bpm = BASE_BPM + 1.5 * Math.sin(7 * Math.PI * t);
+
+  // Gradual symmetric dips — EXACT same timing as contractions
+  const decels = [
+    { c: 0.27, sig: 0.068, depth: 32 },
+    { c: 0.74, sig: 0.068, depth: 32 },
+  ];
+
+  for (const d of decels) {
+    bpm -= d.depth * gauss(t, d.c, d.sig);
+  }
+
+  return Math.max(100, bpm);
+}
+
+makeStrip('c-early', 'rgb(255,200,43)', fhrEarly, contraEarly);
+
+
+// ═══════════════════════════════════════════════════════════════
+//  3. ACCELERATION  (A — Oxygenated / Reassuring)
+//  Clear peaks ≥15 bpm above stable baseline — aligned with contractions
+// ═══════════════════════════════════════════════════════════════
+function fhrAccel(t) {
+  // Rock-steady baseline — peaks are unmistakable
+  let bpm = BASE_BPM + 1.5 * Math.sin(7 * Math.PI * t);
+
+  // Wide, tall, smooth accelerations
+  const accels = [
+    { c: 0.2,  sig: 0.06,  height: 30 },
+    { c: 0.52, sig: 0.065, height: 28 },
+    { c: 0.82, sig: 0.055, height: 32 },
+  ];
+
+  for (const a of accels) {
+    bpm += a.height * gauss(t, a.c, a.sig);
+  }
+
+  return Math.min(210, bpm);
+}
+
+function contraAccel(t) {
+  return 0.85 * gauss(t, 0.2, 0.06) + 0.85 * gauss(t, 0.52, 0.065) + 0.85 * gauss(t, 0.82, 0.055);
+}
+
+makeStrip('c-accel', 'rgb(43,180,255)', fhrAccel, contraAccel);
+
+
+// ═══════════════════════════════════════════════════════════════
+//  4. LATE DECELERATION  (L — Placental Insufficiency)
+//  Smooth dip that begins AFTER contraction peak; slow recovery
+// ═══════════════════════════════════════════════════════════════
+function contraLate(t) {
+  return 0.9 * gauss(t, 0.22, 0.065) + 0.9 * gauss(t, 0.67, 0.065);
+}
+
+function fhrLate(t) {
+  // Stable baseline — the lag is the key teaching point
+  let bpm = BASE_BPM + 1.5 * Math.sin(7 * Math.PI * t);
+
+  // Dip starts ~0.12 AFTER contraction peak, slow return (wider right tail)
+  const decels = [
+    { contraC: 0.22, c: 0.34, sigL: 0.055, sigR: 0.09, depth: 30 },
+    { contraC: 0.67, c: 0.79, sigL: 0.055, sigR: 0.09, depth: 30 },
+  ];
+
+  for (const d of decels) {
+    const dt = t - d.c;
+    // Asymmetric Gaussian: steeper left slope, shallower right (slow recovery)
+    const sig = dt < 0 ? d.sigL : d.sigR;
+    bpm -= d.depth * Math.exp(-0.5 * (dt / sig) ** 2);
+  }
+
+  return Math.max(100, bpm);
+}
+
+makeStrip('c-late', 'rgb(255,80,80)', fhrLate, contraLate);
+
+</script>
+</body>
+</html>
