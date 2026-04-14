@@ -7664,7 +7664,7 @@
         group: student.group_name || student.group
       });
 
-      const cacheKey = `payments-v26-${student.id}`;
+      const cacheKey = `payments-v27-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached calendar payment status for student:', student.id);
@@ -8022,6 +8022,34 @@
         }
       });
       scheduledDates.sort();
+
+      // ── Orphan payment matching ──────────────────────────────────────────────
+      // If a payment date lands on a non-class day (e.g. student paid April 12 for
+      // their April 11 class), the Stripe/payment fallback records the payment date
+      // instead of the class date. The paid date won't match any scheduledDate, so
+      // April 11 shows as unpaid and the April 12 payment is invisible.
+      // Fix: find orphaned paidDates (not in scheduledDates) and re-map them to the
+      // nearest unpaid scheduled class within ±3 days.
+      const scheduledSet = new Set(scheduledDates);
+      const orphanedPayments = [];
+      paidDates.forEach(d => {
+        if (!scheduledSet.has(d)) orphanedPayments.push(d);
+      });
+      orphanedPayments.forEach(orphanDate => {
+        const orphanMs = new Date(orphanDate + 'T00:00:00').getTime();
+        let bestMatch = null;
+        let bestDiff  = Infinity;
+        scheduledDates.forEach(sd => {
+          if (paidDates.has(sd) || absentDates.has(sd)) return; // already resolved
+          const diff = Math.abs(new Date(sd + 'T00:00:00').getTime() - orphanMs);
+          const diffDays = diff / 86400000;
+          if (diffDays <= 3 && diff < bestDiff) { bestMatch = sd; bestDiff = diff; }
+        });
+        if (bestMatch) {
+          paidDates.add(bestMatch);
+          debugLog(`🔀 Orphan payment ${orphanDate} → matched to scheduled class ${bestMatch}`);
+        }
+      });
 
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
 
