@@ -886,6 +886,8 @@
           </div>
           <div class="batch-actions">
             <button id="globalPostBtn" onclick="openPostModal()" class="pill-btn green">Post</button>
+            <button onclick="batchUnpost('group')" class="pill-btn red">Unpost (Group)</button>
+            <button onclick="batchUnpost('student')" class="pill-btn red">Unpost (Student)</button>
             <button onclick="openFreeAccessModal()" class="pill-btn teal">FREE</button>
             <button onclick="batchRemoveFreeAccess()" class="pill-btn amber">Un-Free</button>
             <button onclick="batchShareWithIndividual()" class="pill-btn violet">Share Individual</button>
@@ -4999,6 +5001,98 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       } catch (error) {
         console.error('Batch hide error:', error);
         await customAlert('Failed to hide notes: ' + error.message);
+      }
+    }
+
+    async function batchUnpost(mode = 'group') {
+      if (selectedNoteIds.size === 0) {
+        await customAlert('No notes selected');
+        return;
+      }
+
+      const noteIds = Array.from(selectedNoteIds);
+
+      if (mode === 'student') {
+        // Load group students
+        const groupLetter = currentGroup.replace('Group ', '');
+        if (allStudents.length === 0) await loadStudentsForModal();
+        const groupStudents = allStudents
+          .filter(s => {
+            const g = (s.group_name || '').replace('Group ', '');
+            return g === groupLetter || s.group_name === groupLetter;
+          })
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        if (groupStudents.length === 0) {
+          await customAlert('No Students', `No students found in ${currentGroup}.`);
+          return;
+        }
+
+        const student = await showUnpostStudentPicker(groupStudents);
+        if (!student) return;
+
+        const confirmed = await customConfirm(
+          'Unpost for Student',
+          `Remove ${noteIds.length} note(s) for ${student.name} only?`
+        );
+        if (!confirmed) return;
+
+        try {
+          const { error } = await supabaseClient
+            .from('student_note_permissions')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('student_id', student.id);
+          if (error) throw error;
+
+          await supabaseClient
+            .from('note_free_access')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('student_id', student.id);
+
+          permissions = permissions.filter(p =>
+            !(noteIds.includes(p.note_id) && p.student_id === student.id)
+          );
+          freeAccessGrants = freeAccessGrants.filter(g =>
+            !(noteIds.includes(g.note_id) && g.student_id === student.id)
+          );
+
+          clearSelection();
+          await renderSystems();
+          await customAlert('Success', `Removed ${noteIds.length} note(s) for ${student.name}`);
+        } catch (err) {
+          console.error('Batch unpost student error:', err);
+          await customAlert('Error', 'Failed to unpost: ' + err.message);
+        }
+
+      } else {
+        // Whole group
+        const confirmed = await customConfirm(
+          'Unpost from Group',
+          `Remove ${noteIds.length} note(s) from ${currentGroup}?`
+        );
+        if (!confirmed) return;
+
+        try {
+          const { error } = await supabaseClient
+            .from('student_note_permissions')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('group_name', currentGroup);
+          if (error) throw error;
+
+          permissions = permissions.filter(p =>
+            !(noteIds.includes(p.note_id) && p.group_name === currentGroup)
+          );
+
+          clearSelection();
+          await renderSystems();
+          await customAlert('Success', `Removed ${noteIds.length} note(s) from ${currentGroup}`);
+        } catch (err) {
+          console.error('Batch unpost group error:', err);
+          await customAlert('Error', 'Failed to unpost: ' + err.message);
+        }
       }
     }
 
