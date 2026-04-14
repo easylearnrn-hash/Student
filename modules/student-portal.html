@@ -7993,6 +7993,15 @@
         }
       }
 
+      // Force-add any manually enrolled dates not already in scheduledDates.
+      // These bypass both the created_at filter AND the day-of-week check.
+      manualEnrollDates.forEach(d => {
+        if (!scheduledDates.includes(d) && d <= todayDateStr && d >= '2025-12-01') {
+          scheduledDates.push(d);
+        }
+      });
+      scheduledDates.sort();
+
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
 
       const unpaidClasses  = [];
@@ -8001,18 +8010,20 @@
       // DEBT CUTOFF: Uses the module-level DEBT_CUTOFF_STR = '2026-03-30'.
       // Classes before this date are silently ignored for debt purposes
       // (paid/absent tracking remains intact for all dates).
+      // EXCEPTION: manually enrolled dates always count regardless of cutoff.
 
       for (const dateStr of scheduledDates) {
   const isAbsent  = absentDates.has(dateStr);
   const hasPaid   = paidDates.has(dateStr);
+        const isManuallyEnrolled = manualEnrollDates.has(dateStr);
 
         if (isAbsent) {
           absentClasses.push({ date: dateStr, amount: 0, status: 'absent' });
         } else if (!hasPaid) {
-          // Only count as debt if on or after the cutoff date
-          if (dateStr >= DEBT_CUTOFF_STR) {
+          // Manually enrolled dates always count; others respect the debt cutoff
+          if (isManuallyEnrolled || dateStr >= DEBT_CUTOFF_STR) {
             unpaidClasses.push({ date: dateStr, amount: pricePerClass });
-            debugLog(`🔴 ${dateStr}: UNPAID`);
+            debugLog(`🔴 ${dateStr}: UNPAID${isManuallyEnrolled ? ' (manual enrollment)' : ''}`);
           } else {
             debugLog(`⏭️ ${dateStr}: UNPAID but before debt cutoff — ignored`);
           }
