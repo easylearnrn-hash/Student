@@ -10691,23 +10691,21 @@
         const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
 
         // For group-level grants: only show notes posted on/after the student's effective start.
-        // Effective start = earliest of (account creation date, earliest paid class date).
-        // This prevents inheriting ALL historical group notes while still showing notes for
-        // classes the student already attended and paid for before their account was created.
+        // Use a 14-day buffer before the join date so notes from the class week before account
+        // creation are still visible (e.g. account created April 14, class was April 13).
+        // This blocks truly old historical notes (Dec/Jan) while showing recent ones.
         const studentJoinDateStr = (currentStudent.start_date || currentStudent.created_at || '').split('T')[0] || null;
-        let effectiveStartStr = studentJoinDateStr;
-        if (currentStudentPaidDates && currentStudentPaidDates.size > 0) {
-          const earliestPaid = Array.from(currentStudentPaidDates).sort()[0];
-          if (!effectiveStartStr || earliestPaid < effectiveStartStr) {
-            effectiveStartStr = earliestPaid;
-          }
+        let effectiveStartStr = null;
+        if (studentJoinDateStr) {
+          const d = new Date(studentJoinDateStr + 'T00:00:00');
+          d.setDate(d.getDate() - 14);
+          effectiveStartStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         }
         const freeAccessGrants = [
           ...(freeIndividualRes.data || []).filter(g => !blockedNoteIds.has(g.note_id)),
           ...(freeGroupRes.data || []).filter(g => {
             if (blockedNoteIds.has(g.note_id)) return false;
-            if (!effectiveStartStr) return true; // no join date — show all
-            // Use the note's class_date (when it was posted) or created_at as the post date.
+            if (!effectiveStartStr) return true;
             const postDate = (g.class_date || g.created_at || '').split('T')[0];
             return !postDate || postDate >= effectiveStartStr;
           })
