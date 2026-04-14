@@ -2017,6 +2017,46 @@
           }
         });
 
+        // ── Orphan payment re-mapping ────────────────────────────────────────────
+        // A payment recorded on a non-class day (e.g. paid April 12 for April 11
+        // class, or April 14 for April 13) becomes an "orphan": it's in the index
+        // under the payment date, but the calendar only ever queries class dates.
+        // Fix: for each indexed payment date that falls on a non-scheduled day,
+        // find the nearest scheduled class date within ±3 days and add the same
+        // student IDs under that class date as well.
+        const scheduledClassDates = new Set();
+        const dayMap = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6, Sunday:0,
+                         Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6, Sun:0 };
+        groupsData.forEach(group => {
+          if (!group.schedule) return;
+          const activeDayNums = Object.entries(dayMap)
+            .filter(([name]) => group.schedule.includes(name))
+            .map(([, num]) => num);
+          if (activeDayNums.length === 0) return;
+          const today = new Date(); today.setHours(0,0,0,0);
+          for (let i = 0; i <= 14; i++) {
+            const d = new Date(today); d.setDate(today.getDate() - i);
+            if (activeDayNums.includes(d.getDay())) {
+              const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+              scheduledClassDates.add(ds);
+            }
+          }
+        });
+
+        paymentIndex.forEach((studentIds, paymentDateStr) => {
+          if (scheduledClassDates.has(paymentDateStr)) return;
+          const payMs = new Date(paymentDateStr + 'T00:00:00').getTime();
+          let bestDate = null, bestDiff = Infinity;
+          scheduledClassDates.forEach(classDateStr => {
+            const diff = Math.abs(new Date(classDateStr + 'T00:00:00').getTime() - payMs);
+            if (diff < bestDiff && diff / 86400000 <= 3) { bestDiff = diff; bestDate = classDateStr; }
+          });
+          if (bestDate) {
+            if (!paymentIndex.has(bestDate)) paymentIndex.set(bestDate, new Set());
+            studentIds.forEach(id => paymentIndex.get(bestDate).add(id));
+          }
+        });
+
         // Rebuild manual enrollments Set for created_at bypass
         manualEnrollments.clear();
         manualEnrollmentsData.forEach(me => {
