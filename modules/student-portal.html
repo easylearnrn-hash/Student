@@ -7818,7 +7818,7 @@
         ? names.map(n => `,payer_name.ilike.%${n}%,resolved_student_name.ilike.%${n}%`).join('')
         : '';
 
-      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult] = await Promise.all([
+      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult, manualEnrollResult] = await Promise.all([
         Promise.resolve(
           supabaseClient.from('student_absences').select('class_date').eq('student_id', student.id)
         ).catch(() => ({ data: null, error: true })),
@@ -7839,6 +7839,10 @@
           supabaseClient.from('payments')
             .select('for_class, for_class_dates, email_date, amount, status, payer_name, resolved_student_name, student_id, linked_student_id')
             .or(`student_id.eq.${student.id},linked_student_id.eq.${student.id}${nameFilters}`)
+        ).catch(() => ({ data: [], error: null })),
+        // Manual enrollment records — admin-added past-date enrollments that bypass created_at
+        Promise.resolve(
+          supabaseClient.from('payment_records').select('date').eq('student_id', student.id).eq('payment_method', 'manual_enrollment')
         ).catch(() => ({ data: [], error: null }))
       ]);
 
@@ -7847,6 +7851,9 @@
       const credits    = (!creditResult.error       && creditResult.data)     ? creditResult.data    : [];
       const skipped    = (!skippedResult.error      && skippedResult.data)    ? skippedResult.data   : [];
       const zelleRaw   = (!zelleResult.error        && zelleResult.data)      ? zelleResult.data     : [];
+      const manualEnrollDates = (!manualEnrollResult.error && manualEnrollResult.data)
+        ? manualEnrollResult.data.map(r => (r.date || '').split('T')[0]).filter(Boolean)
+        : [];
 
       const normalizePaymentName = value => String(value || '')
         .toLowerCase()
@@ -7946,6 +7953,14 @@
         // Always include today — debt is owed for today's class regardless of whether it has started yet
         scheduledDates.push(dateStr);
       }
+
+      // Add manually enrolled past dates (admin override — bypasses created_at filter)
+      manualEnrollDates.forEach(d => {
+        if (!scheduledDates.includes(d) && !skippedDates.has(d)) {
+          scheduledDates.push(d);
+        }
+      });
+      scheduledDates.sort();
 
       // Add one-time classes
       if (Array.isArray(groupScheduleData.one_time_schedules)) {
