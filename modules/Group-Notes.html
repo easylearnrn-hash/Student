@@ -1067,7 +1067,8 @@
         <button onclick="selectAllFilteredNotes()" class="pill-btn ghost" style="font-size: 12px; padding: 6px 14px;">✓ Select All</button>
         <button onclick="clearFilteredNotesSelection()" class="pill-btn ghost" style="font-size: 12px; padding: 6px 14px;">Clear</button>
         <button id="bulkPostBtn" onclick="bulkPostFilteredNotes()" class="pill-btn green" style="font-size: 12px; padding: 6px 14px; display: none;">✓ Post Selected</button>
-        <button id="bulkUnpostBtn" onclick="bulkUnpostFilteredNotes()" class="pill-btn red" style="font-size: 12px; padding: 6px 14px; display: none;">✕ Unpost Selected</button>
+        <button id="bulkUnpostBtn" onclick="bulkUnpostFilteredNotes('group')" class="pill-btn red" style="font-size: 12px; padding: 6px 14px; display: none;">✕ Unpost (Group)</button>
+        <button id="bulkUnpostStudentBtn" onclick="bulkUnpostFilteredNotes('student')" class="pill-btn red" style="font-size: 12px; padding: 6px 14px; display: none;">✕ Unpost (Student)</button>
         <button id="bulkFreeBtn" onclick="bulkMakeFree()" class="pill-btn teal" style="font-size: 12px; padding: 6px 14px; display: none;">🆓 Free Selected</button>
         <button id="bulkUnfreeBtn" onclick="bulkRemoveFree()" class="pill-btn amber" style="font-size: 12px; padding: 6px 14px; display: none;">💰 Unfree Selected</button>
         <span id="filteredSelectedCount" style="margin-left: auto; color: var(--text-muted); font-size: 13px; font-weight: 600;">0 selected</span>
@@ -6270,6 +6271,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       
       bulkPostBtn.style.display = filterType === 'unposted' ? 'inline-block' : 'none';
       bulkUnpostBtn.style.display = filterType === 'posted' ? 'inline-block' : 'none';
+      document.getElementById('bulkUnpostStudentBtn').style.display = filterType === 'posted' ? 'inline-block' : 'none';
       bulkFreeBtn.style.display = (filterType === 'posted' || filterType === 'unposted') ? 'inline-block' : 'none';
       bulkUnfreeBtn.style.display = filterType === 'free' ? 'inline-block' : 'none';
 
@@ -7084,54 +7086,206 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       }
     }
 
-    async function bulkUnpostFilteredNotes() {
+    async function bulkUnpostFilteredNotes(mode = 'group') {
       if (selectedFilteredNotes.size === 0) {
         await customAlert('No Selection', 'Please select at least one note to unpost');
         return;
       }
 
-      const confirmed = await customConfirm(
-        'Unpost Selected Notes',
-        `Remove ${selectedFilteredNotes.size} note(s) from ${currentGroup}?`
-      );
-      if (!confirmed) return;
+      const noteIds = Array.from(selectedFilteredNotes);
 
-      try {
-        const noteIds = Array.from(selectedFilteredNotes);
+      if (mode === 'student') {
+        // ── Individual student unpost ──
+        // Load group students for picker
+        const groupLetter = currentGroup.replace('Group ', '');
+        if (allStudents.length === 0) await loadStudentsForModal();
+        const groupStudents = allStudents
+          .filter(s => {
+            const g = (s.group_name || '').replace('Group ', '');
+            return g === groupLetter || s.group_name === groupLetter;
+          })
+          .sort((a, b) => a.name.localeCompare(b.name));
 
-        // Delete from student_note_permissions (PAID access table)
-        const { error } = await supabaseClient
-          .from('student_note_permissions')
-          .delete()
-          .in('note_id', noteIds)
-          .eq('group_name', currentGroup);
+        if (groupStudents.length === 0) {
+          await customAlert('No Students', `No students found in ${currentGroup}.`);
+          return;
+        }
 
-        if (error) throw error;
+        const student = await showUnpostStudentPicker(groupStudents);
+        if (!student) return;
 
-        // Capture count before clearing
-        const count = selectedFilteredNotes.size;
-        
-        // Update local permissions array immediately for instant UI feedback
-        permissions = permissions.filter(p =>
-          !(noteIds.includes(p.note_id) && p.group_name === currentGroup)
+        const confirmed = await customConfirm(
+          'Unpost for Student',
+          `Remove ${noteIds.length} note(s) for ${student.name} only?`
         );
-        
-        // Clear selection
-        selectedFilteredNotes.clear();
-        filteredModalCheckedNoteIds.clear();
-        
-        // Re-render the filtered notes modal instantly with updated data
-        renderFilteredNotes();
-        
-        // Background refresh to sync badges
-        loadData();
-        
-        await customAlert('Success', `Removed ${count} note(s) from ${currentGroup}`);
+        if (!confirmed) return;
 
-      } catch (error) {
-        console.error('Error unposting notes:', error);
-        await customAlert('Error', 'Failed to unpost notes: ' + error.message);
+        try {
+          // Delete individual-level permissions for this student on these notes
+          const { error } = await supabaseClient
+            .from('student_note_permissions')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('student_id', student.id);
+
+          if (error) throw error;
+
+          // Also remove individual free access grants for this student
+          await supabaseClient
+            .from('note_free_access')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('student_id', student.id);
+
+          // Update local state
+          permissions = permissions.filter(p =>
+            !(noteIds.includes(p.note_id) && p.student_id === student.id)
+          );
+          freeAccessGrants = freeAccessGrants.filter(g =>
+            !(noteIds.includes(g.note_id) && g.student_id === student.id)
+          );
+
+          selectedFilteredNotes.clear();
+          filteredModalCheckedNoteIds.clear();
+          renderFilteredNotes();
+          loadData();
+
+          await customAlert('Success', `Removed ${noteIds.length} note(s) for ${student.name}`);
+        } catch (error) {
+          console.error('Error unposting for student:', error);
+          await customAlert('Error', 'Failed to unpost notes: ' + error.message);
+        }
+
+      } else {
+        // ── Whole group unpost ──
+        const confirmed = await customConfirm(
+          'Unpost Selected Notes',
+          `Remove ${selectedFilteredNotes.size} note(s) from ${currentGroup}?`
+        );
+        if (!confirmed) return;
+
+        try {
+          // Delete from student_note_permissions (PAID access table)
+          const { error } = await supabaseClient
+            .from('student_note_permissions')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('group_name', currentGroup);
+
+          if (error) throw error;
+
+          // Capture count before clearing
+          const count = selectedFilteredNotes.size;
+
+          // Update local permissions array immediately for instant UI feedback
+          permissions = permissions.filter(p =>
+            !(noteIds.includes(p.note_id) && p.group_name === currentGroup)
+          );
+
+          // Clear selection
+          selectedFilteredNotes.clear();
+          filteredModalCheckedNoteIds.clear();
+
+          // Re-render the filtered notes modal instantly with updated data
+          renderFilteredNotes();
+
+          // Background refresh to sync badges
+          loadData();
+
+          await customAlert('Success', `Removed ${count} note(s) from ${currentGroup}`);
+
+        } catch (error) {
+          console.error('Error unposting notes:', error);
+          await customAlert('Error', 'Failed to unpost notes: ' + error.message);
+        }
       }
+    }
+
+    function showUnpostStudentPicker(students) {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+          position:fixed;top:0;left:0;right:0;bottom:0;
+          background:rgba(0,0,0,0.75);z-index:99999;
+          display:flex;align-items:center;justify-content:center;
+          backdrop-filter:blur(6px);
+        `;
+
+        const dialog = document.createElement('div');
+        dialog.style.cssText = `
+          background:linear-gradient(135deg,#1a1f35 0%,#0f1419 100%);
+          border:1px solid rgba(245,240,232,0.2);border-radius:16px;
+          padding:28px;width:420px;max-width:95vw;
+          box-shadow:0 20px 60px rgba(0,0,0,0.6);
+          display:flex;flex-direction:column;max-height:80vh;
+        `;
+
+        const items = students.map(s => `
+          <div class="usp-item" data-id="${s.id}" data-name="${(s.name||'').replace(/"/g,'&quot;')}" style="
+            padding:10px 14px;cursor:pointer;
+            border-bottom:1px solid rgba(255,255,255,0.05);
+            color:rgba(255,255,255,0.85);font-size:14px;transition:background 0.15s;
+          ">${s.name}</div>
+        `).join('');
+
+        dialog.innerHTML = `
+          <h3 style="margin:0 0 12px 0;font-size:18px;font-weight:600;color:rgba(245,240,232,0.95);">Select Student to Unpost For</h3>
+          <input id="uspSearch" type="text" placeholder="Search…" autocomplete="off" style="
+            width:100%;padding:9px 13px;background:rgba(255,255,255,0.07);
+            border:1px solid rgba(245,240,232,0.25);border-radius:8px;
+            color:white;font-size:14px;margin-bottom:10px;box-sizing:border-box;outline:none;
+          ">
+          <div id="uspList" style="
+            overflow-y:auto;flex:1;border:1px solid rgba(255,255,255,0.1);
+            border-radius:8px;margin-bottom:18px;min-height:80px;max-height:300px;
+          ">${items}</div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button id="uspCancel" style="
+              padding:9px 18px;background:rgba(255,255,255,0.06);
+              border:1px solid rgba(255,255,255,0.2);border-radius:8px;
+              color:rgba(255,255,255,0.7);cursor:pointer;font-size:14px;
+            ">Cancel</button>
+          </div>
+        `;
+
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        const search = dialog.querySelector('#uspSearch');
+        const list = dialog.querySelector('#uspList');
+
+        list.addEventListener('mouseover', e => {
+          const item = e.target.closest('.usp-item');
+          if (item) item.style.background = 'rgba(245,240,232,0.08)';
+        });
+        list.addEventListener('mouseout', e => {
+          const item = e.target.closest('.usp-item');
+          if (item) item.style.background = 'transparent';
+        });
+
+        search.addEventListener('input', () => {
+          const q = search.value.toLowerCase();
+          list.querySelectorAll('.usp-item').forEach(item => {
+            item.style.display = item.dataset.name.toLowerCase().includes(q) ? '' : 'none';
+          });
+        });
+
+        list.addEventListener('click', e => {
+          const item = e.target.closest('.usp-item');
+          if (!item) return;
+          overlay.remove();
+          resolve({ id: parseInt(item.dataset.id), name: item.dataset.name });
+        });
+
+        dialog.querySelector('#uspCancel').addEventListener('click', () => {
+          overlay.remove(); resolve(null);
+        });
+        overlay.addEventListener('click', e => {
+          if (e.target === overlay) { overlay.remove(); resolve(null); }
+        });
+
+        search.focus();
+      });
     }
 
     async function bulkMakeFree() {
