@@ -5038,6 +5038,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         if (!confirmed) return;
 
         try {
+          // Delete any existing individual access records for this student+notes
           const { error } = await supabaseClient
             .from('student_note_permissions')
             .delete()
@@ -5050,6 +5051,18 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             .delete()
             .in('note_id', noteIds)
             .eq('student_id', student.id);
+
+          // Insert block records (is_accessible=false) so group-level posts are
+          // hidden for this specific student in the student portal.
+          const blockRows = noteIds.map(nId => ({
+            note_id: nId,
+            student_id: student.id,
+            is_accessible: false
+          }));
+          const { error: blockError } = await supabaseClient
+            .from('student_note_permissions')
+            .insert(blockRows);
+          if (blockError) throw blockError;
 
           permissions = permissions.filter(p =>
             !(noteIds.includes(p.note_id) && p.student_id === student.id)
@@ -7215,7 +7228,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         if (!confirmed) return;
 
         try {
-          // Delete individual-level permissions for this student on these notes
+          // Delete any existing individual-level permissions for this student on these notes
           const { error } = await supabaseClient
             .from('student_note_permissions')
             .delete()
@@ -7230,6 +7243,18 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             .delete()
             .in('note_id', noteIds)
             .eq('student_id', student.id);
+
+          // Insert block records (is_accessible=false) so group-level posts are
+          // hidden for this specific student in the student portal.
+          const blockRows = noteIds.map(nId => ({
+            note_id: nId,
+            student_id: student.id,
+            is_accessible: false
+          }));
+          const { error: blockError } = await supabaseClient
+            .from('student_note_permissions')
+            .insert(blockRows);
+          if (blockError) throw blockError;
 
           // Update local state
           permissions = permissions.filter(p =>

@@ -10553,8 +10553,7 @@
           supabaseClient
             .from('student_note_permissions')
             .select('id, note_id, is_accessible, class_date, granted_at, group_name, student_id')
-            .eq('student_id', studentId)
-            .eq('is_accessible', true),
+            .eq('student_id', studentId),  // fetch both accessible AND blocked (is_accessible=false)
 
           groupNameCandidates.length > 0
             ? supabaseClient
@@ -10567,12 +10566,17 @@
         ]);
 
         const permError = studentPermRes.error || groupPermRes.error;
+        // Build blocked note IDs set from is_accessible=false records for this student
+        const blockedNoteIds = new Set(
+          (studentPermRes.data || []).filter(p => !p.is_accessible).map(p => p.note_id)
+        );
         const filteredGroupPermissions = (groupPermRes.data || []).filter(p => {
           const code = canonicalizeGroupCode(p.group_name);
-          return !!studentGroup && code === studentGroup;
+          // Exclude notes that have been explicitly unposted for this student
+          return !!studentGroup && code === studentGroup && !blockedNoteIds.has(p.note_id);
         });
         const permissions = [
-          ...(studentPermRes.data || []),
+          ...(studentPermRes.data || []).filter(p => p.is_accessible),
           ...filteredGroupPermissions
         ];
         
@@ -10622,8 +10626,8 @@
 
         const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
         const freeAccessGrants = [
-          ...(freeIndividualRes.data || []),
-          ...(freeGroupRes.data || [])
+          ...(freeIndividualRes.data || []).filter(g => !blockedNoteIds.has(g.note_id)),
+          ...(freeGroupRes.data || []).filter(g => !blockedNoteIds.has(g.note_id))
         ];
         
         debugLog('📦 Free Access Query Result:', freeAccessGrants);
