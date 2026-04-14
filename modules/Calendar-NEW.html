@@ -4446,11 +4446,12 @@
         for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
           const dateStr = d.toISOString().split('T')[0];
           
-          if (_startStr && dateStr < _startStr) continue;
+          if (_startStr && dateStr < _startStr && !manualEnrollments.has(`${student.id}-${dateStr}`)) continue;
 
           const isWeeklyClass = isScheduledClassDate(dateStr, group);
           const isOneTimeClass = oneTimeDates.has(dateStr);
-          if (!isWeeklyClass && !isOneTimeClass) continue;
+          const isManuallyEnrolled = manualEnrollments.has(`${student.id}-${dateStr}`);
+          if (!isWeeklyClass && !isOneTimeClass && !isManuallyEnrolled) continue;
           if (isClassSkippedCached(dateStr, group.group_name)) continue;
 
           const paymentInfo = hasPaymentCached(student.id, dateStr, student);
@@ -6220,8 +6221,11 @@
             const group = groupsData.find(g => g.group_name === student.group_name);
             if (group) {
               // DEBT_CUTOFF: matches student-portal.html exactly — only count classes on/after this date
+              // Exception: manually enrolled dates always count regardless of cutoff
               const DEBT_CUTOFF_STR = '2026-03-30';
-              const unpaidDates = getUnpaidClassDates(student).filter(d => d >= DEBT_CUTOFF_STR);
+              const unpaidDates = getUnpaidClassDates(student).filter(d =>
+                d >= DEBT_CUTOFF_STR || manualEnrollments.has(`${student.id}-${d}`)
+              );
               for (const dateStr of unpaidDates) {
                 const formattedDate = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
                   weekday: 'long',
