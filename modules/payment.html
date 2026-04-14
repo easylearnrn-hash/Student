@@ -473,6 +473,14 @@
         forClassDates: params.get('for_class_dates')  || '',
       };
 
+      // Persist class-date payload for redirect/3DS returns where URL params may be altered.
+      if (INVOICE.forClassDates) {
+        sessionStorage.setItem('arnoma:lastForClassDates', INVOICE.forClassDates);
+      }
+      if (INVOICE.forClass) {
+        sessionStorage.setItem('arnoma:lastForClass', INVOICE.forClass);
+      }
+
       const STRIPE_TAX_RATE = 0.05; // 5%
 
       /* ── DOM refs ── */
@@ -502,6 +510,37 @@
         const tax = getTaxAmount(subtotal);
         const total = roundMoney(subtotal + tax);
         return { subtotal, tax, total };
+      }
+
+      function normalizeDateList(values) {
+        if (!Array.isArray(values)) return [];
+        const out = values
+          .map(v => String(v || '').split('T')[0].trim())
+          .filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v));
+        return Array.from(new Set(out));
+      }
+
+      function resolveForClassDates() {
+        const fromJson = raw => {
+          if (!raw) return [];
+          try { return normalizeDateList(JSON.parse(raw)); } catch (_) { return []; }
+        };
+        const fromCsv = raw => {
+          if (!raw) return [];
+          return normalizeDateList(String(raw).split(',').map(d => d.trim()).filter(Boolean));
+        };
+
+        let dates = fromJson(INVOICE.forClassDates);
+        if (dates.length === 0) {
+          dates = fromJson(sessionStorage.getItem('arnoma:lastForClassDates'));
+        }
+        if (dates.length === 0) {
+          dates = fromCsv(INVOICE.forClass);
+        }
+        if (dates.length === 0) {
+          dates = fromCsv(sessionStorage.getItem('arnoma:lastForClass'));
+        }
+        return dates;
       }
 
       /* ── Helpers ── */
@@ -671,15 +710,7 @@
           <div class="success-sub">Your payment has been processed.<br>A receipt will be sent to your email by Stripe.</div>
         `;
 
-        // Parse for_class_dates JSON array sent by student-portal.html
-        let forClassDatesArr = [];
-        if (INVOICE.forClassDates) {
-          try { forClassDatesArr = JSON.parse(INVOICE.forClassDates); } catch(_) {}
-        }
-        // Fall back to the comma-separated for_class string
-        if (!forClassDatesArr.length && INVOICE.forClass) {
-          forClassDatesArr = INVOICE.forClass.split(',').map(d => d.trim()).filter(Boolean);
-        }
+        const forClassDatesArr = resolveForClassDates();
         const today = new Date().toISOString().split('T')[0];
 
         // Notify parent window (student-portal.html modal) — parent writes payment_records

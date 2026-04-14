@@ -4942,7 +4942,7 @@
     // 🔥 VERSION CHECK — force cache-bypass reload when a new version is detected.
     // Update PORTAL_VERSION on every deployment so stale cached pages self-heal.
     (function() {
-      const PORTAL_VERSION = 'portal-20260414-4'; // ← bump this with every deploy
+      const PORTAL_VERSION = 'portal-20260414-5'; // ← bump this with every deploy
       const KEY = 'arnoma:portal:v';
       const prev = localStorage.getItem(KEY);
       localStorage.setItem(KEY, PORTAL_VERSION);
@@ -4951,7 +4951,7 @@
         window.location.reload(true);
       }
     })();
-    console.log('🚀 STUDENT PORTAL VERSION: portal-20260414-4');
+    console.log('🚀 STUDENT PORTAL VERSION: portal-20260414-5');
     console.log('📅 Loaded at:', new Date().toLocaleString());
     
     // ==========================================================================
@@ -13762,6 +13762,14 @@
   </div>
 
   <script>
+    function normalizeClassDateList(values) {
+      if (!Array.isArray(values)) return [];
+      const out = values
+        .map(v => String(v || '').split('T')[0].trim())
+        .filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v));
+      return Array.from(new Set(out));
+    }
+
     /* ── Payment modal helpers ── */
     function openPaymentModal() {
       const student = window.currentStudent;
@@ -13774,7 +13782,10 @@
         return;
       }
 
-      const unpaidDates = (window.currentUnpaidClasses || []);
+      const unpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
+      // Keep a local snapshot so success mapping still works even if iframe message
+      // misses forClassDates after a redirect/auth step.
+      window._lastStripeClassDates = unpaidDates;
       const params = new URLSearchParams({
         student_name    : student?.name    || '',
         student_id      : String(student?.id || ''),
@@ -13786,7 +13797,7 @@
         for_class_dates : JSON.stringify(unpaidDates),
       });
 
-      const src = `payment.html?${params.toString()}`;
+      const src = `payment.html?v=20260414-2&${params.toString()}`;
       document.getElementById('arnomaPaymentIframe').src = src;
 
       const overlay = document.getElementById('arnomaPaymentModalOverlay');
@@ -13812,9 +13823,25 @@
         // field IS the class date (Calendar-NEW falls back to pr.date in extractForClassDates).
         try {
           const today = e.data.date || new Date().toISOString().split('T')[0];
-          const classDates = (e.data.forClassDates && e.data.forClassDates.length)
-            ? e.data.forClassDates
-            : [today];
+          const messageDates = normalizeClassDateList(e.data.forClassDates || []);
+          const messageSingleDate = String(e.data.forClass || '').split('T')[0].trim();
+          const modalSnapshotDates = normalizeClassDateList(window._lastStripeClassDates || []);
+          const currentUnpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
+
+          let classDates = messageDates;
+          if (classDates.length === 0 && /^\d{4}-\d{2}-\d{2}$/.test(messageSingleDate)) {
+            classDates = [messageSingleDate];
+          }
+          if (classDates.length === 0 && modalSnapshotDates.length > 0) {
+            classDates = modalSnapshotDates;
+          }
+          if (classDates.length === 0 && currentUnpaidDates.length > 0) {
+            classDates = currentUnpaidDates;
+          }
+          if (classDates.length === 0) {
+            classDates = [today];
+          }
+
           const studentId = e.data.studentId || (window.currentStudent && window.currentStudent.id) || null;
           const amount    = e.data.amount || 0;
           const perClass  = classDates.length > 1 ? +(amount / classDates.length).toFixed(2) : amount;
