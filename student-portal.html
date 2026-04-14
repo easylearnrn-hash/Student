@@ -10690,17 +10690,26 @@
 
         const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
 
-        // For group-level grants: only show notes posted on/after the student's join date.
-        // This prevents newly added students from inheriting all historical group notes.
+        // For group-level grants: only show notes posted on/after the student's effective start.
+        // Effective start = earliest of (account creation date, earliest paid class date).
+        // This prevents inheriting ALL historical group notes while still showing notes for
+        // classes the student already attended and paid for before their account was created.
         const studentJoinDateStr = (currentStudent.start_date || currentStudent.created_at || '').split('T')[0] || null;
+        let effectiveStartStr = studentJoinDateStr;
+        if (currentStudentPaidDates && currentStudentPaidDates.size > 0) {
+          const earliestPaid = Array.from(currentStudentPaidDates).sort()[0];
+          if (!effectiveStartStr || earliestPaid < effectiveStartStr) {
+            effectiveStartStr = earliestPaid;
+          }
+        }
         const freeAccessGrants = [
           ...(freeIndividualRes.data || []).filter(g => !blockedNoteIds.has(g.note_id)),
           ...(freeGroupRes.data || []).filter(g => {
             if (blockedNoteIds.has(g.note_id)) return false;
-            if (!studentJoinDateStr) return true; // no join date — show all
+            if (!effectiveStartStr) return true; // no join date — show all
             // Use the note's class_date (when it was posted) or created_at as the post date.
             const postDate = (g.class_date || g.created_at || '').split('T')[0];
-            return !postDate || postDate >= studentJoinDateStr;
+            return !postDate || postDate >= effectiveStartStr;
           })
         ];
         
