@@ -2154,7 +2154,16 @@
                 </label>
               </div>
 
-              <div class="profile-section-title" style="margin-top:4px;">Notes & Aliases</div>
+              <!-- Calendar start date — shown only when Show in Calendar is ON -->
+              <div id="calendarStartDateRow" style="display:none; margin-top:10px; margin-bottom:4px; padding:12px 14px; border-radius:10px; background:rgba(196,164,95,0.07); border:1px solid rgba(196,164,95,0.20);">
+                <div style="font-family:var(--font-sans,Inter,sans-serif); font-size:11px; font-weight:600; letter-spacing:0.10em; text-transform:uppercase; color:rgba(196,164,95,0.75); margin-bottom:8px;">Calendar Start Date</div>
+                <div style="font-family:var(--font-sans,Inter,sans-serif); font-size:12px; color:rgba(245,240,232,0.55); margin-bottom:10px; line-height:1.5;">Debt and payment history will only count from this date onward. Leave blank to use the student's sign-up date.</div>
+                <input type="date" id="modalStartDate"
+                  style="width:100%; padding:9px 12px; border-radius:8px; border:1px solid rgba(196,164,95,0.30); background:rgba(14,18,30,0.6); color:rgba(245,240,232,0.90); font-family:inherit; font-size:13px; cursor:pointer; outline:none;"
+                  onchange="if(currentStudent){ currentStudent.start_date = this.value || null; saveStudent(currentStudent); }" />
+              </div>
+
+              <div class="profile-section-title" style="margin-top:14px;">Notes & Aliases</div>
 
               <div class="profile-field">
                 <div class="profile-field-label">Payment Aliases</div>
@@ -2920,7 +2929,8 @@
                 aliases: parseAliasesField(s.aliases),
                 notes: s.notes || '',
                 status: s.status || 'active',
-                showInCalendar: s.show_in_grid !== false
+                showInCalendar: s.show_in_grid !== false,
+                start_date: s.start_date ? s.start_date.split('T')[0] : null
               };
               
               debugLog(`👤 Student ${mappedStudent.id} (${mappedStudent.name}):`, {
@@ -3071,6 +3081,7 @@
             status: student.status || 'active',
             role: student.role || 'student',  // CRITICAL: Must be 'student' or 'admin'
             show_in_grid: student.showInCalendar !== false,
+            start_date: student.start_date || null,
             updated_at: new Date().toISOString()
           };
           
@@ -5223,6 +5234,14 @@
         const calToggle = document.getElementById('modalCalendarToggle');
         if (calToggle) calToggle.checked = !!s.showInCalendar;
 
+        // Calendar start date picker
+        const startDateInput = document.getElementById('modalStartDate');
+        const startDateRow = document.getElementById('calendarStartDateRow');
+        if (startDateInput && startDateRow) {
+          startDateInput.value = s.start_date ? s.start_date.split('T')[0] : '';
+          startDateRow.style.display = !!s.showInCalendar ? 'block' : 'none';
+        }
+
         // Aliases & notes
         document.getElementById('modalAliases').value = aliasesArray.join(', ');
         document.getElementById('modalNotes').value = s.notes || '';
@@ -5292,6 +5311,9 @@
       function handleModalCalendarToggle(checkbox) {
         if (!currentStudent) return;
         toggleCalendarVisibility(currentStudent.id, checkbox.checked);
+        // Show/hide the start date picker
+        const row = document.getElementById('calendarStartDateRow');
+        if (row) row.style.display = checkbox.checked ? 'block' : 'none';
       }
 
       function validateEmail(email) {
