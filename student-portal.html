@@ -4939,8 +4939,19 @@
        VERSION: 2024-12-24-v7 - BALANCE SIGN FIX: POSITIVE=CREDIT, NEGATIVE=DEBT
        ========================================================================== */
     
-    // 🔥 VERSION CHECK - Verify this code is loading
-    console.log('🚀 STUDENT PORTAL VERSION: 2024-12-24-v7 (Balance Sign Fix: Positive=Credit, Negative=Debt)');
+    // 🔥 VERSION CHECK — force cache-bypass reload when a new version is detected.
+    // Update PORTAL_VERSION on every deployment so stale cached pages self-heal.
+    (function() {
+      const PORTAL_VERSION = 'portal-20260414-5'; // ← bump this with every deploy
+      const KEY = 'arnoma:portal:v';
+      const prev = localStorage.getItem(KEY);
+      localStorage.setItem(KEY, PORTAL_VERSION);
+      if (prev && prev !== PORTAL_VERSION) {
+        // New version detected — bypass cache and reload immediately
+        window.location.reload(true);
+      }
+    })();
+    console.log('🚀 STUDENT PORTAL VERSION: portal-20260414-5');
     console.log('📅 Loaded at:', new Date().toLocaleString());
     
     // ==========================================================================
@@ -5407,6 +5418,10 @@
     let paymentsLoadingPromise = null;
     let progressLoaded = false;
     let materialsLoaded = false;
+    // Full paid/absent date sets from calculateUnpaidFromSchedule — used for note unlock logic.
+    // These cover ALL payment sources (payment_records, Zelle, credits) without a schedule floor.
+    let currentStudentPaidDates = new Set();
+    let currentStudentAbsentDates = new Set();
     
     // ==========================================================================
     // CACHING SYSTEM - Performance Optimization
@@ -7649,10 +7664,28 @@
         group: student.group_name || student.group
       });
 
-      const cacheKey = `payments-v25-${student.id}`;
+      const cacheKey = `payments-v28-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached calendar payment status for student:', student.id);
+        // Even on cache hit, ensure the full paid/absent sets are populated.
+        // They may still be empty if the earlier call short-circuited before reaching
+        // calculateUnpaidFromSchedule (e.g. no schedule data at that time).
+        if (currentStudentPaidDates.size === 0) {
+          try {
+            let sd = currentGroupScheduleData;
+            if (!sd || !sd.schedule) {
+              const groupName = getStudentGroup(student);
+              if (groupName) {
+                sd = await getGroupSchedule(groupName);
+                currentGroupScheduleData = sd || currentGroupScheduleData;
+              }
+            }
+            const sr = await calculateUnpaidFromSchedule(student, [], sd || {});
+            currentStudentPaidDates   = sr.paidDates   || new Set();
+            currentStudentAbsentDates = sr.absentDates || new Set();
+          } catch (_) { /* non-fatal — unlock logic falls back to buildPaidDatesSet */ }
+        }
         return cached;
       }
 
@@ -7666,17 +7699,15 @@
           }
         }
 
-        if (!scheduleData || !scheduleData.schedule) {
-          setCachedData(cacheKey, []);
-          return [];
-        }
-
-        const scheduleResult = await calculateUnpaidFromSchedule(student, [], scheduleData);
+        const scheduleResult = await calculateUnpaidFromSchedule(student, [], scheduleData || {});
         const paidDates      = scheduleResult.paidDates      || new Set();
         const absentDates    = scheduleResult.absentDates    || new Set();
         // scheduledDates is already floored at Mar 30 — ONLY these dates are shown in history.
         // paidDates/absentDates are the lookup sets; scheduledDates is the master list.
         const scheduledDates = scheduleResult.scheduledDates || [];
+        // Expose full paid/absent sets for note unlock logic (covers ALL payment sources).
+        currentStudentPaidDates   = paidDates;
+        currentStudentAbsentDates = absentDates;
         const pricePerClass  = parseFloat(student.price_per_class) || 0;
 
         const payments = [];
@@ -7744,9 +7775,6 @@
      */
     async function calculateUnpaidFromSchedule(student, payments, groupScheduleData) {
       const studentGroup = student.group_name || student.group_letter || student.group;
-      if (!studentGroup || !groupScheduleData || !groupScheduleData.schedule) {
-        return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
-      }
 
       const pricePerClass = parseFloat(student.price_per_class) || 50;
       const nowParts = getTodayLAParts();
@@ -7798,7 +7826,7 @@
         ? names.map(n => `,payer_name.ilike.%${n}%,resolved_student_name.ilike.%${n}%`).join('')
         : '';
 
-      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult] = await Promise.all([
+      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult, manualEnrollResult] = await Promise.all([
         Promise.resolve(
           supabaseClient.from('student_absences').select('class_date').eq('student_id', student.id)
         ).catch(() => ({ data: null, error: true })),
@@ -7819,6 +7847,11 @@
           supabaseClient.from('payments')
             .select('for_class, for_class_dates, email_date, amount, status, payer_name, resolved_student_name, student_id, linked_student_id')
             .or(`student_id.eq.${student.id},linked_student_id.eq.${student.id}${nameFilters}`)
+        ).catch(() => ({ data: [], error: null })),
+        // Manual enrollments — dates bypassing created_at filter, mirrors Calendar-NEW.
+        // Keep this broad so older rows that missed payment_method still count.
+        Promise.resolve(
+          supabaseClient.from('payment_records').select('date, payment_method, status, amount').eq('student_id', student.id)
         ).catch(() => ({ data: [], error: null }))
       ]);
 
@@ -7827,6 +7860,21 @@
       const credits    = (!creditResult.error       && creditResult.data)     ? creditResult.data    : [];
       const skipped    = (!skippedResult.error      && skippedResult.data)    ? skippedResult.data   : [];
       const zelleRaw   = (!zelleResult.error        && zelleResult.data)      ? zelleResult.data     : [];
+      const manualEnrollRows = (!manualEnrollResult.error && manualEnrollResult.data) ? manualEnrollResult.data : [];
+      const manualEnrollDates = new Set(
+        manualEnrollRows
+          .filter(r => {
+            const method = String(r.payment_method || '').trim().toLowerCase();
+            const status = String(r.status || '').trim().toLowerCase();
+            const amount = Number(r.amount || 0);
+            return method === 'manual_enrollment'
+              || method === 'manual-enrollment'
+              || method === 'manual enrollment'
+              || (status === 'unpaid' && amount === 0 && (!method || method === 'manual'));
+          })
+          .map(r => (r.date || '').split('T')[0])
+          .filter(Boolean)
+      );
 
       const normalizePaymentName = value => String(value || '')
         .toLowerCase()
@@ -7888,16 +7936,36 @@
       if (student.start_date) {
         _studentStartStr = student.start_date.split('T')[0];
       } else if (student.created_at) {
-        _studentStartStr = new Date(student.created_at).toISOString().split('T')[0];
+        _studentStartStr = String(student.created_at).split('T')[0];
       }
       // Never start before the absolute floor
       if (!_studentStartStr || _studentStartStr < '2025-12-01') {
         _studentStartStr = '2025-12-01';
       }
 
+      // ── New-student payment back-fill ──────────────────────────────────────
+      // If the student was just created today but already has payment records for
+      // earlier class dates (e.g. admin created the account after the first class),
+      // _studentStartStr would exclude those dates from scheduledDates → no history shown.
+      // Fix: walk back _studentStartStr to the week containing the earliest paid date.
+      if (paidDates.size > 0) {
+        const earliestPaid = Array.from(paidDates).sort()[0];
+        if (earliestPaid < _studentStartStr) {
+          // Go back 7 days before the earliest payment to ensure the class day is captured.
+          const d = new Date(earliestPaid + 'T00:00:00');
+          d.setDate(d.getDate() - 7);
+          const adjusted = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          _studentStartStr = adjusted > '2025-12-01' ? adjusted : '2025-12-01';
+          debugLog(`📅 Shifted _studentStartStr back to ${_studentStartStr} to cover paid date ${earliestPaid}`);
+        }
+      }
+
       const startDate = new Date(ABSOLUTE_FLOOR.getTime());
 
-      const scheduleStr = groupScheduleData.schedule || '';
+      const scheduleStr = (groupScheduleData && groupScheduleData.schedule) ? groupScheduleData.schedule : '';
+      const oneTimeSchedules = Array.isArray(groupScheduleData?.one_time_schedules)
+        ? groupScheduleData.one_time_schedules
+        : [];
       const daysOfWeek  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
       const fullDayMap  = { Mon:'Monday', Tue:'Tuesday', Wed:'Wednesday', Thu:'Thursday', Fri:'Friday', Sat:'Saturday', Sun:'Sunday' };
 
@@ -7910,7 +7978,7 @@
         }
       });
 
-      if (scheduleActiveDays.length === 0) {
+      if (scheduleActiveDays.length === 0 && oneTimeSchedules.length === 0 && manualEnrollDates.size === 0) {
         return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
       }
 
@@ -7920,7 +7988,7 @@
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const day   = String(d.getDate()).padStart(2, '0');
         const dateStr = `${year}-${month}-${day}`;
-        if (_studentStartStr && dateStr < _studentStartStr) continue; // Match Calendar logic
+        if (_studentStartStr && dateStr < _studentStartStr && !manualEnrollDates.has(dateStr)) continue; // Match Calendar logic
         if (!scheduleActiveDays.includes(daysOfWeek[d.getDay()])) continue;
         if (skippedDates.has(dateStr)) continue;
         // Always include today — debt is owed for today's class regardless of whether it has started yet
@@ -7928,11 +7996,11 @@
       }
 
       // Add one-time classes
-      if (Array.isArray(groupScheduleData.one_time_schedules)) {
-        groupScheduleData.one_time_schedules.forEach(ot => {
+      if (oneTimeSchedules.length > 0) {
+        oneTimeSchedules.forEach(ot => {
           const otDate = ot.date ? ot.date.substring(0, 10) : null;
           if (!otDate) return;
-          if (_studentStartStr && otDate < _studentStartStr) return; // Match Calendar logic
+          if (_studentStartStr && otDate < _studentStartStr && !manualEnrollDates.has(otDate)) return; // Match Calendar logic
           const [y,mo,dy] = otDate.split('-');
           if (new Date(+y, +mo-1, +dy) > todayLA) return;
           if (skippedDates.has(otDate) || scheduledDates.includes(otDate)) return;
@@ -7950,8 +8018,7 @@
           .filter(Boolean)
           .some(name => scheduleStr.includes(name));
 
-        const hasOneTimeToday = Array.isArray(groupScheduleData.one_time_schedules) &&
-          groupScheduleData.one_time_schedules.some(ot => {
+        const hasOneTimeToday = oneTimeSchedules.some(ot => {
             const otDate = ot?.date ? ot.date.substring(0, 10) : null;
             return otDate === todayDateStr;
           });
@@ -7964,6 +8031,43 @@
         }
       }
 
+      // Force-add any manually enrolled dates not already in scheduledDates.
+      // These bypass both the created_at filter AND the day-of-week check.
+      manualEnrollDates.forEach(d => {
+        if (!scheduledDates.includes(d) && d <= todayDateStr && d >= '2025-12-01') {
+          scheduledDates.push(d);
+        }
+      });
+      scheduledDates.sort();
+
+      // ── Orphan payment matching ──────────────────────────────────────────────
+      // If a payment date lands on a non-class day (e.g. student paid April 12 for
+      // their April 11 class), the Stripe/payment fallback records the payment date
+      // instead of the class date. The paid date won't match any scheduledDate, so
+      // April 11 shows as unpaid and the April 12 payment is invisible.
+      // Fix: find orphaned paidDates (not in scheduledDates) and re-map them to the
+      // nearest unpaid scheduled class within ±3 days.
+      const scheduledSet = new Set(scheduledDates);
+      const orphanedPayments = [];
+      paidDates.forEach(d => {
+        if (!scheduledSet.has(d)) orphanedPayments.push(d);
+      });
+      orphanedPayments.forEach(orphanDate => {
+        const orphanMs = new Date(orphanDate + 'T00:00:00').getTime();
+        let bestMatch = null;
+        let bestDiff  = Infinity;
+        scheduledDates.forEach(sd => {
+          if (paidDates.has(sd) || absentDates.has(sd)) return; // already resolved
+          const diff = Math.abs(new Date(sd + 'T00:00:00').getTime() - orphanMs);
+          const diffDays = diff / 86400000;
+          if (diffDays <= 3 && diff < bestDiff) { bestMatch = sd; bestDiff = diff; }
+        });
+        if (bestMatch) {
+          paidDates.add(bestMatch);
+          debugLog(`🔀 Orphan payment ${orphanDate} → matched to scheduled class ${bestMatch}`);
+        }
+      });
+
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
 
       const unpaidClasses  = [];
@@ -7972,18 +8076,20 @@
       // DEBT CUTOFF: Uses the module-level DEBT_CUTOFF_STR = '2026-03-30'.
       // Classes before this date are silently ignored for debt purposes
       // (paid/absent tracking remains intact for all dates).
+      // EXCEPTION: manually enrolled dates always count regardless of cutoff.
 
       for (const dateStr of scheduledDates) {
   const isAbsent  = absentDates.has(dateStr);
   const hasPaid   = paidDates.has(dateStr);
+        const isManuallyEnrolled = manualEnrollDates.has(dateStr);
 
         if (isAbsent) {
           absentClasses.push({ date: dateStr, amount: 0, status: 'absent' });
         } else if (!hasPaid) {
-          // Only count as debt if on or after the cutoff date
-          if (dateStr >= DEBT_CUTOFF_STR) {
+          // Manually enrolled dates always count; others respect the debt cutoff
+          if (isManuallyEnrolled || dateStr >= DEBT_CUTOFF_STR) {
             unpaidClasses.push({ date: dateStr, amount: pricePerClass });
-            debugLog(`🔴 ${dateStr}: UNPAID`);
+            debugLog(`🔴 ${dateStr}: UNPAID${isManuallyEnrolled ? ' (manual enrollment)' : ''}`);
           } else {
             debugLog(`⏭️ ${dateStr}: UNPAID but before debt cutoff — ignored`);
           }
@@ -8450,11 +8556,15 @@
      * @param {Set<number>} [permissionNoteIdSet] - Set of note IDs posted via student_note_permissions
      * @returns {Map<number, boolean>} Map of noteId -> isPaid status
      */
-    function computeNotePaymentStatus(notes, student, paymentRecords, scheduleData, freeNoteIds, notePostDateMap = null, permissionNoteIdSet = null) {
+    function computeNotePaymentStatus(notes, student, paymentRecords, scheduleData, freeNoteIds, notePostDateMap = null, permissionNoteIdSet = null, paidDatesOverride = null) {
       const notePaymentStatus = new Map();
 
-      // Build paidDatesSet using the same logic as Calendar-NEW green dots
-      const paidDatesSet = buildPaidDatesSet(paymentRecords);
+      // Prefer the caller-supplied full paidDatesSet (from calculateUnpaidFromSchedule,
+      // which covers ALL payment sources without a schedule floor). Fall back to the
+      // schedule-filtered buildPaidDatesSet only when no override is available.
+      const paidDatesSet = (paidDatesOverride && paidDatesOverride.size > 0)
+        ? paidDatesOverride
+        : buildPaidDatesSet(paymentRecords);
 
       debugDebug(`📊 Computing note payment status for ${notes.length} notes. Paid dates: ${Array.from(paidDatesSet).sort().join(', ')}`);
 
@@ -10509,8 +10619,7 @@
           supabaseClient
             .from('student_note_permissions')
             .select('id, note_id, is_accessible, class_date, granted_at, group_name, student_id')
-            .eq('student_id', studentId)
-            .eq('is_accessible', true),
+            .eq('student_id', studentId),  // fetch both accessible AND blocked (is_accessible=false)
 
           groupNameCandidates.length > 0
             ? supabaseClient
@@ -10518,16 +10627,22 @@
                 .select('id, note_id, is_accessible, class_date, granted_at, group_name, student_id')
                 .is('student_id', null)
                 .eq('is_accessible', true)
+                .in('group_name', groupNameCandidates)
             : Promise.resolve({ data: [], error: null })
         ]);
 
         const permError = studentPermRes.error || groupPermRes.error;
+        // Build blocked note IDs set from is_accessible=false records for this student
+        const blockedNoteIds = new Set(
+          (studentPermRes.data || []).filter(p => !p.is_accessible).map(p => p.note_id)
+        );
         const filteredGroupPermissions = (groupPermRes.data || []).filter(p => {
           const code = canonicalizeGroupCode(p.group_name);
-          return !!studentGroup && code === studentGroup;
+          // Exclude notes that have been explicitly unposted for this student
+          return !!studentGroup && code === studentGroup && !blockedNoteIds.has(p.note_id);
         });
         const permissions = [
-          ...(studentPermRes.data || []),
+          ...(studentPermRes.data || []).filter(p => p.is_accessible),
           ...filteredGroupPermissions
         ];
         
@@ -10558,21 +10673,38 @@
           console.error('❌ CRITICAL: Student has no group assigned! This will show ALL group notes!');
         }
         
-        // Query for individual student access OR group access
-        let freeAccessQuery = supabaseClient
-          .from('note_free_access')
-          .select('note_id, access_type, group_letter, student_id, created_at, class_date'); // Include per-group class_date when available
-        
-        // Build OR condition: individual access for this student OR group access for their group
-        if (normalizedGroupLetter) {
-          freeAccessQuery = freeAccessQuery.or(`student_id.eq.${studentId},and(access_type.eq.group,group_letter.eq.${normalizedGroupLetter})`);
-          debugLog('✅ Applied group filter:', `student_id.eq.${studentId},and(access_type.eq.group,group_letter.eq.${normalizedGroupLetter})`);
-        } else {
-          freeAccessQuery = freeAccessQuery.eq('student_id', studentId);
-          console.warn('⚠️ No group - only showing individual access');
-        }
-        
-        const { data: freeAccessGrants, error: freeAccessError } = await freeAccessQuery;
+        // Fetch FREE access in two clean parallel queries (avoids complex OR/AND syntax issues).
+        // Individual: note_free_access rows where student_id = this student.
+        // Group:      note_free_access rows where access_type='group' AND group_letter = this group.
+        const [freeIndividualRes, freeGroupRes] = await Promise.all([
+          supabaseClient
+            .from('note_free_access')
+            .select('note_id, access_type, group_letter, student_id, created_at, class_date')
+            .eq('student_id', studentId),
+          normalizedGroupLetter
+            ? supabaseClient
+                .from('note_free_access')
+                .select('note_id, access_type, group_letter, student_id, created_at, class_date')
+                .eq('access_type', 'group')
+                .eq('group_letter', normalizedGroupLetter)
+            : Promise.resolve({ data: [], error: null })
+        ]);
+
+        const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
+
+        // For group-level grants: only show notes posted on/after the student's join date.
+        // This prevents newly added students from inheriting all historical group notes.
+        const studentJoinDateStr = (currentStudent.start_date || currentStudent.created_at || '').split('T')[0] || null;
+        const freeAccessGrants = [
+          ...(freeIndividualRes.data || []).filter(g => !blockedNoteIds.has(g.note_id)),
+          ...(freeGroupRes.data || []).filter(g => {
+            if (blockedNoteIds.has(g.note_id)) return false;
+            if (!studentJoinDateStr) return true; // no join date — show all
+            // Use the note's class_date (when it was posted) or created_at as the post date.
+            const postDate = (g.class_date || g.created_at || '').split('T')[0];
+            return !postDate || postDate >= studentJoinDateStr;
+          })
+        ];
         
         debugLog('📦 Free Access Query Result:', freeAccessGrants);
         debugLog('📊 Total free access grants:', freeAccessGrants?.length || 0);
@@ -10747,7 +10879,8 @@
           currentGroupScheduleData,
           freeNoteIds,
           notePostDateMap,
-          permissionNoteIdSet
+          permissionNoteIdSet,
+          currentStudentPaidDates  // Full paid-date Set from all payment sources (bypasses schedule floor)
         );
         
         if (DEBUG_MODE) {
@@ -11519,12 +11652,12 @@
 
           // ── Maternal Health ────────────────────────────────────────────
           // --- exact normalised DB titles (old combined note titles) ---
-          'naegeles rule antepartum care and gestational complications': 'Notes/Maternal Health/Naegeles-Rule.html',
-          'naegeles rule antepartum complications': 'Notes/Maternal Health/Naegeles-Rule.html',
+          'naegeles rule antepartum care and gestational complications': 'Notes/Maternal Health/Naegeles-Rule-Antepartum-Complications.html',
+          'naegeles rule antepartum complications': 'Notes/Maternal Health/Naegeles-Rule-Antepartum-Complications.html',
           'intrapartum care leopold maneuvers and veal chop': 'Notes/Maternal Health/VEAL-CHOP-FHR-Patterns.html',
           'intrapartum care leopold veal chop': 'Notes/Maternal Health/VEAL-CHOP-FHR-Patterns.html',
-          'organ disorders cancer and womens health': 'Notes/Maternal Health/Organ-Disorders.html',
-          'organ disorders cancer womens health': 'Notes/Maternal Health/Organ-Disorders.html',
+          'organ disorders cancer and womens health': 'Notes/Maternal Health/Organ-Disorders-Cancer-Womens-Health.html',
+          'organ disorders cancer womens health': 'Notes/Maternal Health/Organ-Disorders-Cancer-Womens-Health.html',
           'gdm and gestational hypertension': 'Notes/Maternal Health/GDM.html',
           'gestational diabetes mellitus': 'Notes/Maternal Health/GDM.html',
           'gestational diabetes': 'Notes/Maternal Health/GDM.html',
@@ -11546,10 +11679,10 @@
           'menstrual cycle made easy': 'Notes/Maternal Health/Menstrual-Cycle-Made-Easy.html',
           'hormonal and menstrual disorders': 'Notes/Maternal Health/Hormonal-and-Menstrual-Disorders.html',
           'hormonal menstrual disorders': 'Notes/Maternal Health/Hormonal-and-Menstrual-Disorders.html',
-          'naegeles rule': 'Notes/Maternal Health/Naegeles-Rule.html',
-          'naegele s rule': 'Notes/Maternal Health/Naegeles-Rule.html',
+          'naegeles rule': 'Notes/Maternal Health/Naegeles-Rule-Antepartum-Complications.html',
+          'naegele s rule': 'Notes/Maternal Health/Naegeles-Rule-Antepartum-Complications.html',
           'antepartum care': 'Notes/Maternal Health/Antepartum-Care.html',
-          'antepartum complications': 'Notes/Maternal Health/Naegeles-Rule.html',
+          'antepartum complications': 'Notes/Maternal Health/Naegeles-Rule-Antepartum-Complications.html',
           'pregnancy assessment signs': 'Notes/Maternal Health/Pregnancy-Assessment-Signs.html',
           'apgar score': 'Notes/Maternal Health/APGAR-Score.html',
           'apgar': 'Notes/Maternal Health/APGAR-Score.html',
@@ -11560,7 +11693,7 @@
           'infant bonding': 'Notes/Maternal Health/Infant-Bonding.html',
           'womens health nclex priorities': 'Notes/Maternal Health/Womens-Health-NCLEX-Priorities.html',
           "women s health nclex priorities": 'Notes/Maternal Health/Womens-Health-NCLEX-Priorities.html',
-          'organ disorders cancer womens health': 'Notes/Maternal Health/Organ-Disorders.html',
+          'organ disorders cancer womens health': 'Notes/Maternal Health/Organ-Disorders-Cancer-Womens-Health.html',
           'organ disorders': 'Notes/Maternal Health/Organ-Disorders.html',
           'endometriosis fibroids': 'Notes/Maternal Health/Organ-Disorders.html',
           'cancer': 'Notes/Maternal Health/Cancer.html',
@@ -11568,12 +11701,13 @@
           'placenta previa and abruption': 'Notes/Maternal Health/Placenta-Previa.html',
           'placenta previa': 'Notes/Maternal Health/Placenta-Previa.html',
           'placental abruption': 'Notes/Maternal Health/Placental-Abruption.html',
-          'postpartum and newborn care': 'Notes/Maternal Health/Postpartum.html',
+          'postpartum and newborn care': 'Notes/Maternal Health/Postpartum-and-Newborn-Care.html',
+          'postpartum newborn care': 'Notes/Maternal Health/Postpartum-and-Newborn-Care.html',
           'postpartum': 'Notes/Maternal Health/Postpartum.html',
           'postpartum care': 'Notes/Maternal Health/Postpartum.html',
           'reproductive anatomy and fertilization': 'Notes/Maternal Health/Fertilization-and-Implantation.html',
           'fertilization and implantation': 'Notes/Maternal Health/Fertilization-and-Implantation.html',
-          'torch infections and medications': 'Notes/Maternal Health/TORCH-Infections.html',
+          'torch infections and medications': 'Notes/Maternal Health/TORCH-Infections-and-Medications.html',
           'torch infections': 'Notes/Maternal Health/TORCH-Infections.html',
           'torch': 'Notes/Maternal Health/TORCH-Infections.html',
           'vaginal infections': 'Notes/Maternal Health/Infections.html',
@@ -13683,6 +13817,14 @@
   </div>
 
   <script>
+    function normalizeClassDateList(values) {
+      if (!Array.isArray(values)) return [];
+      const out = values
+        .map(v => String(v || '').split('T')[0].trim())
+        .filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v));
+      return Array.from(new Set(out));
+    }
+
     /* ── Payment modal helpers ── */
     function openPaymentModal() {
       const student = window.currentStudent;
@@ -13695,7 +13837,10 @@
         return;
       }
 
-      const unpaidDates = (window.currentUnpaidClasses || []);
+      const unpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
+      // Keep a local snapshot so success mapping still works even if iframe message
+      // misses forClassDates after a redirect/auth step.
+      window._lastStripeClassDates = unpaidDates;
       const params = new URLSearchParams({
         student_name    : student?.name    || '',
         student_id      : String(student?.id || ''),
@@ -13707,7 +13852,7 @@
         for_class_dates : JSON.stringify(unpaidDates),
       });
 
-      const src = `payment.html?${params.toString()}`;
+      const src = `payment.html?v=20260414-2&${params.toString()}`;
       document.getElementById('arnomaPaymentIframe').src = src;
 
       const overlay = document.getElementById('arnomaPaymentModalOverlay');
@@ -13733,9 +13878,25 @@
         // field IS the class date (Calendar-NEW falls back to pr.date in extractForClassDates).
         try {
           const today = e.data.date || new Date().toISOString().split('T')[0];
-          const classDates = (e.data.forClassDates && e.data.forClassDates.length)
-            ? e.data.forClassDates
-            : [today];
+          const messageDates = normalizeClassDateList(e.data.forClassDates || []);
+          const messageSingleDate = String(e.data.forClass || '').split('T')[0].trim();
+          const modalSnapshotDates = normalizeClassDateList(window._lastStripeClassDates || []);
+          const currentUnpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
+
+          let classDates = messageDates;
+          if (classDates.length === 0 && /^\d{4}-\d{2}-\d{2}$/.test(messageSingleDate)) {
+            classDates = [messageSingleDate];
+          }
+          if (classDates.length === 0 && modalSnapshotDates.length > 0) {
+            classDates = modalSnapshotDates;
+          }
+          if (classDates.length === 0 && currentUnpaidDates.length > 0) {
+            classDates = currentUnpaidDates;
+          }
+          if (classDates.length === 0) {
+            classDates = [today];
+          }
+
           const studentId = e.data.studentId || (window.currentStudent && window.currentStudent.id) || null;
           const amount    = e.data.amount || 0;
           const perClass  = classDates.length > 1 ? +(amount / classDates.length).toFixed(2) : amount;
