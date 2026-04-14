@@ -7664,7 +7664,7 @@
         group: student.group_name || student.group
       });
 
-      const cacheKey = `payments-v27-${student.id}`;
+      const cacheKey = `payments-v28-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached calendar payment status for student:', student.id);
@@ -7941,6 +7941,23 @@
       // Never start before the absolute floor
       if (!_studentStartStr || _studentStartStr < '2025-12-01') {
         _studentStartStr = '2025-12-01';
+      }
+
+      // ── New-student payment back-fill ──────────────────────────────────────
+      // If the student was just created today but already has payment records for
+      // earlier class dates (e.g. admin created the account after the first class),
+      // _studentStartStr would exclude those dates from scheduledDates → no history shown.
+      // Fix: walk back _studentStartStr to the week containing the earliest paid date.
+      if (paidDates.size > 0) {
+        const earliestPaid = Array.from(paidDates).sort()[0];
+        if (earliestPaid < _studentStartStr) {
+          // Go back 7 days before the earliest payment to ensure the class day is captured.
+          const d = new Date(earliestPaid + 'T00:00:00');
+          d.setDate(d.getDate() - 7);
+          const adjusted = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          _studentStartStr = adjusted > '2025-12-01' ? adjusted : '2025-12-01';
+          debugLog(`📅 Shifted _studentStartStr back to ${_studentStartStr} to cover paid date ${earliestPaid}`);
+        }
       }
 
       const startDate = new Date(ABSOLUTE_FLOOR.getTime());
@@ -10674,9 +10691,19 @@
         ]);
 
         const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
+
+        // For group-level grants: only show notes posted on/after the student's join date.
+        // This prevents newly added students from inheriting all historical group notes.
+        const studentJoinDateStr = (currentStudent.start_date || currentStudent.created_at || '').split('T')[0] || null;
         const freeAccessGrants = [
           ...(freeIndividualRes.data || []).filter(g => !blockedNoteIds.has(g.note_id)),
-          ...(freeGroupRes.data || []).filter(g => !blockedNoteIds.has(g.note_id))
+          ...(freeGroupRes.data || []).filter(g => {
+            if (blockedNoteIds.has(g.note_id)) return false;
+            if (!studentJoinDateStr) return true; // no join date — show all
+            // Use the note's class_date (when it was posted) or created_at as the post date.
+            const postDate = (g.class_date || g.created_at || '').split('T')[0];
+            return !postDate || postDate >= studentJoinDateStr;
+          })
         ];
         
         debugLog('📦 Free Access Query Result:', freeAccessGrants);
