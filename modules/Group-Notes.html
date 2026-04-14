@@ -889,7 +889,8 @@
             <button onclick="batchUnpost('group')" class="pill-btn red">Unpost (Group)</button>
             <button onclick="batchUnpost('student')" class="pill-btn red">Unpost (Student)</button>
             <button onclick="openFreeAccessModal()" class="pill-btn teal">FREE</button>
-            <button onclick="batchRemoveFreeAccess()" class="pill-btn amber">Un-Free</button>
+            <button onclick="batchRemoveFreeAccess('group')" class="pill-btn amber">Un-Free (Group)</button>
+            <button onclick="batchRemoveFreeAccess('student')" class="pill-btn amber">Un-Free (Student)</button>
             <button onclick="batchShareWithIndividual()" class="pill-btn violet">Share Individual</button>
             <button onclick="batchDelete()" class="pill-btn red">Delete</button>
             <button onclick="clearSelection()" class="pill-btn ghost">Clear</button>
@@ -5198,24 +5199,83 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       }
     }
 
-    async function batchRemoveFreeAccess() {
+    async function batchRemoveFreeAccess(mode = 'group') {
       if (selectedNoteIds.size === 0) {
         await customAlert('No notes selected');
         return;
       }
 
+      const noteIds = Array.from(selectedNoteIds);
+      const groupLetter = currentGroup.replace('Group ', '').trim();
+
+      if (mode === 'student') {
+        // Load group students
+        if (allStudents.length === 0) await loadStudentsForModal();
+        const groupStudents = allStudents
+          .filter(s => {
+            const g = (s.group_name || '').replace('Group ', '').trim();
+            return g === groupLetter || s.group_name === groupLetter;
+          })
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        if (groupStudents.length === 0) {
+          await customAlert('No Students', `No students found in ${currentGroup}.`);
+          return;
+        }
+
+        const student = await showUnpostStudentPicker(groupStudents);
+        if (!student) return;
+
+        const confirmed = await customConfirm(
+          'Remove Free Access',
+          `Remove FREE access for ${student.name} from ${noteIds.length} note(s)?`
+        );
+        if (!confirmed) return;
+
+        try {
+          const { error } = await supabaseClient
+            .from('note_free_access')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('student_id', student.id);
+          if (error) throw error;
+
+          // Update local array
+          freeAccessGrants = freeAccessGrants.filter(grant =>
+            !(noteIds.includes(grant.note_id) && grant.student_id === student.id)
+          );
+
+          await customAlert(`✓ Removed FREE access for ${student.name} from ${noteIds.length} note(s)`);
+
+          await createNotification(
+            'batch_unfree_student',
+            'Unfree Access (Student)',
+            `Removed FREE access for ${student.name} from ${noteIds.length} notes in ${currentGroup}`,
+            'notes',
+            { note_count: noteIds.length, group: currentGroup, student: student.name }
+          );
+
+          clearSelection();
+          await renderSystems();
+        } catch (error) {
+          console.error('Batch unfree (student) error:', error);
+          await customAlert('Failed to remove free access: ' + error.message);
+        }
+        return;
+      }
+
+      // Group mode (default)
       const confirmed = await customConfirm(
         'Remove Free Access',
-        `Remove FREE access from ${selectedNoteIds.size} note(s) for ${currentGroup}?\n\nStudents will need to pay to access these notes.`
+        `Remove FREE access from ${noteIds.length} note(s) for ${currentGroup}?\n\nStudents will need to pay to access these notes.`
       );
       if (!confirmed) return;
 
       try {
-        const groupLetter = currentGroup.replace('Group ', '');
         let successCount = 0;
         let errorCount = 0;
 
-        for (const noteId of selectedNoteIds) {
+        for (const noteId of noteIds) {
           try {
             // Delete free access grants for this note and group
             const { error } = await supabaseClient
