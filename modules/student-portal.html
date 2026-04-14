@@ -7664,7 +7664,7 @@
         group: student.group_name || student.group
       });
 
-      const cacheKey = `payments-v29-${student.id}`;
+      const cacheKey = `payments-v28-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached calendar payment status for student:', student.id);
@@ -10692,19 +10692,9 @@
 
         const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
 
-        // For group-level grants: only show notes posted on/after the student's first class date.
-        // Use start_date first; fall back to created_at minus a 14-day buffer so accounts
-        // created a few days after the first class still see notes from that class week.
-        // This prevents newly added students from inheriting all historical group notes
-        // while still correctly showing notes posted just before the account was created.
-        let _joinBase = (currentStudent.start_date || currentStudent.created_at || '').split('T')[0] || null;
-        let studentJoinDateStr = null;
-        if (_joinBase) {
-          const _jd = new Date(_joinBase + 'T00:00:00');
-          // If no explicit start_date, give a 14-day buffer to cover admin processing lag
-          if (!currentStudent.start_date) _jd.setDate(_jd.getDate() - 14);
-          studentJoinDateStr = `${_jd.getFullYear()}-${String(_jd.getMonth()+1).padStart(2,'0')}-${String(_jd.getDate()).padStart(2,'0')}`;
-        }
+        // For group-level grants: only show notes posted on/after the student's join date.
+        // This prevents newly added students from inheriting all historical group notes.
+        const studentJoinDateStr = (currentStudent.start_date || currentStudent.created_at || '').split('T')[0] || null;
         const freeAccessGrants = [
           ...(freeIndividualRes.data || []).filter(g => !blockedNoteIds.has(g.note_id)),
           ...(freeGroupRes.data || []).filter(g => {
