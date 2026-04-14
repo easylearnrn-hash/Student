@@ -7840,7 +7840,7 @@
             .select('for_class, for_class_dates, email_date, amount, status, payer_name, resolved_student_name, student_id, linked_student_id')
             .or(`student_id.eq.${student.id},linked_student_id.eq.${student.id}${nameFilters}`)
         ).catch(() => ({ data: [], error: null })),
-        // Manual enrollment records — admin-added past-date enrollments that bypass created_at
+        // Manual enrollments — dates bypassing created_at filter, mirrors Calendar-NEW
         Promise.resolve(
           supabaseClient.from('payment_records').select('date').eq('student_id', student.id).eq('payment_method', 'manual_enrollment')
         ).catch(() => ({ data: [], error: null }))
@@ -7851,9 +7851,11 @@
       const credits    = (!creditResult.error       && creditResult.data)     ? creditResult.data    : [];
       const skipped    = (!skippedResult.error      && skippedResult.data)    ? skippedResult.data   : [];
       const zelleRaw   = (!zelleResult.error        && zelleResult.data)      ? zelleResult.data     : [];
-      const manualEnrollDates = (!manualEnrollResult.error && manualEnrollResult.data)
-        ? manualEnrollResult.data.map(r => (r.date || '').split('T')[0]).filter(Boolean)
-        : [];
+      const manualEnrollDates = new Set(
+        ((!manualEnrollResult.error && manualEnrollResult.data) ? manualEnrollResult.data : [])
+          .map(r => (r.date || '').split('T')[0])
+          .filter(Boolean)
+      );
 
       const normalizePaymentName = value => String(value || '')
         .toLowerCase()
@@ -7915,13 +7917,7 @@
       if (student.start_date) {
         _studentStartStr = student.start_date.split('T')[0];
       } else if (student.created_at) {
-        // IMPORTANT: Convert to LA local date, not UTC — avoids off-by-one errors when
-        // a student is enrolled late in the day (e.g., 9 PM LA = next day UTC).
-        try {
-          _studentStartStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date(student.created_at));
-        } catch(e) {
-          _studentStartStr = new Date(student.created_at).toISOString().split('T')[0];
-        }
+        _studentStartStr = new Date(student.created_at).toISOString().split('T')[0];
       }
       // Never start before the absolute floor
       if (!_studentStartStr || _studentStartStr < '2025-12-01') {
@@ -7953,27 +7949,19 @@
         const month = String(d.getMonth() + 1).padStart(2, '0');
         const day   = String(d.getDate()).padStart(2, '0');
         const dateStr = `${year}-${month}-${day}`;
-        if (_studentStartStr && dateStr < _studentStartStr) continue; // Match Calendar logic
+        if (_studentStartStr && dateStr < _studentStartStr && !manualEnrollDates.has(dateStr)) continue; // Match Calendar logic
         if (!scheduleActiveDays.includes(daysOfWeek[d.getDay()])) continue;
         if (skippedDates.has(dateStr)) continue;
         // Always include today — debt is owed for today's class regardless of whether it has started yet
         scheduledDates.push(dateStr);
       }
 
-      // Add manually enrolled past dates (admin override — bypasses created_at filter)
-      manualEnrollDates.forEach(d => {
-        if (!scheduledDates.includes(d) && !skippedDates.has(d)) {
-          scheduledDates.push(d);
-        }
-      });
-      scheduledDates.sort();
-
       // Add one-time classes
       if (Array.isArray(groupScheduleData.one_time_schedules)) {
         groupScheduleData.one_time_schedules.forEach(ot => {
           const otDate = ot.date ? ot.date.substring(0, 10) : null;
           if (!otDate) return;
-          if (_studentStartStr && otDate < _studentStartStr) return; // Match Calendar logic
+          if (_studentStartStr && otDate < _studentStartStr && !manualEnrollDates.has(otDate)) return; // Match Calendar logic
           const [y,mo,dy] = otDate.split('-');
           if (new Date(+y, +mo-1, +dy) > todayLA) return;
           if (skippedDates.has(otDate) || scheduledDates.includes(otDate)) return;
