@@ -4942,7 +4942,7 @@
     // 🔥 VERSION CHECK — force cache-bypass reload when a new version is detected.
     // Update PORTAL_VERSION on every deployment so stale cached pages self-heal.
     (function() {
-      const PORTAL_VERSION = 'portal-20260413-3'; // ← bump this with every deploy
+      const PORTAL_VERSION = 'portal-20260414-4'; // ← bump this with every deploy
       const KEY = 'arnoma:portal:v';
       const prev = localStorage.getItem(KEY);
       localStorage.setItem(KEY, PORTAL_VERSION);
@@ -4951,7 +4951,7 @@
         window.location.reload(true);
       }
     })();
-    console.log('🚀 STUDENT PORTAL VERSION: portal-20260413-3');
+    console.log('🚀 STUDENT PORTAL VERSION: portal-20260414-4');
     console.log('📅 Loaded at:', new Date().toLocaleString());
     
     // ==========================================================================
@@ -7664,7 +7664,7 @@
         group: student.group_name || student.group
       });
 
-      const cacheKey = `payments-v25-${student.id}`;
+      const cacheKey = `payments-v26-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached calendar payment status for student:', student.id);
@@ -7674,11 +7674,16 @@
         if (currentStudentPaidDates.size === 0) {
           try {
             let sd = currentGroupScheduleData;
-            if (sd && sd.schedule) {
-              const sr = await calculateUnpaidFromSchedule(student, [], sd);
-              currentStudentPaidDates   = sr.paidDates   || new Set();
-              currentStudentAbsentDates = sr.absentDates || new Set();
+            if (!sd || !sd.schedule) {
+              const groupName = getStudentGroup(student);
+              if (groupName) {
+                sd = await getGroupSchedule(groupName);
+                currentGroupScheduleData = sd || currentGroupScheduleData;
+              }
             }
+            const sr = await calculateUnpaidFromSchedule(student, [], sd || {});
+            currentStudentPaidDates   = sr.paidDates   || new Set();
+            currentStudentAbsentDates = sr.absentDates || new Set();
           } catch (_) { /* non-fatal — unlock logic falls back to buildPaidDatesSet */ }
         }
         return cached;
@@ -7694,12 +7699,7 @@
           }
         }
 
-        if (!scheduleData || !scheduleData.schedule) {
-          setCachedData(cacheKey, []);
-          return [];
-        }
-
-        const scheduleResult = await calculateUnpaidFromSchedule(student, [], scheduleData);
+        const scheduleResult = await calculateUnpaidFromSchedule(student, [], scheduleData || {});
         const paidDates      = scheduleResult.paidDates      || new Set();
         const absentDates    = scheduleResult.absentDates    || new Set();
         // scheduledDates is already floored at Mar 30 — ONLY these dates are shown in history.
@@ -7775,9 +7775,6 @@
      */
     async function calculateUnpaidFromSchedule(student, payments, groupScheduleData) {
       const studentGroup = student.group_name || student.group_letter || student.group;
-      if (!studentGroup || !groupScheduleData || !groupScheduleData.schedule) {
-        return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
-      }
 
       const pricePerClass = parseFloat(student.price_per_class) || 50;
       const nowParts = getTodayLAParts();
@@ -7851,9 +7848,10 @@
             .select('for_class, for_class_dates, email_date, amount, status, payer_name, resolved_student_name, student_id, linked_student_id')
             .or(`student_id.eq.${student.id},linked_student_id.eq.${student.id}${nameFilters}`)
         ).catch(() => ({ data: [], error: null })),
-        // Manual enrollments — dates bypassing created_at filter, mirrors Calendar-NEW
+        // Manual enrollments — dates bypassing created_at filter, mirrors Calendar-NEW.
+        // Keep this broad so older rows that missed payment_method still count.
         Promise.resolve(
-          supabaseClient.from('payment_records').select('date').eq('student_id', student.id).eq('payment_method', 'manual_enrollment')
+          supabaseClient.from('payment_records').select('date, payment_method, status, amount').eq('student_id', student.id)
         ).catch(() => ({ data: [], error: null }))
       ]);
 
@@ -7862,8 +7860,18 @@
       const credits    = (!creditResult.error       && creditResult.data)     ? creditResult.data    : [];
       const skipped    = (!skippedResult.error      && skippedResult.data)    ? skippedResult.data   : [];
       const zelleRaw   = (!zelleResult.error        && zelleResult.data)      ? zelleResult.data     : [];
+      const manualEnrollRows = (!manualEnrollResult.error && manualEnrollResult.data) ? manualEnrollResult.data : [];
       const manualEnrollDates = new Set(
-        ((!manualEnrollResult.error && manualEnrollResult.data) ? manualEnrollResult.data : [])
+        manualEnrollRows
+          .filter(r => {
+            const method = String(r.payment_method || '').trim().toLowerCase();
+            const status = String(r.status || '').trim().toLowerCase();
+            const amount = Number(r.amount || 0);
+            return method === 'manual_enrollment'
+              || method === 'manual-enrollment'
+              || method === 'manual enrollment'
+              || (status === 'unpaid' && amount === 0 && (!method || method === 'manual'));
+          })
           .map(r => (r.date || '').split('T')[0])
           .filter(Boolean)
       );
@@ -7928,7 +7936,7 @@
       if (student.start_date) {
         _studentStartStr = student.start_date.split('T')[0];
       } else if (student.created_at) {
-        _studentStartStr = new Date(student.created_at).toISOString().split('T')[0];
+        _studentStartStr = String(student.created_at).split('T')[0];
       }
       // Never start before the absolute floor
       if (!_studentStartStr || _studentStartStr < '2025-12-01') {
@@ -7937,7 +7945,10 @@
 
       const startDate = new Date(ABSOLUTE_FLOOR.getTime());
 
-      const scheduleStr = groupScheduleData.schedule || '';
+      const scheduleStr = (groupScheduleData && groupScheduleData.schedule) ? groupScheduleData.schedule : '';
+      const oneTimeSchedules = Array.isArray(groupScheduleData?.one_time_schedules)
+        ? groupScheduleData.one_time_schedules
+        : [];
       const daysOfWeek  = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
       const fullDayMap  = { Mon:'Monday', Tue:'Tuesday', Wed:'Wednesday', Thu:'Thursday', Fri:'Friday', Sat:'Saturday', Sun:'Sunday' };
 
@@ -7950,7 +7961,7 @@
         }
       });
 
-      if (scheduleActiveDays.length === 0) {
+      if (scheduleActiveDays.length === 0 && oneTimeSchedules.length === 0 && manualEnrollDates.size === 0) {
         return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
       }
 
@@ -7968,8 +7979,8 @@
       }
 
       // Add one-time classes
-      if (Array.isArray(groupScheduleData.one_time_schedules)) {
-        groupScheduleData.one_time_schedules.forEach(ot => {
+      if (oneTimeSchedules.length > 0) {
+        oneTimeSchedules.forEach(ot => {
           const otDate = ot.date ? ot.date.substring(0, 10) : null;
           if (!otDate) return;
           if (_studentStartStr && otDate < _studentStartStr && !manualEnrollDates.has(otDate)) return; // Match Calendar logic
@@ -7990,8 +8001,7 @@
           .filter(Boolean)
           .some(name => scheduleStr.includes(name));
 
-        const hasOneTimeToday = Array.isArray(groupScheduleData.one_time_schedules) &&
-          groupScheduleData.one_time_schedules.some(ot => {
+        const hasOneTimeToday = oneTimeSchedules.some(ot => {
             const otDate = ot?.date ? ot.date.substring(0, 10) : null;
             return otDate === todayDateStr;
           });

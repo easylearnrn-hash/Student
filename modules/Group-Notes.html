@@ -1073,7 +1073,8 @@
         <button id="bulkUnpostBtn" onclick="bulkUnpostFilteredNotes('group')" class="pill-btn red" style="font-size: 12px; padding: 6px 14px; display: none;">✕ Unpost (Group)</button>
         <button id="bulkUnpostStudentBtn" onclick="bulkUnpostFilteredNotes('student')" class="pill-btn red" style="font-size: 12px; padding: 6px 14px; display: none;">✕ Unpost (Student)</button>
         <button id="bulkFreeBtn" onclick="bulkMakeFree()" class="pill-btn teal" style="font-size: 12px; padding: 6px 14px; display: none;">🆓 Free Selected</button>
-        <button id="bulkUnfreeBtn" onclick="bulkRemoveFree()" class="pill-btn amber" style="font-size: 12px; padding: 6px 14px; display: none;">💰 Unfree Selected</button>
+        <button id="bulkUnfreeGroupBtn" onclick="bulkRemoveFree('group')" class="pill-btn amber" style="font-size: 12px; padding: 6px 14px; display: none;">💰 Unfree (Group)</button>
+        <button id="bulkUnfreeStudentBtn" onclick="bulkRemoveFree('student')" class="pill-btn amber" style="font-size: 12px; padding: 6px 14px; display: none;">💰 Unfree (Student)</button>
         <span id="filteredSelectedCount" style="margin-left: auto; color: var(--text-muted); font-size: 13px; font-weight: 600;">0 selected</span>
       </div>
 
@@ -5213,8 +5214,8 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         if (allStudents.length === 0) await loadStudentsForModal();
         const groupStudents = allStudents
           .filter(s => {
-            const g = (s.group_name || '').replace('Group ', '').trim();
-            return g === groupLetter || s.group_name === groupLetter;
+            const g = (s.group_name || '').replace('Group ', '').trim().toUpperCase();
+            return g === groupLetter.toUpperCase();
           })
           .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -5233,6 +5234,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         if (!confirmed) return;
 
         try {
+          // Remove explicit individual free grants first.
           const { error } = await supabaseClient
             .from('note_free_access')
             .delete()
@@ -5240,12 +5242,49 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             .eq('student_id', student.id);
           if (error) throw error;
 
+          // Reset student-specific permission overrides for these notes.
+          const { error: deletePermError } = await supabaseClient
+            .from('student_note_permissions')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('student_id', student.id);
+          if (deletePermError) throw deletePermError;
+
+          // Keep notes visible for this student as paid notes (not free), then add
+          // a block row so group-level free grants are suppressed for this student only.
+          const paidAccessRows = noteIds.map(nId => ({
+            note_id: nId,
+            student_id: student.id,
+            group_name: currentGroup,
+            is_accessible: true
+          }));
+
+          const blockRows = noteIds.map(nId => ({
+            note_id: nId,
+            student_id: student.id,
+            is_accessible: false
+          }));
+
+          const { error: paidAccessError } = await supabaseClient
+            .from('student_note_permissions')
+            .insert(paidAccessRows);
+          if (paidAccessError) throw paidAccessError;
+
+          const { error: blockError } = await supabaseClient
+            .from('student_note_permissions')
+            .insert(blockRows);
+          if (blockError) throw blockError;
+
           // Update local array
           freeAccessGrants = freeAccessGrants.filter(grant =>
             !(noteIds.includes(grant.note_id) && grant.student_id === student.id)
           );
+          permissions = permissions.filter(p =>
+            !(noteIds.includes(p.note_id) && p.student_id === student.id)
+          );
+          permissions.push(...paidAccessRows, ...blockRows);
 
-          await customAlert(`✓ Removed FREE access for ${student.name} from ${noteIds.length} note(s)`);
+          await customAlert(`✓ Removed FREE access for ${student.name} from ${noteIds.length} note(s)\n\nNotes remain posted but now require payment.`);
 
           await createNotification(
             'batch_unfree_student',
@@ -5256,7 +5295,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           );
 
           clearSelection();
-          await renderSystems();
+          await loadData(true);
         } catch (error) {
           console.error('Batch unfree (student) error:', error);
           await customAlert('Failed to remove free access: ' + error.message);
@@ -6435,13 +6474,15 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       // Show/hide bulk action buttons based on filter type
       const bulkUnpostBtn = document.getElementById('bulkUnpostBtn');
       const bulkFreeBtn = document.getElementById('bulkFreeBtn');
-      const bulkUnfreeBtn = document.getElementById('bulkUnfreeBtn');
+      const bulkUnfreeGroupBtn = document.getElementById('bulkUnfreeGroupBtn');
+      const bulkUnfreeStudentBtn = document.getElementById('bulkUnfreeStudentBtn');
       
       bulkPostBtn.style.display = filterType === 'unposted' ? 'inline-block' : 'none';
       bulkUnpostBtn.style.display = filterType === 'posted' ? 'inline-block' : 'none';
       document.getElementById('bulkUnpostStudentBtn').style.display = filterType === 'posted' ? 'inline-block' : 'none';
       bulkFreeBtn.style.display = (filterType === 'posted' || filterType === 'unposted') ? 'inline-block' : 'none';
-      bulkUnfreeBtn.style.display = filterType === 'free' ? 'inline-block' : 'none';
+      if (bulkUnfreeGroupBtn) bulkUnfreeGroupBtn.style.display = filterType === 'free' ? 'inline-block' : 'none';
+      if (bulkUnfreeStudentBtn) bulkUnfreeStudentBtn.style.display = filterType === 'free' ? 'inline-block' : 'none';
 
       try {
         // Show modal immediately with loading state
@@ -7165,12 +7206,101 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       }
     }
 
-    async function bulkRemoveFree() {
+    async function bulkRemoveFree(mode = 'group') {
       if (selectedFilteredNotes.size === 0) {
         await customAlert('No Selection', 'Please select at least one note to remove free access');
         return;
       }
 
+      const noteIds = Array.from(selectedFilteredNotes);
+      const groupLetter = currentGroup.replace('Group ', '').trim();
+
+      if (mode === 'student') {
+        // ── Individual student unfree ──
+        if (allStudents.length === 0) await loadStudentsForModal();
+        const groupStudents = allStudents
+          .filter(s => {
+            const g = (s.group_name || '').replace('Group ', '').trim().toUpperCase();
+            return g === groupLetter.toUpperCase();
+          })
+          .sort((a, b) => a.name.localeCompare(b.name));
+
+        if (groupStudents.length === 0) {
+          await customAlert('No Students', `No students found in ${currentGroup}.`);
+          return;
+        }
+
+        const student = await showUnpostStudentPicker(groupStudents);
+        if (!student) return;
+
+        const confirmed = await customConfirm(
+          'Remove Free Access',
+          `Remove FREE access for ${student.name} from ${noteIds.length} note(s)?`
+        );
+        if (!confirmed) return;
+
+        try {
+          const { error: freeDeleteError } = await supabaseClient
+            .from('note_free_access')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('student_id', student.id);
+          if (freeDeleteError) throw freeDeleteError;
+
+          // Replace student-specific rows so notes stay posted but no longer free.
+          const { error: deletePermError } = await supabaseClient
+            .from('student_note_permissions')
+            .delete()
+            .in('note_id', noteIds)
+            .eq('student_id', student.id);
+          if (deletePermError) throw deletePermError;
+
+          const paidAccessRows = noteIds.map(nId => ({
+            note_id: nId,
+            student_id: student.id,
+            group_name: currentGroup,
+            is_accessible: true
+          }));
+
+          const blockRows = noteIds.map(nId => ({
+            note_id: nId,
+            student_id: student.id,
+            is_accessible: false
+          }));
+
+          const { error: paidAccessError } = await supabaseClient
+            .from('student_note_permissions')
+            .insert(paidAccessRows);
+          if (paidAccessError) throw paidAccessError;
+
+          const { error: blockError } = await supabaseClient
+            .from('student_note_permissions')
+            .insert(blockRows);
+          if (blockError) throw blockError;
+
+          freeAccessGrants = freeAccessGrants.filter(g =>
+            !(noteIds.includes(g.note_id) && g.student_id === student.id)
+          );
+          permissions = permissions.filter(p =>
+            !(noteIds.includes(p.note_id) && p.student_id === student.id)
+          );
+          permissions.push(...paidAccessRows, ...blockRows);
+
+          selectedFilteredNotes.clear();
+          filteredModalCheckedNoteIds.clear();
+          renderFilteredNotes();
+          loadData();
+
+          await customAlert('Success', `Removed FREE access for ${student.name} from ${noteIds.length} note(s).\n\nNotes remain posted but now require payment.`);
+        } catch (error) {
+          console.error('Error removing student free access:', error);
+          await customAlert('Error', 'Failed to remove free access: ' + error.message);
+        }
+
+        return;
+      }
+
+      // ── Whole group unfree ──
       const confirmed = await customConfirm(
         'Remove Free Access',
         `Remove ALL free access (both group and individual) from ${selectedFilteredNotes.size} note(s)?`
@@ -7178,11 +7308,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       if (!confirmed) return;
 
       try {
-        const noteIds = Array.from(selectedFilteredNotes);
-        const groupLetter = currentGroup.replace('Group ', '');
-
-        // Remove BOTH group AND individual free access for these notes
-        // Option 1: Remove all free access for the current group (group-based access)
+        // Remove group free access for these notes
         const { error: groupError } = await supabaseClient
           .from('note_free_access')
           .delete()
@@ -7192,12 +7318,12 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
         if (groupError) throw groupError;
 
-        // Option 2: Remove all individual student free access for these notes (in current group)
-        // First get student IDs in current group
+        // Remove individual free access for students in this group.
+        const groupNameCandidates = [groupLetter, currentGroup];
         const { data: studentsInGroup, error: studentsError } = await supabaseClient
           .from('students')
           .select('id')
-          .eq('group_name', groupLetter);
+          .in('group_name', groupNameCandidates);
 
         if (studentsError) {
           console.error('Error fetching students:', studentsError);
@@ -7210,7 +7336,6 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             .from('note_free_access')
             .delete()
             .in('note_id', noteIds)
-            .eq('access_type', 'individual')
             .in('student_id', studentIds);
 
           if (individualError) {
@@ -7221,31 +7346,28 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
         // Capture count before clearing
         const count = selectedFilteredNotes.size;
-        
+
         // Update freeAccessGrants array immediately for instant UI feedback
-        // Remove both group and individual access
         const studentIdsInGroup = studentsInGroup?.map(s => s.id) || [];
         freeAccessGrants = freeAccessGrants.filter(grant => {
-          // Keep grants that don't match our criteria
-          const isGroupMatch = noteIds.includes(grant.note_id) && 
-                               grant.access_type === 'group' && 
+          const isGroupMatch = noteIds.includes(grant.note_id) &&
+                               grant.access_type === 'group' &&
                                grant.group_letter === groupLetter;
-          const isIndividualMatch = noteIds.includes(grant.note_id) && 
-                                    grant.access_type === 'individual' && 
+          const isIndividualMatch = noteIds.includes(grant.note_id) &&
                                     studentIdsInGroup.includes(grant.student_id);
           return !(isGroupMatch || isIndividualMatch);
         });
-        
+
         // Clear selection
         selectedFilteredNotes.clear();
         filteredModalCheckedNoteIds.clear();
-        
+
         // Re-render the filtered notes modal instantly with updated data
         renderFilteredNotes();
-        
+
         // Background refresh to sync badges
         loadData();
-        
+
         await customAlert('Success', `Removed ALL free access from ${count} note(s) for Group ${groupLetter}`);
 
       } catch (error) {
