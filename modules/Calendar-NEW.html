@@ -6226,6 +6226,23 @@
               const unpaidDates = getUnpaidClassDates(student).filter(d =>
                 d >= DEBT_CUTOFF_STR || manualEnrollments.has(`${student.id}-${d}`)
               );
+
+              // Explicitly inject manually enrolled dates that the loop may have missed
+              // due to timezone offset between UTC iteration and LA-ceiling date.
+              manualEnrollments.forEach(key => {
+                const firstDash = key.indexOf('-');
+                const sid = key.substring(0, firstDash);
+                const d = key.substring(firstDash + 1);
+                if (String(sid) !== String(student.id)) return;
+                if (unpaidDates.includes(d)) return;
+                const paymentInfo = hasPaymentCached(student.id, d, student);
+                const isAbsent = isAbsentCached(d, student.id);
+                if (!paymentInfo.hasPayment && !isAbsent) {
+                  unpaidDates.push(d);
+                }
+              });
+              unpaidDates.sort();
+
               for (const dateStr of unpaidDates) {
                 const formattedDate = new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
                   weekday: 'long',
