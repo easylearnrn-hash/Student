@@ -10797,25 +10797,24 @@
             return value.includes('T') ? value.split('T')[0] : value;
           };
 
-          permissions.forEach(permission => {
+          // Process GROUP-level permissions first (they have correct class_date from when admin posted).
+          // Individual access permissions may lack class_date (they only have granted_at = today).
+          // Using granted_at as perGroupClassDate causes the payment check to look for the WRONG date.
+          // Fix: only set notePostDateMap from permissions that have an explicit class_date.
+          const sortedPermissions = [
+            ...permissions.filter(p => p.student_id == null),   // group-level first
+            ...permissions.filter(p => p.student_id != null)    // individual second (lower priority)
+          ];
+          sortedPermissions.forEach(permission => {
             const classDateString = normalizeDateString(permission.class_date);
-            const grantedAtString = normalizeDateString(permission.granted_at);
-
-            // Only set if not already set by free_access (free_access takes priority)
-            if (!notePostDateMap.has(permission.note_id)) {
-              if (classDateString) {
-                // Use the class_date field from student_note_permissions (set when admin posts notes)
-                notePostDateMap.set(permission.note_id, {
-                  dateString: classDateString,
-                  source: 'permission_class_date'
-                });
-              } else if (grantedAtString) {
-                // Fallback: use granted_at timestamp
-                notePostDateMap.set(permission.note_id, {
-                  dateString: grantedAtString,
-                  source: 'permission_granted_at'
-                });
-              }
+            // Only use class_date — never use granted_at as perGroupClassDate.
+            // granted_at is when the admin clicked "Grant Access", not when the class happened.
+            // If class_date is missing, leave notePostDateMap unset so note.class_date takes over.
+            if (!notePostDateMap.has(permission.note_id) && classDateString) {
+              notePostDateMap.set(permission.note_id, {
+                dateString: classDateString,
+                source: 'permission_class_date'
+              });
             }
           });
         }
@@ -10880,10 +10879,19 @@
         // USE THE PASSED PAYMENT DATA (already loaded by loadPaymentHistory)
         const mergedPaymentRecords = paymentData;
         
-        // Create a Set of note IDs that have FREE access (no payment required)
-        // ⚠️ IMPORTANT: Only note_free_access grants free access
-        // Posted notes (from student_note_permissions) are VISIBLE but still require payment
-        const freeNoteIds = new Set(freeAccessNoteIds || []);
+        // Create a Set of note IDs that have FREE access (no payment required).
+        // ⚠️ CRITICAL FIX: Individual Access grants (admin checkbox in Group Notes) are UNCONDITIONAL.
+        // They must bypass all payment, date, and absence checks — just like note_free_access.
+        // Without this, admin-granted individual access still requires payment (wrong behaviour).
+        const individualAccessNoteIds = (studentPermRes.data || [])
+          .filter(p => p.is_accessible && p.student_id != null && String(p.student_id) === String(studentId))
+          .map(p => p.note_id);
+        
+        const freeNoteIds = new Set([...(freeAccessNoteIds || []), ...individualAccessNoteIds]);
+        
+        if (individualAccessNoteIds.length > 0) {
+          console.log('✅ Individual Access grants (unconditional free):', individualAccessNoteIds);
+        }
         
         if (DEBUG_MODE) debugLog(`✨ FREE access notes: ${freeNoteIds.size} notes (bypass payment checks)`);
         
@@ -11032,11 +11040,14 @@
         if (effectiveStartStr) {
           const beforeFilter = allSystemNotes.length;
           allSystemNotes = allSystemNotes.filter(note => {
-            // Get the note's actual class date from the raw notes data
+            // UNCONDITIONAL: If admin granted Individual Access or Free Access, always show this note.
+            // This bypasses the new-student date filter so individually-granted notes always appear.
+            if (freeNoteIds.has(note.id)) return true;
+
+            // Otherwise apply the new-student date gate: hide notes older than effectiveStartStr.
             const rawNote = notes.find(n => n.id === note.id);
             const noteClassDate = rawNote ? (rawNote.class_date || '').split('T')[0] : '';
-            // If no class_date, don't hide it (can't determine when it was for)
-            if (!noteClassDate) return true;
+            if (!noteClassDate) return true; // no class_date → can't determine age, show it
             return noteClassDate >= effectiveStartStr;
           });
           if (beforeFilter !== allSystemNotes.length) {
