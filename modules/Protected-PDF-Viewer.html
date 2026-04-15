@@ -289,10 +289,22 @@
     // ── Payment check ────────────────────────────────────────────
     // Returns true ONLY when the student has a paid/credit record for the exact class date.
     // Mirrors the green-dot logic in Calendar-NEW.html and shouldUnlockNote() in student-portal.html.
-    async function checkPayment(checkDate) {
+    async function checkPayment(checkDate, currentNoteId = null) {
       if (isAdmin()) return true;
       if (!currentStudent?.id) return true;
       const sid = currentStudent.id;
+      
+      // 💯 USER FIX: If the note has explicit Free Access or Individual Access, bypass payment checks unconditionally
+      if (currentNoteId) {
+        const [freeRes, permRes] = await Promise.all([
+          supabaseClient.from('note_free_access').select('id').eq('note_id', currentNoteId).eq('student_id', sid).maybeSingle(),
+          supabaseClient.from('student_note_permissions').select('id').eq('note_id', currentNoteId).eq('student_id', sid).eq('is_accessible', true).maybeSingle()
+        ]);
+        if (freeRes.data || permRes.data) {
+           return true; // Bypass payment lock unconditionally!
+        }
+      }
+      
       const [mr, ar, cr] = await Promise.all([
         supabaseClient.from('payment_records').select('date,for_class_dates,for_class,status').eq('student_id', sid).eq('status','paid'),
         supabaseClient.from('payments').select('date,for_class_dates,for_class').or(`student_id.eq.${sid},linked_student_id.eq.${sid}`),
@@ -823,7 +835,7 @@
               if (note.requires_payment) {
                 setStatus('Verifying payment…');
                 const checkDate = classDate || (note.class_date ? note.class_date.split('T')[0] : null);
-                if (!(await checkPayment(checkDate))) { showError('🔒 Payment required to access this note.'); return; }
+                if (!(await checkPayment(checkDate, noteId))) { showError('🔒 Payment required to access this note.'); return; }
               } else {
                 // Free note — check group access
                 if (!(await checkNoteGroupAccess(noteId, note))) {
@@ -858,7 +870,7 @@
             if (note.requires_payment) {
               setStatus('Verifying payment…');
               const cd = note.class_date ? note.class_date.split('T')[0] : null;
-              if (!(await checkPayment(cd))) { showError('🔒 Payment required to access this note.'); return; }
+              if (!(await checkPayment(cd, noteId))) { showError('🔒 Payment required to access this note.'); return; }
             }
           }
 
