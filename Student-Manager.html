@@ -1719,8 +1719,8 @@
           <option value="no-group">No Group</option>
         </select>
         <select id="statusFilter" class="filter-select">
-          <option value="" selected>All Statuses</option>
-          <option value="active">Active</option>
+          <option value="">All Statuses</option>
+          <option value="active" selected>Active</option>
           <option value="paused">Paused</option>
           <option value="graduated">Graduated</option>
         </select>
@@ -2154,7 +2154,16 @@
                 </label>
               </div>
 
-              <div class="profile-section-title" style="margin-top:4px;">Notes & Aliases</div>
+              <!-- Calendar start date — shown only when Show in Calendar is ON -->
+              <div id="calendarStartDateRow" style="display:none; margin-top:10px; margin-bottom:4px; padding:12px 14px; border-radius:10px; background:rgba(196,164,95,0.07); border:1px solid rgba(196,164,95,0.20);">
+                <div style="font-family:var(--font-sans,Inter,sans-serif); font-size:11px; font-weight:600; letter-spacing:0.10em; text-transform:uppercase; color:rgba(196,164,95,0.75); margin-bottom:8px;">Calendar Start Date</div>
+                <div style="font-family:var(--font-sans,Inter,sans-serif); font-size:12px; color:rgba(245,240,232,0.55); margin-bottom:10px; line-height:1.5;">Debt and payment history will only count from this date onward. Leave blank to use the student's sign-up date.</div>
+                <input type="date" id="modalStartDate"
+                  style="width:100%; padding:9px 12px; border-radius:8px; border:1px solid rgba(196,164,95,0.30); background:rgba(14,18,30,0.6); color:rgba(245,240,232,0.90); font-family:inherit; font-size:13px; cursor:pointer; outline:none;"
+                  onchange="if(currentStudent){ currentStudent.start_date = this.value || null; saveStudent(currentStudent); }" />
+              </div>
+
+              <div class="profile-section-title" style="margin-top:14px;">Notes & Aliases</div>
 
               <div class="profile-field">
                 <div class="profile-field-label">Payment Aliases</div>
@@ -2920,7 +2929,8 @@
                 aliases: parseAliasesField(s.aliases),
                 notes: s.notes || '',
                 status: s.status || 'active',
-                showInCalendar: s.show_in_grid !== false
+                showInCalendar: s.show_in_grid !== false,
+                start_date: s.start_date ? s.start_date.split('T')[0] : null
               };
               
               debugLog(`👤 Student ${mappedStudent.id} (${mappedStudent.name}):`, {
@@ -3071,6 +3081,7 @@
             status: student.status || 'active',
             role: student.role || 'student',  // CRITICAL: Must be 'student' or 'admin'
             show_in_grid: student.showInCalendar !== false,
+            start_date: student.start_date || null,
             updated_at: new Date().toISOString()
           };
           
@@ -3373,6 +3384,18 @@
         
         // Save to Supabase
         await saveStudent(student);
+
+        // 📅 RECORD VISIBILITY HISTORY so calendar hides/shows the student from the correct date
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const visible = student.status === 'active';
+          await supabaseClient
+            .from('student_visibility_history')
+            .insert({ student_id: student.id, visible, effective_date: today });
+          debugLog(`📅 Status history recorded: ${student.name} → visible=${visible} from ${today}`);
+        } catch (histErr) {
+          console.warn('⚠️ Failed to record status history:', histErr);
+        }
         
         renderStudentCards();
       }
@@ -3420,13 +3443,15 @@
             }
           }
           
-          // Status filter — graduated students are hidden by default
-          // and only shown when the status filter is explicitly set to 'graduated'
-          if (student.status === 'graduated' && statusFilter !== 'graduated') {
-            return false;
-          }
-          if (statusFilter && student.status !== statusFilter) {
-            return false;
+          // Status filter — skip when a search term is active (search all students)
+          // graduated students are hidden by default unless filter is explicitly 'graduated'
+          if (!searchTerm) {
+            if (student.status === 'graduated' && statusFilter !== 'graduated') {
+              return false;
+            }
+            if (statusFilter && student.status !== statusFilter) {
+              return false;
+            }
           }
           
           // Payment filter
@@ -3489,7 +3514,7 @@
       function clearAllFilters() {
         document.getElementById('searchInput').value = '';
         document.getElementById('groupFilter').value = '';
-        document.getElementById('statusFilter').value = '';
+        document.getElementById('statusFilter').value = 'active';
         document.getElementById('paymentFilter').value = '';
         document.getElementById('sortFilter').value = '';
         
@@ -3860,13 +3885,128 @@
       }
 
       async function approveWaitingListStudent(id, firstName, lastName, email, phone, language) {
-        const confirmed = await customConfirm(
-          'Approve Student',
-          `Create student account for ${firstName} ${lastName}?\n\nEmail: ${email}\nPhone: ${phone || 'Not provided'}`
-        );
-        
-        if (!confirmed) return;
-        
+        // ── Step 0: Group + Price picker ─────────────────────────────────────
+        const approvalResult = await new Promise((resolve) => {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:200000;display:flex;align-items:center;justify-content:center;';
+          const dialog = document.createElement('div');
+          dialog.style.cssText = 'background:linear-gradient(135deg,rgba(15,18,40,0.99),rgba(10,12,28,0.99));border:2px solid rgba(138,180,255,0.3);border-radius:24px;padding:32px;max-width:460px;width:92%;box-shadow:0 30px 80px rgba(0,0,0,0.8);max-height:90vh;overflow-y:auto;';
+          dialog.innerHTML = `
+            <h3 style="color:white;margin:0 0 4px;font-size:20px;font-weight:700;">Approve Student</h3>
+            <p style="color:rgba(255,255,255,0.6);margin:0 0 24px;font-size:13px;">
+              Setting up <strong style="color:#8ab4ff;">${firstName} ${lastName}</strong>
+            </p>
+
+            <div style="margin-bottom:22px;">
+              <div style="color:rgba(138,180,255,0.8);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Group Assignment <span style="color:rgba(255,180,0,0.8);font-size:10px;">(required)</span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${['A','B','C','D','E','F'].map(g => `
+                  <button data-group="${g}" style="flex:1;min-width:48px;padding:11px 8px;border-radius:10px;border:2px solid rgba(138,180,255,0.3);background:rgba(138,180,255,0.08);color:white;font-size:17px;font-weight:700;cursor:pointer;transition:all 0.15s;font-family:inherit;">${g}</button>`).join('')}
+              </div>
+            </div>
+
+            <div style="margin-bottom:22px;">
+              <div style="color:rgba(138,180,255,0.8);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Price Per Class <span style="color:rgba(255,180,0,0.8);font-size:10px;">(required)</span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${[25,50,75,100].map(p => `
+                  <button data-price="${p}" style="flex:1;min-width:58px;padding:11px 8px;border-radius:10px;border:2px solid rgba(100,220,130,0.3);background:rgba(100,220,130,0.08);color:white;font-size:15px;font-weight:700;cursor:pointer;transition:all 0.15s;font-family:inherit;">$${p}</button>`).join('')}
+                <button data-price="custom" style="flex:1;min-width:68px;padding:11px 8px;border-radius:10px;border:2px solid rgba(200,160,255,0.3);background:rgba(200,160,255,0.08);color:white;font-size:13px;font-weight:700;cursor:pointer;transition:all 0.15s;font-family:inherit;">Custom</button>
+              </div>
+              <div id="customPriceWrap" style="display:none;margin-top:10px;">
+                <input id="customPriceInput" type="number" min="1" step="1" placeholder="Enter amount (e.g. 80)"
+                  style="width:100%;box-sizing:border-box;padding:11px 14px;border-radius:10px;border:2px solid rgba(200,160,255,0.4);background:rgba(200,160,255,0.08);color:white;font-size:15px;font-weight:600;font-family:inherit;outline:none;"/>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;margin-top:4px;">
+              <button id="approveConfirmBtn" disabled style="flex:1;padding:14px;border-radius:12px;border:none;background:rgba(100,180,255,0.2);color:rgba(255,255,255,0.4);font-size:15px;font-weight:700;cursor:not-allowed;font-family:inherit;transition:all 0.2s;">Approve & Create</button>
+              <button id="approveCancelBtn" style="padding:14px 20px;border-radius:12px;border:2px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:14px;cursor:pointer;font-family:inherit;">Cancel</button>
+            </div>
+          `;
+          overlay.appendChild(dialog);
+          document.body.appendChild(overlay);
+
+          let chosenGroup = null;
+          let chosenPrice = null; // number
+          let isCustom = false;
+
+          const confirmBtn = dialog.querySelector('#approveConfirmBtn');
+          const customWrap = dialog.querySelector('#customPriceWrap');
+          const customInput = dialog.querySelector('#customPriceInput');
+
+          function tryEnableConfirm() {
+            const priceReady = chosenPrice !== null && chosenPrice > 0;
+            const ready = chosenGroup && priceReady;
+            confirmBtn.disabled = !ready;
+            confirmBtn.style.background = ready ? 'linear-gradient(135deg,#3b82f6,#2563eb)' : 'rgba(100,180,255,0.2)';
+            confirmBtn.style.color = ready ? 'white' : 'rgba(255,255,255,0.4)';
+            confirmBtn.style.cursor = ready ? 'pointer' : 'not-allowed';
+          }
+
+          // Group buttons
+          dialog.querySelectorAll('[data-group]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              dialog.querySelectorAll('[data-group]').forEach(b => {
+                b.style.background = 'rgba(138,180,255,0.08)';
+                b.style.borderColor = 'rgba(138,180,255,0.3)';
+                b.style.color = 'white';
+              });
+              chosenGroup = btn.dataset.group;
+              btn.style.background = 'rgba(102,180,255,0.35)';
+              btn.style.borderColor = 'rgba(102,180,255,0.9)';
+              btn.style.color = '#fff';
+              tryEnableConfirm();
+            });
+          });
+
+          // Price buttons
+          dialog.querySelectorAll('[data-price]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              dialog.querySelectorAll('[data-price]').forEach(b => {
+                b.style.background = b.dataset.price === 'custom' ? 'rgba(200,160,255,0.08)' : 'rgba(100,220,130,0.08)';
+                b.style.borderColor = b.dataset.price === 'custom' ? 'rgba(200,160,255,0.3)' : 'rgba(100,220,130,0.3)';
+              });
+              const val = btn.dataset.price;
+              if (val === 'custom') {
+                isCustom = true;
+                chosenPrice = null;
+                customWrap.style.display = 'block';
+                customInput.focus();
+                btn.style.background = 'rgba(200,160,255,0.35)';
+                btn.style.borderColor = 'rgba(200,160,255,0.9)';
+              } else {
+                isCustom = false;
+                chosenPrice = parseFloat(val);
+                customWrap.style.display = 'none';
+                btn.style.background = 'rgba(80,210,110,0.35)';
+                btn.style.borderColor = 'rgba(80,210,110,0.9)';
+              }
+              tryEnableConfirm();
+            });
+          });
+
+          // Custom input live validation
+          customInput.addEventListener('input', () => {
+            const v = parseFloat(customInput.value);
+            chosenPrice = (isCustom && v > 0) ? v : null;
+            tryEnableConfirm();
+          });
+
+          confirmBtn.addEventListener('click', () => {
+            if (!chosenGroup || !chosenPrice || chosenPrice <= 0) return;
+            overlay.remove();
+            resolve({ group: chosenGroup, price: chosenPrice });
+          });
+          dialog.querySelector('#approveCancelBtn').addEventListener('click', () => {
+            overlay.remove();
+            resolve(null);
+          });
+          overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } });
+        });
+
+        if (!approvalResult) return; // Admin cancelled
+        const selectedGroup = approvalResult.group;
+        const selectedPrice = approvalResult.price;
         try {
           // Check for existing students with same email or name
           const fullName = `${firstName} ${lastName}`;
@@ -4130,14 +4270,23 @@
               }
               
               // Update notes with registration info
-              const registrationDate = new Date().toLocaleDateString('en-US', {
-                month: 'long',
-                day: 'numeric',
-                year: 'numeric'
+              const updateRegistrationDate = new Date().toLocaleDateString('en-US', {
+                month: 'long', day: 'numeric', year: 'numeric'
               });
               
-              const newNote = `\n✅ Updated from waiting list on ${registrationDate}`;
-              updates.notes = (existingStudent.notes || '') + newNote;
+              // ── PARITY FIX: Ensure start_date is set so note date-filter works correctly ──
+              if (!existingStudent.start_date) {
+                updates.start_date = new Date().toISOString().split('T')[0];
+              }
+              
+              // ── CRITICAL FIX: Set group_name if not already assigned ──
+              // Without group_name, no group-based notes are visible to this student.
+              if (!existingStudent.group_name && selectedGroup) {
+                updates.group_name = selectedGroup;
+              }
+
+              // ── Set price per class from admin's selection ──
+              updates.price_per_class = selectedPrice;
               
               // Ensure student is active and shown in grid
               if (existingStudent.status !== 'active') {
@@ -4147,6 +4296,63 @@
                 updates.show_in_grid = true;
               }
               
+              // ── PARITY FIX: Create auth account if missing so student can log in ──────────
+              // Students updated from waiting list had no auth account → portal couldn't find them.
+              let updateAuthId = existingStudent.auth_user_id || null;
+              let updateTempPassword = null;
+              let updateEmailWasSent = false;
+              
+              const effectiveEmail = email || existingStudent.email;
+              
+              if (!updateAuthId && effectiveEmail) {
+                // Generate temp password same way as new-student path
+                function genTempPwd() {
+                  const upper='ABCDEFGHJKLMNPQRSTUVWXYZ', lower='abcdefghjkmnpqrstuvwxyz',
+                        digits='23456789', special='!@#$%', all=upper+lower+digits+special;
+                  let p=upper[Math.floor(Math.random()*upper.length)]+lower[Math.floor(Math.random()*lower.length)]+
+                        digits[Math.floor(Math.random()*digits.length)]+special[Math.floor(Math.random()*special.length)];
+                  for(let i=4;i<10;i++) p+=all[Math.floor(Math.random()*all.length)];
+                  return p.split('').sort(()=>Math.random()-0.5).join('');
+                }
+                updateTempPassword = genTempPwd();
+                
+                try {
+                  const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
+                    email: effectiveEmail.trim().toLowerCase(),
+                    password: updateTempPassword,
+                    options: { data: { full_name: existingStudent.name, role: 'student' } }
+                  });
+                  
+                  if (signUpError) {
+                    console.warn('⚠️ Auth account creation for existing student failed:', signUpError.message);
+                    updateTempPassword = null; // Don't show password if auth failed
+                  } else if (signUpData?.user) {
+                    updateAuthId = signUpData.user.id;
+                    updates.auth_user_id = updateAuthId;
+                    
+                    // ── Send magic link to bypass email verification ──────────────────────────
+                    try {
+                      await supabaseClient.auth.signInWithOtp({
+                        email: effectiveEmail.trim().toLowerCase(),
+                        options: { shouldCreateUser: false }
+                      });
+                      debugLog('✅ Magic link sent for existing student update:', effectiveEmail);
+                    } catch (otpErr) {
+                      console.warn('⚠️ Magic link send failed for existing student (non-critical):', otpErr);
+                    }
+                  }
+                } catch (authErr) {
+                  console.warn('⚠️ Auth signUp threw for existing student:', authErr);
+                  updateTempPassword = null;
+                }
+              }
+              
+              // Add credential note
+              const credInfo = updateTempPassword
+                ? `\n✅ Portal credentials created on ${updateUpdateDate || updateRegistrationDate}\n📧 Login: ${effectiveEmail}\n🔑 Password: ${updateTempPassword}`
+                : `\n✅ Updated from waiting list on ${updateRegistrationDate}`;
+              updates.notes = (existingStudent.notes || '') + credInfo;
+              
               // Perform update
               const { error: updateError } = await supabaseClient
                 .from('students')
@@ -4154,6 +4360,43 @@
                 .eq('id', existingStudent.id);
               
               if (updateError) throw updateError;
+              
+              // ── Send welcome email with credentials if auth was newly created ──
+              if (updateTempPassword && effectiveEmail) {
+                try {
+                  const portalUrl = 'https://student.richyfesta.com';
+                  const existingFirstName = existingStudent.name.split(' ')[0];
+                  const welcomeHtml = `<!DOCTYPE html><html><body style="font-family:sans-serif;background:#667eea;margin:0;padding:0;">
+<div style="max-width:600px;margin:40px auto;background:white;border-radius:24px;overflow:hidden;">
+  <div style="background:linear-gradient(135deg,#667eea,#764ba2);padding:40px 32px;text-align:center;">
+    <h1 style="color:white;margin:0;">Welcome to ARNOMA!</h1>
+    <p style="color:rgba(255,255,255,0.85);margin:12px 0 0;">Your student portal is ready</p>
+  </div>
+  <div style="padding:40px 32px;color:#374151;">
+    <p>Hi <strong>${existingFirstName}</strong>,</p>
+    <p>Your student account has been approved! Here are your login credentials:</p>
+    <div style="background:#f0f4ff;border:2px solid rgba(102,126,234,0.4);border-radius:16px;padding:28px;margin:24px 0;">
+      <p style="margin:8px 0;"><strong>Portal:</strong> <a href="${portalUrl}">${portalUrl}</a></p>
+      <p style="margin:8px 0;"><strong>Login:</strong> ${effectiveEmail}</p>
+      <p style="margin:8px 0;"><strong>Password:</strong> <code style="font-size:16px;letter-spacing:2px;">${updateTempPassword}</code></p>
+    </div>
+    <p style="color:#6b7280;font-size:14px;">Questions? Just reply to this email.</p>
+    <p>Best regards,<br><strong style="color:#667eea;">ARNOMA Team</strong></p>
+  </div>
+</div></body></html>`;
+                  const shouldSend = await showEmailPreviewModal(effectiveEmail, existingFirstName, welcomeHtml);
+                  if (shouldSend) {
+                    const emailResp = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+                      body: JSON.stringify({ to: effectiveEmail, subject: 'Welcome to ARNOMA - Your Login Credentials', html: welcomeHtml })
+                    });
+                    if (emailResp.ok) updateEmailWasSent = true;
+                  }
+                } catch (emailErr) {
+                  console.warn('⚠️ Email failed for existing student update:', emailErr);
+                }
+              }
               
               // Delete from waiting list
               const { error: deleteError } = await supabaseClient
@@ -4163,10 +4406,13 @@
               
               if (deleteError) throw deleteError;
               
+              const statusSummary = updateTempPassword
+                ? `Auth account CREATED. Credentials: ${effectiveEmail} / ${updateTempPassword}${updateEmailWasSent ? '\n📧 Welcome email sent!' : '\n⚠️ Email not sent — share credentials manually.'}`
+                : (updateAuthId ? 'Auth account already linked ✅' : '⚠️ Auth account could not be created — student may not be able to log in. Check email/Supabase Auth.');
+              
               await customAlert(
-                'Student Updated',
-                `Updated existing student: ${existingStudent.name}\n\n` +
-                `${Object.keys(updates).length > 0 ? 'Updated fields: ' + Object.keys(updates).join(', ') : 'No new information to add'}`
+                'Student Updated & Activated',
+                `Updated existing student: ${existingStudent.name}\n\n${statusSummary}`
               );
               
               // Reload waiting list
@@ -4217,6 +4463,10 @@
           const generatedStudentId = Date.now();
 
           // ── Step 1: Create Supabase auth account ────────────────
+          // IMPORTANT: supabase.auth.signUp() may require email confirmation depending on project settings.
+          // We also call signInWithOtp() immediately after to send a magic link — clicking the
+          // magic link both CONFIRMS the email AND logs the student in with one click.
+          // This bypasses any email-verification gate completely regardless of project settings.
           let authUserId = null;
           if (email) {
             try {
@@ -4236,6 +4486,18 @@
               } else if (signUpData?.user) {
                 authUserId = signUpData.user.id;
                 debugLog('✅ Auth account created, uid:', authUserId);
+                
+                // ── Send magic link to auto-confirm email & skip verification ──────────────
+                // This means the student clicks ONE link to activate; no separate "verify email" step.
+                try {
+                  await supabaseClient.auth.signInWithOtp({
+                    email: email.trim().toLowerCase(),
+                    options: { shouldCreateUser: false }  // user already exists from signUp above
+                  });
+                  debugLog('✅ Magic link sent — email verification bypassed for student:', email);
+                } catch (otpErr) {
+                  console.warn('⚠️ Magic link send failed (non-critical):', otpErr);
+                }
               }
             } catch (authErr) {
               console.warn('⚠️ Auth signUp threw:', authErr);
@@ -4253,8 +4515,10 @@
               status: 'active',
               show_in_grid: true,
               balance: 0,
-              price_per_class: 0,
+              price_per_class: selectedPrice,
               notes: credentialNote,
+              group_name: selectedGroup,    // ← CRITICAL: group assignment so notes are visible
+              start_date: new Date().toISOString().split('T')[0],  // ← PARITY FIX: set start_date so portal note-filter works correctly
               ...(authUserId ? { auth_user_id: authUserId } : {})
             }])
             .select()
@@ -4262,7 +4526,8 @@
 
           if (studentError) throw studentError;
 
-          // ── Step 3: Send credentials email ──────────────────────
+          // ── Step 3: Preview email — send only after admin confirms ─
+          let emailWasSent = false;
           if (email) {
             try {
               const welcomeEmailHTML = `
@@ -4326,23 +4591,27 @@
 </body>
 </html>`;
 
-              const emailResponse = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                },
-                body: JSON.stringify({
-                  to: email,
-                  subject: 'Welcome to ARNOMA - Your Login Credentials',
-                  html: welcomeEmailHTML
-                })
-              });
-
-              if (emailResponse.ok) {
-                debugLog('✅ Credentials email sent to:', email);
-              } else {
-                console.warn('⚠️ Failed to send credentials email, but student was created successfully');
+              // Show preview — only send after admin clicks "Send"
+              const shouldSend = await showEmailPreviewModal(email, firstName, welcomeEmailHTML);
+              if (shouldSend) {
+                const emailResponse = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                  },
+                  body: JSON.stringify({
+                    to: email,
+                    subject: 'Welcome to ARNOMA - Your Login Credentials',
+                    html: welcomeEmailHTML
+                  })
+                });
+                if (emailResponse.ok) {
+                  emailWasSent = true;
+                  debugLog('✅ Credentials email sent to:', email);
+                } else {
+                  console.warn('⚠️ Failed to send credentials email, but student was created successfully');
+                }
               }
             } catch (emailError) {
               console.warn('⚠️ Email sending failed:', emailError);
@@ -4359,7 +4628,9 @@
           if (deleteError) throw deleteError;
 
           const credentialSummary = email
-            ? `Login: ${email}\nPassword: ${tempPassword}\n\nCredentials have been emailed and saved to their profile.`
+            ? emailWasSent
+              ? `Login: ${email}\nPassword: ${tempPassword}\n\nCredentials email was sent and saved to their profile.`
+              : `Login: ${email}\nPassword: ${tempPassword}\n\nCredentials saved to profile (email was not sent).`
             : 'Student added. No email provided — credentials not generated.';
 
           await customAlert(
@@ -4377,6 +4648,81 @@
           console.error('Error approving student:', error);
           await customAlert('Error', `Failed to create student account: ${error.message}`);
         }
+      }
+
+      /**
+       * Shows an email preview modal and resolves true if the admin clicks "Send",
+       * or false if they click "Skip".
+       */
+      function showEmailPreviewModal(toEmail, firstName, htmlContent) {
+        return new Promise((resolve) => {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = [
+            'position:fixed;top:0;left:0;width:100%;height:100%;',
+            'background:rgba(0,0,0,0.75);z-index:100001;',
+            'display:flex;align-items:center;justify-content:center;',
+            'padding:20px;box-sizing:border-box;'
+          ].join('');
+
+          const modal = document.createElement('div');
+          modal.style.cssText = [
+            'background:linear-gradient(135deg,rgba(15,18,40,0.98),rgba(10,12,28,0.98));',
+            'border:1px solid rgba(102,126,234,0.35);border-radius:20px;',
+            'width:min(720px,100%);max-height:90vh;display:flex;flex-direction:column;',
+            'box-shadow:0 30px 80px rgba(0,0,0,0.8),0 0 60px rgba(102,126,234,0.15);',
+            'overflow:hidden;'
+          ].join('');
+
+          modal.innerHTML = `
+            <div style="padding:22px 28px 18px;border-bottom:1px solid rgba(102,126,234,0.15);flex-shrink:0;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+                <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,rgba(102,126,234,0.25),rgba(118,75,162,0.25));border:1px solid rgba(102,126,234,0.3);display:flex;align-items:center;justify-content:center;font-size:17px;">✉️</div>
+                <div>
+                  <div style="font-size:16px;font-weight:700;color:#fff;">Email Preview</div>
+                  <div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:1px;">Review before sending</div>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:7px;">
+                <div style="display:flex;align-items:baseline;gap:8px;">
+                  <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:rgba(102,126,234,0.7);width:52px;flex-shrink:0;">To</span>
+                  <span style="font-size:13px;color:rgba(255,255,255,0.85);font-weight:500;">${toEmail}</span>
+                </div>
+                <div style="display:flex;align-items:baseline;gap:8px;">
+                  <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:rgba(102,126,234,0.7);width:52px;flex-shrink:0;">Subject</span>
+                  <span style="font-size:13px;color:rgba(255,255,255,0.85);font-weight:500;">Welcome to ARNOMA - Your Login Credentials</span>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1;overflow:hidden;background:#f3f4f6;min-height:0;">
+              <iframe id="emailPreviewFrame" style="width:100%;height:100%;min-height:380px;border:none;display:block;" sandbox="allow-same-origin" title="Email Preview"></iframe>
+            </div>
+            <div style="padding:18px 28px;border-top:1px solid rgba(102,126,234,0.15);display:flex;gap:12px;justify-content:flex-end;flex-shrink:0;background:rgba(10,12,28,0.5);">
+              <button id="epSkipBtn" style="padding:11px 22px;border-radius:12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.75);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">Skip — Don't Send</button>
+              <button id="epSendBtn" style="padding:11px 28px;border-radius:12px;background:linear-gradient(135deg,#667eea,#764ba2);border:none;color:white;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 4px 16px rgba(102,126,234,0.4);display:flex;align-items:center;gap:7px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                Send Email
+              </button>
+            </div>
+          `;
+
+          overlay.appendChild(modal);
+          document.body.appendChild(overlay);
+
+          // Render email HTML safely inside iframe
+          const iframe = modal.querySelector('#emailPreviewFrame');
+          iframe.srcdoc = htmlContent;
+
+          const skipBtn = modal.querySelector('#epSkipBtn');
+          const sendBtn = modal.querySelector('#epSendBtn');
+
+          skipBtn.onmouseover = () => { skipBtn.style.background = 'rgba(255,255,255,0.12)'; };
+          skipBtn.onmouseout  = () => { skipBtn.style.background = 'rgba(255,255,255,0.06)'; };
+          sendBtn.onmouseover = () => { sendBtn.style.opacity = '0.85'; };
+          sendBtn.onmouseout  = () => { sendBtn.style.opacity = '1'; };
+
+          sendBtn.onclick = () => { overlay.remove(); resolve(true);  };
+          skipBtn.onclick = () => { overlay.remove(); resolve(false); };
+        });
       }
 
       async function markAsContacted(id) {
@@ -5127,6 +5473,14 @@
         const calToggle = document.getElementById('modalCalendarToggle');
         if (calToggle) calToggle.checked = !!s.showInCalendar;
 
+        // Calendar start date picker
+        const startDateInput = document.getElementById('modalStartDate');
+        const startDateRow = document.getElementById('calendarStartDateRow');
+        if (startDateInput && startDateRow) {
+          startDateInput.value = s.start_date ? s.start_date.split('T')[0] : '';
+          startDateRow.style.display = !!s.showInCalendar ? 'block' : 'none';
+        }
+
         // Aliases & notes
         document.getElementById('modalAliases').value = aliasesArray.join(', ');
         document.getElementById('modalNotes').value = s.notes || '';
@@ -5196,6 +5550,9 @@
       function handleModalCalendarToggle(checkbox) {
         if (!currentStudent) return;
         toggleCalendarVisibility(currentStudent.id, checkbox.checked);
+        // Show/hide the start date picker
+        const row = document.getElementById('calendarStartDateRow');
+        if (row) row.style.display = checkbox.checked ? 'block' : 'none';
       }
 
       function validateEmail(email) {
@@ -5312,7 +5669,7 @@
         };
       })();
 
-      function cycleModalStatus() {
+      async function cycleModalStatus() {
         if (!currentStudent) return;
 
         const statusOrder = ['active', 'paused', 'graduated', 'inactive'];
@@ -5324,7 +5681,20 @@
         badge.className = `profile-status-btn ${currentStudent.status}`;
 
         debugLog(`Modal status changed to: ${currentStudent.status}`);
-        saveStudent(currentStudent);
+        await saveStudent(currentStudent);
+
+        // 📅 RECORD VISIBILITY HISTORY so calendar hides/shows the student from the correct date
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const visible = currentStudent.status === 'active';
+          await supabaseClient
+            .from('student_visibility_history')
+            .insert({ student_id: currentStudent.id, visible, effective_date: today });
+          debugLog(`📅 Status history recorded: ${currentStudent.name} → visible=${visible} from ${today}`);
+        } catch (histErr) {
+          console.warn('⚠️ Failed to record status history:', histErr);
+        }
+
         renderStudentCards();
       }
 
@@ -5424,7 +5794,18 @@
           return;
         }
 
-        // 🔄 UPDATE CALENDAR'S STUDENT CACHE AND REFRESH CALENDAR
+        // � RECORD VISIBILITY HISTORY so calendar hides/shows the student from the correct date
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          await supabaseClient
+            .from('student_visibility_history')
+            .insert({ student_id: studentId, visible: isVisible, effective_date: today });
+          debugLog(`📅 Visibility history recorded: ${student.name} → visible=${isVisible} from ${today}`);
+        } catch (histErr) {
+          console.warn('⚠️ Failed to record visibility history:', histErr);
+        }
+
+        // �🔄 UPDATE CALENDAR'S STUDENT CACHE AND REFRESH CALENDAR
         // If Calendar module is loaded, update its studentsCache
         if (window.studentsCache && Array.isArray(window.studentsCache)) {
           const cachedStudent = window.studentsCache.find(s => s.id === studentId);

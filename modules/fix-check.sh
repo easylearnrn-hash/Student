@@ -1,1 +1,0 @@
-echo "Database error explicitly mentioned missing column correct_answers; we resolved this by switching to the correct correct_answer column directly in the generated sql file and within all Javascript loading logic across test.html and question.html where arrays are automatically parsed."

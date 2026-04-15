@@ -11,12 +11,22 @@ USING (
     SELECT id FROM students WHERE auth_user_id = auth.uid()
   )
   OR
-  -- Group-wide rows (student_id IS NULL) for this student's group.
-  -- Compare 'Group A' with 'Group ' || 'A'
+  -- Group-wide rows (student_id IS NULL) for this student's group
+  -- Handle both "A" and "Group A" formatting mismatches seamlessly
   (
     student_id IS NULL
-    AND REPLACE(group_name, 'Group ', '') IN (
-      SELECT REPLACE(group_name, 'Group ', '') FROM students WHERE auth_user_id = auth.uid()
+    AND (
+      group_name IN (
+        SELECT group_name FROM students WHERE auth_user_id = auth.uid()
+      )
+      OR
+      group_name IN (
+        SELECT REPLACE(group_name, 'Group ', '') FROM students WHERE auth_user_id = auth.uid()
+      )
+      OR
+      group_name IN (
+        SELECT 'Group ' || REPLACE(group_name, 'Group ', '') FROM students WHERE auth_user_id = auth.uid()
+      )
     )
   )
   OR
