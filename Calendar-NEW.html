@@ -6437,6 +6437,7 @@
             weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
           });
           const groupText = student.group_name ? `Group ${student.group_name}` : 'ARNOMA Student';
+          const year = new Date().getFullYear();
 
           const receiptHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -6527,7 +6528,7 @@
         <img src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png" alt="ARNOMA" width="44" style="display:block;margin:0 auto 14px;filter:brightness(0) invert(1);opacity:0.65;"/>
         <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#c4a352;letter-spacing:2px;text-transform:uppercase;">ARNOMA · NCLEX-RN</p>
         <p style="margin:0 0 18px;font-size:12px;color:rgba(196,163,82,0.4);">nclex.rn@arnoma.us &nbsp;·&nbsp; richy@arnoma.us &nbsp;·&nbsp; 909-808-1818</p>
-        <p style="margin:0;font-size:11px;color:rgba(196,163,82,0.22);">© ${new Date().getFullYear()} ARNOMA. All rights reserved. · Official payment receipt — Receipt #${receiptNumber}</p>
+        <p style="margin:0;font-size:11px;color:rgba(196,163,82,0.22);">© ${year} ARNOMA. All rights reserved. · Official payment receipt — Receipt #${receiptNumber}</p>
       </td>
     </tr>
   </table>
@@ -6570,12 +6571,12 @@
             status:          'sent',
             sent_at:         new Date().toISOString(),
             metadata: {
-              student_id:       student.id,
-              student_name:     student.name,
-              receipt_number:   receiptNumber,
-              amount:           Number(amount),
-              class_date:       classDate,
-              method:           'cash',
+              student_id:        student.id,
+              student_name:      student.name,
+              receipt_number:    receiptNumber,
+              amount:            Number(amount),
+              class_date:        classDate,
+              method:            'cash',
               payment_record_id: paymentRecordId,
             },
           }]);
@@ -7500,6 +7501,51 @@
 
         // Attach event listeners
         attachEventListeners();
+
+        // ── Realtime: flip dots green instantly when any payment_record is inserted ──
+        subscribePaymentRecords();
+      }
+
+      function subscribePaymentRecords() {
+        supabaseClient
+          .channel('payment_records_live')
+          .on(
+            'postgres_changes',
+            { event: 'INSERT', schema: 'public', table: 'payment_records' },
+            (payload) => {
+              const pr = payload.new;
+              if (!pr || !['paid', 'excused'].includes(pr.status)) return;
+
+              // Avoid duplicates — skip if already in local array
+              if (paymentRecordsData.some(r => r.id === pr.id)) return;
+
+              // Add to local array
+              paymentRecordsData.push(pr);
+
+              // Update payment index immediately (O(1) dot flip, no full reload)
+              if (pr.date) {
+                const normalizedDate = normalizeDateString(pr.date);
+                if (!paymentIndex.has(normalizedDate)) {
+                  paymentIndex.set(normalizedDate, new Set());
+                }
+                if (pr.student_id) {
+                  paymentIndex.get(normalizedDate).add(String(pr.student_id));
+                }
+              }
+
+              // Clear per-cell payment cache so next render picks up the new dot
+              clearPaymentCache();
+
+              // Re-render calendar (fast path — indexes already updated)
+              renderCalendar();
+
+              // If day modal is open for that date, refresh it too
+              if (pr.date && currentModalDate === normalizeDateString(pr.date)) {
+                openDayModal(normalizeDateString(pr.date));
+              }
+            }
+          )
+          .subscribe();
       }
 
       // Start when DOM is ready
