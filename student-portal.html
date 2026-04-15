@@ -7702,7 +7702,7 @@
         group: student.group_name || student.group
       });
 
-      const cacheKey = `payments-v30-${student.id}`;
+      const cacheKey = `payments-v31-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached calendar payment status for student:', student.id);
@@ -10691,8 +10691,16 @@
         
         console.log('📊 Permissions query result:', {
           count: permissions?.length || 0,
-          permissions: permissions
+          fromStudentPerms: (studentPermRes.data || []).length,
+          fromGroupPerms: (groupPermRes.data || []).length,
+          filteredGroup: filteredGroupPermissions.length,
+          studentPermError: studentPermRes.error?.message || null,
+          groupPermError: groupPermRes.error?.message || null
         });
+        
+        if ((groupPermRes.data || []).length === 0 && groupNameCandidates.length > 0) {
+          console.warn('⚠️ No group permissions returned for', groupNameCandidates, '— RLS may be blocking or no notes posted to this group yet.');
+        }
         
   const permissionNoteIds = Array.from(new Set((permissions || []).map(p => p.note_id).filter(Boolean)));
         
@@ -11014,13 +11022,24 @@
             read: isNoteOpened(note.id), // Track which notes have been opened
             attachments: (() => {
               const htmlPath = resolveHtmlNotePath(note.title);
-              if (!htmlPath) return [];
-              return [{
-                title: note.title || 'Note',
-                url: htmlPath,
-                noteId: note.id,
-                type: 'html'
-              }];
+              if (htmlPath) {
+                return [{
+                  title: note.title || 'Note',
+                  url: htmlPath,
+                  noteId: note.id,
+                  type: 'html'
+                }];
+              }
+              // Fallback: if the note has a pdf_url, open it via Protected-PDF-Viewer
+              if (note.pdf_url) {
+                return [{
+                  title: note.title || 'Note',
+                  url: `Protected-PDF-Viewer.html?noteId=${note.id}`,
+                  noteId: note.id,
+                  type: 'pdf'
+                }];
+              }
+              return [];
             })()
           };
           
