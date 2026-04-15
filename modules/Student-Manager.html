@@ -3885,74 +3885,128 @@
       }
 
       async function approveWaitingListStudent(id, firstName, lastName, email, phone, language) {
-        // ── Step 0: Ask admin to assign a group BEFORE anything else ────────
-        // This is the most critical step — without a group the student is invisible in all group-based note queries.
-        const selectedGroup = await new Promise((resolve) => {
+        // ── Step 0: Group + Price picker ─────────────────────────────────────
+        const approvalResult = await new Promise((resolve) => {
           const overlay = document.createElement('div');
           overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:200000;display:flex;align-items:center;justify-content:center;';
           const dialog = document.createElement('div');
-          dialog.style.cssText = 'background:linear-gradient(135deg,rgba(15,18,40,0.99),rgba(10,12,28,0.99));border:2px solid rgba(138,180,255,0.3);border-radius:24px;padding:32px;max-width:420px;width:90%;box-shadow:0 30px 80px rgba(0,0,0,0.8);';
+          dialog.style.cssText = 'background:linear-gradient(135deg,rgba(15,18,40,0.99),rgba(10,12,28,0.99));border:2px solid rgba(138,180,255,0.3);border-radius:24px;padding:32px;max-width:460px;width:92%;box-shadow:0 30px 80px rgba(0,0,0,0.8);max-height:90vh;overflow-y:auto;';
           dialog.innerHTML = `
-            <h3 style="color:white;margin:0 0 8px;font-size:20px;">Assign Group</h3>
-            <p style="color:rgba(255,255,255,0.7);margin:0 0 24px;font-size:14px;">
-              Which group is <strong style="color:#8ab4ff;">${firstName} ${lastName}</strong> in?<br>
-              <span style="font-size:12px;color:rgba(255,180,0,0.8);">⚠️ Required — without a group, notes will not be visible to this student.</span>
+            <h3 style="color:white;margin:0 0 4px;font-size:20px;font-weight:700;">Approve Student</h3>
+            <p style="color:rgba(255,255,255,0.6);margin:0 0 24px;font-size:13px;">
+              Setting up <strong style="color:#8ab4ff;">${firstName} ${lastName}</strong>
             </p>
-            <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:24px;">
-              ${['A','B','C','D','E','F'].map(g => `
-                <button data-group="${g}" style="flex:1;min-width:52px;padding:12px;border-radius:12px;border:2px solid rgba(138,180,255,0.3);background:rgba(138,180,255,0.08);color:white;font-size:18px;font-weight:700;cursor:pointer;transition:all 0.15s;" 
-                  onmouseover="this.style.background='rgba(138,180,255,0.25)';this.style.borderColor='rgba(138,180,255,0.7)'" 
-                  onmouseout="if(!this.classList.contains('sel')){this.style.background='rgba(138,180,255,0.08)';this.style.borderColor='rgba(138,180,255,0.3)'}">
-                  ${g}
-                </button>`).join('')}
+
+            <div style="margin-bottom:22px;">
+              <div style="color:rgba(138,180,255,0.8);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Group Assignment <span style="color:rgba(255,180,0,0.8);font-size:10px;">(required)</span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${['A','B','C','D','E','F'].map(g => `
+                  <button data-group="${g}" style="flex:1;min-width:48px;padding:11px 8px;border-radius:10px;border:2px solid rgba(138,180,255,0.3);background:rgba(138,180,255,0.08);color:white;font-size:17px;font-weight:700;cursor:pointer;transition:all 0.15s;font-family:inherit;">${g}</button>`).join('')}
+              </div>
             </div>
-            <div style="display:flex;gap:10px;">
-              <button id="grpConfirmBtn" disabled style="flex:1;padding:14px;border-radius:12px;border:none;background:rgba(138,180,255,0.2);color:rgba(255,255,255,0.4);font-size:15px;font-weight:700;cursor:not-allowed;font-family:inherit;">Approve & Create</button>
-              <button id="grpCancelBtn" style="padding:14px 20px;border-radius:12px;border:2px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:14px;cursor:pointer;font-family:inherit;">Cancel</button>
+
+            <div style="margin-bottom:22px;">
+              <div style="color:rgba(138,180,255,0.8);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Price Per Class <span style="color:rgba(255,180,0,0.8);font-size:10px;">(required)</span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                ${[25,50,75,100].map(p => `
+                  <button data-price="${p}" style="flex:1;min-width:58px;padding:11px 8px;border-radius:10px;border:2px solid rgba(100,220,130,0.3);background:rgba(100,220,130,0.08);color:white;font-size:15px;font-weight:700;cursor:pointer;transition:all 0.15s;font-family:inherit;">$${p}</button>`).join('')}
+                <button data-price="custom" style="flex:1;min-width:68px;padding:11px 8px;border-radius:10px;border:2px solid rgba(200,160,255,0.3);background:rgba(200,160,255,0.08);color:white;font-size:13px;font-weight:700;cursor:pointer;transition:all 0.15s;font-family:inherit;">Custom</button>
+              </div>
+              <div id="customPriceWrap" style="display:none;margin-top:10px;">
+                <input id="customPriceInput" type="number" min="1" step="1" placeholder="Enter amount (e.g. 80)"
+                  style="width:100%;box-sizing:border-box;padding:11px 14px;border-radius:10px;border:2px solid rgba(200,160,255,0.4);background:rgba(200,160,255,0.08);color:white;font-size:15px;font-weight:600;font-family:inherit;outline:none;"/>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:10px;margin-top:4px;">
+              <button id="approveConfirmBtn" disabled style="flex:1;padding:14px;border-radius:12px;border:none;background:rgba(100,180,255,0.2);color:rgba(255,255,255,0.4);font-size:15px;font-weight:700;cursor:not-allowed;font-family:inherit;transition:all 0.2s;">Approve & Create</button>
+              <button id="approveCancelBtn" style="padding:14px 20px;border-radius:12px;border:2px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:14px;cursor:pointer;font-family:inherit;">Cancel</button>
             </div>
           `;
           overlay.appendChild(dialog);
           document.body.appendChild(overlay);
-          
-          let chosen = null;
+
+          let chosenGroup = null;
+          let chosenPrice = null; // number
+          let isCustom = false;
+
+          const confirmBtn = dialog.querySelector('#approveConfirmBtn');
+          const customWrap = dialog.querySelector('#customPriceWrap');
+          const customInput = dialog.querySelector('#customPriceInput');
+
+          function tryEnableConfirm() {
+            const priceReady = chosenPrice !== null && chosenPrice > 0;
+            const ready = chosenGroup && priceReady;
+            confirmBtn.disabled = !ready;
+            confirmBtn.style.background = ready ? 'linear-gradient(135deg,#3b82f6,#2563eb)' : 'rgba(100,180,255,0.2)';
+            confirmBtn.style.color = ready ? 'white' : 'rgba(255,255,255,0.4)';
+            confirmBtn.style.cursor = ready ? 'pointer' : 'not-allowed';
+          }
+
+          // Group buttons
           dialog.querySelectorAll('[data-group]').forEach(btn => {
             btn.addEventListener('click', () => {
               dialog.querySelectorAll('[data-group]').forEach(b => {
-                b.classList.remove('sel');
-                b.style.background='rgba(138,180,255,0.08)';
-                b.style.borderColor='rgba(138,180,255,0.3)';
+                b.style.background = 'rgba(138,180,255,0.08)';
+                b.style.borderColor = 'rgba(138,180,255,0.3)';
+                b.style.color = 'white';
               });
-              chosen = btn.dataset.group;
-              btn.classList.add('sel');
-              btn.style.background='rgba(102,180,255,0.35)';
-              btn.style.borderColor='rgba(102,180,255,0.9)';
-              const confirmBtn = dialog.querySelector('#grpConfirmBtn');
-              confirmBtn.disabled = false;
-              confirmBtn.style.background='linear-gradient(135deg,#3b82f6,#2563eb)';
-              confirmBtn.style.color='white';
-              confirmBtn.style.cursor='pointer';
+              chosenGroup = btn.dataset.group;
+              btn.style.background = 'rgba(102,180,255,0.35)';
+              btn.style.borderColor = 'rgba(102,180,255,0.9)';
+              btn.style.color = '#fff';
+              tryEnableConfirm();
             });
           });
-          
-          dialog.querySelector('#grpConfirmBtn').addEventListener('click', () => {
-            overlay.remove();
-            resolve(chosen);
+
+          // Price buttons
+          dialog.querySelectorAll('[data-price]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              dialog.querySelectorAll('[data-price]').forEach(b => {
+                b.style.background = b.dataset.price === 'custom' ? 'rgba(200,160,255,0.08)' : 'rgba(100,220,130,0.08)';
+                b.style.borderColor = b.dataset.price === 'custom' ? 'rgba(200,160,255,0.3)' : 'rgba(100,220,130,0.3)';
+              });
+              const val = btn.dataset.price;
+              if (val === 'custom') {
+                isCustom = true;
+                chosenPrice = null;
+                customWrap.style.display = 'block';
+                customInput.focus();
+                btn.style.background = 'rgba(200,160,255,0.35)';
+                btn.style.borderColor = 'rgba(200,160,255,0.9)';
+              } else {
+                isCustom = false;
+                chosenPrice = parseFloat(val);
+                customWrap.style.display = 'none';
+                btn.style.background = 'rgba(80,210,110,0.35)';
+                btn.style.borderColor = 'rgba(80,210,110,0.9)';
+              }
+              tryEnableConfirm();
+            });
           });
-          dialog.querySelector('#grpCancelBtn').addEventListener('click', () => {
+
+          // Custom input live validation
+          customInput.addEventListener('input', () => {
+            const v = parseFloat(customInput.value);
+            chosenPrice = (isCustom && v > 0) ? v : null;
+            tryEnableConfirm();
+          });
+
+          confirmBtn.addEventListener('click', () => {
+            if (!chosenGroup || !chosenPrice || chosenPrice <= 0) return;
+            overlay.remove();
+            resolve({ group: chosenGroup, price: chosenPrice });
+          });
+          dialog.querySelector('#approveCancelBtn').addEventListener('click', () => {
             overlay.remove();
             resolve(null);
           });
+          overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } });
         });
-        
-        if (!selectedGroup) return; // Admin cancelled
-        
-        const confirmed = await customConfirm(
-          'Approve Student',
-          `Create student account for ${firstName} ${lastName}?\n\nEmail: ${email}\nGroup: ${selectedGroup}\nPhone: ${phone || 'Not provided'}`
-        );
-        
-        if (!confirmed) return;
-        
+
+        if (!approvalResult) return; // Admin cancelled
+        const selectedGroup = approvalResult.group;
+        const selectedPrice = approvalResult.price;
         try {
           // Check for existing students with same email or name
           const fullName = `${firstName} ${lastName}`;
@@ -4230,6 +4284,9 @@
               if (!existingStudent.group_name && selectedGroup) {
                 updates.group_name = selectedGroup;
               }
+
+              // ── Set price per class from admin's selection ──
+              updates.price_per_class = selectedPrice;
               
               // Ensure student is active and shown in grid
               if (existingStudent.status !== 'active') {
@@ -4458,7 +4515,7 @@
               status: 'active',
               show_in_grid: true,
               balance: 0,
-              price_per_class: 0,
+              price_per_class: selectedPrice,
               notes: credentialNote,
               group_name: selectedGroup,    // ← CRITICAL: group assignment so notes are visible
               start_date: new Date().toISOString().split('T')[0],  // ← PARITY FIX: set start_date so portal note-filter works correctly
