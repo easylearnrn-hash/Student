@@ -10600,11 +10600,14 @@
         
         if (DEBUG_MODE) debugLog('📚 Loading notes for Student ID:', studentId, 'Group:', studentGroup);
         
+        // 💯 USER FIX: Apply canonicalizeGroupCode here so we fetch and match robustly against weirdly-spaced group names
+        const targetGroupCode = canonicalizeGroupCode(studentGroup);
+        
         // Fetch permissions for this student (both individual and group access).
-        // IMPORTANT: Group Notes may store group_name as either "A" or "Group A".
-        // We must support both formats so posted paid notes always appear (locked if unpaid).
+        // IMPORTANT: Group Notes may store group_name as either "A" or "Group A" or canonicalized.
+        // We must support all formats so posted paid notes always appear (locked if unpaid).
         const groupNameCandidates = studentGroup
-          ? [studentGroup, `Group ${studentGroup}`]
+          ? [...new Set([studentGroup, `Group ${studentGroup}`, targetGroupCode, `Group ${targetGroupCode}`])]
           : [];
 
         console.log('🔍 Querying student_note_permissions with:', {
@@ -10634,10 +10637,12 @@
         const blockedNoteIds = new Set(
           (studentPermRes.data || []).filter(p => !p.is_accessible).map(p => p.note_id)
         );
+        
+        // 💯 USER FIX: targetGroupCode is defined prior
         const filteredGroupPermissions = (groupPermRes.data || []).filter(p => {
           const code = canonicalizeGroupCode(p.group_name);
           // Exclude notes that have been explicitly unposted for this student
-          return !!studentGroup && code === studentGroup && !blockedNoteIds.has(p.note_id);
+          return !!targetGroupCode && code === targetGroupCode && !blockedNoteIds.has(p.note_id);
         });
         const permissions = [
           ...(studentPermRes.data || []).filter(p => p.is_accessible),
@@ -10659,7 +10664,8 @@
         
         // Fetch FREE access grants for this student (BEFORE loading notes)
         const studentGroupLetter = currentStudent.group_letter || currentStudent.group || currentStudent.group_name;
-        const normalizedGroupLetter = studentGroupLetter ? studentGroupLetter.toString().replace(/Group\s*/i, '').trim().toUpperCase() : null;
+        // 💯 USER FIX: Always use canonicalizeGroupCode to query note_free_access, since admin tools save it that way!
+        const normalizedGroupLetter = canonicalizeGroupCode(studentGroupLetter);
         
         debugLog('🚨 [CRITICAL DEBUG - FREE ACCESS]');
         debugLog('📊 Student ID:', studentId);
@@ -10995,8 +11001,6 @@
         // Hide notes whose class_date is older than effectiveStartStr (14 days before
         // account creation). This prevents new students from seeing months of old notes
         // while still showing notes from the class week before their account was made.
-        // We filter AFTER loading (using note.class_date) rather than at the ID stage
-        // because note_free_access.created_at is unreliable for this purpose.
         if (effectiveStartStr) {
           const beforeFilter = allSystemNotes.length;
           allSystemNotes = allSystemNotes.filter(note => {
@@ -11006,11 +11010,11 @@
               return true;
             }
 
-            // Get the note's actual class date from the raw notes data
-            const rawNote = notes.find(n => n.id === note.id);
-            const noteClassDate = rawNote ? (rawNote.class_date || '').split('T')[0] : '';
-            // If no class_date, don't hide it (can't determine when it was for)
-            if (!noteClassDate) return true;
+            // Use the already-computed note.date from the transformed object, which handles
+            // per-group class_dates correctly, instead of the global raw note.class_date.
+            if (!note.date) return true;
+            
+            const noteClassDate = `${note.date.getFullYear()}-${String(note.date.getMonth() + 1).padStart(2, '0')}-${String(note.date.getDate()).padStart(2, '0')}`;
             return noteClassDate >= effectiveStartStr;
           });
           if (beforeFilter !== allSystemNotes.length) {
