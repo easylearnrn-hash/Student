@@ -4579,6 +4579,43 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           .eq('group_letter', groupLetter);
         if (freeErr) throw freeErr;
 
+        // Repost should also refresh explicit per-student rows for this group.
+        // This guarantees visibility for students if group-level rows are not readable.
+        const normalizeGroupCode = (value) => String(value || '').replace(/^group\s*/i, '').trim().toUpperCase();
+        const targetGroupCode = normalizeGroupCode(groupLetter);
+        const { data: groupStudents, error: groupStudentsErr } = await supabaseClient
+          .from('students')
+          .select('id, group_name')
+          .eq('show_in_grid', true);
+        if (groupStudentsErr) throw groupStudentsErr;
+
+        const groupStudentIds = (groupStudents || [])
+          .filter(s => normalizeGroupCode(s.group_name) === targetGroupCode)
+          .map(s => s.id)
+          .filter(Boolean);
+
+        if (groupStudentIds.length > 0) {
+          const individualRecords = [];
+          for (const noteId of noteIds) {
+            for (const sid of groupStudentIds) {
+              individualRecords.push({
+                note_id: noteId,
+                student_id: sid,
+                group_name: groupName,
+                is_accessible: true,
+                class_date: newDate
+              });
+            }
+          }
+
+          const { data: individualRows, error: individualErr } = await supabaseClient
+            .from('student_note_permissions')
+            .upsert(individualRecords, { onConflict: 'note_id,student_id,group_name' })
+            .select();
+          if (individualErr) throw individualErr;
+          if (individualRows) individualRows.forEach(r => permissions.push(r));
+        }
+
         // Update local cache
         permissions.forEach(p => {
           if (noteIds.includes(p.note_id) && groupNames.includes(String(p.group_name || '').trim()) && !p.student_id) {
@@ -4814,6 +4851,45 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           const { data: inserted, error } = await supabaseClient.from('student_note_permissions').insert(records).select();
           if (error) throw error;
           if (inserted) inserted.forEach(r => permissions.push(r));
+
+          // Also keep explicit per-student rows in sync for this group.
+          // This ensures students can still see assigned notes even if group-level
+          // rows are filtered by stricter RLS policies.
+          const normalizeGroupCode = (value) => String(value || '').replace(/^group\s*/i, '').trim().toUpperCase();
+          const targetGroupCode = normalizeGroupCode(groupLetter);
+          const { data: groupStudents, error: groupStudentsErr } = await supabaseClient
+            .from('students')
+            .select('id, group_name')
+            .eq('show_in_grid', true);
+          if (groupStudentsErr) throw groupStudentsErr;
+
+          const groupStudentIds = (groupStudents || [])
+            .filter(s => normalizeGroupCode(s.group_name) === targetGroupCode)
+            .map(s => s.id)
+            .filter(Boolean);
+
+          if (groupStudentIds.length > 0) {
+            const individualRecords = [];
+            for (const noteId of noteIds) {
+              for (const sid of groupStudentIds) {
+                individualRecords.push({
+                  note_id: noteId,
+                  student_id: sid,
+                  group_name: groupName,
+                  is_accessible: true,
+                  class_date: classDate,
+                  granted_by: adminEmail
+                });
+              }
+            }
+
+            const { data: individualRows, error: individualErr } = await supabaseClient
+              .from('student_note_permissions')
+              .upsert(individualRecords, { onConflict: 'note_id,student_id,group_name' })
+              .select();
+            if (individualErr) throw individualErr;
+            if (individualRows) individualRows.forEach(r => permissions.push(r));
+          }
 
           // Email students in this group
           try {

@@ -13,6 +13,17 @@
 BEGIN;
 
 -- ============================================================
+-- STEP 0A: Backfill students.auth_user_id from auth.users by email
+-- Fixes older student rows that can log in but were never linked by uid
+-- ============================================================
+UPDATE students s
+SET auth_user_id = u.id
+FROM auth.users u
+WHERE s.auth_user_id IS NULL
+  AND s.email IS NOT NULL
+  AND lower(trim(s.email)) = lower(trim(u.email));
+
+-- ============================================================
 -- STEP 0: Add missing class_date column to note_free_access
 -- ============================================================
 ALTER TABLE note_free_access
@@ -32,7 +43,10 @@ TO authenticated
 USING (
   -- Individual rows assigned to this specific student
   student_id IN (
-    SELECT id FROM students WHERE auth_user_id = auth.uid()
+    SELECT id
+    FROM students
+    WHERE auth_user_id = auth.uid()
+       OR lower(trim(email)) = lower(trim(auth.jwt() ->> 'email'))
   )
   OR
   -- Group-wide rows (student_id IS NULL) — match any format: "E" or "Group E"
@@ -40,15 +54,24 @@ USING (
     student_id IS NULL
     AND (
       group_name IN (
-        SELECT group_name FROM students WHERE auth_user_id = auth.uid()
+        SELECT group_name
+        FROM students
+        WHERE auth_user_id = auth.uid()
+           OR lower(trim(email)) = lower(trim(auth.jwt() ->> 'email'))
       )
       OR
       group_name IN (
-        SELECT REPLACE(group_name, 'Group ', '') FROM students WHERE auth_user_id = auth.uid()
+        SELECT REPLACE(group_name, 'Group ', '')
+        FROM students
+        WHERE auth_user_id = auth.uid()
+           OR lower(trim(email)) = lower(trim(auth.jwt() ->> 'email'))
       )
       OR
       group_name IN (
-        SELECT 'Group ' || REPLACE(group_name, 'Group ', '') FROM students WHERE auth_user_id = auth.uid()
+        SELECT 'Group ' || REPLACE(group_name, 'Group ', '')
+        FROM students
+        WHERE auth_user_id = auth.uid()
+           OR lower(trim(email)) = lower(trim(auth.jwt() ->> 'email'))
       )
     )
   )
@@ -70,7 +93,10 @@ TO public
 USING (
   -- Individual access for this specific student
   student_id IN (
-    SELECT id FROM students WHERE auth_user_id = auth.uid()
+    SELECT id
+    FROM students
+    WHERE auth_user_id = auth.uid()
+       OR lower(trim(email)) = lower(trim(auth.jwt() ->> 'email'))
   )
   OR
   -- Group access: match any format "E" or "Group E"
@@ -80,6 +106,7 @@ USING (
       SELECT REPLACE(REPLACE(group_name, 'Group ', ''), 'group ', '')
       FROM students
       WHERE auth_user_id = auth.uid()
+         OR lower(trim(email)) = lower(trim(auth.jwt() ->> 'email'))
     )
   )
   OR
@@ -108,7 +135,9 @@ USING (
     id IN (
       SELECT nfa.note_id
       FROM note_free_access nfa
-      LEFT JOIN students s ON s.auth_user_id = auth.uid()
+      LEFT JOIN students s
+        ON s.auth_user_id = auth.uid()
+        OR lower(trim(s.email)) = lower(trim(auth.jwt() ->> 'email'))
       WHERE (
         (nfa.access_type = 'individual' AND nfa.student_id = s.id)
         OR
@@ -121,7 +150,9 @@ USING (
     id IN (
       SELECT snp.note_id
       FROM student_note_permissions snp
-      LEFT JOIN students s ON s.auth_user_id = auth.uid()
+      LEFT JOIN students s
+        ON s.auth_user_id = auth.uid()
+        OR lower(trim(s.email)) = lower(trim(auth.jwt() ->> 'email'))
       WHERE snp.is_accessible = true
         AND (
           snp.student_id = s.id
@@ -152,5 +183,11 @@ FROM pg_policies
 WHERE schemaname = 'public'
   AND tablename IN ('student_note_permissions', 'note_free_access', 'student_notes')
 ORDER BY tablename, policyname;
+
+-- Optional quick check for Lusine linkage
+SELECT id, name, email, auth_user_id, group_name
+FROM students
+WHERE lower(name) LIKE '%lusine%'
+   OR lower(coalesce(email, '')) LIKE '%lusine%';
 
 COMMIT;
