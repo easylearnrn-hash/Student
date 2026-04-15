@@ -901,6 +901,7 @@
           <div class="batch-actions">
             <!-- Post / Unpost -->
             <button id="globalPostBtn" onclick="openPostModal()" class="pill-btn green" title="Post selected notes (students must pay to access)">📤 Post</button>
+            <button onclick="batchRepost()" class="pill-btn amber" title="Change the date on already-posted notes">📅 Repost</button>
             <button onclick="batchUnpost()" class="pill-btn red" title="Remove notes from group or individual student">↩ Unpost</button>
             <div class="batch-divider"></div>
             <!-- Free access -->
@@ -4483,6 +4484,122 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       postSelectedStudents.clear();
       document.getElementById('postGroupSelect').value = '';
       document.getElementById('postStudentSearch').value = '';
+    }
+
+    async function batchRepost() {
+      if (selectedNoteIds.size === 0) {
+        await customAlert('No Notes Selected', 'Please select at least one note to repost');
+        return;
+      }
+      const noteIds = Array.from(selectedNoteIds);
+      const groupLetter = currentGroup.replace('Group ', '');
+
+      // Build class date options from group schedule
+      let classDatesArray = [];
+      try {
+        const { data: grp } = await supabaseClient.from('groups').select('schedule').eq('group_name', groupLetter).single();
+        if (grp && grp.schedule) {
+          const scheduleDays = parseSchedule(grp.schedule);
+          const today = new Date();
+          const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+          const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+          for (let d = 1; d <= daysInMonth; d++) {
+            const date = new Date(today.getFullYear(), today.getMonth(), d);
+            if (date > todayStart) continue;
+            const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
+            const matches = (scheduleDays.monday && dayName === 'Monday') ||
+              (scheduleDays.tuesday && dayName === 'Tuesday') ||
+              (scheduleDays.wednesday && dayName === 'Wednesday') ||
+              (scheduleDays.thursday && dayName === 'Thursday') ||
+              (scheduleDays.friday && dayName === 'Friday') ||
+              (scheduleDays.saturday && dayName === 'Saturday') ||
+              (scheduleDays.sunday && dayName === 'Sunday');
+            if (matches) {
+              const y = date.getFullYear();
+              const m = String(date.getMonth() + 1).padStart(2, '0');
+              const dd = String(date.getDate()).padStart(2, '0');
+              classDatesArray.push({
+                display: `${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} (${date.toLocaleDateString('en-US', { weekday: 'short' })})`,
+                value: `${y}-${m}-${dd}`
+              });
+            }
+          }
+        }
+      } catch (e) { /* schedule optional */ }
+
+      const laDateToday = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+      const todayLa = new Date(laDateToday).toISOString().split('T')[0];
+
+      const newDate = await customPromptWithDate(
+        'Repost — Update Date',
+        `Update the class date for ${noteIds.length} note(s) in ${currentGroup}:`,
+        'Pick a date:',
+        todayLa,
+        classDatesArray
+      );
+      if (!newDate) return;
+
+      const confirmed = await customConfirm(
+        'Confirm Repost',
+        `Update class date to ${newDate} for ${noteIds.length} note(s) in ${currentGroup}?`
+      );
+      if (!confirmed) return;
+
+      // Loading overlay
+      const loadingDiv = document.createElement('div');
+      loadingDiv.id = 'repost-loading';
+      loadingDiv.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 99999; display: flex; align-items: center; justify-content: center;';
+      loadingDiv.innerHTML = `<div style="background: rgba(14,19,34,0.96); padding: 40px; border-radius: 20px; text-align: center; border: 1px solid rgba(196,164,95,0.22);">
+        <div style="font-size: 48px; margin-bottom: 20px;">📅</div>
+        <div style="color: #f5f0e8; font-size: 18px; font-weight: 600;">Updating Dates...</div>
+        <div style="color: rgba(245,240,232,0.55); font-size: 14px; margin-top: 10px;">Reposting ${noteIds.length} note(s) to ${newDate}</div>
+      </div>`;
+      document.body.appendChild(loadingDiv);
+
+      try {
+        const groupName = groupLetter;
+        const legacyGroupName = `Group ${groupLetter}`;
+        const groupNames = [groupName, legacyGroupName];
+
+        // Update class_date on student_note_permissions for these notes in this group
+        const { error: permErr } = await supabaseClient
+          .from('student_note_permissions')
+          .update({ class_date: newDate })
+          .in('note_id', noteIds)
+          .in('group_name', groupNames)
+          .is('student_id', null);
+        if (permErr) throw permErr;
+
+        // Also update note_free_access rows for this group
+        const { error: freeErr } = await supabaseClient
+          .from('note_free_access')
+          .update({ class_date: newDate })
+          .in('note_id', noteIds)
+          .eq('access_type', 'group')
+          .eq('group_letter', groupLetter);
+        if (freeErr) throw freeErr;
+
+        // Update local cache
+        permissions.forEach(p => {
+          if (noteIds.includes(p.note_id) && groupNames.includes(String(p.group_name || '').trim()) && !p.student_id) {
+            p.class_date = newDate;
+          }
+        });
+        freeAccessGrants.forEach(g => {
+          if (noteIds.includes(g.note_id) && g.access_type === 'group' && g.group_letter === groupLetter) {
+            g.class_date = newDate;
+          }
+        });
+
+        showToast(`✅ Reposted ${noteIds.length} note(s) to ${newDate}`);
+        clearSelection();
+        await loadData(true);
+      } catch (err) {
+        console.error('❌ Repost failed:', err);
+        await customAlert('Error', `Repost failed: ${err.message}`);
+      } finally {
+        document.getElementById('repost-loading')?.remove();
+      }
     }
 
     function selectPostType(type) {
