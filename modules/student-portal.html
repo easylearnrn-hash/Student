@@ -10690,10 +10690,15 @@
 
         const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
 
-        // For group-level grants: only show notes posted on/after the student's effective start.
-        // Use a 14-day buffer before the join date so notes from the class week before account
-        // creation are still visible (e.g. account created April 14, class was April 13).
-        // This blocks truly old historical notes (Dec/Jan) while showing recent ones.
+        // For group-level grants: fetch all, then filter notes by class_date after loading.
+        // Filtering here by date was causing empty results because note_free_access.created_at
+        // reflects when the row was inserted (months ago), not when the class was held.
+        const freeAccessGrants = [
+          ...(freeIndividualRes.data || []).filter(g => !blockedNoteIds.has(g.note_id)),
+          ...(freeGroupRes.data || []).filter(g => !blockedNoteIds.has(g.note_id))
+        ];
+        // Compute effective start: 14 days before account creation, to allow notes
+        // from the class week prior (e.g. account created Apr 14, class was Apr 13).
         const studentJoinDateStr = (currentStudent.start_date || currentStudent.created_at || '').split('T')[0] || null;
         let effectiveStartStr = null;
         if (studentJoinDateStr) {
@@ -10701,15 +10706,6 @@
           d.setDate(d.getDate() - 14);
           effectiveStartStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
         }
-        const freeAccessGrants = [
-          ...(freeIndividualRes.data || []).filter(g => !blockedNoteIds.has(g.note_id)),
-          ...(freeGroupRes.data || []).filter(g => {
-            if (blockedNoteIds.has(g.note_id)) return false;
-            if (!effectiveStartStr) return true;
-            const postDate = (g.class_date || g.created_at || '').split('T')[0];
-            return !postDate || postDate >= effectiveStartStr;
-          })
-        ];
         
         debugLog('📦 Free Access Query Result:', freeAccessGrants);
         debugLog('📊 Total free access grants:', freeAccessGrants?.length || 0);
@@ -10988,6 +10984,27 @@
         });
         
         allSystemNotes = transformedNotes;
+
+        // ── New-student note filter ──────────────────────────────────────────
+        // Hide notes whose class_date is older than effectiveStartStr (14 days before
+        // account creation). This prevents new students from seeing months of old notes
+        // while still showing notes from the class week before their account was made.
+        // We filter AFTER loading (using note.class_date) rather than at the ID stage
+        // because note_free_access.created_at is unreliable for this purpose.
+        if (effectiveStartStr) {
+          const beforeFilter = allSystemNotes.length;
+          allSystemNotes = allSystemNotes.filter(note => {
+            // Get the note's actual class date from the raw notes data
+            const rawNote = notes.find(n => n.id === note.id);
+            const noteClassDate = rawNote ? (rawNote.class_date || '').split('T')[0] : '';
+            // If no class_date, don't hide it (can't determine when it was for)
+            if (!noteClassDate) return true;
+            return noteClassDate >= effectiveStartStr;
+          });
+          if (beforeFilter !== allSystemNotes.length) {
+            console.log(`📅 New-student filter: hid ${beforeFilter - allSystemNotes.length} old notes (before ${effectiveStartStr})`);
+          }
+        }
         refreshSystemAssignmentStats();
         
         console.log('✅ ALL SYSTEM NOTES SET:', allSystemNotes.length);
