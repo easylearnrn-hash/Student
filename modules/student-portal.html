@@ -11032,22 +11032,28 @@
         allSystemNotes = transformedNotes;
 
         // ── New-student note filter ──────────────────────────────────────────
-        // Hide notes whose class_date is older than effectiveStartStr (14 days before
+        // Hide notes whose POSTING date is older than effectiveStartStr (14 days before
         // account creation). This prevents new students from seeing months of old notes
         // while still showing notes from the class week before their account was made.
-        // We filter AFTER loading (using note.class_date) rather than at the ID stage
-        // because note_free_access.created_at is unreliable for this purpose.
+        //
+        // CRITICAL: We use notePostDateMap (when admin POSTED this note to this group for a
+        // specific class) rather than rawNote.class_date (when the note was originally
+        // uploaded/created). Notes are uploaded months in advance but posted class-by-class.
+        // A note uploaded in Dec 2025 and posted for the Apr 13 2026 class should be visible
+        // to a student who joined Apr 14 2026 — the class happened AFTER they joined.
         if (effectiveStartStr) {
           const beforeFilter = allSystemNotes.length;
           allSystemNotes = allSystemNotes.filter(note => {
             // UNCONDITIONAL: If admin granted Individual Access or Free Access, always show this note.
-            // This bypasses the new-student date filter so individually-granted notes always appear.
             if (freeNoteIds.has(note.id)) return true;
 
-            // Otherwise apply the new-student date gate: hide notes older than effectiveStartStr.
+            // Use posting date (when this note was assigned to this group for a class).
+            // Fall back to the note's own class_date only if no posting record exists.
+            const postMeta = notePostDateMap.get(note.id);
             const rawNote = notes.find(n => n.id === note.id);
-            const noteClassDate = rawNote ? (rawNote.class_date || '').split('T')[0] : '';
-            if (!noteClassDate) return true; // no class_date → can't determine age, show it
+            const noteClassDate = postMeta?.dateString
+              || (rawNote ? (rawNote.class_date || '').split('T')[0] : '');
+            if (!noteClassDate) return true; // no date info → show it
             return noteClassDate >= effectiveStartStr;
           });
           if (beforeFilter !== allSystemNotes.length) {
