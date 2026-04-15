@@ -7702,7 +7702,7 @@
         group: student.group_name || student.group
       });
 
-      const cacheKey = `payments-v29-${student.id}`;
+      const cacheKey = `payments-v30-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached calendar payment status for student:', student.id);
@@ -8094,9 +8094,12 @@
         let bestDiff  = Infinity;
         scheduledDates.forEach(sd => {
           if (paidDates.has(sd) || absentDates.has(sd)) return; // already resolved
-          const diff = Math.abs(new Date(sd + 'T00:00:00').getTime() - orphanMs);
+          const sdMs = new Date(sd + 'T00:00:00').getTime();
+          // Only allow backward matching: the payment date must be ON or AFTER the class date.
+          // A payment on Apr 14 cannot cover a class on Apr 15 (student paid for a past class).
+          const diff = orphanMs - sdMs; // positive when orphan is paid AFTER the class
           const diffDays = diff / 86400000;
-          if (diffDays <= 3 && diff < bestDiff) { bestMatch = sd; bestDiff = diff; }
+          if (diffDays >= 0 && diffDays <= 3 && diff < bestDiff) { bestMatch = sd; bestDiff = diff; }
         });
         if (bestMatch) {
           paidDates.add(bestMatch);
@@ -10654,13 +10657,13 @@
         const [studentPermRes, groupPermRes] = await Promise.all([
           supabaseClient
             .from('student_note_permissions')
-            .select('id, note_id, is_accessible, class_date, granted_at, group_name, student_id')
+            .select('id, note_id, is_accessible, class_date, group_name, student_id')
             .eq('student_id', studentId),  // fetch both accessible AND blocked (is_accessible=false)
 
           groupNameCandidates.length > 0
             ? supabaseClient
                 .from('student_note_permissions')
-                .select('id, note_id, is_accessible, class_date, granted_at, group_name, student_id')
+                .select('id, note_id, is_accessible, class_date, group_name, student_id')
                 .is('student_id', null)
                 .eq('is_accessible', true)
                 .in('group_name', groupNameCandidates)
