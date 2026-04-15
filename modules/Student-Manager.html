@@ -3885,9 +3885,70 @@
       }
 
       async function approveWaitingListStudent(id, firstName, lastName, email, phone, language) {
+        // ── Step 0: Ask admin to assign a group BEFORE anything else ────────
+        // This is the most critical step — without a group the student is invisible in all group-based note queries.
+        const selectedGroup = await new Promise((resolve) => {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:200000;display:flex;align-items:center;justify-content:center;';
+          const dialog = document.createElement('div');
+          dialog.style.cssText = 'background:linear-gradient(135deg,rgba(15,18,40,0.99),rgba(10,12,28,0.99));border:2px solid rgba(138,180,255,0.3);border-radius:24px;padding:32px;max-width:420px;width:90%;box-shadow:0 30px 80px rgba(0,0,0,0.8);';
+          dialog.innerHTML = `
+            <h3 style="color:white;margin:0 0 8px;font-size:20px;">Assign Group</h3>
+            <p style="color:rgba(255,255,255,0.7);margin:0 0 24px;font-size:14px;">
+              Which group is <strong style="color:#8ab4ff;">${firstName} ${lastName}</strong> in?<br>
+              <span style="font-size:12px;color:rgba(255,180,0,0.8);">⚠️ Required — without a group, notes will not be visible to this student.</span>
+            </p>
+            <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:24px;">
+              ${['A','B','C','D','E','F'].map(g => `
+                <button data-group="${g}" style="flex:1;min-width:52px;padding:12px;border-radius:12px;border:2px solid rgba(138,180,255,0.3);background:rgba(138,180,255,0.08);color:white;font-size:18px;font-weight:700;cursor:pointer;transition:all 0.15s;" 
+                  onmouseover="this.style.background='rgba(138,180,255,0.25)';this.style.borderColor='rgba(138,180,255,0.7)'" 
+                  onmouseout="if(!this.classList.contains('sel')){this.style.background='rgba(138,180,255,0.08)';this.style.borderColor='rgba(138,180,255,0.3)'}">
+                  ${g}
+                </button>`).join('')}
+            </div>
+            <div style="display:flex;gap:10px;">
+              <button id="grpConfirmBtn" disabled style="flex:1;padding:14px;border-radius:12px;border:none;background:rgba(138,180,255,0.2);color:rgba(255,255,255,0.4);font-size:15px;font-weight:700;cursor:not-allowed;font-family:inherit;">Approve & Create</button>
+              <button id="grpCancelBtn" style="padding:14px 20px;border-radius:12px;border:2px solid rgba(255,255,255,0.2);background:transparent;color:rgba(255,255,255,0.7);font-size:14px;cursor:pointer;font-family:inherit;">Cancel</button>
+            </div>
+          `;
+          overlay.appendChild(dialog);
+          document.body.appendChild(overlay);
+          
+          let chosen = null;
+          dialog.querySelectorAll('[data-group]').forEach(btn => {
+            btn.addEventListener('click', () => {
+              dialog.querySelectorAll('[data-group]').forEach(b => {
+                b.classList.remove('sel');
+                b.style.background='rgba(138,180,255,0.08)';
+                b.style.borderColor='rgba(138,180,255,0.3)';
+              });
+              chosen = btn.dataset.group;
+              btn.classList.add('sel');
+              btn.style.background='rgba(102,180,255,0.35)';
+              btn.style.borderColor='rgba(102,180,255,0.9)';
+              const confirmBtn = dialog.querySelector('#grpConfirmBtn');
+              confirmBtn.disabled = false;
+              confirmBtn.style.background='linear-gradient(135deg,#3b82f6,#2563eb)';
+              confirmBtn.style.color='white';
+              confirmBtn.style.cursor='pointer';
+            });
+          });
+          
+          dialog.querySelector('#grpConfirmBtn').addEventListener('click', () => {
+            overlay.remove();
+            resolve(chosen);
+          });
+          dialog.querySelector('#grpCancelBtn').addEventListener('click', () => {
+            overlay.remove();
+            resolve(null);
+          });
+        });
+        
+        if (!selectedGroup) return; // Admin cancelled
+        
         const confirmed = await customConfirm(
           'Approve Student',
-          `Create student account for ${firstName} ${lastName}?\n\nEmail: ${email}\nPhone: ${phone || 'Not provided'}`
+          `Create student account for ${firstName} ${lastName}?\n\nEmail: ${email}\nGroup: ${selectedGroup}\nPhone: ${phone || 'Not provided'}`
         );
         
         if (!confirmed) return;
@@ -4164,6 +4225,12 @@
                 updates.start_date = new Date().toISOString().split('T')[0];
               }
               
+              // ── CRITICAL FIX: Set group_name if not already assigned ──
+              // Without group_name, no group-based notes are visible to this student.
+              if (!existingStudent.group_name && selectedGroup) {
+                updates.group_name = selectedGroup;
+              }
+              
               // Ensure student is active and shown in grid
               if (existingStudent.status !== 'active') {
                 updates.status = 'active';
@@ -4205,6 +4272,17 @@
                   } else if (signUpData?.user) {
                     updateAuthId = signUpData.user.id;
                     updates.auth_user_id = updateAuthId;
+                    
+                    // ── Send magic link to bypass email verification ──────────────────────────
+                    try {
+                      await supabaseClient.auth.signInWithOtp({
+                        email: effectiveEmail.trim().toLowerCase(),
+                        options: { shouldCreateUser: false }
+                      });
+                      debugLog('✅ Magic link sent for existing student update:', effectiveEmail);
+                    } catch (otpErr) {
+                      console.warn('⚠️ Magic link send failed for existing student (non-critical):', otpErr);
+                    }
                   }
                 } catch (authErr) {
                   console.warn('⚠️ Auth signUp threw for existing student:', authErr);
@@ -4328,6 +4406,10 @@
           const generatedStudentId = Date.now();
 
           // ── Step 1: Create Supabase auth account ────────────────
+          // IMPORTANT: supabase.auth.signUp() may require email confirmation depending on project settings.
+          // We also call signInWithOtp() immediately after to send a magic link — clicking the
+          // magic link both CONFIRMS the email AND logs the student in with one click.
+          // This bypasses any email-verification gate completely regardless of project settings.
           let authUserId = null;
           if (email) {
             try {
@@ -4347,6 +4429,18 @@
               } else if (signUpData?.user) {
                 authUserId = signUpData.user.id;
                 debugLog('✅ Auth account created, uid:', authUserId);
+                
+                // ── Send magic link to auto-confirm email & skip verification ──────────────
+                // This means the student clicks ONE link to activate; no separate "verify email" step.
+                try {
+                  await supabaseClient.auth.signInWithOtp({
+                    email: email.trim().toLowerCase(),
+                    options: { shouldCreateUser: false }  // user already exists from signUp above
+                  });
+                  debugLog('✅ Magic link sent — email verification bypassed for student:', email);
+                } catch (otpErr) {
+                  console.warn('⚠️ Magic link send failed (non-critical):', otpErr);
+                }
               }
             } catch (authErr) {
               console.warn('⚠️ Auth signUp threw:', authErr);
@@ -4366,6 +4460,7 @@
               balance: 0,
               price_per_class: 0,
               notes: credentialNote,
+              group_name: selectedGroup,    // ← CRITICAL: group assignment so notes are visible
               start_date: new Date().toISOString().split('T')[0],  // ← PARITY FIX: set start_date so portal note-filter works correctly
               ...(authUserId ? { auth_user_id: authUserId } : {})
             }])

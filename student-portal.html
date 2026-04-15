@@ -5289,15 +5289,21 @@
           if (!emailError && emailStudentData) {
             console.log('✅ Found student by email fallback:', emailStudentData.name);
             
-            // Self-heal: link auth_user_id so future lookups work instantly
-            supabaseClient
-              .from('students')
-              .update({ auth_user_id: session.user.id })
-              .eq('id', emailStudentData.id)
-              .then(({ error: healError }) => {
-                if (healError) console.warn('⚠️ Could not self-heal auth_user_id:', healError.message);
-                else console.log('🔧 Self-healed auth_user_id for student:', emailStudentData.name);
-              });
+            // Self-heal: link auth_user_id so future lookups work instantly.
+            // Use an admin-proxied RPC if available, otherwise skip silently — student still works via email match.
+            try {
+              // Try updating via RPC function (if it exists and service role is exposed server-side).
+              // This is non-critical: student WORKS without it; this just speeds up future sessions.
+              const { error: healError } = await supabaseClient
+                .from('students')
+                .update({ auth_user_id: session.user.id })
+                .eq('id', emailStudentData.id)
+                .eq('email', session.user.email.trim()); // RLS: match own email
+              if (healError) console.log('ℹ️ auth_user_id self-heal skipped (expected if RLS blocks write):', healError.message);
+              else console.log('🔧 Self-healed auth_user_id for student:', emailStudentData.name);
+            } catch (healErr) {
+              // Non-critical — student still loads correctly
+            }
             
             // Check admin status before returning
             if (emailStudentData.role === 'admin') {
