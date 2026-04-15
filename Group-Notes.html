@@ -1781,16 +1781,26 @@
         const urlParams = new URLSearchParams(window.location.search);
         const requestedGroup = urlParams.get('group');
         
-        
         // 🔒 CRITICAL: Verify admin access BEFORE loading any data
         const isAdmin = await requireAdminSession();
         if (!isAdmin) {
           return; // Stop execution - user will be redirected
         }
 
+        // Show spinner immediately while fetching
+        const container = document.getElementById('systemsContainer');
+        if (container) container.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading systems and notes...</div></div>';
 
-        await loadActiveGroups();
+        // 🚀 PERFORMANCE: Run loadActiveGroups (tab visibility) and data fetch in PARALLEL.
+        // loadActiveGroups only touches tab UI; it does not affect what data is fetched.
+        // loadData(skipRender=true) fetches & caches all data without rendering.
+        // Both finish together → then we set the requested group and render once.
+        await Promise.all([
+          loadActiveGroups(),
+          loadData(false, true)   // fetch + cache only, no render yet
+        ]);
 
+        // Apply ?group= URL param after active groups are known
         if (requestedGroup) {
           const normalizedGroup = requestedGroup.startsWith('Group ')
             ? requestedGroup
@@ -1802,7 +1812,8 @@
           });
         }
 
-        await loadData();
+        // Single render pass with all data already in memory
+        await renderSystems();
       } catch (error) {
         console.error('Init error:', error);
         alert('Failed to initialize: ' + error.message);
@@ -1896,12 +1907,14 @@
     }
 
     
-    async function fetchAll(table, selectStr, orderByObj = null) {
+    // applyFilter: optional fn(query) => query to add .eq/.is/.not etc. before pagination
+    async function fetchAll(table, selectStr, orderByObj = null, applyFilter = null) {
       let allData = [];
       let offset = 0;
       const batchSize = 1000;
       while (true) {
         let query = supabaseClient.from(table).select(selectStr).range(offset, offset + batchSize - 1);
+        if (applyFilter) query = applyFilter(query);
         if (orderByObj) {
           query = query.order(orderByObj.col, { ascending: orderByObj.asc });
         } else {
@@ -1919,12 +1932,13 @@
     }
 
     // ===== LOAD DATA =====
-    async function loadData(forceRefresh = false) {
+    // skipRender=true: fetch + cache only, no DOM render (used in parallel init)
+    async function loadData(forceRefresh = false, skipRender = false) {
       const container = getCachedDOM('systemsContainer') || document.getElementById('systemsContainer');
       if (container) setCachedDOM('systemsContainer', container);
       
-      // Only show loading spinner if not a background refresh
-      if (!forceRefresh) {
+      // Only show loading spinner if not a background refresh and not a fetch-only call
+      if (!forceRefresh && !skipRender) {
         container.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading systems and notes...</div></div>';
       }
 
@@ -1937,17 +1951,37 @@
         // 🚀 PERFORMANCE: Parallel fetches if any data missing from cache
         if (!notesCache || !permsCache || !freeAccessCache) {
           const [notesResult, permsResult, freeAccessResult] = await Promise.all([
-            // Fetch notes (if not cached)
-            notesCache ? Promise.resolve({ data: notesCache, error: null }) : 
-              fetchAll('student_notes', 'id, title, system_category, category, group_name, class_date, description, pdf_url, requires_payment, video_url, created_at, file_size, file_name', { col: 'class_date', asc: false }).then(d => ({data: d, error: null})),
+            // Fetch notes — skip soft-deleted rows (deleted=false only)
+            notesCache ? Promise.resolve({ data: notesCache, error: null }) :
+              fetchAll(
+                'student_notes',
+                'id, title, system_category, category, group_name, class_date, description, pdf_url, requires_payment, video_url, created_at, file_size, file_name',
+                { col: 'class_date', asc: false },
+                q => q.eq('deleted', false)
+              ).then(d => ({data: d, error: null})),
             
-            // Fetch permissions (if not cached)
+            // Fetch permissions — group-level rows ONLY (student_id IS NULL).
+            // Per-student rows (written during Post/Repost) are not used by renderSystems;
+            // they are fetched on-demand in the Access dropdown. Skipping them cuts the
+            // payload by up to 30× (num_notes × num_students rows → num_notes rows).
             permsCache ? Promise.resolve({ data: permsCache, error: null }) :
-              fetchAll('student_note_permissions', 'note_id, group_name, is_accessible, class_date, student_id').then(d => ({data: d, error: null})),
+              fetchAll(
+                'student_note_permissions',
+                'note_id, group_name, is_accessible, class_date, student_id',
+                null,
+                q => q.is('student_id', null)
+              ).then(d => ({data: d, error: null})),
             
-            // Fetch free access (if not cached)
+            // Fetch free access — group-level rows ONLY (access_type='group').
+            // Individual rows are not used in the main note grid.
             freeAccessCache ? Promise.resolve({ data: freeAccessCache, error: null }) :
-              fetchAll('note_free_access', 'note_id, access_type, group_letter, student_id, class_date').then(d => ({data: d, error: null}))]);
+              fetchAll(
+                'note_free_access',
+                'note_id, access_type, group_letter, student_id, class_date',
+                null,
+                q => q.eq('access_type', 'group')
+              ).then(d => ({data: d, error: null}))
+          ]);
 
           // Handle errors
           if (notesResult.error) throw notesResult.error;
@@ -1970,16 +2004,21 @@
           freeAccessGrants = freeAccessCache;
         }
 
-        await renderSystems();
+        // 🚀 PRE-WARM ongoing system cache so renderSystems() doesn't block on a DB query
+        await getOngoingSystemName();
+
+        if (!skipRender) await renderSystems();
 
       } catch (error) {
         console.error('Load data error:', error);
-        container.innerHTML = `
-          <div class="empty-state">
-            <div class="icon">❌</div>
-            <div class="text">Failed to load data: ${error.message}</div>
-          </div>
-        `;
+        if (!skipRender) {
+          container.innerHTML = `
+            <div class="empty-state">
+              <div class="icon">❌</div>
+              <div class="text">Failed to load data: ${error.message}</div>
+            </div>
+          `;
+        }
       }
     }
 
