@@ -10616,13 +10616,13 @@
         const [studentPermRes, groupPermRes] = await Promise.all([
           supabaseClient
             .from('student_note_permissions')
-            .select('id, note_id, is_accessible, class_date, group_name, student_id')
+            .select('id, note_id, is_accessible, class_date, granted_at, group_name, student_id')
             .eq('student_id', studentId),  // fetch both accessible AND blocked (is_accessible=false)
 
           groupNameCandidates.length > 0
             ? supabaseClient
                 .from('student_note_permissions')
-                .select('id, note_id, is_accessible, class_date, group_name, student_id')
+                .select('id, note_id, is_accessible, class_date, granted_at, group_name, student_id')
                 .is('student_id', null)
                 .eq('is_accessible', true)
                 .in('group_name', groupNameCandidates)
@@ -10660,16 +10660,29 @@
         // Fetch FREE access grants for this student (BEFORE loading notes)
         const studentGroupLetter = currentStudent.group_letter || currentStudent.group || currentStudent.group_name;
         const normalizedGroupLetter = studentGroupLetter ? studentGroupLetter.toString().replace(/Group\s*/i, '').trim().toUpperCase() : null;
-
+        
+        debugLog('🚨 [CRITICAL DEBUG - FREE ACCESS]');
+        debugLog('📊 Student ID:', studentId);
+        debugLog('👤 Student Name:', currentStudent.name);
+        debugLog('🏫 Raw Group:', studentGroupLetter);
+        debugLog('🔤 Normalized Group Letter:', normalizedGroupLetter);
+        
+        if (!normalizedGroupLetter) {
+          console.error('❌ CRITICAL: Student has no group assigned! This will show ALL group notes!');
+        }
+        
+        // Fetch FREE access in two clean parallel queries (avoids complex OR/AND syntax issues).
+        // Individual: note_free_access rows where student_id = this student.
+        // Group:      note_free_access rows where access_type='group' AND group_letter = this group.
         const [freeIndividualRes, freeGroupRes] = await Promise.all([
           supabaseClient
             .from('note_free_access')
-            .select('note_id, access_type, group_letter, student_id, created_at')
+            .select('note_id, access_type, group_letter, student_id, created_at, class_date')
             .eq('student_id', studentId),
           normalizedGroupLetter
             ? supabaseClient
                 .from('note_free_access')
-                .select('note_id, access_type, group_letter, student_id, created_at')
+                .select('note_id, access_type, group_letter, student_id, created_at, class_date')
                 .eq('access_type', 'group')
                 .eq('group_letter', normalizedGroupLetter)
             : Promise.resolve({ data: [], error: null })
@@ -10707,31 +10720,64 @@
         
         const freeAccessNoteIds = freeAccessGrants?.map(fa => fa.note_id) || [];
         
-        // Build map of note_id -> post date for display.
-        // note_free_access only has created_at (no class_date column).
-        // student_note_permissions has class_date (set by Group-Notes when posting).
+        // 🔥 FIX: Create map of note_id -> class_date from BOTH free_access AND permissions tables
+        // This gives us the ACTUAL date each note was posted to THIS group
         const notePostDateMap = new Map();
-        const normalizeDateStr = (value) => {
-          if (!value) return null;
-          return String(value).includes('T') ? value.split('T')[0] : value;
-        };
-
-        // 1. From free_access grants — use created_at only
+        
+        // 1. Add dates from FREE ACCESS grants
         if (freeAccessGrants) {
+          const normalizeDateString = (value) => {
+            if (!value) return null;
+            return value.includes('T') ? value.split('T')[0] : value;
+          };
+
           freeAccessGrants.forEach(grant => {
-            const createdDateString = normalizeDateStr(grant.created_at);
-            if (!notePostDateMap.has(grant.note_id) && createdDateString) {
-              notePostDateMap.set(grant.note_id, { dateString: createdDateString, source: 'free_access_created_at' });
+            const classDateString = normalizeDateString(grant.class_date);
+            const createdDateString = normalizeDateString(grant.created_at);
+
+            if (classDateString) {
+              // Prefer explicit class_date recorded when admin posted for this group
+              notePostDateMap.set(grant.note_id, {
+                dateString: classDateString,
+                source: 'free_access_class_date'
+              });
+            } else if (!notePostDateMap.has(grant.note_id) && createdDateString) {
+              // Fallback: use created_at only if no class_date captured yet
+              notePostDateMap.set(grant.note_id, {
+                dateString: createdDateString,
+                source: 'free_access_created_at'
+              });
             }
           });
         }
-
-        // 2. From permissions — prefer class_date (when admin posted the note to the group)
+        
+        // 2. Add dates from PERMISSION-BASED PAID ACCESS (student_note_permissions)
+        // CRITICAL: This ensures paid notes show the correct per-group posting date
         if (permissions) {
+          const normalizeDateString = (value) => {
+            if (!value) return null;
+            return value.includes('T') ? value.split('T')[0] : value;
+          };
+
           permissions.forEach(permission => {
-            const classDateString = normalizeDateStr(permission.class_date);
-            if (!notePostDateMap.has(permission.note_id) && classDateString) {
-              notePostDateMap.set(permission.note_id, { dateString: classDateString, source: 'permission_class_date' });
+            const classDateString = normalizeDateString(permission.class_date);
+            const grantedAtString = normalizeDateString(permission.granted_at);
+
+            // Only set if not already set by free_access (free_access takes priority)
+            if (!notePostDateMap.has(permission.note_id)) {
+              if (classDateString) {
+                // Use the class_date field from student_note_permissions (set when admin posts notes)
+                notePostDateMap.set(permission.note_id, {
+                  dateString: classDateString,
+                  source: 'permission_class_date'
+                });
+              } else if (grantedAtString) {
+                // Fallback: use granted_at timestamp
+                notePostDateMap.set(permission.note_id, {
+                  dateString: grantedAtString,
+                  source: 'permission_granted_at'
+                });
+              }
             }
           });
         }
@@ -10797,9 +10843,15 @@
         const mergedPaymentRecords = paymentData;
         
         // Create a Set of note IDs that have FREE access (no payment required)
-        // ⚠️ IMPORTANT: Only note_free_access grants free access
-        // Posted notes (from student_note_permissions) are VISIBLE but still require payment
-        const freeNoteIds = new Set(freeAccessNoteIds || []);
+        // ⚠️ IMPORTANT: Originally only note_free_access granted free access, BUT
+        // 💯 USER FIX: "make 100% sure this opens the notes for checked student unconditionally !"
+        // We now ALSO add Individual Access (student_note_permissions where student_id is set) to freeNoteIds
+        // so that the admin's manual checkbox unconditionally unlocks the note without requiring payment.
+        const individualAccessNoteIds = (studentPermRes.data || [])
+          .filter(p => p.is_accessible && p.student_id === studentId)
+          .map(p => p.note_id);
+          
+        const freeNoteIds = new Set([...(freeAccessNoteIds || []), ...individualAccessNoteIds]);
         
         if (DEBUG_MODE) debugLog(`✨ FREE access notes: ${freeNoteIds.size} notes (bypass payment checks)`);
         
@@ -10948,6 +11000,12 @@
         if (effectiveStartStr) {
           const beforeFilter = allSystemNotes.length;
           allSystemNotes = allSystemNotes.filter(note => {
+            // 💯 USER FIX: Unconditional access applies here too. If the admin explicitly 
+            // granted Individual Access OR Free Access via freeNoteIds, it always passes!
+            if (freeNoteIds.has(note.id)) {
+              return true;
+            }
+
             // Get the note's actual class date from the raw notes data
             const rawNote = notes.find(n => n.id === note.id);
             const noteClassDate = rawNote ? (rawNote.class_date || '').split('T')[0] : '';
