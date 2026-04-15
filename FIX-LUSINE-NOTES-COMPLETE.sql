@@ -178,8 +178,35 @@ WITH CHECK (is_arnoma_admin());
 -- ============================================================
 -- STEP 4: BACKFILL explicit per-student note permissions
 -- Creates student-specific rows from existing group posts.
--- This bypasses fragile group-name formatting issues and guarantees visibility.
+-- De-duplicates source rows so ON CONFLICT does not hit the same key twice.
 -- ============================================================
+WITH backfill_source AS (
+  SELECT
+    snp.note_id,
+    s.id AS student_id,
+    s.group_name,
+    true AS is_accessible,
+    COALESCE(snp.class_date, CURRENT_DATE) AS class_date,
+    COALESCE(snp.granted_by, 'system-fix') AS granted_by
+  FROM student_note_permissions snp
+  JOIN students s
+    ON upper(regexp_replace(coalesce(snp.group_name, ''), '^group\s*', '', 'i'))
+     = upper(regexp_replace(coalesce(s.group_name, ''), '^group\s*', '', 'i'))
+  WHERE snp.student_id IS NULL
+    AND snp.is_accessible = true
+    AND s.group_name IS NOT NULL
+),
+backfill_dedup AS (
+  SELECT DISTINCT ON (note_id, student_id, group_name)
+    note_id,
+    student_id,
+    group_name,
+    is_accessible,
+    class_date,
+    granted_by
+  FROM backfill_source
+  ORDER BY note_id, student_id, group_name, class_date DESC, granted_by DESC
+)
 INSERT INTO student_note_permissions (
   note_id,
   student_id,
@@ -189,19 +216,13 @@ INSERT INTO student_note_permissions (
   granted_by
 )
 SELECT
-  snp.note_id,
-  s.id AS student_id,
-  s.group_name,
-  true AS is_accessible,
-  COALESCE(snp.class_date, CURRENT_DATE) AS class_date,
-  COALESCE(snp.granted_by, 'system-fix') AS granted_by
-FROM student_note_permissions snp
-JOIN students s
-  ON upper(regexp_replace(coalesce(snp.group_name, ''), '^group\s*', '', 'i'))
-   = upper(regexp_replace(coalesce(s.group_name, ''), '^group\s*', '', 'i'))
-WHERE snp.student_id IS NULL
-  AND snp.is_accessible = true
-  AND s.group_name IS NOT NULL
+  note_id,
+  student_id,
+  group_name,
+  is_accessible,
+  class_date,
+  granted_by
+FROM backfill_dedup
 ON CONFLICT (note_id, student_id, group_name)
 DO UPDATE
 SET
