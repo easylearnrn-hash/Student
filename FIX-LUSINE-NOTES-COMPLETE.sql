@@ -176,6 +176,40 @@ USING (is_arnoma_admin())
 WITH CHECK (is_arnoma_admin());
 
 -- ============================================================
+-- STEP 4: BACKFILL explicit per-student note permissions
+-- Creates student-specific rows from existing group posts.
+-- This bypasses fragile group-name formatting issues and guarantees visibility.
+-- ============================================================
+INSERT INTO student_note_permissions (
+  note_id,
+  student_id,
+  group_name,
+  is_accessible,
+  class_date,
+  granted_by
+)
+SELECT
+  snp.note_id,
+  s.id AS student_id,
+  s.group_name,
+  true AS is_accessible,
+  COALESCE(snp.class_date, CURRENT_DATE) AS class_date,
+  COALESCE(snp.granted_by, 'system-fix') AS granted_by
+FROM student_note_permissions snp
+JOIN students s
+  ON upper(regexp_replace(coalesce(snp.group_name, ''), '^group\s*', '', 'i'))
+   = upper(regexp_replace(coalesce(s.group_name, ''), '^group\s*', '', 'i'))
+WHERE snp.student_id IS NULL
+  AND snp.is_accessible = true
+  AND s.group_name IS NOT NULL
+ON CONFLICT (note_id, student_id, group_name)
+DO UPDATE
+SET
+  is_accessible = EXCLUDED.is_accessible,
+  class_date = COALESCE(EXCLUDED.class_date, student_note_permissions.class_date),
+  granted_by = COALESCE(EXCLUDED.granted_by, student_note_permissions.granted_by);
+
+-- ============================================================
 -- VERIFICATION — these will return results you can inspect
 -- ============================================================
 SELECT tablename, policyname, roles, cmd
@@ -189,5 +223,11 @@ SELECT id, name, email, auth_user_id, group_name
 FROM students
 WHERE lower(name) LIKE '%lusine%'
    OR lower(coalesce(email, '')) LIKE '%lusine%';
+
+-- Verify Lusine Julhakyan has accessible note rows now
+SELECT COUNT(*) AS lusine_accessible_note_rows
+FROM student_note_permissions
+WHERE student_id = 155
+  AND is_accessible = true;
 
 COMMIT;
