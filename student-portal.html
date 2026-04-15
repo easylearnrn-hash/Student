@@ -5275,7 +5275,41 @@
         .maybeSingle();
       
       if (error || !studentData) {
-        console.error('❌ Student lookup failed:', {
+        // ── PARITY FIX: Fall back to email lookup for students created before auth_user_id was linked ──
+        // Waiting-list students approved via "Update Existing" path had no auth_user_id set.
+        // Also covers students where signUp() failed silently during creation.
+        if (session.user.email) {
+          console.log('⚠️ auth_user_id lookup failed, trying email fallback for:', session.user.email);
+          const { data: emailStudentData, error: emailError } = await supabaseClient
+            .from('students')
+            .select('*')
+            .ilike('email', session.user.email.trim())
+            .maybeSingle();
+          
+          if (!emailError && emailStudentData) {
+            console.log('✅ Found student by email fallback:', emailStudentData.name);
+            
+            // Self-heal: link auth_user_id so future lookups work instantly
+            supabaseClient
+              .from('students')
+              .update({ auth_user_id: session.user.id })
+              .eq('id', emailStudentData.id)
+              .then(({ error: healError }) => {
+                if (healError) console.warn('⚠️ Could not self-heal auth_user_id:', healError.message);
+                else console.log('🔧 Self-healed auth_user_id for student:', emailStudentData.name);
+              });
+            
+            // Check admin status before returning
+            if (emailStudentData.role === 'admin') {
+              await supabaseClient.auth.signOut();
+              window.location.href = 'index.html';
+              return null;
+            }
+            return emailStudentData;
+          }
+        }
+        
+        console.error('❌ Student lookup failed (both auth_user_id and email):', {
           error,
           errorCode: error?.code,
           errorMessage: error?.message,
@@ -5287,7 +5321,6 @@
         // Check if admin chat mode before showing error
         const adminChatCheck = localStorage.getItem('admin_chat_token') || sessionStorage.getItem('admin_chat_token');
         if (!adminChatCheck) {
-          // Show more detailed error message
           const errorMsg = error?.message || 'Unknown error';
           alert(`Your account is not set up correctly.\n\nError: ${errorMsg}\n\nEmail: ${session.user.email}\n\nPlease contact the administrator.`);
           await supabaseClient.auth.signOut();
@@ -5307,7 +5340,6 @@
       
       return studentData;
     }
-    
     // ==========================================================================
     // DEBUG MODE - Set to false for production
     // ==========================================================================
@@ -10600,14 +10632,11 @@
         
         if (DEBUG_MODE) debugLog('📚 Loading notes for Student ID:', studentId, 'Group:', studentGroup);
         
-        // 💯 USER FIX: Apply canonicalizeGroupCode here so we fetch and match robustly against weirdly-spaced group names
-        const targetGroupCode = canonicalizeGroupCode(studentGroup);
-        
         // Fetch permissions for this student (both individual and group access).
-        // IMPORTANT: Group Notes may store group_name as either "A" or "Group A" or canonicalized.
-        // We must support all formats so posted paid notes always appear (locked if unpaid).
+        // IMPORTANT: Group Notes may store group_name as either "A" or "Group A".
+        // We must support both formats so posted paid notes always appear (locked if unpaid).
         const groupNameCandidates = studentGroup
-          ? [...new Set([studentGroup, `Group ${studentGroup}`, targetGroupCode, `Group ${targetGroupCode}`])]
+          ? [studentGroup, `Group ${studentGroup}`]
           : [];
 
         console.log('🔍 Querying student_note_permissions with:', {
@@ -10637,12 +10666,10 @@
         const blockedNoteIds = new Set(
           (studentPermRes.data || []).filter(p => !p.is_accessible).map(p => p.note_id)
         );
-        
-        // 💯 USER FIX: targetGroupCode is defined prior
         const filteredGroupPermissions = (groupPermRes.data || []).filter(p => {
           const code = canonicalizeGroupCode(p.group_name);
           // Exclude notes that have been explicitly unposted for this student
-          return !!targetGroupCode && code === targetGroupCode && !blockedNoteIds.has(p.note_id);
+          return !!studentGroup && code === studentGroup && !blockedNoteIds.has(p.note_id);
         });
         const permissions = [
           ...(studentPermRes.data || []).filter(p => p.is_accessible),
@@ -10664,8 +10691,7 @@
         
         // Fetch FREE access grants for this student (BEFORE loading notes)
         const studentGroupLetter = currentStudent.group_letter || currentStudent.group || currentStudent.group_name;
-        // 💯 USER FIX: Always use canonicalizeGroupCode to query note_free_access, since admin tools save it that way!
-        const normalizedGroupLetter = canonicalizeGroupCode(studentGroupLetter);
+        const normalizedGroupLetter = studentGroupLetter ? studentGroupLetter.toString().replace(/Group\s*/i, '').trim().toUpperCase() : null;
         
         debugLog('🚨 [CRITICAL DEBUG - FREE ACCESS]');
         debugLog('📊 Student ID:', studentId);
@@ -10849,15 +10875,9 @@
         const mergedPaymentRecords = paymentData;
         
         // Create a Set of note IDs that have FREE access (no payment required)
-        // ⚠️ IMPORTANT: Originally only note_free_access granted free access, BUT
-        // 💯 USER FIX: "make 100% sure this opens the notes for checked student unconditionally !"
-        // We now ALSO add Individual Access (student_note_permissions where student_id is set) to freeNoteIds
-        // so that the admin's manual checkbox unconditionally unlocks the note without requiring payment.
-        const individualAccessNoteIds = (studentPermRes.data || [])
-          .filter(p => p.is_accessible && p.student_id === studentId)
-          .map(p => p.note_id);
-          
-        const freeNoteIds = new Set([...(freeAccessNoteIds || []), ...individualAccessNoteIds]);
+        // ⚠️ IMPORTANT: Only note_free_access grants free access
+        // Posted notes (from student_note_permissions) are VISIBLE but still require payment
+        const freeNoteIds = new Set(freeAccessNoteIds || []);
         
         if (DEBUG_MODE) debugLog(`✨ FREE access notes: ${freeNoteIds.size} notes (bypass payment checks)`);
         
@@ -11001,20 +11021,16 @@
         // Hide notes whose class_date is older than effectiveStartStr (14 days before
         // account creation). This prevents new students from seeing months of old notes
         // while still showing notes from the class week before their account was made.
+        // We filter AFTER loading (using note.class_date) rather than at the ID stage
+        // because note_free_access.created_at is unreliable for this purpose.
         if (effectiveStartStr) {
           const beforeFilter = allSystemNotes.length;
           allSystemNotes = allSystemNotes.filter(note => {
-            // 💯 USER FIX: Unconditional access applies here too. If the admin explicitly 
-            // granted Individual Access OR Free Access via freeNoteIds, it always passes!
-            if (freeNoteIds.has(note.id)) {
-              return true;
-            }
-
-            // Use the already-computed note.date from the transformed object, which handles
-            // per-group class_dates correctly, instead of the global raw note.class_date.
-            if (!note.date) return true;
-            
-            const noteClassDate = `${note.date.getFullYear()}-${String(note.date.getMonth() + 1).padStart(2, '0')}-${String(note.date.getDate()).padStart(2, '0')}`;
+            // Get the note's actual class date from the raw notes data
+            const rawNote = notes.find(n => n.id === note.id);
+            const noteClassDate = rawNote ? (rawNote.class_date || '').split('T')[0] : '';
+            // If no class_date, don't hide it (can't determine when it was for)
+            if (!noteClassDate) return true;
             return noteClassDate >= effectiveStartStr;
           });
           if (beforeFilter !== allSystemNotes.length) {

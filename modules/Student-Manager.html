@@ -4155,14 +4155,14 @@
               }
               
               // Update notes with registration info
-              const registrationDate = new Date().toLocaleDateString('en-US', {
-                month: 'long',
-                day: 'numeric',
-                year: 'numeric'
+              const updateRegistrationDate = new Date().toLocaleDateString('en-US', {
+                month: 'long', day: 'numeric', year: 'numeric'
               });
               
-              const newNote = `\n✅ Updated from waiting list on ${registrationDate}`;
-              updates.notes = (existingStudent.notes || '') + newNote;
+              // ── PARITY FIX: Ensure start_date is set so note date-filter works correctly ──
+              if (!existingStudent.start_date) {
+                updates.start_date = new Date().toISOString().split('T')[0];
+              }
               
               // Ensure student is active and shown in grid
               if (existingStudent.status !== 'active') {
@@ -4172,6 +4172,52 @@
                 updates.show_in_grid = true;
               }
               
+              // ── PARITY FIX: Create auth account if missing so student can log in ──────────
+              // Students updated from waiting list had no auth account → portal couldn't find them.
+              let updateAuthId = existingStudent.auth_user_id || null;
+              let updateTempPassword = null;
+              let updateEmailWasSent = false;
+              
+              const effectiveEmail = email || existingStudent.email;
+              
+              if (!updateAuthId && effectiveEmail) {
+                // Generate temp password same way as new-student path
+                function genTempPwd() {
+                  const upper='ABCDEFGHJKLMNPQRSTUVWXYZ', lower='abcdefghjkmnpqrstuvwxyz',
+                        digits='23456789', special='!@#$%', all=upper+lower+digits+special;
+                  let p=upper[Math.floor(Math.random()*upper.length)]+lower[Math.floor(Math.random()*lower.length)]+
+                        digits[Math.floor(Math.random()*digits.length)]+special[Math.floor(Math.random()*special.length)];
+                  for(let i=4;i<10;i++) p+=all[Math.floor(Math.random()*all.length)];
+                  return p.split('').sort(()=>Math.random()-0.5).join('');
+                }
+                updateTempPassword = genTempPwd();
+                
+                try {
+                  const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
+                    email: effectiveEmail.trim().toLowerCase(),
+                    password: updateTempPassword,
+                    options: { data: { full_name: existingStudent.name, role: 'student' } }
+                  });
+                  
+                  if (signUpError) {
+                    console.warn('⚠️ Auth account creation for existing student failed:', signUpError.message);
+                    updateTempPassword = null; // Don't show password if auth failed
+                  } else if (signUpData?.user) {
+                    updateAuthId = signUpData.user.id;
+                    updates.auth_user_id = updateAuthId;
+                  }
+                } catch (authErr) {
+                  console.warn('⚠️ Auth signUp threw for existing student:', authErr);
+                  updateTempPassword = null;
+                }
+              }
+              
+              // Add credential note
+              const credInfo = updateTempPassword
+                ? `\n✅ Portal credentials created on ${updateUpdateDate || updateRegistrationDate}\n📧 Login: ${effectiveEmail}\n🔑 Password: ${updateTempPassword}`
+                : `\n✅ Updated from waiting list on ${updateRegistrationDate}`;
+              updates.notes = (existingStudent.notes || '') + credInfo;
+              
               // Perform update
               const { error: updateError } = await supabaseClient
                 .from('students')
@@ -4179,6 +4225,43 @@
                 .eq('id', existingStudent.id);
               
               if (updateError) throw updateError;
+              
+              // ── Send welcome email with credentials if auth was newly created ──
+              if (updateTempPassword && effectiveEmail) {
+                try {
+                  const portalUrl = 'https://student.richyfesta.com';
+                  const existingFirstName = existingStudent.name.split(' ')[0];
+                  const welcomeHtml = `<!DOCTYPE html><html><body style="font-family:sans-serif;background:#667eea;margin:0;padding:0;">
+<div style="max-width:600px;margin:40px auto;background:white;border-radius:24px;overflow:hidden;">
+  <div style="background:linear-gradient(135deg,#667eea,#764ba2);padding:40px 32px;text-align:center;">
+    <h1 style="color:white;margin:0;">Welcome to ARNOMA!</h1>
+    <p style="color:rgba(255,255,255,0.85);margin:12px 0 0;">Your student portal is ready</p>
+  </div>
+  <div style="padding:40px 32px;color:#374151;">
+    <p>Hi <strong>${existingFirstName}</strong>,</p>
+    <p>Your student account has been approved! Here are your login credentials:</p>
+    <div style="background:#f0f4ff;border:2px solid rgba(102,126,234,0.4);border-radius:16px;padding:28px;margin:24px 0;">
+      <p style="margin:8px 0;"><strong>Portal:</strong> <a href="${portalUrl}">${portalUrl}</a></p>
+      <p style="margin:8px 0;"><strong>Login:</strong> ${effectiveEmail}</p>
+      <p style="margin:8px 0;"><strong>Password:</strong> <code style="font-size:16px;letter-spacing:2px;">${updateTempPassword}</code></p>
+    </div>
+    <p style="color:#6b7280;font-size:14px;">Questions? Just reply to this email.</p>
+    <p>Best regards,<br><strong style="color:#667eea;">ARNOMA Team</strong></p>
+  </div>
+</div></body></html>`;
+                  const shouldSend = await showEmailPreviewModal(effectiveEmail, existingFirstName, welcomeHtml);
+                  if (shouldSend) {
+                    const emailResp = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+                      body: JSON.stringify({ to: effectiveEmail, subject: 'Welcome to ARNOMA - Your Login Credentials', html: welcomeHtml })
+                    });
+                    if (emailResp.ok) updateEmailWasSent = true;
+                  }
+                } catch (emailErr) {
+                  console.warn('⚠️ Email failed for existing student update:', emailErr);
+                }
+              }
               
               // Delete from waiting list
               const { error: deleteError } = await supabaseClient
@@ -4188,10 +4271,13 @@
               
               if (deleteError) throw deleteError;
               
+              const statusSummary = updateTempPassword
+                ? `Auth account CREATED. Credentials: ${effectiveEmail} / ${updateTempPassword}${updateEmailWasSent ? '\n📧 Welcome email sent!' : '\n⚠️ Email not sent — share credentials manually.'}`
+                : (updateAuthId ? 'Auth account already linked ✅' : '⚠️ Auth account could not be created — student may not be able to log in. Check email/Supabase Auth.');
+              
               await customAlert(
-                'Student Updated',
-                `Updated existing student: ${existingStudent.name}\n\n` +
-                `${Object.keys(updates).length > 0 ? 'Updated fields: ' + Object.keys(updates).join(', ') : 'No new information to add'}`
+                'Student Updated & Activated',
+                `Updated existing student: ${existingStudent.name}\n\n${statusSummary}`
               );
               
               // Reload waiting list
@@ -4280,6 +4366,7 @@
               balance: 0,
               price_per_class: 0,
               notes: credentialNote,
+              start_date: new Date().toISOString().split('T')[0],  // ← PARITY FIX: set start_date so portal note-filter works correctly
               ...(authUserId ? { auth_user_id: authUserId } : {})
             }])
             .select()
