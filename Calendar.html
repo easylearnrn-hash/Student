@@ -14383,6 +14383,14 @@
           
           // Show success message
           showSuccessToast('💵 Cash payment recorded');
+
+          // ── Auto-send payment receipt email (non-blocking) ──
+          sendPaymentReceiptEmail(student, {
+            amount:    paymentAmount,
+            classDate: dateStr,
+            payDate:   dateStr,
+            method:    result.method || 'Cash',
+          }).catch(err => console.warn('⚠️ Receipt email failed (payment still saved):', err));
           
           // Close the modal
           closeDayModal();
@@ -14399,6 +14407,154 @@
         } catch (err) {
           console.error('❌ Error marking paid manually:', err);
           showErrorToast('❌ Error creating payment. Please try again.');
+        }
+      }
+
+      // =====================================================================
+      // SEND PAYMENT RECEIPT EMAIL
+      // Called automatically after markPaidManually() succeeds.
+      // Non-blocking — payment is already saved before this runs.
+      // =====================================================================
+      async function sendPaymentReceiptEmail(student, { amount, classDate, payDate, method = 'Cash' }) {
+        if (!student || !student.email) return;
+
+        // Parse email (handles JSON array strings)
+        let cleanEmail = String(student.email).trim();
+        if (cleanEmail.startsWith('[') && cleanEmail.endsWith(']')) {
+          try {
+            const parsed = JSON.parse(cleanEmail);
+            if (Array.isArray(parsed) && parsed.length > 0) cleanEmail = String(parsed[0]).trim();
+          } catch(e) {}
+        }
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(cleanEmail)) {
+          debugLog('⚠️ No valid email for receipt — skipping:', student.name);
+          return;
+        }
+
+        const now        = new Date();
+        const receiptNum = `ARNOMA-${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}-${String(student.id).padStart(4,'0')}`;
+        const classFmt   = classDate ? new Date(classDate + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' }) : '—';
+        const payFmt     = payDate   ? new Date(payDate   + 'T12:00:00').toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }) : now.toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+        const issuedFmt  = now.toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+        const amt        = parseFloat(amount) || 0;
+        const groupLabel = student.group_name ? `Group ${student.group_name}` : '—';
+
+        const subject    = `ARNOMA Payment Receipt — $${amt.toFixed(2)} · ${receiptNum}`;
+
+        const htmlBody = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Payment Receipt — ARNOMA</title></head>
+<body style="margin:0;padding:0;background:#0f1220;font-family:'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#0f1220;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+        <tr><td style="background:linear-gradient(135deg,#0e1322 0%,#141926 100%);border:1px solid rgba(196,164,95,0.28);border-bottom:none;border-radius:16px 16px 0 0;padding:32px 36px 24px;text-align:center;">
+          <img src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png" alt="ARNOMA" width="56" height="56" style="border-radius:10px;background:#0c0f1a;padding:4px;display:inline-block;margin-bottom:12px;">
+          <div style="font-family:Georgia,serif;font-size:22px;font-weight:700;color:#f5f0e8;letter-spacing:0.04em;line-height:1.1;">ARNOMA Nursing Academy</div>
+          <div style="font-size:11px;font-weight:600;color:#c4a45f;letter-spacing:0.16em;text-transform:uppercase;margin-top:4px;">NCLEX-RN Preparation Program</div>
+        </td></tr>
+        <tr><td style="height:3px;background:linear-gradient(90deg,transparent,#c4a45f 30%,#d4b87a 50%,#c4a45f 70%,transparent);"></td></tr>
+        <tr><td style="background:rgba(14,19,34,0.98);border-left:1px solid rgba(196,164,95,0.28);border-right:1px solid rgba(196,164,95,0.28);padding:28px 36px 20px;text-align:center;">
+          <div style="display:inline-block;padding:6px 24px;border-radius:20px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.4);color:#22c55e;font-size:12px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:20px;">✓ Payment Confirmed · Paid in Full</div>
+          <div style="font-family:Georgia,serif;font-size:28px;font-weight:700;color:#f5f0e8;letter-spacing:0.02em;">Official Payment Receipt</div>
+          <div style="font-size:13px;color:#c4a45f;margin-top:8px;letter-spacing:0.04em;">Receipt #${receiptNum}</div>
+          <div style="font-size:12px;color:rgba(245,240,232,0.5);margin-top:4px;">Issued: ${issuedFmt}</div>
+        </td></tr>
+        <tr><td style="background:rgba(14,19,34,0.98);border-left:1px solid rgba(196,164,95,0.28);border-right:1px solid rgba(196,164,95,0.28);padding:0 36px 24px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td width="50%" style="vertical-align:top;padding:0 16px 0 0;">
+                <div style="font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#c4a45f;padding-bottom:8px;border-bottom:1px solid rgba(196,164,95,0.25);margin-bottom:14px;">Student Information</div>
+                <div style="margin-bottom:10px;"><div style="font-size:10px;color:#c4a45f;font-weight:600;text-transform:uppercase;margin-bottom:3px;">Name</div><div style="font-family:Georgia,serif;font-size:16px;font-weight:600;color:#f5f0e8;">${student.name}</div></div>
+                <div style="margin-bottom:10px;"><div style="font-size:10px;color:#c4a45f;font-weight:600;text-transform:uppercase;margin-bottom:3px;">Group</div><div style="font-size:14px;color:#f5f0e8;">${groupLabel}</div></div>
+                <div><div style="font-size:10px;color:#c4a45f;font-weight:600;text-transform:uppercase;margin-bottom:3px;">Email</div><div style="font-size:12px;color:rgba(245,240,232,0.7);word-break:break-all;">${cleanEmail}</div></div>
+              </td>
+              <td width="1" style="background:rgba(196,164,95,0.15);"></td>
+              <td width="50%" style="vertical-align:top;padding:0 0 0 16px;">
+                <div style="font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#c4a45f;padding-bottom:8px;border-bottom:1px solid rgba(196,164,95,0.25);margin-bottom:14px;">Payment Details</div>
+                <div style="margin-bottom:10px;"><div style="font-size:10px;color:#c4a45f;font-weight:600;text-transform:uppercase;margin-bottom:3px;">Amount Paid</div><div style="font-family:Georgia,serif;font-size:22px;font-weight:700;color:#c4a45f;">$${amt.toFixed(2)}</div></div>
+                <div style="margin-bottom:10px;"><div style="font-size:10px;color:#c4a45f;font-weight:600;text-transform:uppercase;margin-bottom:3px;">Method</div><div style="font-size:14px;color:#f5f0e8;">${method}</div></div>
+                <div><div style="font-size:10px;color:#c4a45f;font-weight:600;text-transform:uppercase;margin-bottom:3px;">Payment Received</div><div style="font-size:13px;color:rgba(245,240,232,0.85);">${payFmt}</div></div>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+        <tr><td style="background:rgba(14,19,34,0.98);border-left:1px solid rgba(196,164,95,0.28);border-right:1px solid rgba(196,164,95,0.28);padding:0 36px;"><div style="height:1px;background:rgba(196,164,95,0.2);"></div></td></tr>
+        <tr><td style="background:rgba(14,19,34,0.98);border-left:1px solid rgba(196,164,95,0.28);border-right:1px solid rgba(196,164,95,0.28);padding:20px 36px 24px;">
+          <div style="font-size:9px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#c4a45f;padding-bottom:8px;border-bottom:1px solid rgba(196,164,95,0.25);margin-bottom:14px;">Description of Services</div>
+          <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <thead><tr style="background:rgba(196,164,95,0.08);">
+              <th style="padding:9px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:rgba(196,164,95,0.8);">Description</th>
+              <th style="padding:9px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:rgba(196,164,95,0.8);">Class Date</th>
+              <th style="padding:9px 12px;text-align:right;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:rgba(196,164,95,0.8);">Amount</th>
+            </tr></thead>
+            <tbody><tr>
+              <td style="padding:12px;color:rgba(245,240,232,0.85);font-size:13px;border-bottom:1px solid rgba(196,164,95,0.1);">NCLEX-RN Preparation — Class Session</td>
+              <td style="padding:12px;color:rgba(245,240,232,0.7);font-size:13px;border-bottom:1px solid rgba(196,164,95,0.1);">${classFmt}</td>
+              <td style="padding:12px;text-align:right;color:rgba(245,240,232,0.85);font-size:13px;font-weight:600;border-bottom:1px solid rgba(196,164,95,0.1);">$${amt.toFixed(2)}</td>
+            </tr></tbody>
+            <tfoot><tr style="background:rgba(196,164,95,0.08);">
+              <td colspan="2" style="padding:12px;font-family:Georgia,serif;font-size:14px;font-weight:700;color:#f5f0e8;">Total Amount Paid</td>
+              <td style="padding:12px;text-align:right;font-family:Georgia,serif;font-size:16px;font-weight:700;color:#c4a45f;">$${amt.toFixed(2)}</td>
+            </tr></tfoot>
+          </table>
+        </td></tr>
+        <tr><td style="background:rgba(10,12,22,0.98);border:1px solid rgba(196,164,95,0.28);border-top:none;border-radius:0 0 16px 16px;padding:24px 36px;text-align:center;">
+          <div style="height:1px;background:rgba(196,164,95,0.2);margin-bottom:20px;"></div>
+          <div style="font-size:22px;margin-bottom:10px;">✦</div>
+          <div style="font-size:12px;color:rgba(196,164,95,0.7);line-height:1.6;max-width:420px;margin:0 auto;">Thank you for your payment. Please retain this receipt for your records.<br>All payments are non-refundable per ARNOMA Academy tuition policy.</div>
+          <div style="margin-top:16px;font-size:11px;color:rgba(245,240,232,0.3);">ARNOMA Nursing Academy · NCLEX-RN Preparation · arnoma.com</div>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+        try {
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+            },
+            body: JSON.stringify({ to: cleanEmail, subject, html: htmlBody }),
+          });
+
+          if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error?.message || errData.error || 'Email API error');
+          }
+
+          const result = await response.json();
+          if (result.data?.error) throw new Error(result.data.error.message || 'Email service error');
+
+          const resendEmailId = result?.id || result?.data?.id || null;
+
+          debugLog('✅ Receipt email sent:', { to: cleanEmail, receiptNum, resendEmailId });
+
+          // Log to sent_emails
+          await supabaseClient.from('sent_emails').insert([{
+            recipient_email: cleanEmail,
+            recipient_name:  student.name,
+            subject:         subject,
+            html_content:    htmlBody,
+            template_name:   'Payment Receipt',
+            email_type:      'payment_receipt',
+            resend_id:       resendEmailId,
+            delivery_status: 'delivered',
+            status:          'sent',
+            sent_at:         now.toISOString(),
+          }]);
+
+          // Brief non-blocking toast
+          if (typeof showSuccessToast === 'function') {
+            setTimeout(() => showSuccessToast(`📧 Receipt emailed to ${cleanEmail}`), 800);
+          }
+
+        } catch (err) {
+          console.warn('⚠️ Receipt email error (payment already saved):', err.message);
         }
       }
 
