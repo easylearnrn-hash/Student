@@ -6768,13 +6768,31 @@
           if (!error && templates && templates.body) {
             console.log('✅ Using Payment Reminder template from Email System');
             console.log(`📊 Payment details: ${actualUnpaidCount} classes, $${actualAmountDue.toFixed(2)} total`);
-            
+
+            // Build {{ClassDate}} from actual unpaid dates — NOT today's date
+            let classDateText;
+            if (unpaidClasses.length === 0) {
+              classDateText = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+            } else if (unpaidClasses.length === 1) {
+              classDateText = unpaidClasses[0].formattedDate;
+            } else {
+              // List all unpaid dates so the student knows exactly which sessions they owe for
+              classDateText = unpaidClasses
+                .map((c, i) => `${i + 1}. ${c.formattedDate} — $${c.amount.toFixed(2)}`)
+                .join('<br>');
+            }
+
+            // {{PricePerClass}}: show total with breakdown when multiple sessions are owed
+            const classAmountText = unpaidClasses.length > 1
+              ? `${actualAmountDue.toFixed(2)} (${unpaidClasses.length} sessions × $${normalizedPricePerClass.toFixed(2)} each)`
+              : normalizedPricePerClass.toFixed(2);
+
             // Replace template variables with actual data (case-insensitive)
             let emailHTML = templates.body
               .replace(/\{\{StudentName\}\}/gi, studentName)
               .replace(/\{\{UnpaidClasses\}\}/gi, unpaidClassesSummary)
-              .replace(/\{\{ClassDate\}\}/gi, new Date().toLocaleDateString())
-              .replace(/\{\{PricePerClass\}\}/gi, normalizedPricePerClass.toFixed(2))
+              .replace(/\{\{ClassDate\}\}/gi, classDateText)
+              .replace(/\{\{PricePerClass\}\}/gi, classAmountText)
               .replace(/\{\{Balance\}\}/gi, actualAmountDue.toFixed(2))
               .replace(/\{\{AmountDue\}\}/gi, actualAmountDue.toFixed(2))
               .replace(/\{\{UnpaidClassCount\}\}/gi, actualUnpaidCount.toString())
