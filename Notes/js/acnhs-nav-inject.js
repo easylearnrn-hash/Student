@@ -372,7 +372,7 @@
     var sealImg = document.createElement('img');
     sealImg.src = sealUrl;
     sealImg.alt = '';
-    sealImg.style.cssText = 'width:38%;max-width:220px;min-width:80px;opacity:0.16;pointer-events:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;user-drag:none;';
+    sealImg.style.cssText = 'width:70%;max-width:500px;min-width:150px;opacity:0.16;pointer-events:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;user-drag:none;';
     overlay.appendChild(sealImg);
     wrap.appendChild(overlay);
   }
