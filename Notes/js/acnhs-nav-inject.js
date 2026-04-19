@@ -375,7 +375,6 @@
   }
 
   function watermarkImages() {
-    if (_isAdminSession()) return;
     var sealUrl = buildSealUrl();
     if (!sealUrl) return;
     document.querySelectorAll('img').forEach(function (img) {
