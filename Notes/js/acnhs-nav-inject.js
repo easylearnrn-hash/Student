@@ -354,14 +354,17 @@
     var w = img.offsetWidth || img.naturalWidth || 0;
     if (w > 0 && w < 80) return;
 
+    /* Preserve original display and sizing exactly */
+    var origDisplay = window.getComputedStyle(img).display || 'block';
     var wrap = document.createElement('div');
     wrap.className = 'acnhs-wm-wrap';
-    wrap.style.cssText = 'position:relative;display:block;line-height:0;max-width:100%;';
+    wrap.style.cssText = 'position:relative;display:' + (origDisplay === 'inline' ? 'inline-block' : 'block') + ';line-height:0;max-width:' + (img.style.maxWidth || '100%') + ';width:' + (img.style.width || 'auto') + ';';
 
     img.parentNode.insertBefore(wrap, img);
     wrap.appendChild(img);
+    /* Restore image styles so layout is unchanged */
     img.style.display = 'block';
-    img.style.maxWidth = img.style.maxWidth || '100%';
+    img.style.width = '100%';
 
     var overlay = document.createElement('div');
     overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10;';
@@ -369,7 +372,7 @@
     var sealImg = document.createElement('img');
     sealImg.src = sealUrl;
     sealImg.alt = '';
-    sealImg.style.cssText = 'width:25%;max-width:140px;min-width:50px;opacity:0.14;pointer-events:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;user-drag:none;';
+    sealImg.style.cssText = 'width:38%;max-width:220px;min-width:80px;opacity:0.16;pointer-events:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;user-drag:none;';
     overlay.appendChild(sealImg);
     wrap.appendChild(overlay);
   }
