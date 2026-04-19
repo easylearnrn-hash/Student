@@ -669,17 +669,33 @@
         clearMsg();
         setBtnLoading(true);
 
+        // Safety: if confirmPayment hangs (network drop, Stripe Link stall), restore button after 90s
+        const hangTimer = setTimeout(() => {
+          setBtnLoading(false);
+          setMsg('error', 'The request is taking longer than expected. Please check your connection and try again.');
+        }, 90_000);
+
         // Return URL points back to this same page so 3DS redirect lands here
         const returnUrl = window.location.href.split('?')[0] + '?' + window.location.search.slice(1);
 
-        const { error, paymentIntent } = await stripe.confirmPayment({
-          elements,
-          confirmParams:{
-            return_url   : window.location.href,
-            receipt_email: INVOICE.studentEmail || undefined,
-          },
-          redirect:'if_required',
-        });
+        let error, paymentIntent;
+        try {
+          ({ error, paymentIntent } = await stripe.confirmPayment({
+            elements,
+            confirmParams:{
+              return_url   : window.location.href,
+              receipt_email: INVOICE.studentEmail || undefined,
+            },
+            redirect:'if_required',
+          }));
+        } catch (unexpectedErr) {
+          clearTimeout(hangTimer);
+          setMsg('error', 'An unexpected error occurred. Please refresh and try again.');
+          setBtnLoading(false);
+          return;
+        }
+
+        clearTimeout(hangTimer);
 
         if (error) {
           setMsg('error', error.message || 'Payment failed. Please try again.');
