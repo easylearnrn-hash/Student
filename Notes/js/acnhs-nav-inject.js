@@ -861,6 +861,7 @@
     ensureFonts();
     ensureStyles();
     upgradeHeader();
+    watermarkImages();
 
     /* ── Rewire ALL back-navigation links to go to the portal ──
        Covers .back-btn (new files) and .note-back (older files).
@@ -873,6 +874,85 @@
         e.preventDefault();
         window.location.href = portalUrl;
       });
+    });
+  }
+
+  /* ─── 7. WATERMARK: overlay ACNHS seal on every content image ── */
+  function buildSealUrl() {
+    try {
+      var href = window.location.href;
+      var notesIdx = href.search(/\/[Nn]otes\//);
+      if (notesIdx !== -1) return href.slice(0, notesIdx) + '/TEST/acnhs-seal.png';
+    } catch (e) {}
+    return '';
+  }
+
+  function watermarkImages() {
+    if (_isAdminSession()) return;
+    var sealUrl = buildSealUrl();
+    if (!sealUrl) return;
+
+    /* Inject wrapper + overlay styles once */
+    if (!document.getElementById('acnhs-wm-styles')) {
+      var s = document.createElement('style');
+      s.id = 'acnhs-wm-styles';
+      s.textContent =
+        '.acnhs-img-wrap { position: relative; display: inline-block; max-width: 100%; }' +
+        '.acnhs-img-wrap img:first-child { display: block; max-width: 100%; }' +
+        '.acnhs-wm-overlay {' +
+        '  position: absolute; top: 50%; left: 50%;' +
+        '  transform: translate(-50%, -50%);' +
+        '  width: 38%; max-width: 180px; min-width: 60px;' +
+        '  opacity: 0.13;' +
+        '  pointer-events: none;' +
+        '  user-select: none;' +
+        '  -webkit-user-select: none;' +
+        '}';
+      document.head.appendChild(s);
+    }
+
+    /* Target images inside the note content — skip nav/hero images */
+    var skipClasses = ['acnhs-nav-logo', 'acnhs-wm-overlay'];
+    var imgs = document.querySelectorAll('.container img, .note-body img, main img');
+    if (!imgs.length) {
+      /* Fallback: all body images except nav */
+      imgs = document.querySelectorAll('body img');
+    }
+
+    imgs.forEach(function (img) {
+      /* Skip already-wrapped, skip overlay images, skip nav logo */
+      if (img.parentNode && img.parentNode.classList && img.parentNode.classList.contains('acnhs-img-wrap')) return;
+      var cls = img.className || '';
+      for (var i = 0; i < skipClasses.length; i++) {
+        if (cls.indexOf(skipClasses[i]) !== -1) return;
+      }
+      /* Skip tiny images (icons, badges < 60px wide) — check naturalWidth post-load */
+      function applyWatermark() {
+        if (img.naturalWidth > 0 && img.naturalWidth < 60) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'acnhs-img-wrap';
+        /* Preserve inline display style of the image parent */
+        var computed = window.getComputedStyle(img);
+        if (computed.display === 'block' || (img.parentNode && img.parentNode.style && img.parentNode.style.textAlign)) {
+          wrap.style.display = 'block';
+          wrap.style.textAlign = 'center';
+        }
+        img.parentNode.insertBefore(wrap, img);
+        wrap.appendChild(img);
+        var overlay = document.createElement('img');
+        overlay.src = sealUrl;
+        overlay.className = 'acnhs-wm-overlay';
+        overlay.alt = '';
+        overlay.setAttribute('aria-hidden', 'true');
+        wrap.appendChild(overlay);
+      }
+      if (img.complete && img.naturalWidth !== 0) {
+        applyWatermark();
+      } else {
+        img.addEventListener('load', applyWatermark);
+        /* Also attempt immediately — naturalWidth may be 0 before load but still apply */
+        if (img.complete) applyWatermark();
+      }
     });
   }
 
