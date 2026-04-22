@@ -496,6 +496,20 @@
     const skippedIndex = new Set();
     const manualEnrollmentSet = new Set();
 
+    // ── Ignored debts (persisted in localStorage) ─────────────────────────────
+    const FC_IGNORED_KEY = 'arnoma-forecast-ignored-debts';
+    let ignoredDebtStudents = new Set(JSON.parse(localStorage.getItem(FC_IGNORED_KEY) || '[]').map(String));
+
+    function saveIgnoredDebts() {
+      localStorage.setItem(FC_IGNORED_KEY, JSON.stringify([...ignoredDebtStudents]));
+    }
+
+    function ignoreStudentDebt(studentId) {
+      ignoredDebtStudents.add(String(studentId));
+      saveIgnoredDebts();
+      updateStudentBreakdown();
+    }
+
     // Currency formatter
     function formatCurrency(value, symbol = '$') {
       const formatted = Math.round(value).toLocaleString('en-US');
@@ -830,6 +844,116 @@
       } catch (err) { console.error('Error loading manual enrollments:', err); }
     }
 
+    // ── Payment reminder email (mirrors Calendar-NEW.html logic) ───────────────
+    async function sendDebtReminderEmail(studentId) {
+      const student = studentsCache.find(s => s.id === studentId);
+      if (!student) { alert('Student not found.'); return; }
+
+      // Parse email
+      let cleanEmail = String(student.email || '').trim();
+      if (cleanEmail.startsWith('[')) {
+        try { const a = JSON.parse(cleanEmail); if (Array.isArray(a) && a.length) cleanEmail = String(a[0]).trim(); } catch(_) {}
+      }
+      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        alert(`No valid email on file for ${student.name}.\nPlease update in Student Manager.`);
+        return;
+      }
+
+      const price = parseFloat(student.price_per_class) || 0;
+      const unpaidDates = fcGetUnpaidDates(student);
+      const unpaidClassDetails = unpaidDates.map(ds => ({
+        date: ds,
+        formattedDate: new Date(ds + 'T12:00:00').toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric' }),
+        amount: price
+      }));
+      const totalOwed = unpaidClassDetails.reduce((s, c) => s + c.amount, 0) || Math.abs(Math.min(0, parseFloat(student.balance) || 0));
+
+      // Build email HTML
+      const emailHTML = await fcBuildReminderHTML(student.name, totalOwed, price, unpaidClassDetails);
+
+      // Send via edge function
+      try {
+        const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+          body: JSON.stringify({ to: cleanEmail, subject: 'Payment Reminder - ARNOMA NCLEX-RN', html: emailHTML })
+        });
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || e.error || 'Send failed'); }
+
+        // Log to sent_emails
+        await supabaseClient.from('sent_emails').insert({
+          student_id: studentId,
+          recipient_email: cleanEmail,
+          subject: 'Payment Reminder - ARNOMA NCLEX-RN',
+          email_type: 'payment_reminder',
+          template_name: 'Payment Reminder',
+          amount: totalOwed,
+          sent_at: new Date().toISOString()
+        }).maybeSingle();
+
+        alert(`✅ Payment reminder sent to ${student.name}!`);
+      } catch (err) {
+        console.error('Failed to send reminder:', err);
+        alert(`❌ Failed to send email: ${err.message}`);
+      }
+    }
+
+    async function fcBuildReminderHTML(studentName, totalOwed, pricePerClass, unpaidClassDetails) {
+      // Try template from email_templates table first
+      try {
+        const { data: tpl } = await supabaseClient.from('email_templates').select('body').eq('name', 'Payment Reminder').maybeSingle();
+        if (tpl?.body) {
+          let classDateText, classAmountText;
+          if (unpaidClassDetails.length === 0) {
+            classDateText = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+            classAmountText = totalOwed.toFixed(2);
+          } else if (unpaidClassDetails.length === 1) {
+            classDateText = unpaidClassDetails[0].formattedDate;
+            classAmountText = pricePerClass.toFixed(2);
+          } else {
+            classDateText = unpaidClassDetails.map((c,i) => `${i+1}. ${c.formattedDate} — $${c.amount.toFixed(2)}`).join('<br>');
+            classAmountText = `${totalOwed.toFixed(2)} (${unpaidClassDetails.length} sessions × $${pricePerClass.toFixed(2)} each)`;
+          }
+          return tpl.body
+            .replace(/\{\{StudentName\}\}/gi, studentName)
+            .replace(/\{\{ClassDate\}\}/gi, classDateText)
+            .replace(/\{\{PricePerClass\}\}/gi, classAmountText)
+            .replace(/\{\{Balance\}\}/gi, totalOwed.toFixed(2))
+            .replace(/\{\{AmountDue\}\}/gi, totalOwed.toFixed(2))
+            .replace(/\{\{UnpaidClassCount\}\}/gi, String(unpaidClassDetails.length || 1))
+            .replace(/\{\{TeacherEmail\}\}/gi, 'arnomaschool@gmail.com')
+            .replace(/\{\{TeacherName\}\}/gi, 'ARNOMA Team');
+        }
+      } catch(_) {}
+
+      // Fallback: simple HTML reminder
+      const classRows = unpaidClassDetails.length > 0
+        ? unpaidClassDetails.map((c,i) => `<tr><td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;">${i+1}. ${c.formattedDate}</td><td style="padding:10px 16px;border-bottom:1px solid #e5e7eb;text-align:right;">$${c.amount.toFixed(2)}</td></tr>`).join('')
+        : `<tr><td colspan="2" style="padding:10px 16px;">Balance from account records</td></tr>`;
+
+      return `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;background:#f9f9f9;margin:0;padding:20px;">
+<div style="max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+  <div style="background:linear-gradient(135deg,#667eea,#764ba2);padding:32px;text-align:center;">
+    <h1 style="color:#fff;margin:0;font-size:24px;">Payment Reminder</h1>
+    <p style="color:rgba(255,255,255,0.8);margin:8px 0 0;">ARNOMA NCLEX-RN</p>
+  </div>
+  <div style="padding:32px;">
+    <p style="font-size:16px;">Hi <strong>${studentName}</strong>,</p>
+    <p>This is a friendly reminder that the following class session(s) have an outstanding balance:</p>
+    <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin:16px 0;">
+      <thead><tr style="background:#f3f4f6;"><th style="padding:10px 16px;text-align:left;">Class</th><th style="padding:10px 16px;text-align:right;">Amount</th></tr></thead>
+      <tbody>${classRows}</tbody>
+      <tfoot><tr style="background:#667eea;color:#fff;"><td style="padding:12px 16px;"><strong>Total Due</strong></td><td style="padding:12px 16px;text-align:right;"><strong>$${totalOwed.toFixed(2)}</strong></td></tr></tfoot>
+    </table>
+    <p>Please send payment via <strong>Zelle</strong> or <strong>Venmo</strong> at your earliest convenience.</p>
+    <p>If you have already paid, simply reply with a screenshot of your transfer and we'll update our records.</p>
+    <p>Thank you!</p>
+  </div>
+  <div style="background:#f3f4f6;padding:16px;text-align:center;font-size:12px;color:#6b7280;">ARNOMA NCLEX-RN &bull; arnomaschool@gmail.com</div>
+</div>
+</body></html>`;
+    }
+
     // Compute unpaid balances using Calendar-style logic (not status='unpaid')
     function loadUnpaidBalances() {
       fcBuildIndexes();
@@ -1022,7 +1146,7 @@
           totalWeekly += studentWeekly;
         }
 
-        const amountOwed = unpaidByStudent.get(student.id) || 0;
+        const amountOwed = ignoredDebtStudents.has(String(student.id)) ? 0 : (unpaidByStudent.get(student.id) || 0);
 
         studentData.push({
           id: student.id,
@@ -1082,9 +1206,15 @@
             </div>
             ${dimClose}
             ${data.amountOwed > 0 ? `
-            <div style="margin-top: 10px; padding: 10px 12px; background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.6); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
-              <div style="font-size: 10px; font-weight: 700; color: #ef4444; text-transform: uppercase; letter-spacing: 0.5px;">⚠️ Amount Owed</div>
-              <div style="font-size: 18px; font-weight: 900; color: #fca5a5;">${formatCurrency(data.amountOwed, '$')}</div>
+            <div style="margin-top: 10px; padding: 10px 12px; background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.6); border-radius: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <div style="font-size: 10px; font-weight: 700; color: #ef4444; text-transform: uppercase; letter-spacing: 0.5px;">⚠️ Amount Owed</div>
+                <div style="font-size: 18px; font-weight: 900; color: #fca5a5;">${formatCurrency(data.amountOwed, '$')}</div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <button onclick="sendDebtReminderEmail(${data.id})" style="flex:1; padding: 6px 10px; background: rgba(99,102,241,0.25); border: 1px solid rgba(99,102,241,0.5); border-radius: 6px; color: #a5b4fc; font-size: 11px; font-weight: 700; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='rgba(99,102,241,0.4)'" onmouseout="this.style.background='rgba(99,102,241,0.25)'">📧 Send Reminder</button>
+                <button onclick="ignoreStudentDebt(${data.id})" style="flex:1; padding: 6px 10px; background: rgba(107,114,128,0.2); border: 1px solid rgba(107,114,128,0.4); border-radius: 6px; color: #9ca3af; font-size: 11px; font-weight: 700; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='rgba(107,114,128,0.35)'" onmouseout="this.style.background='rgba(107,114,128,0.2)'">🚫 Ignore</button>
+              </div>
             </div>` : ''}
           </div>
         `;
