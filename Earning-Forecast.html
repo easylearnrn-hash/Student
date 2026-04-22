@@ -245,8 +245,7 @@
     }
 
     .student-card.paused {
-      opacity: 0.5;
-      filter: grayscale(0.6);
+      border-color: rgba(251, 191, 36, 0.2);
     }
 
     .student-name {
@@ -481,7 +480,21 @@
     let studentsCache = [];
     let groupsCache = [];
     let paymentsCache = [];
+    let allPaymentsCache = [];        // ALL payments (not month-filtered) — used for payment index
     let unpaidByStudent = new Map(); // studentId -> amount owed
+
+    // ── Extra data stores for Calendar-style payment calculation ─────────────
+    let paymentRecordsPaidCache = [];
+    let absencesCache = [];
+    let skippedClassesCache = [];
+    let creditPaymentsCache = [];
+    let manualEnrollmentsCache = [];
+
+    // ── Payment/absence index structures ─────────────────────────────────────
+    const paymentIndex = new Map();
+    const absenceIndex = new Set();
+    const skippedIndex = new Set();
+    const manualEnrollmentSet = new Set();
 
     // Currency formatter
     function formatCurrency(value, symbol = '$') {
@@ -494,6 +507,201 @@
       const div = document.createElement('div');
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    // ── Timezone / date helpers (mirrored from Calendar-NEW.html) ─────────────
+    const FC_LA_TIMEZONE = 'America/Los_Angeles';
+    const fcLaFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: FC_LA_TIMEZONE, year: 'numeric', month: 'numeric', day: 'numeric'
+    });
+
+    function fcGetToday() {
+      const parts = fcLaFormatter.formatToParts(new Date());
+      const y = Number(parts.find(p => p.type === 'year')?.value);
+      const m = Number(parts.find(p => p.type === 'month')?.value);
+      const d = Number(parts.find(p => p.type === 'day')?.value);
+      return new Date(y, m - 1, d);
+    }
+
+    function fcGetWeekday(dateStr) {
+      const d = new Date(`${fcNormDate(dateStr)}T12:00:00Z`);
+      return new Intl.DateTimeFormat('en-US', { timeZone: FC_LA_TIMEZONE, weekday: 'long' }).format(d);
+    }
+
+    function fcNormDate(value) {
+      if (!value) return '';
+      if (value instanceof Date) return value.toISOString().split('T')[0];
+      const raw = String(value).trim();
+      const datePart = raw.split('T')[0];
+      const sep = datePart.includes('/') ? '/' : '-';
+      const parts = datePart.split(sep).map(p => p.trim());
+      if (parts.length !== 3) return datePart;
+      if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2,'0')}-${parts[2].padStart(2,'0')}`;
+      if (parts[2].length === 4) return `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`;
+      return datePart;
+    }
+
+    function fcNormName(v) {
+      return String(v || '').toLowerCase().replace(/[.,'"()]/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function fcExtractForClassDates(record, fallbackDate) {
+      if (!record) return [];
+      let raw = record.for_class_dates ?? record.for_class ?? [];
+      if (typeof raw === 'string') {
+        const t = raw.trim();
+        if (!t || t === '[]' || t === '{}' || t === 'null') raw = [];
+        else if (t.startsWith('{') && t.endsWith('}')) raw = t.slice(1,-1).split(',').map(d => d.trim()).filter(d => d && d !== 'null');
+        else { try { raw = JSON.parse(t); } catch(e) { raw = []; } }
+      }
+      if (!Array.isArray(raw) || raw.length === 0) {
+        const fb = fcNormDate(fallbackDate || record.date || record.email_date);
+        return fb ? [fb] : [];
+      }
+      return raw.map(entry => {
+        const s = (typeof entry === 'object' && entry !== null)
+          ? (entry.class_date || entry.date || entry.for_class || entry.value || '')
+          : String(entry || '');
+        return fcNormDate(s);
+      }).filter(Boolean);
+    }
+
+    function fcParseSchedule(scheduleStr) {
+      if (!scheduleStr) return [];
+      const dayMap = {sun:'Sunday',sunday:'Sunday',mon:'Monday',monday:'Monday',tue:'Tuesday',tues:'Tuesday',tuesday:'Tuesday',wed:'Wednesday',weds:'Wednesday',wednesday:'Wednesday',thu:'Thursday',thur:'Thursday',thurs:'Thursday',thursday:'Thursday',fri:'Friday',friday:'Friday',sat:'Saturday',saturday:'Saturday'};
+      const sessions = [];
+      scheduleStr.split(',').map(p => p.trim()).filter(Boolean).forEach(part => {
+        const m = part.match(/^([A-Za-z/]+)\s+(.+)$/);
+        if (!m) return;
+        m[1].split('/').forEach(day => {
+          const fd = dayMap[day.trim().toLowerCase().replace(/[^a-z]/g, '')] || '';
+          if (fd) sessions.push({ day: fd, time: m[2] });
+        });
+      });
+      return sessions;
+    }
+
+    function fcIsScheduledDate(dateStr, group) {
+      if (!group?.schedule) return false;
+      const dayName = fcGetWeekday(dateStr);
+      return fcParseSchedule(group.schedule).some(s => s.day === dayName);
+    }
+
+    function fcBuildIndexes() {
+      // Name → Set<studentId> lookup
+      const nameToIds = new Map();
+      studentsCache.forEach(student => {
+        const addName = nm => {
+          const n = fcNormName(nm);
+          if (!n) return;
+          if (!nameToIds.has(n)) nameToIds.set(n, new Set());
+          nameToIds.get(n).add(String(student.id));
+        };
+        addName(student.name);
+        let aliases = [];
+        if (Array.isArray(student.aliases)) aliases = student.aliases;
+        else if (typeof student.aliases === 'string' && student.aliases.trim()) {
+          try { const p = JSON.parse(student.aliases); if (Array.isArray(p)) aliases = p; } catch(e) { aliases = student.aliases.split(',').map(a => a.trim()).filter(Boolean); }
+        }
+        aliases.forEach(addName);
+      });
+
+      // Build paymentIndex from ALL payments
+      paymentIndex.clear();
+      const addToIndex = (dateStr, ids) => {
+        const nd = fcNormDate(dateStr);
+        if (!nd) return;
+        if (!paymentIndex.has(nd)) paymentIndex.set(nd, new Set());
+        const set = paymentIndex.get(nd);
+        ids.forEach(id => id && set.add(String(id)));
+      };
+
+      allPaymentsCache.forEach(p => {
+        const dates = fcExtractForClassDates(p, p.date);
+        dates.forEach(d => {
+          const sid = p.student_id || p.linked_student_id || p.derived_student_id || p.resolved_student_id;
+          const ids = new Set();
+          if (sid) ids.add(String(sid));
+          [p.payer_name, p.resolved_student_name, p.student_name, p.student_full_name, p.student].filter(Boolean).forEach(nm => {
+            const n = fcNormName(nm);
+            if (n && nameToIds.has(n)) nameToIds.get(n).forEach(id => ids.add(id));
+          });
+          addToIndex(d, ids);
+        });
+      });
+
+      paymentRecordsPaidCache.forEach(pr => {
+        const dates = fcExtractForClassDates(pr, pr.date);
+        dates.forEach(d => {
+          const ids = new Set();
+          if (pr.student_id) ids.add(String(pr.student_id));
+          addToIndex(d, ids);
+        });
+      });
+
+      creditPaymentsCache.forEach(cp => {
+        const d = (cp.applied_class_date || cp.class_date || '').split('T')[0];
+        if (!d || !cp.student_id) return;
+        addToIndex(d, new Set([String(cp.student_id)]));
+      });
+
+      // Absence index: "studentId-dateStr"
+      absenceIndex.clear();
+      absencesCache.forEach(a => {
+        const d = (a.class_date || '').split('T')[0];
+        if (d && a.student_id) absenceIndex.add(`${a.student_id}-${d}`);
+      });
+
+      // Skipped index: "dateStr-groupName"
+      skippedIndex.clear();
+      skippedClassesCache.forEach(s => {
+        const d = (s.class_date || '').split('T')[0];
+        if (d && s.group_name) skippedIndex.add(`${d}-${s.group_name}`);
+      });
+
+      // Manual enrollment index
+      manualEnrollmentSet.clear();
+      manualEnrollmentsCache.forEach(me => {
+        if (me.student_id && me.date) manualEnrollmentSet.add(`${me.student_id}-${me.date.split('T')[0]}`);
+      });
+    }
+
+    function fcHasPayment(studentId, dateStr) {
+      const nd = fcNormDate(dateStr);
+      return paymentIndex.has(nd) && paymentIndex.get(nd).has(String(studentId));
+    }
+
+    function fcIsAbsent(studentId, dateStr) {
+      return absenceIndex.has(`${studentId}-${dateStr}`);
+    }
+
+    function fcIsSkipped(dateStr, groupName) {
+      return skippedIndex.has(`${dateStr}-${groupName}`);
+    }
+
+    function fcGetUnpaidDates(student) {
+      const group = groupsCache.find(g => g.group_name === student.group_name);
+      if (!group) return [];
+      const today = fcGetToday();
+      const floor = new Date('2025-12-01');
+      let startStr = null;
+      if (student.start_date) startStr = student.start_date.split('T')[0];
+      else if (student.created_at) startStr = new Date(student.created_at).toISOString().split('T')[0];
+      const oneTimeDates = new Set(
+        Array.isArray(group.one_time_schedules)
+          ? group.one_time_schedules.map(ot => (ot.date || '').split('T')[0]).filter(Boolean)
+          : []
+      );
+      const unpaid = [];
+      for (let d = new Date(floor); d <= today; d.setDate(d.getDate() + 1)) {
+        const ds = d.toISOString().split('T')[0];
+        const isManual = manualEnrollmentSet.has(`${student.id}-${ds}`);
+        if (startStr && ds < startStr && !isManual) continue;
+        if (!fcIsScheduledDate(ds, group) && !oneTimeDates.has(ds) && !isManual) continue;
+        if (fcIsSkipped(ds, group.group_name)) continue;
+        if (!fcHasPayment(student.id, ds) && !fcIsAbsent(student.id, ds)) unpaid.push(ds);
+      }
+      return unpaid;
     }
 
     // Load students from Supabase
@@ -563,38 +771,79 @@
       }
     }
 
-    // Load unpaid balances for all students from payment_records
-    async function loadUnpaidBalances() {
+    // ── New loaders needed for Calendar-style debt calculation ───────────────
+    async function loadAllPayments() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('payments')
+          .select('*');
+        if (error) throw error;
+        allPaymentsCache = data || [];
+      } catch (err) { console.error('Error loading all payments:', err); }
+    }
+
+    async function loadPaymentRecordsPaid() {
       try {
         const { data, error } = await supabaseClient
           .from('payment_records')
-          .select('student_id, amount')
-          .eq('status', 'unpaid');
-
+          .select('student_id, date, payment_method')
+          .in('status', ['paid', 'excused']);
         if (error) throw error;
+        paymentRecordsPaidCache = data || [];
+      } catch (err) { console.error('Error loading paid payment_records:', err); }
+    }
 
-        // First pass: accumulate totals and row counts per student
-        const rawMap = new Map();
-        (data || []).forEach(row => {
-          const sid = row.student_id;
-          if (!rawMap.has(sid)) rawMap.set(sid, { total: 0, count: 0, hasAmounts: false });
-          const entry = rawMap.get(sid);
-          const amt = parseFloat(row.amount) || 0;
-          if (amt > 0) { entry.total += amt; entry.hasAmounts = true; }
-          entry.count++;
-        });
+    async function loadAbsencesData() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('student_absences').select('student_id, class_date');
+        if (error) throw error;
+        absencesCache = data || [];
+      } catch (err) { console.error('Error loading absences:', err); }
+    }
 
-        // Second pass: resolve — use stored amounts when set, else count × price_per_class
-        unpaidByStudent = new Map();
-        rawMap.forEach((entry, sid) => {
-          const student = studentsCache.find(s => s.id === sid);
-          const pricePerClass = parseFloat(student?.price_per_class) || 0;
-          const owed = entry.hasAmounts ? entry.total : entry.count * pricePerClass;
-          if (owed > 0) unpaidByStudent.set(sid, owed);
-        });
-      } catch (err) {
-        console.error('Error loading unpaid balances:', err);
-      }
+    async function loadSkippedClassesData() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('skipped_classes').select('class_date, group_name');
+        if (error) throw error;
+        skippedClassesCache = data || [];
+      } catch (err) { console.error('Error loading skipped classes:', err); }
+    }
+
+    async function loadCreditPaymentsData() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('credit_payments').select('student_id, applied_class_date, class_date');
+        if (error) throw error;
+        creditPaymentsCache = data || [];
+      } catch (err) { console.error('Error loading credit payments:', err); }
+    }
+
+    async function loadManualEnrollmentsData() {
+      try {
+        const { data, error } = await supabaseClient
+          .from('payment_records')
+          .select('student_id, date').eq('payment_method', 'manual_enrollment');
+        if (error) throw error;
+        manualEnrollmentsCache = data || [];
+      } catch (err) { console.error('Error loading manual enrollments:', err); }
+    }
+
+    // Compute unpaid balances using Calendar-style logic (not status='unpaid')
+    function loadUnpaidBalances() {
+      fcBuildIndexes();
+      unpaidByStudent = new Map();
+      studentsCache.forEach(student => {
+        const price = parseFloat(student.price_per_class) || 0;
+        if (price <= 0) return;
+        const unpaidDates = fcGetUnpaidDates(student);
+        let owed = unpaidDates.length * price;
+        // Also consider ledger balance: negative balance = debt
+        const ledgerDebt = Math.abs(Math.min(0, parseFloat(student.balance) || 0));
+        if (ledgerDebt > owed) owed = ledgerDebt;
+        if (owed > 0) unpaidByStudent.set(student.id, owed);
+      });
     }
 
     // Count weekly classes for a group
@@ -802,9 +1051,12 @@
         const statusLabel = isPaused ? 'Paused' : 'Active';
         const pausedPrefix = isPaused ? '⏸ ' : '';
         const opacityNote = isPaused ? ' <span style="font-size: 10px; opacity: 0.7;">(not counted in forecast)</span>' : '';
+        const dimOpen = isPaused ? '<div style="opacity:0.5;filter:grayscale(0.6);">' : '';
+        const dimClose = isPaused ? '</div>' : '';
 
         html += `
           <div class="student-card ${statusClass}">
+            ${dimOpen}
             <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
               <div>
                 <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
@@ -828,8 +1080,9 @@
                 <div class="student-stat-value">${formatCurrency(data.studentMonthly, '$')}</div>
               </div>
             </div>
+            ${dimClose}
             ${data.amountOwed > 0 ? `
-            <div style="margin-top: 10px; padding: 10px 12px; background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.6); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; opacity: 1 !important; filter: none !important;">
+            <div style="margin-top: 10px; padding: 10px 12px; background: rgba(239,68,68,0.18); border: 1px solid rgba(239,68,68,0.6); border-radius: 8px; display: flex; justify-content: space-between; align-items: center;">
               <div style="font-size: 10px; font-weight: 700; color: #ef4444; text-transform: uppercase; letter-spacing: 0.5px;">⚠️ Amount Owed</div>
               <div style="font-size: 18px; font-weight: 900; color: #fca5a5;">${formatCurrency(data.amountOwed, '$')}</div>
             </div>` : ''}
@@ -851,46 +1104,26 @@
 
     // Initialize
     async function init() {
-      console.log('� Checking admin access...');
+      console.log('🔐 Checking admin access...');
       
-      // 🔒 CRITICAL: Verify admin access BEFORE loading any data
       const isAdmin = await requireAdminSession();
-      if (!isAdmin) {
-        return; // Stop execution - user will be redirected
-      }
+      if (!isAdmin) return;
 
-      console.log('�💰 Loading Earning Forecast...');
+      console.log('💰 Loading Earning Forecast...');
       
       await Promise.all([
         loadStudents(),
         loadGroups(),
-        loadPayments()
+        loadPayments(),
+        loadAllPayments(),
+        loadPaymentRecordsPaid(),
+        loadAbsencesData(),
+        loadSkippedClassesData(),
+        loadCreditPaymentsData(),
+        loadManualEnrollmentsData()
       ]);
-      await loadUnpaidBalances(); // needs studentsCache to be ready
 
-      console.log('📊 Data loaded:');
-      console.log('  - Students:', studentsCache.length);
-      console.log('  - Groups:', groupsCache.length);
-      console.log('  - Payments (this month):', paymentsCache.length);
-      
-      // Debug: Show sample data
-      if (studentsCache.length > 0) {
-        const sampleStudent = studentsCache[0];
-        console.log('  - Sample student:', {
-          name: sampleStudent.name,
-          group: sampleStudent.group_letter,
-          price: sampleStudent.price_per_class,
-          status: sampleStudent.status
-        });
-      }
-      
-      if (groupsCache.length > 0) {
-        const sampleGroup = groupsCache[0];
-        console.log('  - Sample group:', {
-          name: sampleGroup.group_name,
-          schedule: sampleGroup.schedule
-        });
-      }
+      loadUnpaidBalances(); // synchronous after all data is loaded
 
       updateForecastData();
       console.log('✅ Earning Forecast loaded');
