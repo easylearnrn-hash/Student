@@ -844,10 +844,110 @@
       } catch (err) { console.error('Error loading manual enrollments:', err); }
     }
 
+    // ── Premium glassmorphism helpers ─────────────────────────────────────────
+    function fcEnsureStyles() {
+      if (document.getElementById('fc-ui-styles')) return;
+      const s = document.createElement('style');
+      s.id = 'fc-ui-styles';
+      s.textContent = `
+        @keyframes fcFadeIn{from{opacity:0}to{opacity:1}}
+        @keyframes fcSlideUp{from{transform:translateY(24px);opacity:0}to{transform:translateY(0);opacity:1}}
+        @keyframes fcSlideIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
+        @keyframes fcSlideOut{from{transform:translateX(0);opacity:1}to{transform:translateX(120%);opacity:0}}
+      `;
+      document.head.appendChild(s);
+    }
+
+    function fcShowToast(message, type = 'success') {
+      fcEnsureStyles();
+      const toast = document.createElement('div');
+      toast.style.cssText = `
+        position:fixed;top:24px;right:24px;z-index:99999999;
+        padding:16px 22px;border-radius:14px;font-weight:600;font-size:14px;
+        color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+        box-shadow:0 8px 32px rgba(0,0,0,0.5);max-width:380px;line-height:1.5;
+        background:${type === 'success'
+          ? 'linear-gradient(135deg,#667eea 0%,#a855f7 100%)'
+          : 'linear-gradient(135deg,#ef4444 0%,#dc2626 100%)'};
+        animation:fcSlideIn 0.35s cubic-bezier(0.4,0,0.2,1);
+      `;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      setTimeout(() => {
+        toast.style.animation = 'fcSlideOut 0.3s cubic-bezier(0.4,0,0.2,1) forwards';
+        setTimeout(() => toast.remove(), 320);
+      }, 3500);
+    }
+
+    function fcShowError(title, message) {
+      fcEnsureStyles();
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.78);z-index:99999999;backdrop-filter:blur(10px);display:flex;align-items:center;justify-content:center;animation:fcFadeIn 0.2s ease;`;
+      overlay.innerHTML = `
+        <div style="background:linear-gradient(160deg,#1a1f35 0%,#0d1120 100%);border:1px solid rgba(239,68,68,0.4);border-radius:20px;padding:32px;width:440px;max-width:90vw;box-shadow:0 32px 80px rgba(0,0,0,0.7);animation:fcSlideUp 0.3s cubic-bezier(0.4,0,0.2,1);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+          <div style="font-size:20px;font-weight:700;color:#f87171;margin-bottom:10px;">${title}</div>
+          <div style="color:rgba(255,255,255,0.75);font-size:14px;line-height:1.65;margin-bottom:24px;">${message}</div>
+          <div style="display:flex;justify-content:flex-end;">
+            <button id="fcErrClose" style="padding:10px 24px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);border-radius:10px;color:rgba(255,255,255,0.8);font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;">Close</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const close = () => overlay.remove();
+      overlay.querySelector('#fcErrClose').addEventListener('click', close);
+      overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    }
+
+    function fcShowEmailPreview(subject, html, studentName, onConfirm) {
+      fcEnsureStyles();
+      const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      const overlay = document.createElement('div');
+      overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:99999998;backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;animation:fcFadeIn 0.2s ease;`;
+
+      const dialog = document.createElement('div');
+      dialog.style.cssText = `
+        background:linear-gradient(160deg,#1a1f35 0%,#0d1120 100%);
+        border:1px solid rgba(138,180,255,0.25);border-radius:20px;
+        padding:28px 28px 24px;width:90vw;max-width:780px;
+        height:90vh;max-height:900px;display:flex;flex-direction:column;
+        box-shadow:0 32px 80px rgba(0,0,0,0.7),0 0 0 1px rgba(255,255,255,0.04);
+        animation:fcSlideUp 0.3s cubic-bezier(0.4,0,0.2,1);
+        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      `;
+      dialog.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <div style="width:12px;height:12px;border-radius:50%;background:#ff5f57;"></div>
+          <div style="width:12px;height:12px;border-radius:50%;background:#febc2e;"></div>
+          <div style="width:12px;height:12px;border-radius:50%;background:#28c840;"></div>
+          <span style="flex:1;text-align:center;font-size:12px;color:rgba(255,255,255,0.32);margin-right:36px;">Email Preview</span>
+        </div>
+        <div style="margin-bottom:16px;">
+          <div style="font-size:18px;font-weight:700;color:#8ab4ff;margin-bottom:4px;">Payment Reminder — ${escapeHtml(studentName)}</div>
+          <div style="color:rgba(255,255,255,0.5);font-size:13px;">Subject: <strong style="color:rgba(255,255,255,0.8);">${escapeHtml(subject)}</strong></div>
+        </div>
+        <iframe src="${blobUrl}" style="flex:1;width:100%;border:none;border-radius:12px;background:#fff;min-height:0;"></iframe>
+        <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:18px;flex-shrink:0;">
+          <button id="fcPreviewCancel" style="padding:11px 26px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:10px;color:rgba(255,255,255,0.65);font-size:14px;font-weight:600;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,0.12)'" onmouseout="this.style.background='rgba(255,255,255,0.06)'">Cancel</button>
+          <button id="fcPreviewSend" style="padding:11px 28px;background:linear-gradient(135deg,#667eea 0%,#a855f7 100%);border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;letter-spacing:0.3px;box-shadow:0 4px 16px rgba(102,126,234,0.45);" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">✉️ Send Email</button>
+        </div>
+      `;
+
+      overlay.appendChild(dialog);
+      document.body.appendChild(overlay);
+
+      const cleanup = (confirmed) => {
+        URL.revokeObjectURL(blobUrl);
+        overlay.remove();
+        if (confirmed) onConfirm();
+      };
+      dialog.querySelector('#fcPreviewCancel').addEventListener('click', () => cleanup(false));
+      dialog.querySelector('#fcPreviewSend').addEventListener('click', () => cleanup(true));
+      overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(false); });
+    }
+
     // ── Payment reminder email (mirrors Calendar-NEW.html logic) ───────────────
     async function sendDebtReminderEmail(studentId) {
       const student = studentsCache.find(s => s.id === studentId);
-      if (!student) { alert('Student not found.'); return; }
+      if (!student) { fcShowError('Student Not Found', 'Could not locate this student. Try refreshing the page.'); return; }
 
       // Parse email
       let cleanEmail = String(student.email || '').trim();
@@ -855,7 +955,7 @@
         try { const a = JSON.parse(cleanEmail); if (Array.isArray(a) && a.length) cleanEmail = String(a[0]).trim(); } catch(_) {}
       }
       if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-        alert(`No valid email on file for ${student.name}.\nPlease update in Student Manager.`);
+        fcShowError('No Email On File', `<strong>${escapeHtml(student.name)}</strong> does not have a valid email address on record.<br><br>Please update their profile in Student Manager first.`);
         return;
       }
 
@@ -867,57 +967,57 @@
         amount: price
       }));
       const totalOwed = unpaidClassDetails.reduce((s, c) => s + c.amount, 0) || Math.abs(Math.min(0, parseFloat(student.balance) || 0));
+      const subject = 'Payment Reminder - ARNOMA NCLEX-RN';
 
-      // Build email HTML
+      // Build email HTML then show preview
       const emailHTML = await fcBuildReminderHTML(student.name, totalOwed, price, unpaidClassDetails);
 
-      // Send via edge function
-      try {
-        const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
-          body: JSON.stringify({ to: cleanEmail, subject: 'Payment Reminder - ARNOMA NCLEX-RN', html: emailHTML })
-        });
-        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || e.error || 'Send failed'); }
+      fcShowEmailPreview(subject, emailHTML, student.name, async () => {
+        try {
+          const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` },
+            body: JSON.stringify({ to: cleanEmail, subject, html: emailHTML })
+          });
+          if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || e.error || 'Send failed'); }
 
-        // Log to sent_emails
-        const { data: emailLog } = await supabaseClient.from('sent_emails').insert({
-          recipient_email: cleanEmail,
-          recipient_name: student.name,
-          subject: 'Payment Reminder - ARNOMA NCLEX-RN',
-          email_type: 'payment_reminder',
-          template_name: 'Payment Reminder',
-          html_content: emailHTML,
-          delivery_status: 'delivered',
-          status: 'sent',
-          sent_at: new Date().toISOString()
-        }).select().maybeSingle();
-
-        // Log to notifications (so it shows in the notification feed)
-        await supabaseClient.from('notifications').insert({
-          type: 'email_sent',
-          category: 'email',
-          title: 'Payment Reminder Sent',
-          description: `Sent payment reminder to ${student.name} (${cleanEmail}) for $${totalOwed.toFixed(2)}`,
-          student_name: student.name,
-          metadata: {
-            student_id: studentId,
-            student_name: student.name,
-            email: cleanEmail,
-            amount: totalOwed,
+          await supabaseClient.from('sent_emails').insert({
+            recipient_email: cleanEmail,
+            recipient_name: student.name,
+            subject,
             email_type: 'payment_reminder',
-            subject: 'Payment Reminder - ARNOMA NCLEX-RN'
-          },
-          timestamp: new Date().toISOString(),
-          read: false,
-          created_at: new Date().toISOString()
-        });
+            template_name: 'Payment Reminder',
+            html_content: emailHTML,
+            delivery_status: 'delivered',
+            status: 'sent',
+            sent_at: new Date().toISOString()
+          }).select().maybeSingle();
 
-        alert(`✅ Payment reminder sent to ${student.name}!`);
-      } catch (err) {
-        console.error('Failed to send reminder:', err);
-        alert(`❌ Failed to send email: ${err.message}`);
-      }
+          await supabaseClient.from('notifications').insert({
+            type: 'email_sent',
+            category: 'email',
+            title: 'Payment Reminder Sent',
+            description: `Sent payment reminder to ${student.name} (${cleanEmail}) for $${totalOwed.toFixed(2)}`,
+            student_name: student.name,
+            metadata: {
+              student_id: studentId,
+              student_name: student.name,
+              email: cleanEmail,
+              amount: totalOwed,
+              email_type: 'payment_reminder',
+              subject
+            },
+            timestamp: new Date().toISOString(),
+            read: false,
+            created_at: new Date().toISOString()
+          });
+
+          fcShowToast(`✅ Payment reminder sent to ${student.name}!`, 'success');
+        } catch (err) {
+          console.error('Failed to send reminder:', err);
+          fcShowToast(`❌ Failed to send: ${err.message}`, 'error');
+        }
+      });
     }
 
     async function fcBuildReminderHTML(studentName, totalOwed, pricePerClass, unpaidClassDetails) {
