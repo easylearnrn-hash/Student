@@ -1394,13 +1394,50 @@
       // console.log('📧 Has metadata?', !!notif.metadata);
       // console.log('📧 Has metadata.html?', !!(notif.metadata && notif.metadata.html));
       
+      // Normalize metadata — Supabase may return it as a TEXT/JSON string rather than a parsed object
+      let meta = notif.metadata;
+      if (typeof meta === 'string') {
+        try { meta = JSON.parse(meta); } catch(_) { meta = null; }
+      }
+
       // Check if this is an email notification with HTML content
-      if (notif.metadata && notif.metadata.html) {
-        // Show email preview instead of just marking as read
-        showEmailPreview(notif);
+      if (meta && meta.html) {
+        showEmailPreview({ ...notif, metadata: meta });
         return;
       }
-      
+
+      // Fallback: load HTML from sent_emails using the stored sent_email_id
+      if (meta && meta.sent_email_id) {
+        (async () => {
+          try {
+            const { data: se } = await supabase
+              .from('sent_emails')
+              .select('html_content, subject, recipient_email')
+              .eq('id', meta.sent_email_id)
+              .maybeSingle();
+            if (se?.html_content) {
+              showEmailPreview({
+                ...notif,
+                metadata: {
+                  ...meta,
+                  html: se.html_content,
+                  subject: meta.subject || se.subject,
+                  email: meta.email || se.recipient_email
+                }
+              });
+              return;
+            }
+          } catch(e) { console.error('⚠️ Could not load sent_email record:', e); }
+          console.log('⚠️ No HTML content found, marking as read only');
+          try {
+            await supabase.from('notifications').update({ read: true, is_read: true }).eq('id', notifId);
+            if (notif) { notif.read = true; notif.is_read = true; }
+            renderNotifications();
+          } catch(err) { console.error('❌ Error marking as read:', err); }
+        })();
+        return;
+      }
+
       console.log('⚠️ No HTML content found, marking as read only');
       
       try {
