@@ -5964,8 +5964,17 @@ ORDER BY timestamp DESC;</pre>
                 status: pr.status || 'paid',
                 _source: 'stripe'
               }));
-              payments = [...payments, ...stripePayments];
-              debugLog(`✅ Merged ${stripePayments.length} Stripe payments from payment_records`);
+              // Deduplicate: same student + same date + same amount should never show twice
+              // (guards against duplicate DB rows already in payment_records)
+              const seenStripe = new Set();
+              const uniqueStripePayments = stripePayments.filter(p => {
+                const key = `${p.student_id}|${(p.email_date || '').split('T')[0]}|${p.amount}`;
+                if (seenStripe.has(key)) return false;
+                seenStripe.add(key);
+                return true;
+              });
+              payments = [...payments, ...uniqueStripePayments];
+              debugLog(`✅ Merged ${uniqueStripePayments.length} Stripe payments from payment_records (${stripePayments.length - uniqueStripePayments.length} display duplicates suppressed)`);
             }
           } catch (stripeErr) {
             console.warn('⚠️ Could not load Stripe payment_records:', stripeErr);

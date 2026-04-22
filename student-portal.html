@@ -8326,6 +8326,12 @@
 
       document.getElementById('totalUnpaid').textContent = `$${displayUnpaidAmount.toFixed(0)}`;
 
+      // ── DEBT LOCK: $300+ balance locks the portal until payment is made ──
+      const DEBT_LOCK_THRESHOLD = 300;
+      if (displayUnpaidAmount >= DEBT_LOCK_THRESHOLD && typeof applyDebtLock === 'function') {
+        applyDebtLock(displayUnpaidAmount.toFixed(0));
+      }
+
       // Show / hide Pay Now button based on balance
       const payNowBtn = document.getElementById('payNowBtn');
       if (payNowBtn) {
@@ -13889,8 +13895,9 @@
     padding: 20px;
     box-sizing: border-box;
   ">
-    <!-- Close button -->
+    <!-- Close button — hidden while portal is debt-locked -->
     <button
+      id="arnomaPaymentCloseBtn"
       onclick="closePaymentModal()"
       aria-label="Close payment"
       style="
@@ -13910,6 +13917,26 @@
       onmouseover="this.style.background='rgba(255,255,255,0.2)'"
       onmouseout="this.style.background='rgba(255,255,255,0.1)'"
     >✕</button>
+
+    <!-- Debt-lock notice (only visible during lock) -->
+    <div id="arnomaDebtLockNotice" style="
+      display: none;
+      position: absolute;
+      top: 18px; left: 50%; transform: translateX(-50%);
+      max-width: 420px; width: calc(100% - 40px);
+      background: rgba(176,48,64,0.18);
+      border: 1px solid rgba(176,48,64,0.45);
+      border-radius: 12px;
+      padding: 10px 18px;
+      color: #fca5a5;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      text-align: center;
+      z-index: 100001;
+    ">
+      🔒 Your account has a balance of <strong id="arnomaDebtLockAmount"></strong>. Please make a payment to restore full access.
+    </div>
 
     <!-- The iframe — payment.html runs inside this -->
     <iframe
@@ -13978,7 +14005,34 @@
       document.body.style.overflow = 'hidden';
     }
 
+    // Track debt-lock state
+    window._arnomaDebtLocked = false;
+
+    function applyDebtLock(amountDue) {
+      window._arnomaDebtLocked = true;
+      // Hide close button so student cannot dismiss the modal
+      const closeBtn = document.getElementById('arnomaPaymentCloseBtn');
+      if (closeBtn) closeBtn.style.display = 'none';
+      // Show lock notice
+      const notice = document.getElementById('arnomaDebtLockNotice');
+      const amountEl = document.getElementById('arnomaDebtLockAmount');
+      if (amountEl) amountEl.textContent = `$${amountDue}`;
+      if (notice) notice.style.display = 'block';
+      // Open the payment modal
+      openPaymentModal();
+    }
+
+    function releaseDebtLock() {
+      window._arnomaDebtLocked = false;
+      const closeBtn = document.getElementById('arnomaPaymentCloseBtn');
+      if (closeBtn) closeBtn.style.display = 'flex';
+      const notice = document.getElementById('arnomaDebtLockNotice');
+      if (notice) notice.style.display = 'none';
+    }
+
     function closePaymentModal() {
+      // Blocked while debt-locked — student must pay to close
+      if (window._arnomaDebtLocked) return;
       const overlay = document.getElementById('arnomaPaymentModalOverlay');
       overlay.style.display = 'none';
       document.getElementById('arnomaPaymentIframe').src = '';
@@ -14026,17 +14080,35 @@
             payment_method: 'stripe',
           }));
 
-          const { error: dbErr } = await supabaseClient
+          // Idempotency guard: skip any dates that already have a stripe payment_record
+          // so that retries, 3DS redirects, or double-taps never create duplicate rows.
+          const { data: existingStripe } = await supabaseClient
             .from('payment_records')
-            .insert(rows);
-          if (dbErr) {
-            console.error('[ARNOMA] Stripe payment_records insert failed:', dbErr.message);
+            .select('date')
+            .eq('student_id', studentId)
+            .eq('payment_method', 'stripe')
+            .in('date', classDates);
+          const alreadyPaidDates = new Set((existingStripe || []).map(r => r.date));
+          const rowsToInsert = rows.filter(r => !alreadyPaidDates.has(r.date));
+
+          if (rowsToInsert.length === 0) {
+            console.log('[ARNOMA] All Stripe payment_records already exist, skipping insert');
           } else {
-            console.log('[ARNOMA] ✅ Stripe payment recorded — rows:', rows);
+            const { error: dbErr } = await supabaseClient
+              .from('payment_records')
+              .insert(rowsToInsert);
+            if (dbErr) {
+              console.error('[ARNOMA] Stripe payment_records insert failed:', dbErr.message);
+            } else {
+              console.log('[ARNOMA] ✅ Stripe payment recorded — rows:', rowsToInsert);
+            }
           }
         } catch (writeErr) {
           console.error('[ARNOMA] Failed to write Stripe payment_records:', writeErr);
         }
+
+        // Unlock before closing (payment clears the debt)
+        releaseDebtLock();
 
         // Refresh payment display after 3 s (payment.html auto-closes itself)
         setTimeout(async () => {
@@ -14052,14 +14124,14 @@
       }
     });
 
-    /* Close on overlay click (outside iframe) */
+    /* Close on overlay click (outside iframe) — blocked when debt-locked */
     document.getElementById('arnomaPaymentModalOverlay').addEventListener('click', function(e) {
-      if (e.target === this) closePaymentModal();
+      if (e.target === this && !window._arnomaDebtLocked) closePaymentModal();
     });
 
-    /* Close on Escape key */
+    /* Close on Escape key — blocked when debt-locked */
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && document.getElementById('arnomaPaymentModalOverlay').style.display === 'flex') {
+      if (e.key === 'Escape' && !window._arnomaDebtLocked && document.getElementById('arnomaPaymentModalOverlay').style.display === 'flex') {
         closePaymentModal();
       }
     });
