@@ -731,24 +731,12 @@
         let sessions = scheduleByDay[day];
         const isToday = day === today;
 
-        // Sort sessions for Yerevan view: AM first, then PM
-        if (timezone === 'Yerevan' && sessions.length > 0) {
-          sessions = sessions.sort((a, b) => {
-            const timeA = convertToYerevan(a.time);
-            const timeB = convertToYerevan(b.time);
-            
-            // Extract AM/PM from converted times
-            const isPM_A = timeA.toUpperCase().includes('PM');
-            const isPM_B = timeB.toUpperCase().includes('PM');
-            
-            // AM comes before PM
-            if (!isPM_A && isPM_B) return -1;
-            if (isPM_A && !isPM_B) return 1;
-            
-            // If both are same period, sort by hour
-            const hourA = parseInt(timeA.match(/(\d+):/)[1]);
-            const hourB = parseInt(timeB.match(/(\d+):/)[1]);
-            return hourA - hourB;
+        // Sort sessions chronologically (earliest first) for both views
+        if (sessions.length > 0) {
+          sessions = sessions.slice().sort((a, b) => {
+            const rawA = timezone === 'Yerevan' ? convertToYerevan(a.time) : a.time;
+            const rawB = timezone === 'Yerevan' ? convertToYerevan(b.time) : b.time;
+            return timeToMinutes(rawA) - timeToMinutes(rawB);
           });
         }
 
@@ -784,6 +772,16 @@
     function parseSchedule(scheduleStr) {
       if (!scheduleStr) return [];
       return scheduleStr.split(',').map(s => s.trim()).filter(s => s);
+    }
+
+    function timeToMinutes(timeStr) {
+      const match = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+      if (!match) return 0;
+      let [, h, m, period] = match;
+      h = parseInt(h); m = parseInt(m);
+      if (period.toUpperCase() === 'PM' && h !== 12) h += 12;
+      if (period.toUpperCase() === 'AM' && h === 12) h = 0;
+      return h * 60 + m;
     }
 
     function convertToYerevanWithDay(laTime) {
