@@ -881,15 +881,37 @@
         if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error?.message || e.error || 'Send failed'); }
 
         // Log to sent_emails
-        await supabaseClient.from('sent_emails').insert({
-          student_id: studentId,
+        const { data: emailLog } = await supabaseClient.from('sent_emails').insert({
           recipient_email: cleanEmail,
+          recipient_name: student.name,
           subject: 'Payment Reminder - ARNOMA NCLEX-RN',
           email_type: 'payment_reminder',
           template_name: 'Payment Reminder',
-          amount: totalOwed,
+          html_content: emailHTML,
+          delivery_status: 'delivered',
+          status: 'sent',
           sent_at: new Date().toISOString()
-        }).maybeSingle();
+        }).select().maybeSingle();
+
+        // Log to notifications (so it shows in the notification feed)
+        await supabaseClient.from('notifications').insert({
+          type: 'email_sent',
+          category: 'email',
+          title: 'Payment Reminder Sent',
+          description: `Sent payment reminder to ${student.name} (${cleanEmail}) for $${totalOwed.toFixed(2)}`,
+          student_name: student.name,
+          metadata: {
+            student_id: studentId,
+            student_name: student.name,
+            email: cleanEmail,
+            amount: totalOwed,
+            email_type: 'payment_reminder',
+            subject: 'Payment Reminder - ARNOMA NCLEX-RN'
+          },
+          timestamp: new Date().toISOString(),
+          read: false,
+          created_at: new Date().toISOString()
+        });
 
         alert(`✅ Payment reminder sent to ${student.name}!`);
       } catch (err) {
