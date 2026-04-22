@@ -601,6 +601,12 @@
       return fcParseSchedule(group.schedule).some(s => s.day === dayName);
     }
 
+    // Normalize group code: "Group A" → "A", "a" → "A"
+    function fcNormGroupCode(val) {
+      if (!val) return '';
+      return String(val).trim().replace(/^group\s+/i, '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+    }
+
     function fcBuildIndexes() {
       // Name → Set<studentId> lookup
       const nameToIds = new Map();
@@ -631,7 +637,9 @@
       };
 
       allPaymentsCache.forEach(p => {
-        const dates = fcExtractForClassDates(p, p.date);
+        // Use null as fallback — payments table has email_date not date;
+        // using email_date as fallback incorrectly marks email receipt dates as paid class dates.
+        const dates = fcExtractForClassDates(p, null);
         dates.forEach(d => {
           const sid = p.student_id || p.linked_student_id || p.derived_student_id || p.resolved_student_id;
           const ids = new Set();
@@ -666,11 +674,12 @@
         if (d && a.student_id) absenceIndex.add(`${a.student_id}-${d}`);
       });
 
-      // Skipped index: "dateStr-groupName"
+      // Skipped index: "dateStr-NORMALIZEDGROUP"
       skippedIndex.clear();
       skippedClassesCache.forEach(s => {
         const d = (s.class_date || '').split('T')[0];
-        if (d && s.group_name) skippedIndex.add(`${d}-${s.group_name}`);
+        const gn = fcNormGroupCode(s.group_name);
+        if (d && gn) skippedIndex.add(`${d}-${gn}`);
       });
 
       // Manual enrollment index
@@ -690,14 +699,19 @@
     }
 
     function fcIsSkipped(dateStr, groupName) {
-      return skippedIndex.has(`${dateStr}-${groupName}`);
+      return skippedIndex.has(`${dateStr}-${fcNormGroupCode(groupName)}`);
     }
 
     function fcGetUnpaidDates(student) {
-      const group = groupsCache.find(g => g.group_name === student.group_name);
+      // Flexible group lookup — normalize both sides so "A" matches "Group A"
+      const normStudentGroup = fcNormGroupCode(student.group_name || student.group_letter || '');
+      const group = groupsCache.find(g => fcNormGroupCode(g.group_name) === normStudentGroup);
       if (!group) return [];
       const today = fcGetToday();
-      const floor = new Date('2026-04-01');
+      // Use UTC midnight for the floor so the loop doesn't duplicate dates in PT timezone
+      const FLOOR_STR = '2026-04-01';
+      const floorTime = Date.UTC(2026, 3, 1);
+      const todayTime = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
       let startStr = null;
       if (student.start_date) startStr = student.start_date.split('T')[0];
       else if (student.created_at) startStr = new Date(student.created_at).toISOString().split('T')[0];
@@ -706,13 +720,14 @@
           ? group.one_time_schedules.map(ot => (ot.date || '').split('T')[0]).filter(Boolean)
           : []
       );
+      const normGroupCode = fcNormGroupCode(group.group_name);
       const unpaid = [];
-      for (let d = new Date(floor); d <= today; d.setDate(d.getDate() + 1)) {
-        const ds = d.toISOString().split('T')[0];
+      for (let t = floorTime; t <= todayTime; t += 86400000) {
+        const ds = new Date(t).toISOString().split('T')[0];
         const isManual = manualEnrollmentSet.has(`${student.id}-${ds}`);
         if (startStr && ds < startStr && !isManual) continue;
         if (!fcIsScheduledDate(ds, group) && !oneTimeDates.has(ds) && !isManual) continue;
-        if (fcIsSkipped(ds, group.group_name)) continue;
+        if (fcIsSkipped(ds, normGroupCode)) continue;
         if (!fcHasPayment(student.id, ds) && !fcIsAbsent(student.id, ds)) unpaid.push(ds);
       }
       return unpaid;
