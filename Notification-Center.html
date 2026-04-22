@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <script src="shared-auth.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="shared-auth.js"></script>
+  <script src="shared-dialogs.js"></script>
   <title>🔔 Notifications</title>
   <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png">
   <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png">
@@ -455,13 +456,6 @@
       line-height: 1.5;
     }
 
-    /* Notification Footer */
-    .notification-footer {
-      margin-top: 8px;
-      font-size: 12px;
-      color: rgba(255, 255, 255, 0.5);
-    }
-
     /* Quick Actions */
     .quick-actions {
       margin-top: 12px;
@@ -684,7 +678,7 @@
 
       <div class="filter-option">
         <div class="filter-option-label">
-          <span class="emoji">�</span>
+          <span class="emoji">🔄</span>
           <span>Payment Reassigned</span>
         </div>
         <div class="toggle-switch active" onclick="toggleFilter('payment_reassigned')"></div>
@@ -813,7 +807,7 @@
 
       <div class="filter-option">
         <div class="filter-option-label">
-          <span class="emoji">�</span>
+          <span class="emoji">🔒</span>
           <span>Note Access Revoked</span>
         </div>
         <div class="toggle-switch active" onclick="toggleFilter('note_revoked')"></div>
@@ -968,8 +962,10 @@
       const switches = modal.querySelectorAll('.toggle-switch');
       
       switches.forEach(toggle => {
-        const onclick = toggle.getAttribute('onclick');
-        const filterType = onclick.match(/toggleFilter\('(\w+)'\)/)[1];
+        const onclick = toggle.getAttribute('onclick') || '';
+        const match = onclick.match(/toggleFilter\('(\w+)'\)/);
+        if (!match) return; // guard: skip toggles without a recognized filter
+        const filterType = match[1];
         
         if (notificationFilters[filterType]) {
           toggle.classList.add('active');
@@ -1276,7 +1272,12 @@
       const category = (notif.category || notif.type || '').toLowerCase();
       const title = (notif.title || '').toLowerCase();
       const description = (notif.description || '').toLowerCase();
-      const payload = notif.payload || {};
+      // Normalize metadata — may be a raw JSON string from Supabase TEXT column
+      let rawMeta = notif.metadata || notif.payload || {};
+      if (typeof rawMeta === 'string') {
+        try { rawMeta = JSON.parse(rawMeta); } catch(_) { rawMeta = {}; }
+      }
+      const payload = rawMeta;
       
       let actions = '';
       
@@ -1374,8 +1375,8 @@
     // HANDLE NOTIFICATION CLICK
     // ============================================================
     async function handleNotificationClick(notifId, event) {
-      // Don't mark as read if clicking a quick action button
-      if (event && event.target.classList.contains('quick-action-btn')) {
+      // Don't mark as read if clicking a quick action button (or a child inside one)
+      if (event && event.target.closest('.quick-action-btn')) {
         return;
       }
       
@@ -1526,14 +1527,10 @@
     // MARK ALL AS READ
     // ============================================================
     async function markAllNotificationsAsRead() {
-      try {
-        const unreadIds = notifications.filter(n => !n.read && !n.is_read).map(n => n.id);
-        
-        if (unreadIds.length === 0) {
-          alert('All notifications are already marked as read');
-          return;
-        }
+      const unreadIds = notifications.filter(n => !n.read && !n.is_read).map(n => n.id);
+      if (unreadIds.length === 0) return; // nothing to do — silent skip
 
+      try {
         const { error } = await supabase
           .from('notifications')
           .update({ read: true, is_read: true })
@@ -1541,16 +1538,13 @@
 
         if (error) throw error;
 
-        // Update local state
-        notifications.forEach(n => {
-          n.read = true;
-          n.is_read = true;
-        });
-
+        notifications.forEach(n => { n.read = true; n.is_read = true; });
         renderNotifications();
       } catch (err) {
         console.error('❌ Error marking all as read:', err);
-        alert('Error marking all as read');
+        if (typeof customAlert === 'function') {
+          customAlert('Error', 'Failed to mark notifications as read. Please try again.');
+        }
       }
     }
 
@@ -1558,7 +1552,10 @@
     // CLEAR ALL NOTIFICATIONS
     // ============================================================
     async function clearAllNotifications() {
-      if (!confirm('Are you sure you want to clear all notifications?')) return;
+      const confirmed = typeof customConfirm === 'function'
+        ? await customConfirm('Clear All Notifications', 'This will permanently delete all notifications. This cannot be undone.', true)
+        : confirm('Are you sure you want to clear all notifications?');
+      if (!confirmed) return;
 
       try {
         const { error } = await supabase
@@ -1572,7 +1569,9 @@
         renderNotifications();
       } catch (err) {
         console.error('❌ Error clearing notifications:', err);
-        alert('Error clearing notifications');
+        if (typeof customAlert === 'function') {
+          customAlert('Error', 'Failed to clear notifications. Please try again.');
+        }
       }
     }
 
@@ -1639,12 +1638,19 @@
           event: '*',
           schema: 'public',
           table: 'notifications'
-        }, async (payload) => {
-          console.log('🔔 Notification change:', payload);
+        }, async () => {
           await loadNotifications();
         })
         .subscribe();
     }
+
+    // Clean up realtime subscription when the iframe/page is unloaded
+    window.addEventListener('beforeunload', () => {
+      if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel).catch(() => {});
+        realtimeChannel = null;
+      }
+    });
 
     // ============================================================
     // INITIALIZE ON LOAD
