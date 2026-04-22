@@ -394,8 +394,21 @@
 
       <!-- Student Breakdown Card (Hidden Initially) -->
       <div class="card" id="breakdownCard" style="display: none;">
-        <div class="header">
-          <h1>📊 Student Breakdown</h1>
+        <div class="header" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+          <h1 style="margin:0;">📊 Student Breakdown</h1>
+          <button id="unpaidFilterBtn" onclick="toggleUnpaidFilter()" style="
+            padding: 7px 16px;
+            background: rgba(239,68,68,0.15);
+            border: 1px solid rgba(239,68,68,0.4);
+            border-radius: 20px;
+            color: #fca5a5;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: 0.5px;
+            transition: all 0.2s;
+            white-space: nowrap;
+          " onmouseover="this.style.background='rgba(239,68,68,0.28)'" onmouseout="this.style.background=showOnlyUnpaid?'rgba(239,68,68,0.35)':'rgba(239,68,68,0.15)'">⚠️ Unpaid</button>
         </div>
 
         <div style="border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 24px">
@@ -499,6 +512,20 @@
     // ── Ignored debts (persisted in localStorage) ─────────────────────────────
     const FC_IGNORED_KEY = 'arnoma-forecast-ignored-debts';
     let ignoredDebtStudents = new Set(JSON.parse(localStorage.getItem(FC_IGNORED_KEY) || '[]').map(String));
+
+    // ── Unpaid filter toggle ───────────────────────────────────────────────────
+    let showOnlyUnpaid = false;
+    function toggleUnpaidFilter() {
+      showOnlyUnpaid = !showOnlyUnpaid;
+      const btn = document.getElementById('unpaidFilterBtn');
+      if (btn) {
+        btn.style.background = showOnlyUnpaid ? 'rgba(239,68,68,0.35)' : 'rgba(239,68,68,0.15)';
+        btn.style.borderColor = showOnlyUnpaid ? 'rgba(239,68,68,0.8)' : 'rgba(239,68,68,0.4)';
+        btn.style.color = showOnlyUnpaid ? '#ffffff' : '#fca5a5';
+        btn.textContent = showOnlyUnpaid ? '✕ Show All' : '⚠️ Unpaid';
+      }
+      updateStudentBreakdown();
+    }
 
     function saveIgnoredDebts() {
       localStorage.setItem(FC_IGNORED_KEY, JSON.stringify([...ignoredDebtStudents]));
@@ -1376,11 +1403,18 @@
       const container = document.getElementById('studentBreakdownList');
 
       // Show both active and paused students
-      const eligibleStudents = studentsCache.filter(s => {
+      let eligibleStudents = studentsCache.filter(s => {
         if (s.show_in_grid === false) return false;
         const status = (s.status || 'active').toLowerCase();
         return status === 'active' || status === 'paused';
       });
+
+      // When unpaid filter is active, keep only students with an outstanding balance
+      if (showOnlyUnpaid) {
+        eligibleStudents = eligibleStudents.filter(s =>
+          !ignoredDebtStudents.has(String(s.id)) && (unpaidByStudent.get(s.id) || 0) > 0
+        );
+      }
 
       let totalWeekly = 0;
       let html = '';
