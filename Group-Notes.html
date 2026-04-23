@@ -6539,30 +6539,24 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           let successCount = 0;
           let duplicateCount = 0;
 
-          // Insert records one by one to handle duplicates gracefully
-          for (const record of records) {
-            const { data, error } = await supabaseClient
-              .from('note_free_access')
-              .insert(record)
-              .select();
+          // ⚡ BATCH UPSERT: one network round-trip for all records (vs 338 sequential inserts)
+          // onConflict handles the unique_student_access (note_id, student_id) constraint.
+          const { data: upsertData, error: upsertError } = await supabaseClient
+            .from('note_free_access')
+            .upsert(records, {
+              onConflict: 'note_id,student_id',
+              ignoreDuplicates: false  // Update class_date/created_by on conflict
+            })
+            .select();
 
-            if (error) {
-              // Ignore duplicate errors (PostgreSQL error code 23505 or HTTP 409)
-              if (error.code === '23505' || error.message?.includes('duplicate') || error.status === 409) {
-                duplicateCount++;
-                continue;
-              }
-              console.error('   ❌ Insert error:', error);
-              throw error;
-            }
-            
-            // ✅ UPDATE LOCAL CACHE (like OPEN/POST does!)
-            if (data && data.length > 0) {
-              freeAccessGrants.push(data[0]);
-            }
-            
-            successCount++;
+          if (upsertError) {
+            console.error('   ❌ Batch upsert error:', upsertError);
+            throw upsertError;
           }
+
+          successCount = (upsertData || []).length;
+          // Update local cache with all new/updated grants
+          (upsertData || []).forEach(row => freeAccessGrants.push(row));
 
           // Send email notifications to selected students
           let emailSummary = '';
@@ -6594,9 +6588,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             emailSummary = `\n⚠️ Email notifications failed to send`;
           }
 
-          const message = duplicateCount > 0 
-            ? `✅ FREE access granted to ${freeSelectedStudents.size} student(s)!\n${successCount} new grants, ${duplicateCount} already existed${emailSummary}`
-            : `✅ FREE access granted to ${freeSelectedStudents.size} student(s) for ${selectedNoteIds.size} note(s)${emailSummary}`;
+          const message = `✅ FREE access granted to ${freeSelectedStudents.size} student(s) for ${selectedNoteIds.size} note(s)${emailSummary}`;
 
           // ✅ CREATE NOTIFICATION for individual free access
           const noteTitles = Array.from(selectedNoteIds).map(noteId => {
