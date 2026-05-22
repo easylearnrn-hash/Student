@@ -9244,13 +9244,12 @@
         notesMessage.remove();
       }
       
-      // 🚀 Load payments in background (don't block)
-      ensurePaymentsData().then(payments => {
-        loadClassroomUpdates(payments).catch(err => {
-          console.warn('Failed to load classroom updates:', err);
-        });
-      }).catch(err => {
-        console.error('Materials section payment fetch failed:', err);
+      // 🚀 loadClassroomUpdates fetches payments internally in parallel with note-access
+      // queries — no need to pre-await ensurePaymentsData() here.
+      loadClassroomUpdates(null).catch(err => {
+        console.warn('Failed to load classroom updates:', err);
+        const cl = document.getElementById('classroomList');
+        if (cl) cl.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.7);padding:40px;">Error loading notes. Please refresh.</div>';
       });
       
       materialsLoaded = true;
@@ -10622,18 +10621,16 @@
      * await loadClassroomUpdates(payments);
      */
     async function loadClassroomUpdates(payments) {
-      // Use passed payments or fall back to global currentPayments
-      const paymentData = payments || currentPayments || [];
-      
       const classroomList = document.getElementById('classroomList');
       classroomList.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.7); padding: 40px;">Loading your notes...</div>';
-      
-      debugDebug('💰 Payment data for notes:', {
-        passedPayments: !!payments,
-        globalPayments: !!currentPayments,
-        usingPayments: paymentData.length,
-        firstPayment: paymentData[0]
-      });
+
+      // Timeout guard: if still showing spinner after 12s, show an actionable error
+      // instead of leaving the student stuck forever.
+      const loadingTimeout = setTimeout(() => {
+        if (classroomList.innerHTML.includes('Loading your notes')) {
+          classroomList.innerHTML = '<div style="text-align:center;color:rgba(255,255,255,0.7);padding:40px;">Taking longer than expected. <br><br><button onclick="window.location.reload()" style="margin-top:12px;padding:10px 20px;background:rgba(102,126,234,0.3);border:1px solid rgba(102,126,234,0.5);border-radius:8px;color:white;cursor:pointer;font-size:14px;">Tap to Retry</button></div>';
+        }
+      }, 12000);
       
       try {
         const studentId = currentStudent?.id;
@@ -10669,91 +10666,76 @@
           groupNameCandidates
         });
 
-        const [studentPermRes, groupPermRes] = await Promise.all([
+        // Compute group letter before the parallel fetch block
+        const studentGroupLetter = currentStudent.group_letter || currentStudent.group || currentStudent.group_name;
+        const normalizedGroupLetter = studentGroupLetter ? studentGroupLetter.toString().replace(/Group\s*/i, '').trim().toUpperCase() : null;
+
+        if (!normalizedGroupLetter) {
+          console.error('❌ CRITICAL: Student has no group assigned!');
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 🚀 SINGLE PARALLEL ROUND: run ALL note-access queries + payment data
+        //    fetch in one Promise.all instead of 3 sequential rounds.
+        //    Before: round1(payments 6q) → round2(perms 2q) → round3(free 2q)
+        //    After:  round1(all 4 note-access + payments in parallel)
+        // ─────────────────────────────────────────────────────────────────────
+        const [studentPermRes, groupPermRes, freeIndividualRes, freeGroupRes, paymentDataResult] = await Promise.all([
+          // 1. Student-specific permissions (accessible + blocked)
           supabaseClient
             .from('student_note_permissions')
             .select('id, note_id, is_accessible, class_date, group_name, student_id')
-            .eq('student_id', studentId),  // fetch both accessible AND blocked (is_accessible=false)
+            .eq('student_id', studentId),
 
-            studentGroup
+          // 2. Group-level permissions — filtered by group_name at the DB level to cut payload
+          studentGroup && groupNameCandidates.length > 0
             ? supabaseClient
                 .from('student_note_permissions')
                 .select('id, note_id, is_accessible, class_date, group_name, student_id')
                 .is('student_id', null)
                 .eq('is_accessible', true)
-              // Fetch all group rows visible to this student, then normalize + filter in JS.
-              // This avoids missing rows where DB format is not exactly "E" or "Group E".
-            : Promise.resolve({ data: [], error: null })
-        ]);
+                .in('group_name', groupNameCandidates)
+            : Promise.resolve({ data: [], error: null }),
 
-        const permError = studentPermRes.error || groupPermRes.error;
-        // Build blocked note IDs set from is_accessible=false records for this student
-        const blockedNoteIds = new Set(
-          (studentPermRes.data || []).filter(p => !p.is_accessible).map(p => p.note_id)
-        );
-        const filteredGroupPermissions = (groupPermRes.data || []).filter(p => {
-          const code = canonicalizeGroupCode(p.group_name);
-          // Exclude notes that have been explicitly unposted for this student
-          return !!studentGroup && code === studentGroup && !blockedNoteIds.has(p.note_id);
-        });
-        const permissions = [
-          ...(studentPermRes.data || []).filter(p => p.is_accessible),
-          ...filteredGroupPermissions
-        ];
-        
-        if (permError) {
-          console.error('❌ Error loading permissions:', permError);
-        }
-        
-        console.log('📊 Permissions query result:', {
-          count: permissions?.length || 0,
-          fromStudentPerms: (studentPermRes.data || []).length,
-          fromGroupPerms: (groupPermRes.data || []).length,
-          filteredGroup: filteredGroupPermissions.length,
-          studentPermError: studentPermRes.error?.message || null,
-          groupPermError: groupPermRes.error?.message || null
-        });
-        
-        if ((groupPermRes.data || []).length === 0 && groupNameCandidates.length > 0) {
-          console.warn('⚠️ No group permissions returned for', groupNameCandidates, '— RLS may be blocking or no notes posted to this group yet.');
-        }
-        
-  const permissionNoteIds = Array.from(new Set((permissions || []).map(p => p.note_id).filter(Boolean)));
-        
-        if (DEBUG_MODE) debugLog(`✅ Found ${permissionNoteIds.length} notes via permissions`);
-        
-        // Fetch FREE access grants for this student (BEFORE loading notes)
-        const studentGroupLetter = currentStudent.group_letter || currentStudent.group || currentStudent.group_name;
-        const normalizedGroupLetter = studentGroupLetter ? studentGroupLetter.toString().replace(/Group\s*/i, '').trim().toUpperCase() : null;
-        
-        debugLog('🚨 [CRITICAL DEBUG - FREE ACCESS]');
-        debugLog('📊 Student ID:', studentId);
-        debugLog('👤 Student Name:', currentStudent.name);
-        debugLog('🏫 Raw Group:', studentGroupLetter);
-        debugLog('🔤 Normalized Group Letter:', normalizedGroupLetter);
-        
-        if (!normalizedGroupLetter) {
-          console.error('❌ CRITICAL: Student has no group assigned! This will show ALL group notes!');
-        }
-        
-        // Fetch FREE access in two clean parallel queries (avoids complex OR/AND syntax issues).
-        // Individual: note_free_access rows where student_id = this student.
-        // Group:      note_free_access rows where access_type='group' AND group_letter = this group.
-        const [freeIndividualRes, freeGroupRes] = await Promise.all([
+          // 3. Individual free-access grants
           supabaseClient
             .from('note_free_access')
             .select('note_id, access_type, group_letter, student_id, class_date')
             .eq('student_id', studentId),
+
+          // 4. Group free-access grants
           normalizedGroupLetter
             ? supabaseClient
                 .from('note_free_access')
                 .select('note_id, access_type, group_letter, student_id, class_date')
                 .eq('access_type', 'group')
                 .eq('group_letter', normalizedGroupLetter)
-            : Promise.resolve({ data: [], error: null })
+            : Promise.resolve({ data: [], error: null }),
+
+          // 5. Payment data — fetched in parallel, not before
+          ensurePaymentsData().catch(() => [])
         ]);
 
+        const permError = studentPermRes.error || groupPermRes.error;
         const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
+
+        // Build blocked note IDs set from is_accessible=false records for this student
+        const blockedNoteIds = new Set(
+          (studentPermRes.data || []).filter(p => !p.is_accessible).map(p => p.note_id)
+        );
+        const filteredGroupPermissions = (groupPermRes.data || []).filter(p => {
+          const code = canonicalizeGroupCode(p.group_name);
+          return !!studentGroup && code === studentGroup && !blockedNoteIds.has(p.note_id);
+        });
+        const permissions = [
+          ...(studentPermRes.data || []).filter(p => p.is_accessible),
+          ...filteredGroupPermissions
+        ];
+
+        if (permError) console.error('❌ Error loading permissions:', permError);
+
+        const permissionNoteIds = Array.from(new Set((permissions || []).map(p => p.note_id).filter(Boolean)));
+        if (DEBUG_MODE) debugLog(`✅ Found ${permissionNoteIds.length} notes via permissions`);
 
         // Individual free access grants are UNCONDITIONAL — admin explicitly unlocked these
         // notes for this specific student. They must never be filtered by blockedNoteIds
@@ -10943,8 +10925,8 @@
           })));
         }
         
-        // USE THE PASSED PAYMENT DATA (already loaded by loadPaymentHistory)
-        const mergedPaymentRecords = paymentData;
+        // Payment data came from the parallel Promise.all above (paymentDataResult)
+        const mergedPaymentRecords = paymentDataResult || currentPayments || [];
         
         // Create a Set of note IDs that have FREE access (no payment required).
         // ⚠️ CRITICAL FIX: Individual Access grants (admin 👤 Share button) are UNCONDITIONAL.
@@ -11165,12 +11147,14 @@
         
         displayNotes(sortedNotes);
         updateSystemNotifications();
+        clearTimeout(loadingTimeout);
         
         return transformedNotes;
         
       } catch (error) {
+        clearTimeout(loadingTimeout);
         console.error('❌ Error in loadClassroomUpdates:', error);
-        classroomList.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.7); padding: 40px;">Error loading notes.</div>';
+        classroomList.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.7); padding: 40px;">Error loading notes. <br><br><button onclick="window.location.reload()" style="margin-top:12px;padding:10px 20px;background:rgba(102,126,234,0.3);border:1px solid rgba(102,126,234,0.5);border-radius:8px;color:white;cursor:pointer;font-size:14px;">Tap to Retry</button></div>';
         allSystemNotes = [];
         refreshSystemAssignmentStats();
         updateSystemNotifications();
