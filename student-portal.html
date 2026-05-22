@@ -10875,7 +10875,7 @@
         }
         
         // Fetch the actual notes (using combined permissions + free access)
-        const { data: notes, error: notesError } = await supabaseClient
+        let { data: notes, error: notesError } = await supabaseClient
           .from('student_notes')
           .select('*')
           .in('id', allAccessibleNoteIds)
@@ -10891,7 +10891,46 @@
         }
         
         if (DEBUG_MODE) debugLog(`✅ Loaded ${notes?.length || 0} notes`);
-        
+
+        // ──────────────────────────────────────────────────────────────────
+        // 🔐 NEW-STUDENT RETROACTIVE ACCESS GUARD
+        // Block any note that was uploaded BEFORE this student joined.
+        // Group-level access (free or paid) only applies to notes that
+        // already existed when the student enrolled. Notes uploaded after
+        // the student joined are always accessible (normal flow).
+        // Individual explicit grants — admin 🎁 gift or purchased — bypass
+        // this guard entirely.
+        // ──────────────────────────────────────────────────────────────────
+        // Use ONLY the DB-assigned created_at for access control — never start_date,
+        // which is admin-editable and can be set to a past date.
+        const studentDbCreatedAt = (currentStudent.created_at || '').split('T')[0] || null;
+        if (studentDbCreatedAt && notes && notes.length > 0) {
+          // Build the set of note IDs explicitly granted to THIS student
+          // (individual gift or purchased). These bypass the join-date guard entirely.
+          const explicitlyGrantedNoteIds = new Set([
+            ...(freeIndividualRes.data || []).map(g => g.note_id),
+            ...(studentPermRes.data || [])
+              .filter(p => p.is_accessible && p.student_id != null && p.group_name == null)
+              .map(p => p.note_id)
+          ]);
+          // Midnight of the student's actual DB creation date
+          const studentJoinTs = new Date(studentDbCreatedAt + 'T00:00:00').getTime();
+          const countBefore = notes.length;
+          notes = notes.filter(note => {
+            if (explicitlyGrantedNoteIds.has(note.id)) return true; // explicit individual grant — always show
+            // Use created_at (upload time), fall back to class_date (visible date on card).
+            // Old notes uploaded before the created_at column existed will have null created_at
+            // but a real class_date (e.g. "2025-12-19") — use that as the cutoff.
+            const noteDateRaw = note.created_at || note.class_date;
+            if (!noteDateRaw) return false; // no date at all → block (safe default, note predates system)
+            const normDate = noteDateRaw.includes('T') ? noteDateRaw : noteDateRaw + 'T00:00:00';
+            const noteTs = new Date(normDate).getTime();
+            return noteTs >= studentJoinTs; // allow only if note existed on/after student was added
+          });
+          const blocked = countBefore - notes.length;
+          console.log(`🔐 New-student guard: studentDbCreatedAt=${studentDbCreatedAt}, total=${countBefore}, blocked=${blocked}, remaining=${notes.length}`);
+        }
+
         // ALWAYS log note count for debugging
         console.log('📚 LOADED NOTES COUNT:', notes?.length || 0);
         if (notes && notes.length > 0) {
