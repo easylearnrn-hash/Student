@@ -753,7 +753,25 @@
       return skippedIndex.has(`${dateStr}-${fcNormGroupCode(groupName)}`);
     }
 
+    function fcIsDebtEligible(student) {
+      if (!student) return false;
+
+      const status = (student.status || 'active').toString().trim().toLowerCase();
+      const hiddenByGrid = (
+        student.show_in_grid === false ||
+        student.show_in_grid === 'false' ||
+        student.show_in_grid === 0 ||
+        student.show_in_grid === '0'
+      );
+
+      if (hiddenByGrid) return false;
+      if (status === 'paused' || status === 'graduated' || status === 'inactive' || status === 'archived' || status === 'deleted') return false;
+      return true;
+    }
+
     function fcGetUnpaidDates(student) {
+      if (!fcIsDebtEligible(student)) return [];
+
       // Flexible group lookup — normalize both sides so "A" matches "Group A"
       const normStudentGroup = fcNormGroupCode(student.group_name || student.group_letter || '');
       const group = groupsCache.find(g => fcNormGroupCode(g.group_name) === normStudentGroup);
@@ -822,28 +840,178 @@
     async function loadPayments() {
       try {
         const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-        // Load from both tables
-        const [automatedResult, manualResult] = await Promise.all([
+        const [{ data: ignoredData }, paymentsResult, recordsResult] = await Promise.all([
+          supabaseClient.from('ignored_fuchsia_payments').select('payment_id'),
           supabaseClient
             .from('payments')
-            .select('*')
-            .gte('for_class', startOfMonth)
-            .lte('for_class', endOfMonth),
+            .select('id, email_date, amount, resolved_student_name, payer_name, memo, student_id, linked_student_id'),
           supabaseClient
             .from('payment_records')
-            .select('*')
-            .gte('date', startOfMonth)
-            .lte('date', endOfMonth)
-            .eq('status', 'paid')
+            .select('id, date, amount, status, notes, student_id, payment_method, students(name)')
         ]);
 
-        const automated = automatedResult.data || [];
-        const manual = manualResult.data || [];
-        
-        paymentsCache = [...automated, ...manual];
+        if (paymentsResult.error) throw paymentsResult.error;
+        if (recordsResult.error) throw recordsResult.error;
+
+        const rawPayments = paymentsResult.data || [];
+        const rawRecords = recordsResult.data || [];
+        const ignoredIds = new Set((ignoredData || []).map(row => row.payment_id));
+
+        const paymentEntries = [];
+        const seenPortalKeysFromPayments = new Set();
+        const seenPortalNameKeysFromPayments = new Set();
+        const portalNameAmountDateMap = new Map();
+        const seenPaymentRecordKeys = new Set();
+
+        function normalizeIdentity(value) {
+          return (value || '')
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, ' ');
+        }
+
+        function toLocalDateOnly(dateObj) {
+          return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+        }
+
+        function toCents(value) {
+          return Math.round(Number(value || 0) * 100);
+        }
+
+        function normalizeMemo(value) {
+          return (value || '')
+            .toString()
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, ' ');
+        }
+
+        function buildNameDateAmountKey(name, dateOnly, usd) {
+          return `${normalizeIdentity(name)}|${dateOnly}|${toCents(usd)}`;
+        }
+
+        function buildNameAmountKey(name, usd) {
+          return `${normalizeIdentity(name)}|${toCents(usd)}`;
+        }
+
+        function dateOnlyToMs(dateOnly) {
+          const parts = (dateOnly || '').split('-');
+          if (parts.length !== 3) return NaN;
+          const y = Number(parts[0]);
+          const m = Number(parts[1]);
+          const d = Number(parts[2]);
+          if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return NaN;
+          return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
+        }
+
+        function hasPortalApproxMatch(name, dateOnly, usd) {
+          const key = buildNameAmountKey(name, usd);
+          const dateSet = portalNameAmountDateMap.get(key);
+          if (!dateSet || dateSet.size === 0) return false;
+
+          const targetMs = dateOnlyToMs(dateOnly);
+          if (!Number.isFinite(targetMs)) return false;
+
+          for (const existingDate of dateSet) {
+            const existingMs = dateOnlyToMs(existingDate);
+            if (!Number.isFinite(existingMs)) continue;
+            const diffDays = Math.abs(existingMs - targetMs) / 86400000;
+            if (diffDays <= 1) return true;
+          }
+          return false;
+        }
+
+        function addEntry(name, usd) {
+          const normalizedName = (name || 'Unknown').trim() || 'Unknown';
+          const numericUsd = Number(usd || 0);
+          if (!Number.isFinite(numericUsd) || numericUsd <= 0) return;
+          paymentEntries.push({
+            name: normalizedName,
+            usd: numericUsd
+          });
+        }
+
+        (rawPayments || []).forEach(p => {
+          if (ignoredIds.has(p.id)) return;
+          const d = p.email_date ? new Date(p.email_date) : null;
+          if (!d || isNaN(d)) return;
+
+          const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          if (key !== currentMonthKey) return;
+
+          const name = (p.resolved_student_name || p.payer_name || 'Unknown').trim() || 'Unknown';
+          const amountUsd = Number(p.amount || 0);
+          addEntry(name, amountUsd);
+
+          const normalizedMemo = normalizeMemo(p.memo || '');
+          const isLikelyPortal = /portal|stripe\s*pi|pi_[a-z0-9]+/i.test(normalizedMemo);
+          if (isLikelyPortal) {
+            const dateOnly = toLocalDateOnly(d);
+            const identity = p.linked_student_id || p.student_id || normalizeIdentity(name);
+            const sourceKey = `${identity}|${dateOnly}|${toCents(amountUsd)}|${normalizedMemo}`;
+            seenPortalKeysFromPayments.add(sourceKey);
+
+            const sourceNameKey = buildNameDateAmountKey(name, dateOnly, amountUsd);
+            seenPortalNameKeysFromPayments.add(sourceNameKey);
+
+            const nameAmountKey = buildNameAmountKey(name, amountUsd);
+            if (!portalNameAmountDateMap.has(nameAmountKey)) {
+              portalNameAmountDateMap.set(nameAmountKey, new Set());
+            }
+            portalNameAmountDateMap.get(nameAmountKey).add(dateOnly);
+          }
+        });
+
+        const bestRecordByEquivalentKey = new Map();
+
+        (rawRecords || []).forEach(p => {
+          if (!p.date) return;
+
+          const monthKey = p.date.slice(0, 7);
+          if (monthKey !== currentMonthKey) return;
+
+          const paymentMethod = (p.payment_method || '').toString().toLowerCase();
+          if (paymentMethod === 'manual_enrollment') return;
+
+          const status = (p.status || '').toString().toLowerCase();
+          if (status && status !== 'paid') return;
+
+          const name = (p.students?.name || 'Unknown').trim() || 'Unknown';
+          const raw = Number(p.amount || 0);
+          const stripped = raw / 1.05;
+          const usd = Math.abs(stripped - Math.round(stripped)) < 0.01 ? Math.round(stripped) : raw;
+          const identity = p.student_id || normalizeIdentity(name);
+          const equivalentKey = `${identity}|${p.date}|${toCents(usd)}`;
+          const hasStripePi = /stripe\s*pi|pi_[a-z0-9]+/i.test((p.notes || '').toString());
+          const score = hasStripePi ? 2 : ((p.notes || '').toString().trim() ? 1 : 0);
+
+          const existing = bestRecordByEquivalentKey.get(equivalentKey);
+          if (!existing || score > existing.score) {
+            bestRecordByEquivalentKey.set(equivalentKey, { ...p, _usd: usd, _name: name, score });
+          }
+        });
+
+        [...bestRecordByEquivalentKey.values()].forEach(p => {
+          const usd = Number(p._usd || 0);
+          const name = p._name || (p.students?.name || 'Unknown').trim() || 'Unknown';
+
+          const identity = p.student_id || normalizeIdentity(name);
+          const normalizedMemo = normalizeMemo(p.notes || '');
+          const sourceKey = `${identity}|${p.date}|${toCents(usd)}|${normalizedMemo}`;
+          const sourceNameKey = buildNameDateAmountKey(name, p.date, usd);
+          if (seenPaymentRecordKeys.has(sourceKey)) return;
+          if (seenPortalKeysFromPayments.has(sourceKey)) return;
+          if (seenPortalNameKeysFromPayments.has(sourceNameKey)) return;
+          if (hasPortalApproxMatch(name, p.date, usd)) return;
+          seenPaymentRecordKeys.add(sourceKey);
+
+          addEntry(name, usd);
+        });
+
+        paymentsCache = paymentEntries.map(entry => ({ amount: entry.usd }));
         return paymentsCache;
       } catch (error) {
         console.error('Error loading payments:', error);
@@ -1269,6 +1437,8 @@
       fcBuildIndexes();
       unpaidByStudent = new Map();
       studentsCache.forEach(student => {
+        if (!fcIsDebtEligible(student)) return;
+
         const price = parseFloat(student.price_per_class) || 0;
         if (price <= 0) return;
         const unpaidDates = fcGetUnpaidDates(student);
@@ -1558,22 +1728,35 @@
       if (!isAdmin) return;
 
       console.log('💰 Loading Earning Forecast...');
-      
+
+      // Fast-first paint: load only what the top summary needs.
       await Promise.all([
         loadStudents(),
         loadGroups(),
-        loadPayments(),
+        loadPayments()
+      ]);
+
+      updateForecastData();
+
+      // Background refresh for heavy debt/index datasets.
+      Promise.all([
         loadAllPayments(),
         loadPaymentRecordsPaid(),
         loadAbsencesData(),
         loadSkippedClassesData(),
         loadCreditPaymentsData(),
         loadManualEnrollmentsData()
-      ]);
+      ]).then(() => {
+        loadUnpaidBalances();
+        // If breakdown is visible, refresh it after background data completes.
+        const breakdownCard = document.getElementById('breakdownCard');
+        if (breakdownCard && breakdownCard.style.display !== 'none') {
+          updateStudentBreakdown();
+        }
+      }).catch(err => {
+        console.error('Background debt data load failed:', err);
+      });
 
-      loadUnpaidBalances(); // synchronous after all data is loaded
-
-      updateForecastData();
       console.log('✅ Earning Forecast loaded');
     }
 

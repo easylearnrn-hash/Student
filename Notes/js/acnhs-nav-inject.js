@@ -8,9 +8,6 @@
  */
 (function () {
 
-  /* Capture script URL immediately (document.currentScript is only live during sync execution) */
-  var _scriptSrc = (typeof document !== 'undefined' && document.currentScript) ? document.currentScript.src : null;
-
   /* ─── 1. INJECT GOOGLE FONTS if not present ─────────────────── */
   function ensureFonts() {
     if (document.querySelector('link[href*="Playfair+Display"]')) return;
@@ -211,19 +208,6 @@
     return '';
   }
 
-  /* ─── 4b. BUILD SEAL URL for watermark (uses currentScript path for accuracy) ─── */
-  function buildSealUrl() {
-    if (_scriptSrc) {
-      try { return new URL('../images/acnhs-seal.png', _scriptSrc).href; } catch (e) {}
-    }
-    try {
-      var href = window.location.href;
-      var notesIdx = href.search(/\/[Nn]otes\//);
-      if (notesIdx !== -1) return href.slice(0, notesIdx) + '/Notes/images/acnhs-seal.png';
-    } catch (e) {}
-    return '';
-  }
-
   /* ─── 5. MAIN: replace .note-header with premium nav + hero ─── */
   function upgradeHeader() {
     /* Skip if nav already injected */
@@ -338,55 +322,6 @@
   /* ─── 6. HTML-escape helper ─────────────────────────────────── */
   function _esc(str) {
     return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  /* ─── 6a. PHOTO WATERMARK ────────────────────────────────────── */
-  /* Overlays the ACNHS seal on every content image at 14% opacity.
-     Works on screenshot captures — the seal is baked into the image area. */
-  function _applyWatermark(img, sealUrl) {
-    /* Skip: already watermarked */
-    if (img.parentNode && img.parentNode.classList && img.parentNode.classList.contains('acnhs-wm-wrap')) return;
-    /* Skip: nav logo or the seal itself */
-    if (img.classList && img.classList.contains('acnhs-nav-logo')) return;
-    if ((img.src || '').indexOf('acnhs-seal') !== -1) return;
-    if ((img.src || '').indexOf('acnhs-nav-logo') !== -1) return;
-    /* Skip: tiny images (icons etc.) */
-    var w = img.offsetWidth || img.naturalWidth || 0;
-    if (w > 0 && w < 80) return;
-
-    /* Preserve original display and sizing exactly */
-    var origDisplay = window.getComputedStyle(img).display || 'block';
-    var wrap = document.createElement('div');
-    wrap.className = 'acnhs-wm-wrap';
-    wrap.style.cssText = 'position:relative;display:' + (origDisplay === 'inline' ? 'inline-block' : 'block') + ';line-height:0;max-width:' + (img.style.maxWidth || '100%') + ';width:' + (img.style.width || 'auto') + ';';
-
-    img.parentNode.insertBefore(wrap, img);
-    wrap.appendChild(img);
-    /* Restore image styles so layout is unchanged */
-    img.style.display = 'block';
-    img.style.width = '100%';
-
-    var overlay = document.createElement('div');
-    overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10;';
-
-    var sealImg = document.createElement('img');
-    sealImg.src = sealUrl;
-    sealImg.alt = '';
-    sealImg.style.cssText = 'width:70%;max-width:500px;min-width:150px;opacity:0.16;pointer-events:none;-webkit-user-select:none;user-select:none;-webkit-user-drag:none;user-drag:none;';
-    overlay.appendChild(sealImg);
-    wrap.appendChild(overlay);
-  }
-
-  function watermarkImages() {
-    var sealUrl = buildSealUrl();
-    if (!sealUrl) return;
-    document.querySelectorAll('img').forEach(function (img) {
-      if (img.complete) {
-        _applyWatermark(img, sealUrl);
-      } else {
-        img.addEventListener('load', function () { _applyWatermark(img, sealUrl); });
-      }
-    });
   }
 
   /* ─── 6b. Get student name from URL params (portal passes ?studentName=) ── */
@@ -926,7 +861,6 @@
     ensureFonts();
     ensureStyles();
     upgradeHeader();
-    watermarkImages();
 
     /* ── Rewire ALL back-navigation links to go to the portal ──
        Covers .back-btn (new files) and .note-back (older files).
@@ -947,8 +881,5 @@
   } else {
     init();
   }
-
-  /* Also run watermark after all resources (images) have fully loaded */
-  window.addEventListener('load', watermarkImages);
 
 })();
