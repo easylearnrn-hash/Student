@@ -1788,6 +1788,10 @@
                 <button class="toggle-btn" data-value="100" onclick="this.classList.toggle('active')">$100</button>
               </div>
               <input type="number" id="newStudentCustomPrice" class="form-input" placeholder="Or enter custom amount" />
+              <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:rgba(255,255,255,0.78);">
+                <input type="checkbox" id="newStudentFreeToggle" style="width:14px;height:14px;accent-color:#34d399;">
+                Mark as Free (no payment required)
+              </label>
             </div>
 
             <!-- Credit Balance -->
@@ -2121,6 +2125,10 @@
                          onchange="selectCustomAmount(this.value)" 
                          style="width: 80px; height: 36px; padding: 0 10px; border-radius: 10px; background: rgba(255,252,240,0.04); font-size: 13px; font-weight: 600; color: #fbbf24; border: 1px solid rgba(196,164,95,0.2); outline: none;">
                 </div>
+                <label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:rgba(255,255,255,0.78);">
+                  <input type="checkbox" id="modalFreeToggle" onchange="handleModalFreeToggle(this)" style="width:14px;height:14px;accent-color:#34d399;">
+                  Mark as Free (no payment required)
+                </label>
               </div>
             </div>
 
@@ -2736,6 +2744,26 @@
         }
         return '0 $';
       }
+
+      const FREE_STUDENT_MARKER = '[ARNOMA_FREE_STUDENT]';
+
+      function hasFreeStudentMarker(notesValue) {
+        return typeof notesValue === 'string' && notesValue.includes(FREE_STUDENT_MARKER);
+      }
+
+      function stripFreeStudentMarker(notesValue) {
+        if (typeof notesValue !== 'string') return '';
+        return notesValue
+          .replace(FREE_STUDENT_MARKER, '')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+      }
+
+      function composeNotesWithFreeMarker(notesValue, isFree) {
+        const cleanNotes = stripFreeStudentMarker(notesValue || '');
+        if (!isFree) return cleanNotes;
+        return cleanNotes ? `${FREE_STUDENT_MARKER}\n${cleanNotes}` : FREE_STUDENT_MARKER;
+      }
       
       // Helper function to parse email field (handles JSON strings, arrays, and regular strings)
       function parseEmailField(emailData) {
@@ -2913,6 +2941,8 @@
               const existingEmailList = parseEmailField(s.email);
               const normalizedEmails = normalizeEmailList(existingEmailList);
               const primaryEmail = normalizedEmails[0] || '';
+              const rawNotes = s.notes || '';
+              const isFreeStudent = hasFreeStudentMarker(rawNotes);
               if (primaryEmail && requiresEmailNormalization(s.email)) {
                 pendingEmailFixes.push({ id: s.id, email: primaryEmail });
               }
@@ -2927,7 +2957,8 @@
                 email: primaryEmail,
                 college: s.college || '',
                 aliases: parseAliasesField(s.aliases),
-                notes: s.notes || '',
+                notes: stripFreeStudentMarker(rawNotes),
+                isFree: isFreeStudent,
                 status: s.status || 'active',
                 showInCalendar: s.show_in_grid !== false,
                 start_date: s.start_date ? s.start_date.split('T')[0] : null
@@ -3077,7 +3108,7 @@
               // Database expects "Alias1, Alias2" not ["Alias1","Alias2"]
               return cleaned.length > 0 ? cleaned.join(', ') : null;
             })(),
-            notes: student.notes || '',
+            notes: composeNotesWithFreeMarker(student.notes || '', !!student.isFree),
             status: student.status || 'active',
             role: student.role || 'student',  // CRITICAL: Must be 'student' or 'admin'
             show_in_grid: student.showInCalendar !== false,
@@ -3550,6 +3581,7 @@
         document.getElementById('newStudentEmail').value = '';
         document.getElementById('newStudentCollege').value = '';
         document.getElementById('newStudentNotes').value = '';
+        document.getElementById('newStudentFreeToggle').checked = false;
         // Clear active buttons
         document.querySelectorAll('#newStudentGroupButtons .toggle-btn.active').forEach(btn => btn.classList.remove('active'));
         document.querySelectorAll('#newStudentPriceButtons .toggle-btn.active').forEach(btn => btn.classList.remove('active'));
@@ -3585,11 +3617,15 @@
         // Get price
         const activePriceButton = document.querySelector('#newStudentPriceButtons .toggle-btn.active');
         const customPrice = document.getElementById('newStudentCustomPrice').value;
+        const newStudentIsFree = !!document.getElementById('newStudentFreeToggle')?.checked;
         let pricePerClass = 0;
         if (activePriceButton) {
           pricePerClass = parseInt(activePriceButton.getAttribute('data-value')) || 0;
         } else if (customPrice) {
           pricePerClass = parseInt(customPrice) || 0;
+        }
+        if (newStudentIsFree) {
+          pricePerClass = 0;
         }
 
         // Create student object
@@ -3602,6 +3638,7 @@
           email: document.getElementById('newStudentEmail').value.trim(),
           college: document.getElementById('newStudentCollege').value.trim(),
           notes: document.getElementById('newStudentNotes').value.trim(),
+          isFree: newStudentIsFree,
           status: 'active',
           showInCalendar: true
         };
@@ -5464,6 +5501,12 @@
           }
         }
 
+        const freeToggle = document.getElementById('modalFreeToggle');
+        if (freeToggle) {
+          freeToggle.checked = !!s.isFree;
+          setModalFreeMode(!!s.isFree);
+        }
+
         // Group buttons
         document.querySelectorAll('#groupButtons .group-btn').forEach(btn => {
           btn.classList.toggle('active', btn.textContent.trim() === groupLetter);
@@ -5516,6 +5559,7 @@
         currentStudent.balance = parseInt(document.getElementById('modalCredit').value) || 0;
         currentStudent.aliases = document.getElementById('modalAliases').value.split(',').map(a => a.trim()).filter(Boolean);
         currentStudent.notes = document.getElementById('modalNotes').value;
+        currentStudent.isFree = !!document.getElementById('modalFreeToggle')?.checked;
 
         saveStudent(currentStudent).then(() => {
           renderStudentCards();
@@ -5729,7 +5773,45 @@
         }
       }
 
+      function setModalFreeMode(isFree) {
+        const priceButtons = document.querySelectorAll('#amountButtons .price-btn');
+        const customInput = document.getElementById('customPriceInput');
+
+        priceButtons.forEach(btn => {
+          btn.disabled = !!isFree;
+          btn.style.opacity = isFree ? '0.45' : '1';
+          btn.style.pointerEvents = isFree ? 'none' : 'auto';
+          if (isFree) btn.classList.remove('active');
+        });
+
+        if (customInput) {
+          customInput.disabled = !!isFree;
+          customInput.style.opacity = isFree ? '0.45' : '1';
+          if (isFree) {
+            customInput.value = '';
+            customInput.classList.remove('active');
+          }
+        }
+
+        const modalPriceEl = document.getElementById('modalPrice');
+        if (modalPriceEl && currentStudent) {
+          modalPriceEl.textContent = isFree ? 'FREE' : formatPrice(currentStudent.price_per_class);
+        }
+      }
+
+      function handleModalFreeToggle(checkbox) {
+        if (!currentStudent) return;
+        currentStudent.isFree = !!checkbox.checked;
+        if (currentStudent.isFree) {
+          currentStudent.price_per_class = 0;
+        }
+        setModalFreeMode(currentStudent.isFree);
+        saveStudent(currentStudent);
+        renderStudentCards();
+      }
+
       function selectAmount(amount, btn) {
+          if (currentStudent?.isFree) return;
           // Remove active from all amount buttons
           document.querySelectorAll('#amountButtons .price-btn').forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
@@ -5750,6 +5832,7 @@
         }
 
         function selectCustomAmount(amount) {
+          if (currentStudent?.isFree) return;
           const numericAmount = parseInt(amount) || 0;
           document.querySelectorAll('#amountButtons .price-btn').forEach(b => b.classList.remove('active'));
           document.getElementById('customPriceInput').value = amount ? numericAmount : '';
