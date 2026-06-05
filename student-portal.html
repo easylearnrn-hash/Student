@@ -10908,7 +10908,7 @@
         // Fetch the actual notes (using combined permissions + free access)
         let { data: notes, error: notesError } = await supabaseClient
           .from('student_notes')
-          .select('*')
+          .select('id, title, description, requires_payment, class_date, updated_at, created_at, pdf_url, file_size, category, system_category, group_name')
           .in('id', allAccessibleNoteIds)
           .order('updated_at', { ascending: false }); // Use updated_at (when note was last modified/posted)
         
@@ -11155,14 +11155,16 @@
           return acc;
         }, {}));
         
-        // 🔄 Refresh the progress carousel with new note data
-        await loadSystemsProgress();
-        
         // Sort notes by date - NEWEST FIRST
         const sortedNotes = [...transformedNotes].sort((a, b) => b.date - a.date);
         
         displayNotes(sortedNotes);
         updateSystemNotifications();
+
+        // Refresh systems/progress in background so note cards appear immediately.
+        loadSystemsProgress().catch((err) => {
+          console.error('⚠️ Background systems refresh failed:', err);
+        });
         clearTimeout(loadingTimeout);
         
         return transformedNotes;
