@@ -4629,6 +4629,34 @@
               <div class="stat-label">Credit</div>
               <div class="stat-value" style="color: #f59e0b;" id="creditBalance">$0</div>
               <div class="stat-date" id="creditNote">Extra payment available</div>
+              <button id="payFromCreditBtn" onclick="payFromCredit()" style="
+                display: none;
+                margin-top: 12px;
+                width: 100%;
+                padding: 10px 0;
+                background: linear-gradient(135deg, #d2a94f 0%, #f0d78c 50%, #d2a94f 100%);
+                background-size: 200% 100%;
+                border: none;
+                border-radius: 10px;
+                color: #111111;
+                font-size: 10px;
+                font-weight: 800;
+                letter-spacing: 0.1em;
+                text-transform: uppercase;
+                cursor: pointer;
+                transition: background-position 0.35s ease, transform 0.2s ease, box-shadow 0.2s ease;
+                position: relative;
+                overflow: hidden;
+                font-family: inherit;
+              "
+              onmouseover="this.style.backgroundPosition='100% 0';this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 22px rgba(210,169,79,0.45)'"
+              onmouseout="this.style.backgroundPosition='0% 0';this.style.transform='';this.style.boxShadow=''">
+                <span style="display:inline-flex;align-items:center;justify-content:center;gap:6px;position:relative;z-index:1;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14.5a3.5 3.5 0 0 1 0 7H7"/></svg>
+                  Pay From Credit
+                </span>
+                <span style="position:absolute;top:0;left:0;right:0;height:45%;background:linear-gradient(180deg,rgba(255,255,255,0.15),transparent);pointer-events:none;"></span>
+              </button>
             </div>
             <div class="stat-card" id="absencesCard" style="border-color: #94a3b8; display: none;">
               <div class="stat-label">Absences</div>
@@ -8367,10 +8395,28 @@
       const creditCardEl = document.getElementById('creditCard');
       const creditValueEl = document.getElementById('creditBalance');
       const creditNoteEl = document.getElementById('creditNote');
+      const payFromCreditBtn = document.getElementById('payFromCreditBtn');
       if (creditCardEl && creditValueEl) {
-        // Credit card is never shown — any non-zero balance is treated as debt (admin ledger convention)
-        creditCardEl.style.display = 'none';
-        creditCardEl.classList.remove('credit-active');
+        if (creditBalance > 0) {
+          const formattedCredit = Number.isInteger(creditBalance)
+            ? creditBalance.toFixed(0)
+            : creditBalance.toFixed(2);
+          creditValueEl.textContent = `$${formattedCredit}`;
+          if (creditNoteEl) {
+            creditNoteEl.textContent = `Credit of $${formattedCredit} exists`;
+          }
+          creditCardEl.style.display = 'block';
+          creditCardEl.classList.add('credit-active');
+          if (payFromCreditBtn) {
+            payFromCreditBtn.style.display = displayUnpaidAmount > 0 ? 'block' : 'none';
+          }
+        } else {
+          creditCardEl.style.display = 'none';
+          creditCardEl.classList.remove('credit-active');
+          if (payFromCreditBtn) {
+            payFromCreditBtn.style.display = 'none';
+          }
+        }
       }
       
       // Update absences card
@@ -14005,6 +14051,145 @@
       overlay.style.display = 'flex';
       // Prevent body scroll while modal is open
       document.body.style.overflow = 'hidden';
+    }
+
+    async function payFromCredit() {
+      const student = window.currentStudent;
+      if (!student || !student.id) {
+        if (typeof customAlert === 'function') {
+          await customAlert('Payment Error', 'Student information is missing. Please refresh and try again.');
+        }
+        return;
+      }
+
+      const unpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []).sort((a, b) => a.localeCompare(b));
+      if (unpaidDates.length === 0) {
+        if (typeof customAlert === 'function') {
+          await customAlert('No Unpaid Classes', 'There are no unpaid classes to cover from credit.');
+        }
+        return;
+      }
+
+      const classPrice = parseFloat(student.price_per_class) || 50;
+      if (classPrice <= 0) {
+        if (typeof customAlert === 'function') {
+          await customAlert('Payment Error', 'Invalid class price. Please contact admin.');
+        }
+        return;
+      }
+
+      const { data: latestStudent, error: latestStudentErr } = await supabaseClient
+        .from('students')
+        .select('balance')
+        .eq('id', student.id)
+        .single();
+
+      if (latestStudentErr) {
+        if (typeof customAlert === 'function') {
+          await customAlert('Credit Check Failed', `Could not verify latest credit balance: ${latestStudentErr.message}`);
+        }
+        return;
+      }
+
+      const currentBalance = parseFloat(latestStudent?.balance) || 0;
+      const payableClassCount = Math.min(unpaidDates.length, Math.floor(currentBalance / classPrice));
+
+      if (payableClassCount <= 0) {
+        const needAmount = classPrice - currentBalance;
+        if (typeof customAlert === 'function') {
+          await customAlert('Insufficient Credit', `You need $${needAmount.toFixed(2)} more credit to pay for 1 class.`);
+        }
+        return;
+      }
+
+      const datesToApply = unpaidDates.slice(0, payableClassCount);
+      const totalToApply = classPrice * datesToApply.length;
+      const newBalance = +(currentBalance - totalToApply).toFixed(2);
+
+      let confirmed = false;
+      if (typeof customConfirm === 'function') {
+        confirmed = await customConfirm(
+          'Pay From Credit?',
+          `Apply $${totalToApply.toFixed(2)} credit to ${datesToApply.length} unpaid ${datesToApply.length === 1 ? 'class' : 'classes'}? New credit balance will be $${newBalance.toFixed(2)}.`
+        );
+      } else {
+        confirmed = window.confirm(`Apply $${totalToApply.toFixed(2)} credit to ${datesToApply.length} unpaid ${datesToApply.length === 1 ? 'class' : 'classes'}?`);
+      }
+
+      if (!confirmed) return;
+
+      // Guard against stale UI state: skip class dates already covered by credit entries.
+      const { data: existingCredits, error: existingCreditsErr } = await supabaseClient
+        .from('credit_payments')
+        .select('class_date, applied_class_date')
+        .eq('student_id', student.id)
+        .in('class_date', datesToApply);
+
+      if (existingCreditsErr) {
+        if (typeof customAlert === 'function') {
+          await customAlert('Payment Error', `Could not verify existing credit payments: ${existingCreditsErr.message}`);
+        }
+        return;
+      }
+
+      const existingSet = new Set((existingCredits || []).map(r => String(r.class_date || '').split('T')[0]).filter(Boolean));
+      const insertDates = datesToApply.filter(d => !existingSet.has(d));
+
+      if (insertDates.length === 0) {
+        if (typeof customAlert === 'function') {
+          await customAlert('Already Paid', 'These classes are already covered. Refreshing data now.');
+        }
+        window.location.reload();
+        return;
+      }
+
+      const actualTotalToApply = classPrice * insertDates.length;
+      const actualNewBalance = +(currentBalance - actualTotalToApply).toFixed(2);
+      const rows = insertDates.map((dateStr, idx) => ({
+        student_id: student.id,
+        class_date: dateStr,
+        applied_class_date: dateStr,
+        amount: classPrice,
+        balance_after: +(currentBalance - classPrice * (idx + 1)).toFixed(2),
+      }));
+
+      const { error: insertErr } = await supabaseClient
+        .from('credit_payments')
+        .insert(rows);
+
+      if (insertErr) {
+        if (typeof customAlert === 'function') {
+          await customAlert('Payment Error', `Failed to apply credit payment: ${insertErr.message}`);
+        }
+        return;
+      }
+
+      const { error: updateErr } = await supabaseClient
+        .from('students')
+        .update({ balance: actualNewBalance })
+        .eq('id', student.id);
+
+      if (updateErr) {
+        await supabaseClient
+          .from('credit_payments')
+          .delete()
+          .eq('student_id', student.id)
+          .in('class_date', insertDates);
+        if (typeof customAlert === 'function') {
+          await customAlert('Payment Error', `Failed to update credit balance: ${updateErr.message}`);
+        }
+        return;
+      }
+
+      window.currentStudent.balance = actualNewBalance;
+      if (typeof customAlert === 'function') {
+        await customAlert(
+          'Credit Payment Applied',
+          `$${actualTotalToApply.toFixed(2)} was applied from credit to ${insertDates.length} unpaid ${insertDates.length === 1 ? 'class' : 'classes'}. Remaining credit: $${actualNewBalance.toFixed(2)}.`
+        );
+      }
+
+      window.location.reload();
     }
 
     // Track debt-lock state
