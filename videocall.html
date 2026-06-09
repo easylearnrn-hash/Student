@@ -868,6 +868,7 @@
         started: false,
         broadcastGroup: null,
         groupStudents: [],
+        realtimeChannel: null,
       };
 
       const elements = {
@@ -1129,6 +1130,24 @@
 
       // ── Class lifecycle ───────────────────────────────────────────────────────
 
+      function handleStudentJoin(studentId, name) {
+        const cb = elements.studentChecklist.querySelector('input[data-student-id="' + studentId + '"]');
+        if (cb && !cb.checked) {
+          cb.checked = true;
+          cb.dispatchEvent(new Event('change'));
+        }
+        // Flash row green briefly to highlight the new join
+        if (cb) {
+          const item = cb.closest('.checklist-item');
+          if (item) {
+            item.style.transition = 'background 0.3s';
+            item.style.background = 'rgba(93, 209, 138, 0.22)';
+            setTimeout(() => { item.style.background = ''; }, 2500);
+          }
+        }
+        debugLog('Student joined via portal:', name, studentId);
+      }
+
       async function launchClass() {
         const room = slugify(elements.roomSlug.value) || makeRoomCode();
         const jitsiUrl = 'https://meet.jit.si/' + room;
@@ -1159,7 +1178,16 @@
 
         elements.helpText.textContent = 'Class is live in a separate tab. Use the attendance panel on the right to track who showed up. Click End Class when done.';
 
-        // Broadcast to portal + send emails + load student list
+        // Subscribe to Realtime channel — auto-check students as they join via portal
+        state.realtimeChannel = supabaseClient.channel('class-' + room)
+          .on('broadcast', { event: 'student-join' }, ({ payload }) => {
+            if (payload && payload.student_id) {
+              handleStudentJoin(payload.student_id, payload.name || '');
+            }
+          })
+          .subscribe();
+
+        // Broadcast, email, load students
         if (groupName) {
           broadcastClassLive(groupName, room, jitsiUrl, title);
           notifyGroupByEmail(groupName, title, jitsiUrl);
@@ -1173,6 +1201,10 @@
         const confirmed = await customConfirm('End Class?', 'This will remove the "Join Class" button from the student portal.');
         if (!confirmed) return;
         state.started = false;
+        if (state.realtimeChannel) {
+          supabaseClient.removeChannel(state.realtimeChannel);
+          state.realtimeChannel = null;
+        }
         if (state.broadcastGroup) {
           broadcastClassEnded(state.broadcastGroup);
           state.broadcastGroup = null;

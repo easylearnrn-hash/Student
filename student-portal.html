@@ -5141,7 +5141,7 @@
             <span>🎛️</span>
             <span>Portal</span>
           </button>
-          <button class="forum-btn live-class-btn" id="joinLiveClassBtn" style="display:none;" onclick="window.open(this.dataset.joinUrl, '_blank')">
+          <button class="forum-btn live-class-btn" id="joinLiveClassBtn" style="display:none;" onclick="joinLiveClass()">
             <span class="live-indicator-dot"></span>
             <span>Class is Live — Join</span>
           </button>
@@ -8139,6 +8139,32 @@
     // PORTAL DATA LOADING
     // ==========================================================================
     
+    async function joinLiveClass() {
+      const btn = document.getElementById('joinLiveClassBtn');
+      if (!btn || !btn.dataset.joinUrl) return;
+      const url = btn.dataset.joinUrl;
+      const room = btn.dataset.roomCode;
+      // Broadcast join event via Supabase Realtime so the teacher's attendance panel auto-checks this student
+      if (room && currentStudent && currentStudent.id) {
+        try {
+          const ch = supabaseClient.channel('class-' + room);
+          ch.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+              ch.send({
+                type: 'broadcast',
+                event: 'student-join',
+                payload: { student_id: currentStudent.id, name: currentStudent.name, joined_at: new Date().toISOString() },
+              });
+              setTimeout(() => supabaseClient.removeChannel(ch), 1500);
+            }
+          });
+        } catch (e) {
+          debugLog('joinLiveClass broadcast error:', e);
+        }
+      }
+      window.open(url, '_blank');
+    }
+
     async function checkActiveLiveClass() {
       try {
         if (!currentStudent || !currentStudent.group_name) return;
@@ -8156,6 +8182,7 @@
           const ageHours = (Date.now() - startedAt.getTime()) / 3600000;
           if (ageHours < 4) {
             btn.dataset.joinUrl = data.setting_value.inviteUrl;
+            btn.dataset.roomCode = data.setting_value.room || '';
             const titleSpan = btn.querySelector('span:last-child');
             if (titleSpan) titleSpan.textContent = (data.setting_value.title || 'Class') + ' — Join Now';
             btn.style.display = '';
