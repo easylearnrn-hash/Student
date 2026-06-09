@@ -4959,17 +4959,6 @@
                   } else if (signUpData?.user) {
                     updateAuthId = signUpData.user.id;
                     updates.auth_user_id = updateAuthId;
-                    
-                    // ── Send magic link to bypass email verification ──────────────────────────
-                    try {
-                      await supabaseClient.auth.signInWithOtp({
-                        email: effectiveEmail.trim().toLowerCase(),
-                        options: { shouldCreateUser: false }
-                      });
-                      debugLog('✅ Magic link sent for existing student update:', effectiveEmail);
-                    } catch (otpErr) {
-                      console.warn('⚠️ Magic link send failed for existing student (non-critical):', otpErr);
-                    }
                   }
                 } catch (authErr) {
                   console.warn('⚠️ Auth signUp threw for existing student:', authErr);
@@ -4979,7 +4968,7 @@
               
               // Add credential note
               const credInfo = updateTempPassword
-                ? `\n✅ Portal credentials created on ${updateUpdateDate || updateRegistrationDate}\n📧 Login: ${effectiveEmail}\n🔑 Password: ${updateTempPassword}`
+                ? `\n✅ Portal credentials created on ${updateRegistrationDate}\n📧 Login: ${effectiveEmail}\n🔑 Password: ${updateTempPassword}`
                 : `\n✅ Updated from waiting list on ${updateRegistrationDate}`;
               updates.notes = (existingStudent.notes || '') + credInfo;
               
@@ -5076,10 +5065,8 @@
           const generatedStudentId = Date.now();
 
           // ── Step 1: Create Supabase auth account ────────────────
-          // IMPORTANT: supabase.auth.signUp() may require email confirmation depending on project settings.
-          // We also call signInWithOtp() immediately after to send a magic link — clicking the
-          // magic link both CONFIRMS the email AND logs the student in with one click.
-          // This bypasses any email-verification gate completely regardless of project settings.
+          // Email confirmation is disabled in Supabase Auth settings so students
+          // can log in immediately with the credentials sent in the welcome email.
           let authUserId = null;
           if (email) {
             try {
@@ -5099,18 +5086,6 @@
               } else if (signUpData?.user) {
                 authUserId = signUpData.user.id;
                 debugLog('✅ Auth account created, uid:', authUserId);
-                
-                // ── Send magic link to auto-confirm email & skip verification ──────────────
-                // This means the student clicks ONE link to activate; no separate "verify email" step.
-                try {
-                  await supabaseClient.auth.signInWithOtp({
-                    email: email.trim().toLowerCase(),
-                    options: { shouldCreateUser: false }  // user already exists from signUp above
-                  });
-                  debugLog('✅ Magic link sent — email verification bypassed for student:', email);
-                } catch (otpErr) {
-                  console.warn('⚠️ Magic link send failed (non-critical):', otpErr);
-                }
               }
             } catch (authErr) {
               console.warn('⚠️ Auth signUp threw:', authErr);
