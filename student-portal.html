@@ -647,6 +647,33 @@
       color: var(--accent-secondary);
       transform: translateY(-1px);
     }
+
+    .live-class-btn {
+      background: rgba(52, 211, 153, 0.12) !important;
+      border-color: rgba(52, 211, 153, 0.35) !important;
+      color: #34d399 !important;
+      font-weight: 700 !important;
+    }
+
+    .live-class-btn:hover {
+      background: rgba(52, 211, 153, 0.22) !important;
+      border-color: rgba(52, 211, 153, 0.55) !important;
+      transform: translateY(-1px);
+    }
+
+    .live-indicator-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #34d399;
+      flex-shrink: 0;
+      animation: livePulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.45; transform: scale(0.75); }
+    }
     
     .forum-badge {
       position: absolute;
@@ -5114,6 +5141,10 @@
             <span>🎛️</span>
             <span>Portal</span>
           </button>
+          <button class="forum-btn live-class-btn" id="joinLiveClassBtn" style="display:none;" onclick="window.open(this.dataset.joinUrl, '_blank')">
+            <span class="live-indicator-dot"></span>
+            <span>Class is Live — Join</span>
+          </button>
           <div class="account-dropdown">
             <button class="account-btn" onclick="toggleAccountDropdown()">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;opacity:0.75"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -5580,6 +5611,8 @@
     function showPrivacyTutorial() {
       const SEEN_KEY = 'arnoma:portal:privacy-hint-seen';
       if (localStorage.getItem(SEEN_KEY)) return;
+      // Don't show during admin impersonation — would consume the key on the admin's browser
+      if (sessionStorage.getItem('is_admin_viewing') === 'true' || localStorage.getItem('is_admin_viewing') === 'true') return;
 
       // Build toast if not already in DOM
       if (!document.getElementById('privacyTutorialToast')) {
@@ -8106,6 +8139,35 @@
     // PORTAL DATA LOADING
     // ==========================================================================
     
+    async function checkActiveLiveClass() {
+      try {
+        if (!currentStudent || !currentStudent.group_name) return;
+        const groupName = String(currentStudent.group_name).toUpperCase();
+        const key = 'active_videocall_' + groupName;
+        const { data } = await supabaseClient
+          .from('portal_settings')
+          .select('setting_value')
+          .eq('setting_key', key)
+          .single();
+        const btn = document.getElementById('joinLiveClassBtn');
+        if (!btn) return;
+        if (data && data.setting_value && data.setting_value.inviteUrl) {
+          const startedAt = new Date(data.setting_value.started_at);
+          const ageHours = (Date.now() - startedAt.getTime()) / 3600000;
+          if (ageHours < 4) {
+            btn.dataset.joinUrl = data.setting_value.inviteUrl;
+            const titleSpan = btn.querySelector('span:last-child');
+            if (titleSpan) titleSpan.textContent = (data.setting_value.title || 'Class') + ' — Join Now';
+            btn.style.display = '';
+            return;
+          }
+        }
+        btn.style.display = 'none';
+      } catch (_) {
+        // Silently ignore — portal_settings read failure shouldn't break anything
+      }
+    }
+
     async function loadPortalData() {
       try {
         perfTimer.mark('loadPortalData START');
@@ -8154,6 +8216,11 @@
           }),
           loadStudentAlerts().then(() => {
             perfTimer.mark('Alerts loaded');
+          }),
+          checkActiveLiveClass().then(() => {
+            if (!window._liveClassPollInterval) {
+              window._liveClassPollInterval = setInterval(checkActiveLiveClass, 60000);
+            }
           })
         ]).then(results => {
           results.forEach((result, index) => {
@@ -9074,7 +9141,7 @@
           const label = unpaidClasses.length === 1 ? 'class' : 'classes';
           let noteStr = `${unpaidClasses.length} ${label} flagged from schedule`;
           if (creditBalance > 0) {
-            noteStr += ` (You have $${creditBalance} in unused credit)`;
+            noteStr += ` (You have $${Math.round(creditBalance)} in unused credit)`;
           }
           unpaidSourceNoteEl.textContent = noteStr;
           unpaidSourceNoteEl.style.display = 'block';
@@ -9191,6 +9258,7 @@
       // Check if we have any entries
       if (uniqueEntries.length === 0) {
         paymentList.innerHTML = '<div style="text-align: center; color: #64748b; padding: 40px;">No payment records found.</div>';
+        showPrivacyTutorial();
         return;
       }
       

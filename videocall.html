@@ -7,7 +7,8 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>ARNOMA Videocall Classroom</title>
-    <script src="https://meet.jit.si/external_api.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+    <script src="shared-dialogs.js"></script>
     <style>
       :root {
         --panel-blur: 12px;
@@ -538,6 +539,86 @@
         background: #0b0e16;
       }
 
+      .attendance-log {
+        margin-top: 16px;
+        border: 1px solid rgba(196, 164, 95, 0.18);
+        border-radius: 16px;
+        overflow: hidden;
+      }
+
+      .attendance-log-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        background: rgba(196, 164, 95, 0.06);
+        border-bottom: 1px solid rgba(196, 164, 95, 0.12);
+      }
+
+      .attendance-log-head h4 {
+        margin: 0;
+        font-size: 0.88rem;
+        color: var(--gold-pale);
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      .attendance-log-head .btn {
+        padding: 6px 12px !important;
+        font-size: 0.8rem;
+        width: auto;
+      }
+
+      .attendance-log-list {
+        max-height: 190px;
+        overflow-y: auto;
+        padding: 6px 0;
+      }
+
+      .attendance-entry {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 14px;
+        font-size: 0.85rem;
+        border-bottom: 1px solid rgba(196, 164, 95, 0.06);
+      }
+
+      .attendance-entry:last-child { border-bottom: none; }
+
+      .attendance-entry .ae-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+
+      .attendance-entry.present .ae-dot { background: var(--status-active); box-shadow: 0 0 0 3px rgba(93,209,138,0.18); }
+      .attendance-entry.left   .ae-dot { background: var(--crimson); opacity: 0.65; }
+
+      .attendance-entry .ae-name {
+        flex: 1;
+        color: var(--text-strong);
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .attendance-entry .ae-time {
+        color: var(--text-muted);
+        font-size: 0.78rem;
+        white-space: nowrap;
+      }
+
+      .attendance-log-empty {
+        padding: 18px 14px;
+        color: var(--text-faint);
+        font-size: 0.85rem;
+        text-align: center;
+      }
+
       @media (max-width: 1180px) {
         .grid {
           grid-template-columns: 1fr;
@@ -573,6 +654,77 @@
           padding: 16px;
         }
       }
+
+      .checklist-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 11px 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(196, 164, 95, 0.12);
+        margin-bottom: 8px;
+        background: rgba(255, 252, 240, 0.03);
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+        user-select: none;
+      }
+
+      .checklist-item:hover {
+        background: rgba(255, 252, 240, 0.06);
+      }
+
+      .checklist-item.absent {
+        background: rgba(176, 48, 64, 0.08);
+        border-color: rgba(176, 48, 64, 0.3);
+      }
+
+      .checklist-item input[type=checkbox] {
+        width: 18px;
+        height: 18px;
+        accent-color: #5dd18a;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+
+      .checklist-item .ci-name {
+        flex: 1;
+        font-weight: 600;
+        color: var(--text-strong);
+      }
+
+      .ci-status {
+        font-size: 0.78rem;
+        padding: 3px 9px;
+        border-radius: 999px;
+      }
+
+      .ci-status.present {
+        background: rgba(93, 209, 138, 0.14);
+        color: #5dd18a;
+      }
+
+      .ci-status.absent {
+        background: rgba(176, 48, 64, 0.16);
+        color: #e07080;
+      }
+
+      .live-header {
+        margin-bottom: 18px;
+      }
+
+      .live-header h3 {
+        margin: 0 0 6px;
+        font-family: var(--font-serif);
+        color: var(--gold-pale);
+        font-size: 1.3rem;
+      }
+
+      .live-header p {
+        margin: 0;
+        color: var(--text-body);
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
     </style>
   </head>
   <body>
@@ -600,10 +752,16 @@
       <div class="grid">
         <section class="panel" id="setupPanel">
           <div class="panel-head">
-            <h2>Create or join a class</h2>
-            <p>Use one premium-grade link for the whole session. Students open the invite and enter the same secure room from any camera-enabled device.</p>
+            <h2>Launch a class</h2>
+            <p>Select your group and launch. Jitsi opens in a new tab — students receive an email invite and a "Join Class" button appears live in their portal.</p>
           </div>
           <div class="panel-body">
+            <div class="field">
+              <label for="groupSelect">Group</label>
+              <select id="groupSelect">
+                <option value="">— Select group (optional) —</option>
+              </select>
+            </div>
             <div class="field">
               <label for="classTitle">Class title</label>
               <input id="classTitle" type="text" placeholder="Biology - Period 3" />
@@ -611,39 +769,21 @@
             <div class="row">
               <div class="field">
                 <label for="hostName">Your display name</label>
-                <input id="hostName" type="text" placeholder="Teacher name" />
+                <input id="hostName" type="text" placeholder="Teacher name" value="ARNOMA" />
               </div>
               <div class="field">
                 <label for="roomSlug">Room code</label>
                 <input id="roomSlug" type="text" placeholder="auto-generated" />
               </div>
             </div>
-            <div class="row">
-              <div class="field">
-                <label for="qualityMode">Video quality</label>
-                <select id="qualityMode">
-                  <option value="high">High</option>
-                  <option value="standard">Standard</option>
-                  <option value="low">Low bandwidth</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="startMode">Start with</label>
-                <select id="startMode">
-                  <option value="video">Camera on</option>
-                  <option value="audio">Mic only</option>
-                  <option value="muted">Muted join</option>
-                </select>
-              </div>
-            </div>
+
             <div class="field">
               <label for="notes">Lesson note</label>
               <textarea id="notes" placeholder="Optional meeting note for the class"></textarea>
             </div>
 
             <div class="actions">
-              <button class="btn" id="createBtn">Create class link</button>
-              <button class="btn secondary" id="joinBtn">Join room</button>
+              <button class="btn" id="launchBtn">Launch Class</button>
               <button class="btn secondary" id="copyBtn" disabled>Copy invite link</button>
             </div>
 
@@ -667,8 +807,8 @@
                 <span class="v" id="roomStat">Not created</span>
               </div>
               <div class="stat">
-                <span class="k">Participants</span>
-                <span class="v" id="participantStat">0</span>
+                <span class="k">Students</span>
+                <span class="v" id="participantStat">—</span>
               </div>
               <div class="stat">
                 <span class="k">Meeting state</span>
@@ -677,71 +817,85 @@
             </div>
 
             <div class="info-strip" id="helpText">
-              This page uses Jitsi Meet so the room can be joined by link without building a custom server. Host this HTML on your site, then share the invite URL with students.
+              Select a group to auto-fill the title and room code. Students receive an email when you launch, and a "Join Class" button appears live in their portal.
             </div>
+
+
           </div>
         </section>
 
         <section class="panel meeting-shell">
           <div class="toolbar">
-            <button class="btn secondary" id="toggleAudioBtn" disabled>Mute</button>
-            <button class="btn secondary" id="toggleVideoBtn" disabled>Camera off</button>
-            <button class="btn secondary" id="toggleScreenBtn" disabled>Share screen</button>
-            <button class="btn secondary" id="toggleChatBtn" disabled>Chat</button>
-            <button class="btn secondary" id="toggleTileBtn" disabled>Tile view</button>
-            <button class="btn danger" id="leaveBtn" disabled>Leave class</button>
+            <button class="btn secondary" id="openRoomBtn" disabled>Open Class Room</button>
+            <button class="btn secondary" id="postAttendanceBtn" disabled>Post Attendance</button>
+            <button class="btn danger" id="endClassBtn" disabled>End Class</button>
           </div>
-          <div class="meeting-stage" id="meetingStage">
+          <div class="meeting-stage" id="attendanceStage">
             <div class="stage-overlay" id="stageOverlay">
               <div class="stage-card">
                 <h3>Ready for class</h3>
-                <p>Set up the room on the left, then create a shareable invite link. When the room starts, the meeting appears here with the full conferencing controls students need.</p>
+                <p>Select a group, fill in the details on the left, then click <strong>Launch Class</strong>. Your Jitsi room opens in a new tab — students get email invites and a live "Join Class" button in their portal.</p>
               </div>
             </div>
-            <div class="meeting-frame" id="meetingFrame"></div>
+            <div id="livePanel" style="display:none; position:absolute; inset:0; padding:22px; overflow-y:auto; box-sizing:border-box;">
+              <div class="live-header">
+                <h3 id="livePanelTitle">Class is Live</h3>
+                <p>Check everyone who <strong>attended</strong>. Uncheck absent students, then click <strong>Post Attendance</strong>.</p>
+              </div>
+              <div class="field" style="max-width:220px;">
+                <label for="absenceDate">Class date</label>
+                <input type="date" id="absenceDate" />
+              </div>
+              <div id="studentChecklist"></div>
+            </div>
           </div>
         </section>
       </div>
     </div>
 
     <script>
+      const DEBUG_MODE = false;
+      const debugLog = (...args) => DEBUG_MODE && console.log(...args);
+
+      const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+      const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
       const params = new URLSearchParams(window.location.search);
       const state = {
-        api: null,
         room: '',
         inviteUrl: '',
         started: false,
+        broadcastGroup: null,
+        groupStudents: [],
       };
 
       const elements = {
-        setupPanel: document.getElementById('setupPanel'),
-        meetingStage: document.getElementById('meetingStage'),
-        meetingFrame: document.getElementById('meetingFrame'),
-        stageOverlay: document.getElementById('stageOverlay'),
-        classTitle: document.getElementById('classTitle'),
-        hostName: document.getElementById('hostName'),
-        roomSlug: document.getElementById('roomSlug'),
-        qualityMode: document.getElementById('qualityMode'),
-        startMode: document.getElementById('startMode'),
-        notes: document.getElementById('notes'),
-        createBtn: document.getElementById('createBtn'),
-        joinBtn: document.getElementById('joinBtn'),
-        copyBtn: document.getElementById('copyBtn'),
-        copyLinkBtn: document.getElementById('copyLinkBtn'),
-        inviteBox: document.getElementById('inviteBox'),
-        inviteLink: document.getElementById('inviteLink'),
-        roomStat: document.getElementById('roomStat'),
-        participantStat: document.getElementById('participantStat'),
-        meetingStat: document.getElementById('meetingStat'),
-        connectionText: document.getElementById('connectionText'),
-        connectionDot: document.getElementById('connectionDot'),
-        helpText: document.getElementById('helpText'),
-        toggleAudioBtn: document.getElementById('toggleAudioBtn'),
-        toggleVideoBtn: document.getElementById('toggleVideoBtn'),
-        toggleScreenBtn: document.getElementById('toggleScreenBtn'),
-        toggleChatBtn: document.getElementById('toggleChatBtn'),
-        toggleTileBtn: document.getElementById('toggleTileBtn'),
-        leaveBtn: document.getElementById('leaveBtn'),
+        setupPanel:        document.getElementById('setupPanel'),
+        stageOverlay:      document.getElementById('stageOverlay'),
+        livePanel:         document.getElementById('livePanel'),
+        livePanelTitle:    document.getElementById('livePanelTitle'),
+        studentChecklist:  document.getElementById('studentChecklist'),
+        absenceDate:       document.getElementById('absenceDate'),
+        classTitle:        document.getElementById('classTitle'),
+        hostName:          document.getElementById('hostName'),
+        roomSlug:          document.getElementById('roomSlug'),
+        notes:             document.getElementById('notes'),
+        launchBtn:         document.getElementById('launchBtn'),
+        copyBtn:           document.getElementById('copyBtn'),
+        copyLinkBtn:       document.getElementById('copyLinkBtn'),
+        inviteBox:         document.getElementById('inviteBox'),
+        inviteLink:        document.getElementById('inviteLink'),
+        roomStat:          document.getElementById('roomStat'),
+        participantStat:   document.getElementById('participantStat'),
+        meetingStat:       document.getElementById('meetingStat'),
+        connectionText:    document.getElementById('connectionText'),
+        connectionDot:     document.getElementById('connectionDot'),
+        helpText:          document.getElementById('helpText'),
+        openRoomBtn:       document.getElementById('openRoomBtn'),
+        postAttendanceBtn: document.getElementById('postAttendanceBtn'),
+        endClassBtn:       document.getElementById('endClassBtn'),
+        groupSelect:       document.getElementById('groupSelect'),
       };
 
       function slugify(value) {
@@ -761,34 +915,12 @@
         return [base || 'arnoma-class', stamp, rand].join('-');
       }
 
-      function getBaseUrl() {
-        if (window.location.protocol === 'file:') {
-          return 'https://your-class-site.example/videocall.html';
-        }
-        return `${window.location.origin}${window.location.pathname}`;
-      }
-
-      function buildInviteUrl(room) {
-        const url = new URL(getBaseUrl(), window.location.href);
-        url.searchParams.set('room', room);
-        if (elements.classTitle.value.trim()) url.searchParams.set('topic', elements.classTitle.value.trim());
-        if (elements.hostName.value.trim()) url.searchParams.set('name', elements.hostName.value.trim());
-        return url.toString();
-      }
-
-      function setConnection(status, mode = 'idle') {
-        elements.connectionText.textContent = status;
-        elements.meetingStat.textContent = status;
-        elements.connectionDot.style.background = mode === 'live' ? 'var(--accent-3)' : mode === 'connecting' ? 'var(--accent)' : 'var(--danger)';
-        elements.connectionDot.style.boxShadow = mode === 'live'
-          ? '0 0 0 6px rgba(49, 208, 170, 0.14)'
-          : mode === 'connecting'
-            ? '0 0 0 6px rgba(109, 240, 255, 0.12)'
-            : '0 0 0 6px rgba(255, 109, 122, 0.14)';
-      }
-
-      function setParticipants(count) {
-        elements.participantStat.textContent = String(count);
+      function escapeHtml(str) {
+        return String(str || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
       }
 
       async function copyText(text) {
@@ -798,8 +930,7 @@
         } catch {
           const temp = document.createElement('textarea');
           temp.value = text;
-          temp.style.position = 'fixed';
-          temp.style.opacity = '0';
+          temp.style.cssText = 'position:fixed;opacity:0';
           document.body.appendChild(temp);
           temp.select();
           const ok = document.execCommand('copy');
@@ -808,12 +939,19 @@
         }
       }
 
-      function updateInvite(room) {
+      function setConnection(status, mode = 'idle') {
+        elements.connectionText.textContent = status;
+        elements.meetingStat.textContent = status;
+        elements.connectionDot.style.background = mode === 'live' ? 'var(--status-active)' : '#666';
+        elements.connectionDot.style.boxShadow = mode === 'live' ? '0 0 0 6px rgba(93,209,138,0.14)' : 'none';
+      }
+
+      function updateInvite(room, inviteUrl) {
         state.room = room;
-        state.inviteUrl = buildInviteUrl(room);
+        state.inviteUrl = inviteUrl;
         elements.roomSlug.value = room;
         elements.roomStat.textContent = room;
-        elements.inviteLink.value = state.inviteUrl;
+        elements.inviteLink.value = inviteUrl;
         elements.inviteBox.hidden = false;
         elements.copyBtn.disabled = false;
       }
@@ -822,230 +960,282 @@
         const room = params.get('room');
         const name = params.get('name');
         const topic = params.get('topic');
-
         if (room) elements.roomSlug.value = room;
         if (name) elements.hostName.value = name;
         if (topic) elements.classTitle.value = topic;
       }
 
-      function getStartMutedFlags() {
-        const mode = elements.startMode.value;
-        if (mode === 'muted') {
-          return { audioMuted: true, videoMuted: true };
+      // ── Supabase functions ────────────────────────────────────────────────────
+
+      async function loadGroups() {
+        try {
+          const { data } = await supabaseClient
+            .from('groups')
+            .select('group_name, schedule')
+            .eq('active', true)
+            .order('group_name', { ascending: true });
+          if (!data || !data.length) return;
+          data.forEach(g => {
+            const opt = document.createElement('option');
+            opt.value = g.group_name;
+            opt.textContent = 'Group ' + g.group_name + (g.schedule ? ' — ' + g.schedule : '');
+            elements.groupSelect.appendChild(opt);
+          });
+        } catch (e) {
+          debugLog('loadGroups error:', e);
         }
-        if (mode === 'audio') {
-          return { audioMuted: false, videoMuted: true };
+      }
+
+      async function broadcastClassLive(groupName, room, inviteUrl, title) {
+        if (!groupName) return;
+        try {
+          await supabaseClient.from('portal_settings').upsert({
+            setting_key: 'active_videocall_' + groupName,
+            setting_value: { room, inviteUrl, title, group_name: groupName, started_at: new Date().toISOString() },
+          }, { onConflict: 'setting_key' });
+        } catch (e) {
+          debugLog('broadcastClassLive error:', e);
         }
-        return { audioMuted: false, videoMuted: false };
       }
 
-      function getQualityPreset() {
-        const quality = elements.qualityMode.value;
-        if (quality === 'low') return { resolution: 180, maxBitratesVideo: 250000 };
-        if (quality === 'standard') return { resolution: 480, maxBitratesVideo: 800000 };
-        return { resolution: 720, maxBitratesVideo: 2000000 };
-      }
-
-      function teardownMeeting() {
-        if (state.api) {
-          try {
-            state.api.dispose();
-          } catch {}
+      async function broadcastClassEnded(groupName) {
+        if (!groupName) return;
+        try {
+          await supabaseClient.from('portal_settings')
+            .delete()
+            .eq('setting_key', 'active_videocall_' + groupName);
+        } catch (e) {
+          debugLog('broadcastClassEnded error:', e);
         }
-        state.api = null;
-        state.started = false;
-        elements.meetingFrame.innerHTML = '';
-        elements.stageOverlay.style.display = 'grid';
-        elements.toggleAudioBtn.disabled = true;
-        elements.toggleVideoBtn.disabled = true;
-        elements.toggleScreenBtn.disabled = true;
-        elements.toggleChatBtn.disabled = true;
-        elements.toggleTileBtn.disabled = true;
-        elements.leaveBtn.disabled = true;
-        setConnection('Waiting to start a class', 'idle');
-        setParticipants(0);
       }
 
-      function applyJoinedUi() {
-        elements.stageOverlay.style.display = 'none';
-        elements.toggleAudioBtn.disabled = false;
-        elements.toggleVideoBtn.disabled = false;
-        elements.toggleScreenBtn.disabled = false;
-        elements.toggleChatBtn.disabled = false;
-        elements.toggleTileBtn.disabled = false;
-        elements.leaveBtn.disabled = false;
+      async function notifyGroupByEmail(groupName, title, inviteUrl) {
+        if (!groupName) return;
+        try {
+          const { data: students } = await supabaseClient
+            .from('students')
+            .select('name, email')
+            .eq('group_name', groupName)
+            .eq('status', 'active');
+          if (!students || !students.length) return;
+          for (const s of students) {
+            let emailAddr = s.email;
+            if (!emailAddr) continue;
+            if (typeof emailAddr === 'string' && emailAddr.trim().startsWith('[')) {
+              try { emailAddr = JSON.parse(emailAddr)[0]; } catch { continue; }
+            }
+            if (typeof emailAddr !== 'string' || !emailAddr.includes('@')) continue;
+            const html = '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:28px;background:#0c0f1a;color:#f5f0e8;border-radius:14px">'
+              + '<h2 style="color:#c4a45f;margin-top:0">🎓 ' + title + ' — Class is Live</h2>'
+              + '<p>Hi ' + s.name + ',</p>'
+              + '<p>Your ARNOMA class has just started. Click below to join now:</p>'
+              + '<a href="' + inviteUrl + '" style="display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:14px 28px;border-radius:10px;text-decoration:none;font-weight:bold;margin:16px 0;font-size:1rem">Join Class Now</a>'
+              + '<p style="color:#aaa;font-size:0.85em;margin-top:20px">Or copy this link:<br><span style="color:#c4a45f">' + inviteUrl + '</span></p>'
+              + '<p style="color:#555;font-size:0.78em;margin-top:16px">This is an automated notification from ARNOMA.</p></div>';
+            await fetch(SUPABASE_URL + '/functions/v1/send-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY },
+              body: JSON.stringify({ to: emailAddr, subject: title + ' — Class is Live Now 🎓', html }),
+            }).catch(e => debugLog('email send error:', e));
+          }
+        } catch (e) {
+          debugLog('notifyGroupByEmail error:', e);
+        }
       }
 
-      function initMeeting(room) {
-        if (!window.JitsiMeetExternalAPI) {
-          setConnection('Meeting service failed to load', 'idle');
-          elements.helpText.textContent = 'The Jitsi loader did not initialize. Check your network connection and reload the page.';
+      // ── Attendance ────────────────────────────────────────────────────────────
+
+      async function loadGroupStudents(groupName) {
+        try {
+          const { data } = await supabaseClient
+            .from('students')
+            .select('id, name')
+            .eq('group_name', groupName)
+            .eq('status', 'active')
+            .order('name', { ascending: true });
+          state.groupStudents = data || [];
+          elements.participantStat.textContent = String(state.groupStudents.length);
+          renderChecklist();
+        } catch (e) {
+          debugLog('loadGroupStudents error:', e);
+          state.groupStudents = [];
+          renderChecklist();
+        }
+      }
+
+      function renderChecklist() {
+        const container = elements.studentChecklist;
+        if (!state.groupStudents.length) {
+          container.innerHTML = '<div style="color:var(--text-muted);text-align:center;padding:28px 0;">No active students found in this group.</div>';
           return;
         }
-
-        teardownMeeting();
-        updateInvite(room);
-        applyJoinedUi();
-        setConnection('Connecting to room', 'connecting');
-        state.started = true;
-
-        const { audioMuted, videoMuted } = getStartMutedFlags();
-        const quality = getQualityPreset();
-        const displayName = elements.hostName.value.trim() || 'Teacher';
-        const classTitle = elements.classTitle.value.trim() || 'ARNOMA Class';
-
-        const options = {
-          roomName: room,
-          parentNode: elements.meetingFrame,
-          width: '100%',
-          height: '100%',
-          userInfo: {
-            displayName,
-          },
-          configOverwrite: {
-            prejoinPageEnabled: false,
-            disableInviteFunctions: true,
-            startWithAudioMuted: audioMuted,
-            startWithVideoMuted: videoMuted,
-            disableDeepLinking: true,
-            subject: classTitle,
-            toolbarButtons: [
-              'microphone',
-              'camera',
-              'desktop',
-              'chat',
-              'tileview',
-              'raisehand',
-              'settings',
-              'select-background',
-              'videoquality',
-              'fullscreen',
-              'hangup',
-            ],
-            resolution: quality.resolution,
-            maxBitratesVideo: quality.maxBitratesVideo,
-          },
-          interfaceConfigOverwrite: {
-            DEFAULT_REMOTE_DISPLAY_NAME: 'Student',
-            SHOW_JITSI_WATERMARK: false,
-            SHOW_WATERMARK_FOR_GUESTS: false,
-            SHOW_BRAND_WATERMARK: false,
-            TOOLBAR_ALWAYS_VISIBLE: true,
-            MOBILE_APP_PROMO: false,
-            DISABLE_JOIN_LEAVE_NOTIFICATIONS: false,
-            VIDEO_QUALITY_LABEL_DISABLED: false,
-          },
-        };
-
-        state.api = new JitsiMeetExternalAPI('meet.jit.si', options);
-
-        state.api.addListener('videoConferenceJoined', () => {
-          setConnection('Class is live', 'live');
-          elements.helpText.textContent = 'Students can join with the invite link. The Jitsi toolbar inside the meeting handles camera, microphone, chat, screen share, and tile view.';
-        });
-
-        state.api.addListener('participantJoined', () => {
-          setParticipants(Number(elements.participantStat.textContent || 0) + 1);
-        });
-
-        state.api.addListener('participantLeft', () => {
-          setParticipants(Math.max(0, Number(elements.participantStat.textContent || 0) - 1));
-        });
-
-        state.api.addListener('readyToClose', () => {
-          teardownMeeting();
-        });
-
-        state.api.addListener('tileViewChanged', ({ enabled }) => {
-          elements.toggleTileBtn.textContent = enabled ? 'Tile view on' : 'Tile view';
-        });
-
-        state.api.addListener('audioMuteStatusChanged', ({ muted }) => {
-          elements.toggleAudioBtn.textContent = muted ? 'Unmute' : 'Mute';
-        });
-
-        state.api.addListener('videoMuteStatusChanged', ({ muted }) => {
-          elements.toggleVideoBtn.textContent = muted ? 'Camera on' : 'Camera off';
+        container.innerHTML = state.groupStudents.map(s =>
+          `<label class="checklist-item">
+            <input type="checkbox" checked data-student-id="${s.id}" data-student-name="${escapeHtml(s.name)}" />
+            <span class="ci-name">${escapeHtml(s.name)}</span>
+            <span class="ci-status present">Present</span>
+          </label>`
+        ).join('');
+        container.querySelectorAll('input[type=checkbox]').forEach(cb => {
+          cb.addEventListener('change', e => {
+            const item = e.target.closest('.checklist-item');
+            const badge = item.querySelector('.ci-status');
+            if (e.target.checked) {
+              item.classList.remove('absent');
+              badge.className = 'ci-status present';
+              badge.textContent = 'Present';
+            } else {
+              item.classList.add('absent');
+              badge.className = 'ci-status absent';
+              badge.textContent = 'Absent';
+            }
+          });
         });
       }
 
-      function startFromForm() {
-        const room = slugify(elements.roomSlug.value) || makeRoomCode();
-        updateInvite(room);
-        initMeeting(room);
-      }
-
-      elements.createBtn.addEventListener('click', () => {
-        if (!elements.roomSlug.value.trim()) {
-          elements.roomSlug.value = makeRoomCode();
+      async function postAttendance() {
+        const date = elements.absenceDate.value;
+        if (!date) {
+          await customAlert('Missing Date', 'Please select a class date before posting attendance.');
+          return;
         }
-        startFromForm();
+        const absentStudents = [];
+        elements.studentChecklist.querySelectorAll('input[type=checkbox]').forEach(cb => {
+          if (!cb.checked) {
+            absentStudents.push({ id: Number(cb.dataset.studentId), name: cb.dataset.studentName });
+          }
+        });
+        if (!absentStudents.length) {
+          await customAlert('All Present', 'All students are marked as present — no absences to record.');
+          return;
+        }
+        const absentNames = absentStudents.map(s => '• ' + s.name).join('\n');
+        const presentCount = state.groupStudents.length - absentStudents.length;
+        const confirmed = await customConfirm(
+          'Post Attendance?',
+          'Present: ' + presentCount + '  |  Absent: ' + absentStudents.length + '\n\nAbsent students:\n' + absentNames + '\n\nClass date: ' + date
+        );
+        if (!confirmed) return;
+        const rows = absentStudents.map(s => ({ student_id: s.id, class_date: date }));
+        const { error } = await supabaseClient
+          .from('student_absences')
+          .upsert(rows, { onConflict: 'student_id,class_date' });
+        if (error) {
+          await customAlert('Error', 'Failed to post attendance: ' + error.message);
+          return;
+        }
+        await customAlert('Attendance Posted', 'Marked ' + absentStudents.length + ' student(s) as absent on ' + date + '.');
+      }
+
+      // ── Class lifecycle ───────────────────────────────────────────────────────
+
+      async function launchClass() {
+        const room = slugify(elements.roomSlug.value) || makeRoomCode();
+        const jitsiUrl = 'https://meet.jit.si/' + room;
+        const title = elements.classTitle.value.trim() || 'ARNOMA Class';
+        const groupName = elements.groupSelect.value;
+
+        // Open Jitsi in a new tab (no iframe — no 5-min limit)
+        window.open(jitsiUrl, '_blank');
+
+        // Update invite UI
+        updateInvite(room, jitsiUrl);
+
+        // Set live state
+        state.started = true;
+        state.broadcastGroup = groupName || null;
+        setConnection('Class is live', 'live');
+
+        // Show live attendance panel
+        elements.stageOverlay.style.display = 'none';
+        elements.livePanel.style.display = 'block';
+        elements.livePanelTitle.textContent = (groupName ? 'Group ' + groupName + ' — ' : '') + 'Class is Live';
+        elements.absenceDate.value = new Date().toISOString().slice(0, 10);
+
+        // Enable toolbar buttons
+        elements.openRoomBtn.disabled = false;
+        elements.endClassBtn.disabled = false;
+        elements.postAttendanceBtn.disabled = false;
+
+        elements.helpText.textContent = 'Class is live in a separate tab. Use the attendance panel on the right to track who showed up. Click End Class when done.';
+
+        // Broadcast to portal + send emails + load student list
+        if (groupName) {
+          broadcastClassLive(groupName, room, jitsiUrl, title);
+          notifyGroupByEmail(groupName, title, jitsiUrl);
+          await loadGroupStudents(groupName);
+        } else {
+          elements.studentChecklist.innerHTML = '<div style="color:var(--text-muted);padding:18px 0;">No group selected — select a group before launching to enable attendance tracking.</div>';
+        }
+      }
+
+      async function endClass() {
+        const confirmed = await customConfirm('End Class?', 'This will remove the "Join Class" button from the student portal.');
+        if (!confirmed) return;
+        state.started = false;
+        if (state.broadcastGroup) {
+          broadcastClassEnded(state.broadcastGroup);
+          state.broadcastGroup = null;
+        }
+        elements.stageOverlay.style.display = 'grid';
+        elements.livePanel.style.display = 'none';
+        elements.openRoomBtn.disabled = true;
+        elements.endClassBtn.disabled = true;
+        elements.postAttendanceBtn.disabled = true;
+        setConnection('Waiting to start a class', 'idle');
+        elements.participantStat.textContent = '—';
+        elements.helpText.textContent = 'Select a group to auto-fill the title and room code. Students receive an email when you launch, and a "Join Class" button appears live in their portal.';
+      }
+
+      // ── Group selector ────────────────────────────────────────────────────────
+
+      elements.groupSelect.addEventListener('change', () => {
+        const g = elements.groupSelect.value;
+        if (!g) return;
+        if (!elements.classTitle.value.trim() || elements.classTitle.dataset.autoFilled) {
+          elements.classTitle.value = 'ARNOMA Group ' + g;
+          elements.classTitle.dataset.autoFilled = '1';
+        }
+        elements.roomSlug.value = 'arnoma-grp-' + g.toLowerCase();
       });
 
-      elements.joinBtn.addEventListener('click', () => {
-        const room = slugify(elements.roomSlug.value) || slugify(params.get('room')) || makeRoomCode();
-        elements.roomSlug.value = room;
-        startFromForm();
+      elements.classTitle.addEventListener('input', () => {
+        delete elements.classTitle.dataset.autoFilled;
       });
+
+      // ── Event listeners ───────────────────────────────────────────────────────
+
+      elements.launchBtn.addEventListener('click', launchClass);
+
+      elements.openRoomBtn.addEventListener('click', () => {
+        if (state.room) window.open('https://meet.jit.si/' + state.room, '_blank');
+      });
+
+      elements.postAttendanceBtn.addEventListener('click', postAttendance);
+      elements.endClassBtn.addEventListener('click', endClass);
 
       elements.copyBtn.addEventListener('click', async () => {
         if (!state.inviteUrl) return;
         const ok = await copyText(state.inviteUrl);
-        elements.copyBtn.textContent = ok ? 'Copied' : 'Copy failed';
-        setTimeout(() => {
-          elements.copyBtn.textContent = 'Copy invite link';
-        }, 1400);
+        elements.copyBtn.textContent = ok ? 'Copied!' : 'Copy failed';
+        setTimeout(() => { elements.copyBtn.textContent = 'Copy invite link'; }, 1400);
       });
 
       elements.copyLinkBtn.addEventListener('click', async () => {
         const ok = await copyText(elements.inviteLink.value);
         elements.copyLinkBtn.textContent = ok ? 'Copied' : 'Copy';
-        setTimeout(() => {
-          elements.copyLinkBtn.textContent = 'Copy';
-        }, 1400);
+        setTimeout(() => { elements.copyLinkBtn.textContent = 'Copy'; }, 1400);
       });
 
-      elements.toggleAudioBtn.addEventListener('click', () => {
-        state.api?.executeCommand('toggleAudio');
-      });
-
-      elements.toggleVideoBtn.addEventListener('click', () => {
-        state.api?.executeCommand('toggleVideo');
-      });
-
-      elements.toggleScreenBtn.addEventListener('click', () => {
-        state.api?.executeCommand('toggleShareScreen');
-      });
-
-      elements.toggleChatBtn.addEventListener('click', () => {
-        state.api?.executeCommand('toggleChat');
-      });
-
-      elements.toggleTileBtn.addEventListener('click', () => {
-        state.api?.executeCommand('toggleTileView');
-      });
-
-      elements.leaveBtn.addEventListener('click', () => {
-        state.api?.executeCommand('hangup');
-        teardownMeeting();
-      });
-
-      window.addEventListener('beforeunload', () => {
-        try {
-          state.api?.dispose();
-        } catch {}
-      });
+      // ── Init ──────────────────────────────────────────────────────────────────
 
       readQueryDefaults();
+      loadGroups();
 
-      const presetRoom = slugify(params.get('room'));
-      if (presetRoom) {
-        elements.roomSlug.value = presetRoom;
-        startFromForm();
-      } else {
+      if (!elements.roomSlug.value.trim()) {
         elements.roomSlug.value = makeRoomCode();
-        elements.roomStat.textContent = 'Not created';
       }
+      elements.absenceDate.value = new Date().toISOString().slice(0, 10);
     </script>
   </body>
 </html>
