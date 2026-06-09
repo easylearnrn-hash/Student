@@ -1706,7 +1706,7 @@
         bottom: 0;
         background: rgba(15, 23, 42, 0.7);
         backdrop-filter: blur(var(--list-blur));
-        z-index: 998;
+        z-index: 100098;
         opacity: 0;
         pointer-events: none;
         transition: opacity 0.3s ease;
@@ -1729,7 +1729,7 @@
         box-shadow:
           -10px 0 60px rgba(0, 0, 0, 0.6),
           inset 1px 0 0 rgba(196, 164, 95, 0.06);
-        z-index: 999;
+        z-index: 100099;
         transform: translateX(100%);
         transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         display: flex;
@@ -5078,12 +5078,7 @@
           <div class="detail-field">
             <div class="detail-field-label">Group</div>
             <div class="detail-group-buttons" id="detailGroupButtons">
-              <button class="detail-group-btn" data-group="A">A</button>
-              <button class="detail-group-btn" data-group="B">B</button>
-              <button class="detail-group-btn" data-group="C">C</button>
-              <button class="detail-group-btn" data-group="D">D</button>
-              <button class="detail-group-btn" data-group="E">E</button>
-              <button class="detail-group-btn" data-group="F">F</button>
+              <!-- populated dynamically from groups table -->
               <input type="text" class="detail-group-custom" id="detailGroupCustom" placeholder="Custom">
             </div>
           </div>
@@ -13193,6 +13188,8 @@ ORDER BY timestamp DESC;</pre>
 
         // Setup button event listeners
         setupDetailsButtonListeners();
+        // Populate group buttons from groups table
+        populateDetailGroupButtons();
       }
 
       function populateStudentFields(student) {
@@ -13207,11 +13204,12 @@ ORDER BY timestamp DESC;</pre>
         document.getElementById('detailPhone').value = formatPhone(student.phone || '');
         
         // Group buttons
-        const groupLetter = student.group_name ? student.group_name.replace('Group ', '').trim() : '';
+        const groupLetter = student.group_name ? student.group_name.replace(/^Group\s*/i, '').trim() : '';
         document.querySelectorAll('.detail-group-btn').forEach(btn => {
           btn.classList.toggle('active', btn.dataset.group === groupLetter);
         });
-        document.getElementById('detailGroupCustom').value = groupLetter && !['A', 'B', 'C', 'D', 'E', 'F'].includes(groupLetter) ? groupLetter : '';
+        const knownGroupLetters = Array.from(document.querySelectorAll('.detail-group-btn')).map(b => b.dataset.group);
+        document.getElementById('detailGroupCustom').value = groupLetter && !knownGroupLetters.includes(groupLetter) ? groupLetter : '';
         
         // Status
         document.getElementById('detailStatus').value = student.status || 'active';
@@ -13257,14 +13255,35 @@ ORDER BY timestamp DESC;</pre>
         document.getElementById('saveDetailsBtn').innerHTML = '➕ Create New Student';
       }
 
+      async function populateDetailGroupButtons() {
+        const container = document.getElementById('detailGroupButtons');
+        const customInput = document.getElementById('detailGroupCustom');
+        // Remove old buttons (keep the custom input)
+        container.querySelectorAll('.detail-group-btn').forEach(b => b.remove());
+        try {
+          const groups = await loadGroupsFromSupabase();
+          const activeGroups = (groups || []).filter(g => g.active !== false);
+          activeGroups.forEach(g => {
+            const letter = g.name.replace(/^Group\s*/i, '').trim();
+            const btn = document.createElement('button');
+            btn.className = 'detail-group-btn';
+            btn.dataset.group = letter;
+            btn.textContent = letter;
+            container.insertBefore(btn, customInput);
+          });
+        } catch (e) {
+          debugLog('Could not load groups for sidebar buttons', e);
+        }
+      }
+
       function setupDetailsButtonListeners() {
-        // Group buttons
-        document.querySelectorAll('.detail-group-btn').forEach(btn => {
-          btn.onclick = () => {
-            document.querySelectorAll('.detail-group-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            document.getElementById('detailGroupCustom').value = '';
-          };
+        // Group buttons — event delegation so dynamic buttons work
+        document.getElementById('detailGroupButtons').addEventListener('click', (e) => {
+          const btn = e.target.closest('.detail-group-btn');
+          if (!btn) return;
+          document.querySelectorAll('.detail-group-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          document.getElementById('detailGroupCustom').value = '';
         });
 
         // Custom group input
