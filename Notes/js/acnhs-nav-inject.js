@@ -436,6 +436,9 @@
 
     /* CSS custom-property overrides: remap dark vars to light-paper equivalents */
     var printOverride = [
+      /* ── Force all backgrounds/colors to print exactly as specified ── */
+      '* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }',
+
       /* ── CRITICAL: force body visible — overrides the note-guard display:none ── */
       'body { display: block !important; visibility: visible !important; opacity: 1 !important; }',
 
@@ -522,6 +525,8 @@
       '.card.teal h3 { color: #0f6b72 !important; }',
       '.card.purple { border-color: #7c3aed !important; background: #faf5ff !important; }',
       '.card.purple h3 { color: #5b21b6 !important; }',
+      /* force card backgrounds to print */
+      '.card, .card.gold, .card.red, .card.green, .card.blue, .card.teal, .card.purple { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }',
 
       /* ── Alerts ── */
       '.alert {',
