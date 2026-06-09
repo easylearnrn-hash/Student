@@ -432,9 +432,7 @@
     /* ── 4. Resolve logo URL for the print header ── */
     var logoUrl = buildLogoUrl();
 
-    /* ── 5. Build the print window ── */
-    var pw = window.open('', '_blank', 'width=1020,height=900,scrollbars=yes');
-    if (!pw) { alert('Pop-up blocked. Please allow pop-ups for this site and try again.'); return; }
+    /* ── 5. Build the print document as a Blob URL (avoids document.write restriction on file://) ── */
 
     /* CSS custom-property overrides: remap dark vars to light-paper equivalents */
     var printOverride = [
@@ -532,12 +530,14 @@
       '  margin-bottom: 11px !important;',
       '  font-size: 11px !important;',
       '  break-inside: avoid !important;',
+      '  -webkit-print-color-adjust: exact !important;',
+      '  print-color-adjust: exact !important;',
       '}',
-      '.alert.yellow { background: #fffbf0 !important; border: 1.5px solid #e6b800 !important; color: #5c4000 !important; }',
-      '.alert.red    { background: #fff5f5 !important; border: 1.5px solid #e05c5c !important; color: #7a1a1a !important; }',
-      '.alert.teal   { background: #f0fafb !important; border: 1.5px solid #2a9d8f !important; color: #0a4f55 !important; }',
-      '.alert.green  { background: #f3fbf5 !important; border: 1.5px solid #2e8b57 !important; color: #155226 !important; }',
-      '.alert.blue   { background: #f5f7fc !important; border: 1.5px solid #3a60c0 !important; color: #1a3060 !important; }',
+      '.alert.yellow, .alert.alert-yellow { background: #fffbf0 !important; border: 1.5px solid #e6b800 !important; color: #5c4000 !important; }',
+      '.alert.red,    .alert.alert-red    { background: #fff5f5 !important; border: 1.5px solid #e05c5c !important; color: #7a1a1a !important; }',
+      '.alert.teal,   .alert.alert-teal   { background: #f0fafb !important; border: 1.5px solid #2a9d8f !important; color: #0a4f55 !important; }',
+      '.alert.green,  .alert.alert-green  { background: #f3fbf5 !important; border: 1.5px solid #2e8b57 !important; color: #155226 !important; }',
+      '.alert.blue,   .alert.alert-blue   { background: #f5f7fc !important; border: 1.5px solid #3a60c0 !important; color: #1a3060 !important; }',
       '.alert strong, .alert b { color: inherit !important; }',
 
       /* ── Tables ── */
@@ -653,101 +653,97 @@
       '}',
     ]).concat([
 
-      /* ── Premium print cover header ── */
+      /* ── Print cover header ── */
       '.arnoma-cover {',
-      '  display: flex;',
-      '  align-items: stretch;',
-      '  border-bottom: 2.5px solid #1a1612;',
-      '  padding-bottom: 16px;',
-      '  margin-bottom: 30px;',
-      '  gap: 20px;',
+      '  border: 1.5px solid #c9a84c;',
+      '  border-radius: 10px;',
+      '  overflow: hidden;',
+      '  margin-bottom: 32px;',
       '  page-break-inside: avoid;',
       '}',
-      '.arnoma-cover-left {',
+      '.arnoma-cover-band {',
+      '  background: #1a1612;',
+      '  padding: 10px 18px;',
       '  display: flex;',
       '  align-items: center;',
-      '  gap: 14px;',
-      '  flex: 1;',
+      '  justify-content: space-between;',
+      '  gap: 12px;',
+      '}',
+      '.arnoma-cover-band-left {',
+      '  display: flex;',
+      '  align-items: center;',
+      '  gap: 10px;',
       '}',
       '.arnoma-cover-seal {',
-      '  width: 54px; height: 54px;',
+      '  width: 30px; height: 30px;',
       '  border-radius: 50%;',
-      '  border: 1.5px solid #c9a84c;',
       '  object-fit: contain;',
+      '  border: 1px solid #c9a84c;',
       '  flex-shrink: 0;',
       '}',
-      '.arnoma-cover-inst {',
-      '  line-height: 1.3;',
-      '}',
-      '.arnoma-cover-inst .ci-name {',
-      '  font-family: "Playfair Display", Georgia, "Times New Roman", serif;',
-      '  font-size: 13px;',
+      '.ci-name {',
+      '  font-size: 11.5px;',
       '  font-weight: 700;',
-      '  color: #1a1612;',
+      '  color: #f0e6c8;',
+      '  letter-spacing: .03em;',
       '  display: block;',
       '}',
-      '.arnoma-cover-inst .ci-sub {',
-      '  font-size: 8.5px;',
-      '  font-weight: 700;',
+      '.ci-sub {',
+      '  font-size: 8px;',
+      '  color: #8a7248;',
       '  letter-spacing: .1em;',
       '  text-transform: uppercase;',
-      '  color: #8a7050;',
       '  display: block;',
       '  margin-top: 2px;',
       '}',
-      '.arnoma-cover-rule {',
-      '  width: 1px;',
-      '  background: #c9a84c;',
-      '  margin: 4px 0;',
-      '  flex-shrink: 0;',
-      '}',
-      '.arnoma-cover-doc {',
-      '  flex: 2;',
-      '  display: flex;',
-      '  flex-direction: column;',
-      '  justify-content: center;',
-      '}',
-      '.arnoma-cover-doc .cd-category {',
+      '.ci-year {',
       '  font-size: 8.5px;',
+      '  color: #8a7248;',
+      '  letter-spacing: .06em;',
+      '  white-space: nowrap;',
+      '}',
+      '.arnoma-cover-body {',
+      '  background: #fffdf7;',
+      '  padding: 18px 22px 16px;',
+      '}',
+      '.cd-category {',
+      '  font-size: 8px;',
       '  font-weight: 800;',
-      '  letter-spacing: .14em;',
+      '  letter-spacing: .22em;',
       '  text-transform: uppercase;',
       '  color: #8a6318;',
-      '  margin-bottom: 4px;',
+      '  margin-bottom: 10px;',
       '  display: flex;',
       '  align-items: center;',
-      '  gap: 7px;',
+      '  gap: 10px;',
       '}',
-      '.arnoma-cover-doc .cd-category::before {',
+      '.cd-category::after {',
       '  content: "";',
-      '  display: inline-block;',
-      '  width: 5px; height: 5px;',
-      '  background: #c9a84c;',
-      '  border-radius: 50%;',
+      '  flex: 1;',
+      '  height: 1px;',
+      '  background: linear-gradient(to right, #c9a84c 0%, transparent 100%);',
       '}',
-      '.arnoma-cover-doc .cd-title {',
+      '.cd-title {',
       '  font-family: "Playfair Display", Georgia, "Times New Roman", serif;',
-      '  font-size: 20px;',
+      '  font-size: 26px;',
       '  font-weight: 800;',
       '  color: #1a1612;',
       '  line-height: 1.2;',
-      '  margin-bottom: 6px;',
+      '  margin-bottom: 12px;',
       '}',
-      '.arnoma-cover-doc .cd-meta {',
+      '.cd-meta {',
       '  font-size: 9px;',
       '  color: #6a5a40;',
       '  letter-spacing: .04em;',
       '  display: flex;',
-      '  gap: 14px;',
+      '  align-items: center;',
+      '  gap: 5px;',
       '  flex-wrap: wrap;',
       '}',
-      '.arnoma-cover-doc .cd-meta span::before {',
-      '  content: "· ";',
+      '.cd-sep {',
       '  color: #c9a84c;',
-      '}',
-      '.arnoma-cover-doc .cd-meta span:first-child::before {',
-      '  content: "";',
-      '}',
+      '  font-weight: 700;',
+      '}' ,
 
       /* ── Footer: page number (skipped for admin) ── */
       '@media print {',
@@ -774,7 +770,7 @@
     var safeStudent = studentName.replace(/</g, '&lt;').replace(/>/g, '&gt;');
     var safeCat    = category.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    pw.document.write(
+    var __printHtml = (
       '<!DOCTYPE html>\n<html lang="en">\n<head>\n' +
       '<meta charset="UTF-8"/>\n' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0"/>\n' +
@@ -795,24 +791,26 @@
         '<rect width="100%" height="100%" fill="url(#wm-pat)"/></svg></div>\n'
       ) +
 
-      /* ── Premium cover header ── */
+      /* ── Print cover header ── */
       '<div class="arnoma-cover">' +
-        '<div class="arnoma-cover-left">' +
-          (logoUrl ? '<img class="arnoma-cover-seal" src="' + logoUrl + '" alt="ACNHS Seal" onerror="this.style.display=\'none\'">' : '') +
-          '<div class="arnoma-cover-inst">' +
-            '<span class="ci-name">Armenian College of Nursing</span>' +
-            '<span class="ci-sub">&amp; Health Sciences &nbsp;·&nbsp; ARNOMA</span>' +
+        '<div class="arnoma-cover-band">' +
+          '<div class="arnoma-cover-band-left">' +
+            (logoUrl ? '<img class="arnoma-cover-seal" src="' + logoUrl + '" alt="ACNHS Seal" onerror="this.style.display=\'none\'">' : '') +
+            '<div>' +
+              '<span class="ci-name">Armenian College of Nursing &amp; Health Sciences</span>' +
+              '<span class="ci-sub">ARNOMA &nbsp;&middot;&nbsp; NCLEX-RN Study Materials</span>' +
+            '</div>' +
           '</div>' +
+          '<span class="ci-year">ACNHS &copy; 2026</span>' +
         '</div>' +
-        '<div class="arnoma-cover-rule"></div>' +
-        '<div class="arnoma-cover-doc">' +
+        '<div class="arnoma-cover-body">' +
           '<div class="cd-category">' + safeCat + '</div>' +
           '<div class="cd-title">' + safeTitle + '</div>' +
           '<div class="cd-meta">' +
             '<span>' + safeStudent + '</span>' +
+            (safeStudent ? '<span class="cd-sep">&middot;</span>' : '') +
             '<span>Study Guide</span>' +
-            (isAdmin ? '' : '<span>' + printDate + '</span>') +
-            '<span>ACNHS &copy; 2026</span>' +
+            (isAdmin ? '' : '<span class="cd-sep">&middot;</span><span>' + printDate + '</span>') +
           '</div>' +
         '</div>' +
       '</div>\n' +
@@ -835,13 +833,16 @@
       '  setTimeout(function() {\n' +
       '    window.focus();\n' +
       '    window.print();\n' +
-      '    setTimeout(function() { window.close(); }, 2200);\n' +
       '  }, 650);\n' +
       '})();\n' +
       '<\/script>\n' +
       '</body></html>'
     );
-    pw.document.close();
+    var __blob   = new Blob([__printHtml], {type: 'text/html'});
+    var __blobUrl = URL.createObjectURL(__blob);
+    var pw = window.open(__blobUrl, '_blank', 'width=1020,height=900,scrollbars=yes');
+    if (!pw) { URL.revokeObjectURL(__blobUrl); alert('Pop-up blocked. Please allow pop-ups for this site and try again.'); return; }
+    setTimeout(function() { URL.revokeObjectURL(__blobUrl); }, 15000);
   };
 
   /* ─── 7. GUARD REMOVAL — always runs, even before full init ─── */

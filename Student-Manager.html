@@ -653,6 +653,64 @@
         box-shadow: 0 0 12px rgba(184, 156, 245, 0.2);
       }
 
+      .student-card-actions {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 8px;
+      }
+
+      .restart-pill {
+        padding: 6px 11px;
+        border-radius: 10px;
+        font-family: var(--font-sans);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        border: 1px solid rgba(176, 48, 64, 0.38);
+        background: rgba(176, 48, 64, 0.14);
+        color: #ffb4bd;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .restart-pill:hover {
+        background: rgba(176, 48, 64, 0.2);
+        border-color: rgba(176, 48, 64, 0.55);
+      }
+
+      .credentials-pill {
+        padding: 6px 11px;
+        border-radius: 10px;
+        font-family: var(--font-sans);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        border: 1px solid rgba(138, 180, 255, 0.38);
+        background: rgba(138, 180, 255, 0.12);
+        color: #cfe2ff;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .credentials-pill:hover {
+        background: rgba(138, 180, 255, 0.2);
+        border-color: rgba(138, 180, 255, 0.6);
+      }
+
+      .credentials-pill.resend {
+        border-color: rgba(93, 209, 138, 0.35);
+        background: rgba(93, 209, 138, 0.12);
+        color: #bcf3d1;
+      }
+
+      .credentials-pill.resend:hover {
+        background: rgba(93, 209, 138, 0.2);
+        border-color: rgba(93, 209, 138, 0.55);
+      }
+
       /* ────────────────────────────────────────────
          ACTION MODALS (Add / Bulk / Waiting / Dupes)
          ──────────────────────────────────────────── */
@@ -950,7 +1008,7 @@
 
       /* ── Profile modal layout ── */
       .profile-hero {
-        padding: 32px 36px 24px;
+        padding: 32px 92px 24px 36px;
         background: linear-gradient(135deg, rgba(196,164,95,0.06) 0%, rgba(10,12,22,0) 70%);
         border-bottom: 1px solid rgba(196,164,95,0.12);
         display: flex;
@@ -1014,7 +1072,7 @@
         text-transform: uppercase; letter-spacing: 0.06em;
         cursor: pointer; border: 2px solid transparent;
         background: transparent; transition: all 0.2s;
-        align-self: flex-start; margin-top: 2px;
+        align-self: flex-start; margin-top: 2px; margin-right: 12px;
       }
       .profile-status-btn:hover { transform: scale(1.05); }
       .profile-status-btn.active {
@@ -1128,6 +1186,13 @@
       .profile-toggle-label span {
         font-size: 10px; display: block;
         color: var(--text-faint); margin-top: 2px;
+      }
+
+      .profile-account-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
       }
 
       /* Modal footer */
@@ -2184,6 +2249,13 @@
                 <textarea id="modalNotes" class="profile-field-input notes-input"
                   rows="4" placeholder="Any notes about this student..."></textarea>
               </div>
+
+              <div class="profile-section-title" style="margin-top:14px;">Account Actions</div>
+              <div class="profile-account-actions">
+                <button class="restart-pill" type="button" onclick="if(currentStudent){ restartStudentFinancials(currentStudent.id); }">Restart</button>
+                <button class="credentials-pill" type="button" onclick="if(currentStudent){ resetStudentCredentials(currentStudent.id); }">Reset Credentials</button>
+                <button class="credentials-pill resend" type="button" onclick="if(currentStudent){ resendStudentCredentialsEmail(currentStudent.id); }">Resend Credentials</button>
+              </div>
             </div>
 
           </div><!-- /.profile-body -->
@@ -2409,6 +2481,85 @@
         return `Group ${code}`;
       }
 
+      const DEFAULT_GROUP_CODES = ['A', 'B', 'C', 'D', 'E', 'F'];
+      let activeGroupCodes = [...DEFAULT_GROUP_CODES];
+
+      async function loadActiveGroupsFromManager(forceRefresh = false) {
+        if (!supabaseClient) {
+          return activeGroupCodes;
+        }
+
+        if (!forceRefresh && activeGroupCodes.length) {
+          return activeGroupCodes;
+        }
+
+        try {
+          const { data, error } = await supabaseClient
+            .from('groups')
+            .select('group_name, active')
+            .eq('active', true)
+            .order('group_name', { ascending: true });
+
+          if (error) throw error;
+
+          const normalized = Array.from(new Set((data || [])
+            .map(g => canonicalizeGroupCode(g.group_name || ''))
+            .filter(Boolean)));
+
+          activeGroupCodes = normalized.length ? normalized : [...DEFAULT_GROUP_CODES];
+        } catch (err) {
+          console.warn('⚠️ Failed to load active groups from Group Manager:', err);
+          activeGroupCodes = [...DEFAULT_GROUP_CODES];
+        }
+
+        return activeGroupCodes;
+      }
+
+      function renderEditModalGroupButtons(selectedGroupCode = '') {
+        const container = document.getElementById('groupButtons');
+        if (!container) return;
+
+        const selected = canonicalizeGroupCode(selectedGroupCode || '');
+        const groupsToRender = (activeGroupCodes && activeGroupCodes.length)
+          ? activeGroupCodes
+          : DEFAULT_GROUP_CODES;
+
+        container.innerHTML = groupsToRender.map(groupCode => `
+          <button class="group-btn" onclick="selectGroup('${groupCode}', this)">${groupCode}</button>
+        `).join('');
+
+        if (selected) {
+          container.querySelectorAll('.group-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.textContent.trim() === selected);
+          });
+        }
+      }
+
+      function renderGroupFilterOptions(selectId) {
+        const selectEl = document.getElementById(selectId);
+        if (!selectEl) return;
+
+        const previousValue = selectEl.value;
+        const groupsToRender = (activeGroupCodes && activeGroupCodes.length)
+          ? activeGroupCodes
+          : DEFAULT_GROUP_CODES;
+
+        selectEl.innerHTML = `
+          <option value="">All Groups</option>
+          ${groupsToRender.map(groupCode => `<option value="${groupCode}">Group ${groupCode}</option>`).join('')}
+          <option value="no-group">No Group</option>
+        `;
+
+        const hasPreviousValue = Array.from(selectEl.options).some(opt => opt.value === previousValue);
+        selectEl.value = hasPreviousValue ? previousValue : '';
+      }
+
+      function syncAllGroupDrivenUI() {
+        renderEditModalGroupButtons();
+        renderGroupFilterOptions('groupFilter');
+        renderGroupFilterOptions('portalRegGroupFilter');
+      }
+
       async function normalizeStudentGroupNames(fixes = []) {
         if (!Array.isArray(fixes) || fixes.length === 0 || !supabaseClient) {
           return;
@@ -2602,6 +2753,7 @@
       // ============================================================
   const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
   const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
+  const SUPABASE_SERVICE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2MjgxMTMxNywiZXhwIjoyMDc4Mzg3MzE3fQ.QN1asduC--73-QjFY5bvWQbYQ5GE3_9ppf1hJO7r8yw';
 
       let supabaseClient = null;
       let students = [];
@@ -2686,6 +2838,8 @@
           }
           
           debugLog('✅ Admin access verified, loading students...');
+          await loadActiveGroupsFromManager(true);
+          syncAllGroupDrivenUI();
           loadStudents();
         });
       } else {
@@ -3353,7 +3507,9 @@
                   </div>
                 </div>
               </div>
-              <div class="status-pill ${student.status}" data-action="cycle-status" data-student-id="${student.id}">${student.status}</div>
+              <div class="student-card-actions">
+                <div class="status-pill ${student.status}" data-action="cycle-status" data-student-id="${student.id}">${student.status}</div>
+              </div>
             </div>
           </div>
         `;
@@ -3429,6 +3585,371 @@
         }
         
         renderStudentCards();
+      }
+
+      async function restartStudentFinancials(studentId) {
+        const student = students.find(s => s.id === studentId);
+        if (!student) return;
+
+        const confirmed = await customConfirm(
+          'Restart Student?',
+          `Are you sure you want to restart ${student.name}? This will reset debt/credit to $0 and start from today while keeping payment history records.`
+        );
+        if (!confirmed) return;
+
+        const today = new Date().toISOString().split('T')[0];
+        student.balance = 0;
+        student.start_date = today;
+
+        // Preserve records but remove legacy debt rows from affecting fresh-start debt calculations.
+        const { error: clearLegacyUnpaidError } = await supabaseClient
+          .from('payment_records')
+          .update({ status: 'cancelled' })
+          .eq('student_id', student.id)
+          .eq('status', 'unpaid')
+          .lt('date', today);
+
+        if (clearLegacyUnpaidError) {
+          console.warn('⚠️ Could not clear legacy unpaid rows during restart:', clearLegacyUnpaidError);
+        }
+
+        const saveResult = await saveStudent(student);
+        if (!saveResult) {
+          await customAlert('Restart Failed', `Could not restart ${student.name}. Please try again.`);
+          return;
+        }
+
+        if (currentStudent && currentStudent.id === student.id) {
+          currentStudent.balance = 0;
+          currentStudent.start_date = today;
+          const creditInput = document.getElementById('modalCredit');
+          const creditDisplay = document.getElementById('modalCreditDisplay');
+          const startDateInput = document.getElementById('modalStartDate');
+          if (creditInput) creditInput.value = '0';
+          if (creditDisplay) creditDisplay.textContent = '$0';
+          if (startDateInput) startDateInput.value = today;
+        }
+
+        renderStudentCards();
+        await customAlert('Student Restarted', `${student.name} has been restarted with a $0 balance and a new start date of ${today}. Old payment history remains stored, but debt and old posted notes are excluded from the fresh start view.`);
+      }
+
+      function generateCredentialPassword() {
+        const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+        const lower = 'abcdefghjkmnpqrstuvwxyz';
+        const digits = '23456789';
+        const special = '!@#$%';
+        const all = upper + lower + digits + special;
+        let pwd = '';
+        pwd += upper[Math.floor(Math.random() * upper.length)];
+        pwd += lower[Math.floor(Math.random() * lower.length)];
+        pwd += digits[Math.floor(Math.random() * digits.length)];
+        pwd += special[Math.floor(Math.random() * special.length)];
+        for (let i = 4; i < 10; i++) {
+          pwd += all[Math.floor(Math.random() * all.length)];
+        }
+        return pwd.split('').sort(() => Math.random() - 0.5).join('');
+      }
+
+      function buildPremiumCredentialsEmailCardActions(studentFirstName, studentEmail, tempPassword, portalUrl) {
+        return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARNOMA Student Portal Credentials</title>
+</head>
+<body style="margin:0;padding:0;background:#0f1424;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#0f1424;padding:28px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background:linear-gradient(160deg,#121a30 0%,#0e1426 100%);border:1px solid rgba(196,164,95,0.38);border-radius:18px;overflow:hidden;">
+          <tr>
+            <td style="padding:34px 34px 22px;background:radial-gradient(circle at top right, rgba(196,164,95,0.18), transparent 55%), linear-gradient(145deg,#182340 0%,#131c33 100%);border-bottom:1px solid rgba(196,164,95,0.22);">
+              <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#d4b87a;font-weight:700;margin-bottom:10px;">ARNOMA Student Services</div>
+              <h1 style="margin:0;color:#f5f0e8;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:32px;line-height:1.2;font-style:italic;font-weight:700;">Portal Access Credentials</h1>
+              <p style="margin:12px 0 0;color:rgba(245,240,232,0.82);font-size:15px;line-height:1.65;">Use the credentials below to access your student portal account.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 34px 6px;color:#f5f0e8;">
+              <p style="margin:0 0 14px;font-size:16px;line-height:1.6;">Dear <strong>${studentFirstName}</strong>,</p>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;border-spacing:0 8px;margin:0 0 18px;">
+                <tr>
+                  <td style="width:120px;padding:10px 12px;background:rgba(196,164,95,0.14);border:1px solid rgba(196,164,95,0.35);border-right:none;border-radius:10px 0 0 10px;color:#e8d5a3;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">Portal</td>
+                  <td style="padding:10px 14px;background:rgba(255,252,240,0.04);border:1px solid rgba(196,164,95,0.25);border-radius:0 10px 10px 0;color:#f5f0e8;font-size:14px;font-weight:600;"><a href="${portalUrl}" style="color:#d4b87a;text-decoration:none;">${portalUrl}</a></td>
+                </tr>
+                <tr>
+                  <td style="width:120px;padding:10px 12px;background:rgba(196,164,95,0.14);border:1px solid rgba(196,164,95,0.35);border-right:none;border-radius:10px 0 0 10px;color:#e8d5a3;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">Email</td>
+                  <td style="padding:10px 14px;background:rgba(255,252,240,0.04);border:1px solid rgba(196,164,95,0.25);border-radius:0 10px 10px 0;color:#f5f0e8;font-size:14px;font-weight:600;">${studentEmail}</td>
+                </tr>
+                <tr>
+                  <td style="width:120px;padding:10px 12px;background:rgba(196,164,95,0.14);border:1px solid rgba(196,164,95,0.35);border-right:none;border-radius:10px 0 0 10px;color:#e8d5a3;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">Password</td>
+                  <td style="padding:10px 14px;background:rgba(255,252,240,0.04);border:1px solid rgba(196,164,95,0.25);border-radius:0 10px 10px 0;color:#f5f0e8;font-size:17px;font-weight:800;letter-spacing:1.5px;font-family:Consolas,Monaco,'Courier New',monospace;">${tempPassword}</td>
+                </tr>
+              </table>
+              <div style="padding:14px 16px;border-radius:12px;background:rgba(196,164,95,0.10);border:1px solid rgba(196,164,95,0.25);margin:0 0 16px;">
+                <p style="margin:0;color:#f5f0e8;font-size:13px;line-height:1.7;"><strong>Security Notice:</strong> After your first login, please update your password from your profile settings.</p>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 34px 30px;border-top:1px solid rgba(196,164,95,0.16);">
+              <p style="margin:0;color:#f5f0e8;font-size:14px;line-height:1.6;">Best regards,<br><strong style="color:#d4b87a;">ARNOMA Student Services</strong></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+      }
+
+      function parseLatestCredentialsFromNotes(notesText) {
+        const source = String(notesText || '');
+        const loginRegex = /(?:Portal\s+Login|Login)\s*:\s*([^\n\r]+)/gi;
+        const passwordRegex = /(?:Portal\s+Password|Password)\s*:\s*([^\n\r]+)/gi;
+        const loginMatches = [...source.matchAll(loginRegex)];
+        const passwordMatches = [...source.matchAll(passwordRegex)];
+        const login = loginMatches.length ? loginMatches[loginMatches.length - 1][1].trim() : '';
+        const password = passwordMatches.length ? passwordMatches[passwordMatches.length - 1][1].trim() : '';
+        return { login, password };
+      }
+
+      const resetCredentialsInFlight = new Set();
+      const resetCredentialsCooldowns = new Map();
+
+      async function resendStudentCredentialsEmail(studentId) {
+        const student = students.find(s => s.id === studentId);
+        if (!student) return;
+
+        const { data: freshStudent, error: fetchError } = await supabaseClient
+          .from('students')
+          .select('id, name, email, notes')
+          .eq('id', studentId)
+          .single();
+
+        if (fetchError || !freshStudent) {
+          await customAlert('Resend Failed', 'Could not load student credentials.');
+          return;
+        }
+
+        const creds = parseLatestCredentialsFromNotes(freshStudent.notes || '');
+        const loginEmail = creds.login || (freshStudent.email || '').trim();
+        const existingPassword = creds.password;
+        if (!loginEmail || !existingPassword) {
+          await customAlert('Credentials Not Found', 'No saved credentials were found in this student profile notes.');
+          return;
+        }
+
+        const portalUrl = 'https://student.richyfesta.com';
+        const firstName = (freshStudent.name || 'Student').split(' ')[0] || 'Student';
+        const emailHtml = buildPremiumCredentialsEmailCardActions(firstName, loginEmail, existingPassword, portalUrl);
+        const shouldSend = await showEmailPreviewModal(loginEmail, firstName, emailHtml);
+        if (!shouldSend) return;
+
+        const emailResponse = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({
+            to: loginEmail,
+            subject: 'ARNOMA - Your Existing Login Credentials',
+            html: emailHtml
+          })
+        });
+
+        if (!emailResponse.ok) {
+          await customAlert('Resend Failed', 'Could not send credentials email.');
+          return;
+        }
+
+        await customAlert('Email Sent', `Credentials were resent to ${loginEmail}.`);
+      }
+
+      async function resetStudentCredentials(studentId) {
+        const student = students.find(s => s.id === studentId);
+        if (!student) return;
+
+        if (resetCredentialsInFlight.has(studentId)) {
+          await customAlert('Reset In Progress', 'A credentials reset is already in progress for this student.');
+          return;
+        }
+
+        const nowMs = Date.now();
+        const cooldownUntil = resetCredentialsCooldowns.get(studentId) || 0;
+        if (cooldownUntil > nowMs) {
+          const waitSeconds = Math.ceil((cooldownUntil - nowMs) / 1000);
+          await customAlert('Please Wait', `Please wait ${waitSeconds} seconds before requesting another credentials reset for ${student.name}.`);
+          return;
+        }
+
+        const confirmed = await customConfirm(
+          'Reset Credentials?',
+          `Are you sure you want to reset credentials for ${student.name}?`
+        );
+        if (!confirmed) return;
+
+        resetCredentialsInFlight.add(studentId);
+        resetCredentialsCooldowns.set(studentId, Date.now() + 30000);
+
+        try {
+
+          const { data: freshStudent, error: fetchError } = await supabaseClient
+            .from('students')
+            .select('id, name, email, auth_user_id, notes')
+            .eq('id', studentId)
+            .single();
+
+          if (fetchError || !freshStudent) {
+            await customAlert('Reset Failed', 'Could not load student account information.');
+            return;
+          }
+
+          const email = (freshStudent.email || '').trim().toLowerCase();
+          if (!email) {
+            await customAlert('Reset Failed', 'Student has no email saved. Add an email first.');
+            return;
+          }
+
+          const portalUrl = 'https://student.richyfesta.com';
+          const firstName = (freshStudent.name || 'Student').split(' ')[0] || 'Student';
+          const newTempPassword = generateCredentialPassword();
+          const existingCreds = parseLatestCredentialsFromNotes(freshStudent.notes || '');
+          const hasSavedCredentials = Boolean(existingCreds.login && existingCreds.password);
+
+          const adminClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+            auth: { autoRefreshToken: false, persistSession: false }
+          });
+
+          if (!freshStudent.auth_user_id || !hasSavedCredentials) {
+            let resolvedAuthUserId = freshStudent.auth_user_id || null;
+
+            if (!resolvedAuthUserId) {
+            const { data: signUpData, error: signUpError } = await supabaseClient.auth.signUp({
+              email,
+              password: newTempPassword,
+              options: { data: { full_name: freshStudent.name || 'Student', role: 'student' } }
+            });
+
+              const alreadyRegistered = /already registered|already exists|user already/i.test(signUpError?.message || '');
+
+              if (signUpError && !alreadyRegistered) {
+              await customAlert('Reset Failed', `Could not create auth credentials: ${signUpError.message}`);
+              return;
+            }
+
+              if (signUpData?.user?.id) {
+                resolvedAuthUserId = signUpData.user.id;
+              }
+            }
+
+            if (!resolvedAuthUserId) {
+              const { data: usersData, error: listUsersError } = await adminClient.auth.admin.listUsers({
+                page: 1,
+                perPage: 1000
+              });
+
+              if (listUsersError) {
+                await customAlert('Reset Failed', `Could not locate student auth account: ${listUsersError.message}`);
+                return;
+              }
+
+              const matchedUser = (usersData?.users || []).find(u => (u.email || '').toLowerCase() === email);
+              if (matchedUser?.id) {
+                resolvedAuthUserId = matchedUser.id;
+              }
+            }
+
+            if (!resolvedAuthUserId) {
+              await customAlert('Reset Failed', 'Could not create or find the student auth account.');
+              return;
+            }
+
+            const { error: setPasswordError } = await adminClient.auth.admin.updateUserById(resolvedAuthUserId, {
+              password: newTempPassword,
+              email_confirm: true,
+              user_metadata: { full_name: freshStudent.name || 'Student', role: 'student' }
+            });
+
+            if (setPasswordError) {
+              await customAlert('Reset Failed', `Could not set new credentials: ${setPasswordError.message}`);
+              return;
+            }
+
+            const noteDate = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+            const newNote = `\n✅ Credentials reset on ${noteDate}\n📧 Portal Login: ${email}\n🔑 Portal Password: ${newTempPassword}`;
+            const { error: studentUpdateError } = await supabaseClient
+              .from('students')
+              .update({
+                auth_user_id: resolvedAuthUserId,
+                notes: `${freshStudent.notes || ''}${newNote}`
+              })
+              .eq('id', studentId);
+
+            if (studentUpdateError) {
+              await customAlert('Reset Partially Completed', 'Credentials were created but profile notes could not be updated.');
+              return;
+            }
+
+            const emailHtml = buildPremiumCredentialsEmailCardActions(firstName, email, newTempPassword, portalUrl);
+            const shouldSend = await showEmailPreviewModal(email, firstName, emailHtml);
+            if (shouldSend) {
+              await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({
+                  to: email,
+                  subject: 'Welcome to ARNOMA - Your Login Credentials',
+                  html: emailHtml
+                })
+              })
+            }
+
+            await loadStudents();
+            await customAlert('Credentials Reset', `${freshStudent.name} now has new credentials and updated notes.`);
+            return;
+          }
+
+          const { error: resetError } = await supabaseClient.auth.resetPasswordForEmail(email, {
+            redirectTo: portalUrl
+          });
+
+          if (resetError) {
+            const isRateLimited = resetError.status === 429 || /too many requests|429/i.test(resetError.message || '');
+            if (!isRateLimited) {
+              await customAlert('Reset Failed', resetError.message || 'Could not send reset email.');
+              return;
+            }
+
+            resetCredentialsCooldowns.set(studentId, Date.now() + 120000);
+            const { error: magicLinkError } = await supabaseClient.auth.signInWithOtp({
+              email,
+              options: {
+                shouldCreateUser: false,
+                emailRedirectTo: portalUrl
+              }
+            });
+
+            if (magicLinkError) {
+              await customAlert('Rate Limited', 'Password reset is temporarily rate-limited by Supabase. Please wait about 2 minutes and try again.');
+              return;
+            }
+
+            await customAlert('Recovery Link Sent', `Password reset is rate-limited right now, so a secure magic-link login email was sent to ${email} instead.`);
+            return;
+          }
+
+          await customAlert('Password Reset Email Sent', `A secure reset link was sent to ${email}. Existing payment history and student data remain unchanged.`);
+        } finally {
+          resetCredentialsInFlight.delete(studentId);
+        }
       }
 
       // ============================================
@@ -3922,6 +4443,74 @@
       }
 
       async function approveWaitingListStudent(id, firstName, lastName, email, phone, language) {
+        function buildPremiumCredentialsEmail(studentFirstName, studentEmail, tempPassword, portalUrl) {
+          return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARNOMA Student Portal Credentials</title>
+</head>
+<body style="margin:0;padding:0;background:#0f1424;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#0f1424;padding:28px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:640px;background:linear-gradient(160deg,#121a30 0%,#0e1426 100%);border:1px solid rgba(196,164,95,0.38);border-radius:18px;overflow:hidden;">
+          <tr>
+            <td style="padding:34px 34px 22px;background:radial-gradient(circle at top right, rgba(196,164,95,0.18), transparent 55%), linear-gradient(145deg,#182340 0%,#131c33 100%);border-bottom:1px solid rgba(196,164,95,0.22);">
+              <div style="font-size:11px;letter-spacing:0.18em;text-transform:uppercase;color:#d4b87a;font-weight:700;margin-bottom:10px;">ARNOMA Student Services</div>
+              <h1 style="margin:0;color:#f5f0e8;font-family:'Playfair Display',Georgia,'Times New Roman',serif;font-size:32px;line-height:1.2;font-style:italic;font-weight:700;">Portal Access Granted</h1>
+              <p style="margin:12px 0 0;color:rgba(245,240,232,0.82);font-size:15px;line-height:1.65;">Your student account has been approved. Use the credentials below to access your portal.</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:28px 34px 6px;color:#f5f0e8;">
+              <p style="margin:0 0 14px;font-size:16px;line-height:1.6;">Dear <strong>${studentFirstName}</strong>,</p>
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:rgba(245,240,232,0.86);">Welcome to ARNOMA. We are pleased to provide your official student portal credentials.</p>
+
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:separate;border-spacing:0 8px;margin:0 0 18px;">
+                <tr>
+                  <td style="width:120px;padding:10px 12px;background:rgba(196,164,95,0.14);border:1px solid rgba(196,164,95,0.35);border-right:none;border-radius:10px 0 0 10px;color:#e8d5a3;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">Portal</td>
+                  <td style="padding:10px 14px;background:rgba(255,252,240,0.04);border:1px solid rgba(196,164,95,0.25);border-radius:0 10px 10px 0;color:#f5f0e8;font-size:14px;font-weight:600;"><a href="${portalUrl}" style="color:#d4b87a;text-decoration:none;">${portalUrl}</a></td>
+                </tr>
+                <tr>
+                  <td style="width:120px;padding:10px 12px;background:rgba(196,164,95,0.14);border:1px solid rgba(196,164,95,0.35);border-right:none;border-radius:10px 0 0 10px;color:#e8d5a3;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">Email</td>
+                  <td style="padding:10px 14px;background:rgba(255,252,240,0.04);border:1px solid rgba(196,164,95,0.25);border-radius:0 10px 10px 0;color:#f5f0e8;font-size:14px;font-weight:600;">${studentEmail}</td>
+                </tr>
+                <tr>
+                  <td style="width:120px;padding:10px 12px;background:rgba(196,164,95,0.14);border:1px solid rgba(196,164,95,0.35);border-right:none;border-radius:10px 0 0 10px;color:#e8d5a3;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;">Password</td>
+                  <td style="padding:10px 14px;background:rgba(255,252,240,0.04);border:1px solid rgba(196,164,95,0.25);border-radius:0 10px 10px 0;color:#f5f0e8;font-size:17px;font-weight:800;letter-spacing:1.5px;font-family:Consolas,Monaco,'Courier New',monospace;">${tempPassword}</td>
+                </tr>
+              </table>
+
+              <div style="padding:14px 16px;border-radius:12px;background:rgba(196,164,95,0.10);border:1px solid rgba(196,164,95,0.25);margin:0 0 16px;">
+                <p style="margin:0;color:#f5f0e8;font-size:13px;line-height:1.7;"><strong>Security Notice:</strong> After your first login, please update your password from your profile settings to ensure account security.</p>
+              </div>
+
+              <p style="margin:0 0 18px;color:rgba(245,240,232,0.84);font-size:14px;line-height:1.7;">If you need assistance, reply to this email and the Student Services team will support you promptly.</p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:18px 34px 30px;border-top:1px solid rgba(196,164,95,0.16);">
+              <p style="margin:0;color:#f5f0e8;font-size:14px;line-height:1.6;">Best regards,<br><strong style="color:#d4b87a;">ARNOMA Student Services</strong></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+        }
+
+        const availableGroups = await loadActiveGroupsFromManager(true);
+        if (!availableGroups.length) {
+          await customAlert('No Active Groups', 'No active groups found in Group Manager. Activate at least one group before approving students.');
+          return;
+        }
+
         // ── Step 0: Group + Price picker ─────────────────────────────────────
         const approvalResult = await new Promise((resolve) => {
           const overlay = document.createElement('div');
@@ -3937,7 +4526,7 @@
             <div style="margin-bottom:22px;">
               <div style="color:rgba(138,180,255,0.8);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Group Assignment <span style="color:rgba(255,180,0,0.8);font-size:10px;">(required)</span></div>
               <div style="display:flex;flex-wrap:wrap;gap:8px;">
-                ${['A','B','C','D','E','F'].map(g => `
+                ${availableGroups.map(g => `
                   <button data-group="${g}" style="flex:1;min-width:48px;padding:11px 8px;border-radius:10px;border:2px solid rgba(138,180,255,0.3);background:rgba(138,180,255,0.08);color:white;font-size:17px;font-weight:700;cursor:pointer;transition:all 0.15s;font-family:inherit;">${g}</button>`).join('')}
               </div>
             </div>
@@ -4042,8 +4631,12 @@
         });
 
         if (!approvalResult) return; // Admin cancelled
-        const selectedGroup = approvalResult.group;
+        const selectedGroup = canonicalizeGroupCode(approvalResult.group);
         const selectedPrice = approvalResult.price;
+        if (!activeGroupCodes.includes(selectedGroup)) {
+          await customAlert('Invalid Group', 'Selected group is not active in Group Manager. Please refresh and try again.');
+          return;
+        }
         try {
           // Check for existing students with same email or name
           const fullName = `${firstName} ${lastName}`;
@@ -4403,24 +4996,7 @@
                 try {
                   const portalUrl = 'https://student.richyfesta.com';
                   const existingFirstName = existingStudent.name.split(' ')[0];
-                  const welcomeHtml = `<!DOCTYPE html><html><body style="font-family:sans-serif;background:#667eea;margin:0;padding:0;">
-<div style="max-width:600px;margin:40px auto;background:white;border-radius:24px;overflow:hidden;">
-  <div style="background:linear-gradient(135deg,#667eea,#764ba2);padding:40px 32px;text-align:center;">
-    <h1 style="color:white;margin:0;">Welcome to ARNOMA!</h1>
-    <p style="color:rgba(255,255,255,0.85);margin:12px 0 0;">Your student portal is ready</p>
-  </div>
-  <div style="padding:40px 32px;color:#374151;">
-    <p>Hi <strong>${existingFirstName}</strong>,</p>
-    <p>Your student account has been approved! Here are your login credentials:</p>
-    <div style="background:#f0f4ff;border:2px solid rgba(102,126,234,0.4);border-radius:16px;padding:28px;margin:24px 0;">
-      <p style="margin:8px 0;"><strong>Portal:</strong> <a href="${portalUrl}">${portalUrl}</a></p>
-      <p style="margin:8px 0;"><strong>Login:</strong> ${effectiveEmail}</p>
-      <p style="margin:8px 0;"><strong>Password:</strong> <code style="font-size:16px;letter-spacing:2px;">${updateTempPassword}</code></p>
-    </div>
-    <p style="color:#6b7280;font-size:14px;">Questions? Just reply to this email.</p>
-    <p>Best regards,<br><strong style="color:#667eea;">ARNOMA Team</strong></p>
-  </div>
-</div></body></html>`;
+                  const welcomeHtml = buildPremiumCredentialsEmail(existingFirstName, effectiveEmail, updateTempPassword, portalUrl);
                   const shouldSend = await showEmailPreviewModal(effectiveEmail, existingFirstName, welcomeHtml);
                   if (shouldSend) {
                     const emailResp = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
@@ -4567,66 +5143,7 @@
           let emailWasSent = false;
           if (email) {
             try {
-              const welcomeEmailHTML = `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;">
-    <div style="max-width:600px;margin:40px auto;background:white;border-radius:24px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-        <div style="background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:40px 32px;text-align:center;">
-            <h1 style="color:white;margin:0;font-size:32px;font-weight:700;text-shadow:0 2px 4px rgba(0,0,0,0.2);">Welcome to ARNOMA!</h1>
-            <p style="color:rgba(255,255,255,0.85);margin:12px 0 0;font-size:16px;">Your student portal is ready</p>
-        </div>
-        <div style="padding:40px 32px;line-height:1.6;color:#374151;">
-            <p style="font-size:18px;margin-top:0;">Hi <strong>${firstName}</strong>,</p>
-            <p>Your student account has been approved! Here are your login credentials to access the student portal.</p>
-
-            <div style="background:linear-gradient(135deg,#f0f4ff,#f5f0ff);border:2px solid rgba(102,126,234,0.4);border-radius:16px;padding:28px;margin:28px 0;">
-                <h3 style="color:#667eea;margin:0 0 20px;font-size:17px;letter-spacing:0.3px;">Your Login Credentials</h3>
-                <table style="width:100%;border-collapse:collapse;">
-                    <tr>
-                        <td style="padding:10px 14px;background:rgba(102,126,234,0.08);border-radius:8px 0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#667eea;width:120px;">Portal URL</td>
-                        <td style="padding:10px 14px;background:rgba(102,126,234,0.05);border-radius:0 8px 8px 0;font-size:14px;font-weight:600;color:#374151;"><a href="${portalUrl}" style="color:#667eea;text-decoration:none;">${portalUrl}</a></td>
-                    </tr>
-                    <tr><td colspan="2" style="padding:4px;"></td></tr>
-                    <tr>
-                        <td style="padding:10px 14px;background:rgba(102,126,234,0.08);border-radius:8px 0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#667eea;">Login</td>
-                        <td style="padding:10px 14px;background:rgba(102,126,234,0.05);border-radius:0 8px 8px 0;font-size:14px;font-weight:600;color:#374151;">${email}</td>
-                    </tr>
-                    <tr><td colspan="2" style="padding:4px;"></td></tr>
-                    <tr>
-                        <td style="padding:10px 14px;background:rgba(118,75,162,0.1);border-radius:8px 0 0 8px;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#764ba2;">Password</td>
-                        <td style="padding:10px 14px;background:rgba(118,75,162,0.06);border-radius:0 8px 8px 0;font-size:16px;font-weight:800;color:#374151;letter-spacing:2px;font-family:monospace;">${tempPassword}</td>
-                    </tr>
-                </table>
-            </div>
-
-            <div style="background:#fff8e1;border:1px solid #fbbf24;border-radius:12px;padding:16px 20px;margin-bottom:24px;">
-                <p style="margin:0;font-size:13px;color:#92400e;"><strong>Security tip:</strong> You can change your password any time after logging in from your profile settings.</p>
-            </div>
-
-            <div style="background:linear-gradient(135deg,rgba(102,126,234,0.08),rgba(118,75,162,0.08));border:1px solid rgba(102,126,234,0.2);border-radius:14px;padding:20px 24px;margin-bottom:24px;">
-                <h3 style="color:#667eea;margin:0 0 12px;font-size:15px;">Getting Started</h3>
-                <ol style="margin:0;padding-left:18px;color:#4b5563;">
-                    <li style="margin:6px 0;">Visit <a href="${portalUrl}" style="color:#667eea;font-weight:600;">${portalUrl}</a></li>
-                    <li style="margin:6px 0;">Enter your email and password above</li>
-                    <li style="margin:6px 0;">Access your notes, tests, and class schedule</li>
-                </ol>
-            </div>
-
-            <p style="color:#6b7280;font-size:14px;">Questions? Just reply to this email — we're here to help!</p>
-
-            <div style="margin-top:32px;padding-top:20px;border-top:1px solid rgba(102,126,234,0.2);">
-                <p style="margin:4px 0;font-size:14px;">Best regards,</p>
-                <p style="margin:4px 0;font-weight:700;color:#667eea;font-size:15px;">ARNOMA Team</p>
-            </div>
-        </div>
-    </div>
-</body>
-</html>`;
+              const welcomeEmailHTML = buildPremiumCredentialsEmail(firstName, email, tempPassword, portalUrl);
 
               // Show preview — only send after admin clicks "Send"
               const shouldSend = await showEmailPreviewModal(email, firstName, welcomeEmailHTML);
@@ -5444,7 +5961,7 @@
         portalRegSelectedStudents = [];
       }
 
-      function openModal(studentId) {
+      async function openModal(studentId) {
         currentStudent = students.find(s => s.id === studentId);
         if (!currentStudent) return;
 
@@ -5507,10 +6024,9 @@
           setModalFreeMode(!!s.isFree);
         }
 
-        // Group buttons
-        document.querySelectorAll('#groupButtons .group-btn').forEach(btn => {
-          btn.classList.toggle('active', btn.textContent.trim() === groupLetter);
-        });
+        // Group buttons (active groups only from Group Manager)
+        await loadActiveGroupsFromManager();
+        renderEditModalGroupButtons(groupLetter);
 
         // Calendar toggle
         const calToggle = document.getElementById('modalCalendarToggle');
@@ -5748,6 +6264,11 @@
         try {
           const normalizedLetter = canonicalizeGroupCode(letter);
           console.log('✅ Normalized letter:', normalizedLetter);
+
+          if (!activeGroupCodes.includes(normalizedLetter)) {
+            await customAlert('Inactive Group', `Group ${normalizedLetter} is not active in Group Manager.`);
+            return;
+          }
           
           // Remove active from all group buttons
           document.querySelectorAll('#groupButtons .group-btn').forEach(b => b.classList.remove('active'));
@@ -6135,7 +6656,7 @@
               cycleStatus(studentId);
               return;
             }
-            
+
             // Otherwise open modal
             if (!e.target.closest('.card-toggle') && !e.target.closest('.status-pill')) {
               openModal(studentId);

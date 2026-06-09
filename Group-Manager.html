@@ -1394,7 +1394,7 @@
         />
         <select class="filter-select" id="statusFilter">
           <option value="">All Groups</option>
-          <option value="active">Active Only</option>
+          <option value="active" selected>Active Only</option>
           <option value="inactive">Inactive Only</option>
         </select>
         <select class="filter-select" id="sortSelect">
@@ -2600,7 +2600,7 @@
             const studentsForGroup = possibleKeys.reduce((acc, key) => acc || groupedStudents[key], null) || [];
             const uniqueStudents = dedupeStudentsByIdentity(studentsForGroup);
             group.students = uniqueStudents;
-            group.studentCount = uniqueStudents.length;
+            group.studentCount = uniqueStudents.filter(student => String(student?.status || 'active').trim().toLowerCase() === 'active').length;
           });
 
           debugLog('✅ Loaded students for groups:', groupedStudents);
@@ -2658,13 +2658,16 @@
         return (group.schedule && group.schedule.trim()) ? 1 : 0;
       }
 
+      function getActiveStudents(group) {
+        if (!group || !Array.isArray(group.students)) return [];
+        return group.students.filter(student => String(student?.status || 'active').trim().toLowerCase() === 'active');
+      }
+
       function calculateGroupRevenue(group) {
         if (!group) return 0;
-        const classesPerWeek = calculateClassesPerWeek(group);
-        const multiplier = classesPerWeek > 0 ? classesPerWeek : 1;
         const fallbackPrice = group.pricePerClass || 0;
 
-        const activeStudents = (group.students || []).filter(student => (student.status || 'active') === 'active');
+        const activeStudents = getActiveStudents(group);
         if (activeStudents.length === 0) return 0;
 
         return activeStudents.reduce((total, student) => {
@@ -2672,8 +2675,15 @@
             ? student.pricePerClass
             : parseFloat(student.pricePerClass) || 0;
           const effectivePrice = studentPrice > 0 ? studentPrice : fallbackPrice;
-          return total + (effectivePrice * multiplier);
+          return total + effectivePrice;
         }, 0);
+      }
+
+      function calculateGroupWeeklyRevenue(group) {
+        if (!group) return 0;
+        const classesPerWeek = calculateClassesPerWeek(group);
+        const multiplier = classesPerWeek > 0 ? classesPerWeek : 1;
+        return calculateGroupRevenue(group) * multiplier;
       }
 
       // Initialize
@@ -2691,6 +2701,10 @@
 
         await loadGroups(); // Load from Supabase
         await loadStudentsForGroupCount(); // Count students per group
+
+        // Default the page to Active Only whenever Group Manager opens.
+        document.getElementById('statusFilter').value = 'active';
+
         renderGroups();
         renderColorPicker();
         setupEventDelegation();
@@ -2787,10 +2801,10 @@
 
                 <div class="group-meta">
                   <div class="meta-badge students" data-action="view-students" data-group-id="${group.id}" style="cursor: pointer;" title="Click to view students">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"></path>
-                    </svg>
-                    ${group.studentCount} students - $${calculateGroupRevenue(group).toLocaleString()}
+                    <div style="display: flex; flex-direction: column; gap: 1px; line-height: 1.2; margin-left: auto; align-items: flex-end; text-align: right;">
+                      <div>${getActiveStudents(group).length} students - $${calculateGroupRevenue(group).toLocaleString()}</div>
+                      <div style="font-size: 11px; opacity: 0.85;">Weekly: $${calculateGroupWeeklyRevenue(group).toLocaleString()}</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2935,7 +2949,7 @@
         if (sortBy === 'name') {
           groups.sort((a, b) => a.name.localeCompare(b.name));
         } else if (sortBy === 'students') {
-          groups.sort((a, b) => b.studentCount - a.studentCount);
+          groups.sort((a, b) => getActiveStudents(b).length - getActiveStudents(a).length);
         } else if (sortBy === 'recent') {
           groups.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
         }
@@ -3392,7 +3406,7 @@
 
         // Calculate classes per week
         const classesPerWeek = calculateClassesPerWeek(group);
-        const activeStudents = (group.students || []).filter(student => (student.status || 'active') === 'active');
+        const activeStudents = getActiveStudents(group);
 
         // Render students list
         if (activeStudents.length > 0) {
