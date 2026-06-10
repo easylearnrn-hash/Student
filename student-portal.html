@@ -14918,21 +14918,56 @@
       if (!student || !isoDate) { openPaymentModal(); return; }
 
       const amount = price > 0 ? price : (parseFloat(student.price_per_class) || 50);
-      const params = new URLSearchParams({
-        student_name    : student.name    || '',
-        student_id      : String(student.id || ''),
-        email           : student.email   || '',
-        amount          : String(amount),
-        currency        : 'usd',
-        invoice_ref     : `absent-${student.id}-${isoDate}`,
-        for_class       : isoDate,
-        for_class_dates : JSON.stringify([isoDate]),
-      });
-      const src = `payment.html?v=20260414-2&${params.toString()}`;
-      document.getElementById('arnomaPaymentIframe').src = src;
-      const overlay = document.getElementById('arnomaPaymentModalOverlay');
-      overlay.style.display = 'flex';
-      document.body.style.overflow = 'hidden';
+      const groupLetter = (student.group_name || student.group || '').replace(/^Group\s*/i, '').trim();
+
+      // Look up notes posted for this group on this class date, then open payment with titles
+      const openPaymentWithNotes = (noteTitles) => {
+        const params = new URLSearchParams({
+          student_name    : student.name    || '',
+          student_id      : String(student.id || ''),
+          email           : student.email   || '',
+          amount          : String(amount),
+          currency        : 'usd',
+          invoice_ref     : `absent-${student.id}-${isoDate}`,
+          for_class       : isoDate,
+          for_class_dates : JSON.stringify([isoDate]),
+        });
+        if (noteTitles && noteTitles.length > 0) {
+          params.set('note_titles', JSON.stringify(noteTitles));
+        }
+        const src = `payment.html?v=20260414-2&${params.toString()}`;
+        document.getElementById('arnomaPaymentIframe').src = src;
+        const overlay = document.getElementById('arnomaPaymentModalOverlay');
+        overlay.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+      };
+
+      // Query notes posted for this group on this date
+      (async () => {
+        try {
+          // note_free_access links notes to groups with the posting date
+          const { data: grants } = await supabaseClient
+            .from('note_free_access')
+            .select('note_id, class_date')
+            .eq('group_letter', groupLetter)
+            .eq('class_date', isoDate);
+
+          if (!grants || grants.length === 0) {
+            openPaymentWithNotes([]);
+            return;
+          }
+          const noteIds = grants.map(g => g.note_id);
+          const { data: notes } = await supabaseClient
+            .from('student_notes')
+            .select('title')
+            .in('id', noteIds);
+
+          const titles = (notes || []).map(n => n.title).filter(Boolean);
+          openPaymentWithNotes(titles);
+        } catch (_) {
+          openPaymentWithNotes([]);
+        }
+      })();
     }
     // ──────────────────────────────────────────────────────────────────────────
 
