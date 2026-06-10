@@ -13866,17 +13866,19 @@
         // Absent students show absence dialog with payment option
         item.style.cursor = 'pointer';
         item.addEventListener('click', (e) => {
-          e.stopPropagation(); // PERFORMANCE: Prevent delegation handler from firing
-          const formattedDate = note.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-          showLockedNoteDialog(formattedDate, item, true); // Pass isAbsent=true
+          e.stopPropagation();
+          const isoDate = note.date.toISOString().split('T')[0];
+          const price = window.currentStudent ? (parseFloat(window.currentStudent.price_per_class) || 50) : 50;
+          openAbsenceInfoModal(isoDate, price, true);
         });
       } else if (!note.isPaid && !note.isTemplateMissing) {
-        // Locked notes show payment dialog
+        // Locked (unpaid) notes — same popup, student can pay for that class date
         item.style.cursor = 'pointer';
         item.addEventListener('click', (e) => {
-          e.stopPropagation(); // PERFORMANCE: Prevent delegation handler from firing
-          const formattedDate = note.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-          showLockedNoteDialog(formattedDate, item, false); // Pass isAbsent=false
+          e.stopPropagation();
+          const isoDate = note.date.toISOString().split('T')[0];
+          const price = window.currentStudent ? (parseFloat(window.currentStudent.price_per_class) || 50) : 50;
+          openAbsenceInfoModal(isoDate, price, false);
         });
       } else if (note.isPaid && !note.isAbsent && (note.attachments?.length > 0 || note.isTemplateMissing)) {
         // Unlocked notes with attachments get pointer cursor (click handled by delegation)
@@ -14763,7 +14765,8 @@
       <div style="font-size:36px; margin-bottom:14px;">🪑</div>
       <h3 style="font-family:'Playfair Display',Georgia,serif; font-size:20px; color:#f5f0e8; margin:0 0 10px;">You Were Not Present</h3>
       <p id="absenceInfoDateLine" style="font-size:13px; color:rgba(196,164,95,0.85); font-weight:600; letter-spacing:0.06em; text-transform:uppercase; margin:0 0 18px;"></p>
-      <p style="font-size:14px; color:rgba(245,240,232,0.75); line-height:1.65; margin:0 0 24px;">
+      <p style="font-size:14px; color:rgba(245,240,232,0.75); line-height:1.65; margin:0 0 24px;"
+         id="absenceInfoMessage">
         You were marked absent for this class. To access the class notes, you can still make a payment for this session and the notes will unlock for you.
       </p>
       <button onclick="openAbsencePayment()" style="
@@ -14875,7 +14878,7 @@
     let _absenceInfoDate = null; // YYYY-MM-DD of the tapped absent class
     let _absenceInfoPrice = 0;   // price per class for that session
 
-    function openAbsenceInfoModal(isoDate, price) {
+    function openAbsenceInfoModal(isoDate, price, isAbsent = true) {
       _absenceInfoDate = isoDate;
       _absenceInfoPrice = price || (window.currentStudent ? (parseFloat(window.currentStudent.price_per_class) || 50) : 50);
       const modal = document.getElementById('absenceInfoModal');
@@ -14887,6 +14890,12 @@
       const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
       document.getElementById('absenceInfoDateLine').textContent =
         `${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+      const msgEl = document.getElementById('absenceInfoMessage');
+      if (msgEl) {
+        msgEl.textContent = isAbsent
+          ? 'You were marked absent for this class. To access the class notes, you can still make a payment for this session and the notes will unlock for you.'
+          : 'This note is locked because payment has not been recorded for this class. Make a payment for this session and the notes will unlock for you.';
+      }
       modal.style.display = 'flex';
     }
 
