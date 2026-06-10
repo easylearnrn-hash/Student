@@ -14918,7 +14918,6 @@
       if (!student || !isoDate) { openPaymentModal(); return; }
 
       const amount = price > 0 ? price : (parseFloat(student.price_per_class) || 50);
-      const groupLetter = (student.group_name || student.group || '').replace(/^Group\s*/i, '').trim();
 
       // Look up notes posted for this group on this class date, then open payment with titles
       const openPaymentWithNotes = (noteTitles) => {
@@ -14945,26 +14944,57 @@
       // Query notes posted for this group on this date
       (async () => {
         try {
-          // note_free_access links notes to groups with the posting date
+          const groupLetter = (student.group_letter || student.group || student.group_name || '')
+            .toString().replace(/^Group\s*/i, '').trim().toUpperCase();
+
+          // Use a date range to handle timestamps stored as YYYY-MM-DDT...
+          const dateStart = isoDate;                     // e.g. "2026-06-02"
+          const dateEnd   = isoDate + 'T23:59:59.999Z'; // same day end
+
+          // Source 1: note_free_access (group posts)
           const { data: grants } = await supabaseClient
             .from('note_free_access')
-            .select('note_id, class_date')
+            .select('note_id, class_date, created_at')
+            .eq('access_type', 'group')
             .eq('group_letter', groupLetter)
-            .eq('class_date', isoDate);
+            .gte('class_date', dateStart)
+            .lte('class_date', dateEnd);
 
-          if (!grants || grants.length === 0) {
+          // Source 2: student_note_permissions (group-level permission rows)
+          const groupNameCandidates = [groupLetter, `Group ${groupLetter}`, `group_${groupLetter.toLowerCase()}`];
+          const { data: perms } = await supabaseClient
+            .from('student_note_permissions')
+            .select('note_id, class_date')
+            .is('student_id', null)
+            .eq('is_accessible', true)
+            .in('group_name', groupNameCandidates)
+            .gte('class_date', dateStart)
+            .lte('class_date', dateEnd);
+
+          const noteIds = [
+            ...new Set([
+              ...(grants || []).map(g => g.note_id),
+              ...(perms  || []).map(p => p.note_id),
+            ])
+          ];
+
+          console.log('📚 Notes for date', isoDate, 'group', groupLetter, '→', noteIds.length, 'ids');
+
+          if (noteIds.length === 0) {
             openPaymentWithNotes([]);
             return;
           }
-          const noteIds = grants.map(g => g.note_id);
+
           const { data: notes } = await supabaseClient
             .from('student_notes')
             .select('title')
             .in('id', noteIds);
 
           const titles = (notes || []).map(n => n.title).filter(Boolean);
+          console.log('📝 Note titles for payment screen:', titles);
           openPaymentWithNotes(titles);
-        } catch (_) {
+        } catch (err) {
+          console.error('❌ Failed to fetch notes for payment screen:', err);
           openPaymentWithNotes([]);
         }
       })();
