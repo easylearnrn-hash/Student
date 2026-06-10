@@ -9265,7 +9265,7 @@
 
         if (absentDateSet.has(dateStr)) {
           absenceDisplayDates.add(dateStr);
-          allEntries.push({ date: classDate, type: 'absent',  amount: 0,                statusText: 'Absent',  statusClass: 'absent'  });
+          allEntries.push({ date: classDate, isoDate: dateStr, type: 'absent',  amount: 0,                statusText: 'Absent',  statusClass: 'absent'  });
         } else if (paidDatesSet.has(dateStr)) {
           allEntries.push({ date: classDate, type: 'paid',    amount: pricePerClassValue, statusText: 'Paid',    statusClass: 'paid'    });
         } else {
@@ -9310,6 +9310,12 @@
   uniqueEntries.forEach(entry => {
         const item = document.createElement('div');
         item.className = `payment-item ${entry.statusClass}`;
+        
+        // Absent items open the absence info popup
+        if (entry.type === 'absent' && entry.isoDate) {
+          item.style.cursor = 'pointer';
+          item.addEventListener('click', () => openAbsenceInfoModal(entry.isoDate));
+        }
         
         const dateStr = `${monthNames[entry.date.getMonth()]} ${entry.date.getDate()}, ${entry.date.getFullYear()}`;
         
@@ -14732,6 +14738,46 @@
        Opens payment.html in a glass iframe overlay when student clicks Pay Now.
        Listens for postMessage events from payment.html to close on success.
   ====================================================================== -->
+  <!-- ── ABSENCE INFO POPUP ── -->
+  <div id="absenceInfoModal" style="
+    display:none; position:fixed; inset:0; z-index:99998;
+    background:rgba(0,0,0,0.72); backdrop-filter:blur(12px);
+    -webkit-backdrop-filter:blur(12px);
+    align-items:center; justify-content:center; padding:20px;
+  ">
+    <div style="
+      background:linear-gradient(145deg,rgba(20,24,42,0.98),rgba(14,17,30,0.99));
+      border:1px solid rgba(196,164,95,0.28); border-top:2px solid rgba(196,164,95,0.7);
+      border-radius:20px; padding:32px 28px; max-width:420px; width:100%;
+      box-shadow:0 24px 64px rgba(0,0,0,0.6); text-align:center;
+      position:relative;
+    ">
+      <button onclick="closeAbsenceInfoModal()" style="
+        position:absolute; top:14px; right:16px;
+        background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.25);
+        color:#fca5a5; width:30px; height:30px; border-radius:8px;
+        font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+      ">×</button>
+      <div style="font-size:36px; margin-bottom:14px;">🪑</div>
+      <h3 style="font-family:'Playfair Display',Georgia,serif; font-size:20px; color:#f5f0e8; margin:0 0 10px;">You Were Not Present</h3>
+      <p id="absenceInfoDateLine" style="font-size:13px; color:rgba(196,164,95,0.85); font-weight:600; letter-spacing:0.06em; text-transform:uppercase; margin:0 0 18px;"></p>
+      <p style="font-size:14px; color:rgba(245,240,232,0.75); line-height:1.65; margin:0 0 24px;">
+        You were marked absent for this class. To access the class notes, you can still make a payment for this session and the notes will unlock for you.
+      </p>
+      <button onclick="openAbsencePayment()" style="
+        width:100%; padding:13px;
+        background:linear-gradient(135deg,#c9a84c 0%,#e8c97a 50%,#c9a84c 100%);
+        background-size:200% 100%;
+        border:none; border-radius:12px; color:#0a0a0a;
+        font-size:13px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase;
+        cursor:pointer; transition:filter 0.2s;
+        font-family:inherit;
+      " onmouseover="this.style.filter='brightness(1.1)'" onmouseout="this.style.filter=''">
+        💳 Pay for This Class
+      </button>
+    </div>
+  </div>
+
   <style>
     #arnomaPaymentIframe::-webkit-scrollbar { display: none; }
   </style>
@@ -14823,6 +14869,54 @@
     }
 
     /* ── Payment modal helpers ── */
+    // ── ABSENCE INFO POPUP ──────────────────────────────────────────────────
+    let _absenceInfoDate = null; // YYYY-MM-DD of the tapped absent class
+
+    function openAbsenceInfoModal(isoDate) {
+      _absenceInfoDate = isoDate;
+      const modal = document.getElementById('absenceInfoModal');
+      if (!modal) return;
+      // Format date for display line
+      const parts = isoDate.split('-');
+      const d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+      const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+      document.getElementById('absenceInfoDateLine').textContent =
+        `${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+      modal.style.display = 'flex';
+    }
+
+    function closeAbsenceInfoModal() {
+      const modal = document.getElementById('absenceInfoModal');
+      if (modal) modal.style.display = 'none';
+      _absenceInfoDate = null;
+    }
+
+    function openAbsencePayment() {
+      closeAbsenceInfoModal();
+      const student = window.currentStudent;
+      if (!student || !_absenceInfoDate) { openPaymentModal(); return; }
+      const isoDate = _absenceInfoDate;
+      _absenceInfoDate = null;
+      const price = (student.price_per_class || window.currentTotalUnpaid || 0);
+      const params = new URLSearchParams({
+        student_name    : student.name    || '',
+        student_id      : String(student.id || ''),
+        email           : student.email   || '',
+        amount          : String(price),
+        currency        : 'usd',
+        invoice_ref     : `absent-${student.id}-${isoDate}`,
+        for_class       : isoDate,
+        for_class_dates : JSON.stringify([isoDate]),
+      });
+      const src = `payment.html?v=20260414-2&${params.toString()}`;
+      document.getElementById('arnomaPaymentIframe').src = src;
+      const overlay = document.getElementById('arnomaPaymentModalOverlay');
+      overlay.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     function openPaymentModal() {
       const student = window.currentStudent;
       const amount  = window.currentTotalUnpaid || 0;
@@ -15137,8 +15231,12 @@
 
     /* Close on Escape key — blocked when debt-locked */
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && !window._arnomaDebtLocked && document.getElementById('arnomaPaymentModalOverlay').style.display === 'flex') {
-        closePaymentModal();
+      if (e.key === 'Escape') {
+        if (document.getElementById('absenceInfoModal')?.style.display === 'flex') {
+          closeAbsenceInfoModal();
+        } else if (!window._arnomaDebtLocked && document.getElementById('arnomaPaymentModalOverlay').style.display === 'flex') {
+          closePaymentModal();
+        }
       }
     });
   </script>
