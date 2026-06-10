@@ -9265,7 +9265,7 @@
 
         if (absentDateSet.has(dateStr)) {
           absenceDisplayDates.add(dateStr);
-          allEntries.push({ date: classDate, isoDate: dateStr, type: 'absent',  amount: 0,                statusText: 'Absent',  statusClass: 'absent'  });
+          allEntries.push({ date: classDate, isoDate: dateStr, type: 'absent', amount: pricePerClassValue, statusText: 'Absent', statusClass: 'absent' });
         } else if (paidDatesSet.has(dateStr)) {
           allEntries.push({ date: classDate, type: 'paid',    amount: pricePerClassValue, statusText: 'Paid',    statusClass: 'paid'    });
         } else {
@@ -9314,7 +9314,9 @@
         // Absent items open the absence info popup
         if (entry.type === 'absent' && entry.isoDate) {
           item.style.cursor = 'pointer';
-          item.addEventListener('click', () => openAbsenceInfoModal(entry.isoDate));
+          const _iso = entry.isoDate;
+          const _price = entry.amount || (window.currentStudent ? (parseFloat(window.currentStudent.price_per_class) || 50) : 50);
+          item.addEventListener('click', () => openAbsenceInfoModal(_iso, _price));
         }
         
         const dateStr = `${monthNames[entry.date.getMonth()]} ${entry.date.getDate()}, ${entry.date.getFullYear()}`;
@@ -14871,9 +14873,11 @@
     /* ── Payment modal helpers ── */
     // ── ABSENCE INFO POPUP ──────────────────────────────────────────────────
     let _absenceInfoDate = null; // YYYY-MM-DD of the tapped absent class
+    let _absenceInfoPrice = 0;   // price per class for that session
 
-    function openAbsenceInfoModal(isoDate) {
+    function openAbsenceInfoModal(isoDate, price) {
       _absenceInfoDate = isoDate;
+      _absenceInfoPrice = price || (window.currentStudent ? (parseFloat(window.currentStudent.price_per_class) || 50) : 50);
       const modal = document.getElementById('absenceInfoModal');
       if (!modal) return;
       // Format date for display line
@@ -14889,21 +14893,27 @@
     function closeAbsenceInfoModal() {
       const modal = document.getElementById('absenceInfoModal');
       if (modal) modal.style.display = 'none';
-      _absenceInfoDate = null;
+      // Note: intentionally NOT clearing _absenceInfoDate/_absenceInfoPrice here
+      // so openAbsencePayment() (called right after close) can still read them.
     }
 
     function openAbsencePayment() {
-      closeAbsenceInfoModal();
-      const student = window.currentStudent;
-      if (!student || !_absenceInfoDate) { openPaymentModal(); return; }
+      // Capture date/price BEFORE closing (closeAbsenceInfoModal must not clear them)
       const isoDate = _absenceInfoDate;
-      _absenceInfoDate = null;
-      const price = (student.price_per_class || window.currentTotalUnpaid || 0);
+      const price   = _absenceInfoPrice;
+      closeAbsenceInfoModal();
+      _absenceInfoDate  = null;
+      _absenceInfoPrice = 0;
+
+      const student = window.currentStudent;
+      if (!student || !isoDate) { openPaymentModal(); return; }
+
+      const amount = price > 0 ? price : (parseFloat(student.price_per_class) || 50);
       const params = new URLSearchParams({
         student_name    : student.name    || '',
         student_id      : String(student.id || ''),
         email           : student.email   || '',
-        amount          : String(price),
+        amount          : String(amount),
         currency        : 'usd',
         invoice_ref     : `absent-${student.id}-${isoDate}`,
         for_class       : isoDate,
