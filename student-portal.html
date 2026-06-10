@@ -11932,8 +11932,10 @@
         if (effectiveStartStr) {
           const beforeFilter = allSystemNotes.length;
           allSystemNotes = allSystemNotes.filter(note => {
-            // UNCONDITIONAL: If admin granted Individual Access or Free Access, always show this note.
-            if (freeNoteIds.has(note.id)) return true;
+            // Only bypass date filter for true individual admin grants (admin explicitly unlocked
+            // for this student). Group-level postings must still be filtered by effectiveStartStr
+            // so restarted students don't see notes from before their new start date.
+            if (individualAccessNoteIds.includes(note.id)) return true;
 
             // Use posting date (when this note was assigned to this group for a class).
             // Fall back to the note's own class_date only if no posting record exists.
@@ -13135,7 +13137,7 @@
           // Note: student_notes table might not have 'system' column, so we select all possible variants
           const { data: fetchedNotes, error: notesError } = await supabaseClient
             .from('student_notes')
-            .select('id, system_category, category, group_name, is_deleted');
+            .select('id, system_category, category, group_name, deleted');
           // Only fetch fields needed for per-system counting — avoids statement timeout on large tables
           
           if (notesError) {

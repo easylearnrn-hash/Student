@@ -3613,6 +3613,17 @@
           console.warn('⚠️ Could not clear legacy unpaid rows during restart:', clearLegacyUnpaidError);
         }
 
+        // Remove all note permissions for this student so old posted notes are fully wiped.
+        // Group-level free access (note_free_access) is shared and cannot be per-student deleted,
+        // but the portal date filter will hide notes posted before the new start_date.
+        const { error: clearPermsError } = await supabaseClient
+          .from('student_note_permissions')
+          .delete()
+          .eq('student_id', student.id);
+        if (clearPermsError) {
+          console.warn('⚠️ Could not clear note permissions during restart:', clearPermsError);
+        }
+
         const saveResult = await saveStudent(student);
         if (!saveResult) {
           await customAlert('Restart Failed', `Could not restart ${student.name}. Please try again.`);
