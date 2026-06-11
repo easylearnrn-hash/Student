@@ -8243,7 +8243,8 @@
           }),
           checkActiveLiveClass().then(() => {
             if (!window._liveClassPollInterval) {
-              window._liveClassPollInterval = setInterval(checkActiveLiveClass, 60000);
+              window._liveClassPollInterval = true; // guard flag
+              intervalManager.set('liveClassPoll', checkActiveLiveClass, 60000);
             }
           })
         ]).then(results => {
@@ -11964,11 +11965,7 @@
           ? [studentGroup, `Group ${studentGroup}`]
           : [];
 
-        console.log('🔍 Querying student_note_permissions with:', {
-          studentId,
-          studentGroup,
-          groupNameCandidates
-        });
+        if (DEBUG_MODE) debugLog('🔍 Querying student_note_permissions with:', { studentId, studentGroup, groupNameCandidates });
 
         // Compute group letter before the parallel fetch block
         const studentGroupLetter = currentStudent.group_letter || currentStudent.group || currentStudent.group_name;
@@ -12145,11 +12142,7 @@
         // Combine permission-based access AND free access
         const allAccessibleNoteIds = [...new Set([...permissionNoteIds, ...freeAccessNoteIds])];
         
-        console.log('🔓 ACCESSIBLE NOTE IDS:', {
-          total: allAccessibleNoteIds.length,
-          fromPermissions: permissionNoteIds.length,
-          fromFreeAccess: freeAccessNoteIds.length
-        });
+        if (DEBUG_MODE) debugLog('🔓 ACCESSIBLE NOTE IDS:', { total: allAccessibleNoteIds.length, fromPermissions: permissionNoteIds.length, fromFreeAccess: freeAccessNoteIds.length });
         
         if (DEBUG_MODE) {
           debugLog('🔓 Total Accessible Notes:', allAccessibleNoteIds.length, '(Permissions:', permissionNoteIds.length, '+ Free:', freeAccessNoteIds.length, ')');
@@ -12181,17 +12174,7 @@
         
         if (DEBUG_MODE) debugLog(`✅ Loaded ${notes?.length || 0} notes`);
 
-        // ALWAYS log note count for debugging
-        console.log('📚 LOADED NOTES COUNT:', notes?.length || 0);
-        if (notes && notes.length > 0) {
-          console.log('📝 Sample notes (first 3):', notes.slice(0, 3).map(n => ({
-            id: n.id,
-            title: n.title,
-            category: n.category,
-            system_category: n.system_category,
-            group_name: n.group_name
-          })));
-        }
+        if (DEBUG_MODE) debugLog('📚 LOADED NOTES COUNT:', notes?.length || 0);
         
         // Payment data came from the parallel Promise.all above (paymentDataResult).
         // Guard against transient fetch failures so we don't incorrectly lock paid notes.
@@ -12217,9 +12200,7 @@
         
         const freeNoteIds = new Set([...(freeAccessNoteIds || []), ...individualAccessNoteIds]);
         
-        if (individualAccessNoteIds.length > 0) {
-          console.log('✅ Individual Access grants (unconditional free):', individualAccessNoteIds);
-        }
+        if (DEBUG_MODE && individualAccessNoteIds.length > 0) debugLog('✅ Individual Access grants (unconditional free):', individualAccessNoteIds);
         
         if (DEBUG_MODE) debugLog(`✨ FREE access notes: ${freeNoteIds.size} notes (bypass payment checks)`);
         
@@ -12261,10 +12242,7 @@
           currentStudentPaidDates  // Full paid-date Set from all payment sources (bypasses schedule floor)
         );
         
-        if (DEBUG_MODE) {
-          console.log(`   - Unlocked by payment: ${Array.from(notePaymentStatus.values()).filter(v => v).length}`);
-          console.log(`   - Locked: ${Array.from(notePaymentStatus.values()).filter(v => !v).length}`);
-        }
+        if (DEBUG_MODE) debugLog(`   - Unlocked: ${Array.from(notePaymentStatus.values()).filter(v => v).length} / Locked: ${Array.from(notePaymentStatus.values()).filter(v => !v).length}`);
         
         // Transform notes to match expected format
         const transformedNotes = notes.map(note => {
@@ -12402,18 +12380,11 @@
             if (!noteClassDate) return true; // no date info → show it
             return noteClassDate >= effectiveStartStr;
           });
-          if (beforeFilter !== allSystemNotes.length) {
-            console.log(`📅 New-student filter: hid ${beforeFilter - allSystemNotes.length} old notes (before ${effectiveStartStr})`);
-          }
+          if (DEBUG_MODE && beforeFilter !== allSystemNotes.length) debugLog(`📅 New-student filter: hid ${beforeFilter - allSystemNotes.length} old notes (before ${effectiveStartStr})`);
         }
         refreshSystemAssignmentStats();
         
-        console.log('✅ ALL SYSTEM NOTES SET:', allSystemNotes.length);
-        console.log('📊 System breakdown:', allSystemNotes.reduce((acc, note) => {
-          const sys = note.course || 'Unknown';
-          acc[sys] = (acc[sys] || 0) + 1;
-          return acc;
-        }, {}));
+        if (DEBUG_MODE) debugLog('✅ ALL SYSTEM NOTES SET:', allSystemNotes.length);
         
         // Sort notes by date - NEWEST FIRST
         // Use allSystemNotes (already filtered by effectiveStartStr) so restarted students
@@ -12446,8 +12417,7 @@
   function filterNotesBySystem(systemName) {
       selectedSystem = systemName;
       
-      console.log('🔍 Filtering notes for system:', systemName);
-      console.log('📚 Total notes available:', allSystemNotes.length);
+      if (DEBUG_MODE) debugLog('🔍 Filtering notes for system:', systemName, '| total available:', allSystemNotes.length);
       
       // Normalize system names for comparison (handle "Cardiovascular" vs "Cardiovascular System")
       const normalizeSystemName = (name) => {
@@ -12457,7 +12427,6 @@
       };
       
       const normalizedSearchName = normalizeSystemName(systemName);
-      console.log('🎯 Normalized search name:', normalizedSearchName);
       
       let filteredNotes = allSystemNotes.filter(note => {
         const systemNameFromNote = getSystemNameFromNote(note);
@@ -12465,10 +12434,7 @@
         return normalizedNoteName === normalizedSearchName;
       });
       
-      console.log('✅ Filtered notes count:', filteredNotes.length);
-      if (filteredNotes.length > 0) {
-        console.log('📝 First 3 filtered notes:', filteredNotes.slice(0, 3).map(n => ({ title: n.title, category: n.course })));
-      }
+      if (DEBUG_MODE) debugLog('✅ Filtered notes count:', filteredNotes.length);
       
       // Apply locked filter if active
       if (showLockedOnly) {
@@ -13567,7 +13533,7 @@
     async function loadSystemsProgress() {
       const loadStartTime = Date.now(); // Track when loading started
       
-      console.log('🎯 loadSystemsProgress() called');
+      if (DEBUG_MODE) debugLog('🎯 loadSystemsProgress() called');
       
       const carousel = document.getElementById('systemsCarousel');
       if (!carousel) {
@@ -13577,7 +13543,7 @@
 
       refreshSystemAssignmentStats();
       
-      console.log('📊 systemAssignmentStats:', systemAssignmentStats);
+      if (DEBUG_MODE) debugLog('📊 systemAssignmentStats:', systemAssignmentStats);
 
       try {
         // Get student's group letter for filtering folders
@@ -13762,12 +13728,7 @@
           // Carousel order: Green → Yellow → Blue → Red
           nclexSystems = mappedSystems;
           
-          console.log('🎨 System cards generated:', nclexSystems.length);
-          console.log('📋 Systems by status:', nclexSystems.reduce((acc, s) => {
-            acc[s.status] = (acc[s.status] || 0) + 1;
-            return acc;
-          }, {}));
-          console.log('🔵 Blue cards (in-progress):', nclexSystems.filter(s => s.status === 'in-progress').map(s => s.name));
+          if (DEBUG_MODE) debugLog('🎨 System cards generated:', nclexSystems.length, '| by status:', nclexSystems.reduce((acc, s) => { acc[s.status] = (acc[s.status] || 0) + 1; return acc; }, {}));
         } else {
           nclexSystems = DEFAULT_SYSTEMS.map(system => ({
             ...system,
@@ -14778,7 +14739,7 @@
             .from('portal_settings')
             .select('setting_value')
             .eq('setting_key', 'christmas_theme')
-            .single();
+            .maybeSingle();
 
           if (!error && data) {
             christmasEnabled = data.setting_value?.enabled === true;
@@ -15173,7 +15134,7 @@
       }, 100);
       
       // Check periodically (every 30 seconds)
-      setInterval(checkUnreadMessages, 30000);
+      intervalManager.set('unreadMessages', checkUnreadMessages, 30000);
     })();
   </script>
 
@@ -15418,7 +15379,7 @@
             ])
           ];
 
-          console.log('📚 Notes for date', isoDate, 'group', groupLetter, '→', noteIds.length, 'ids');
+          if (DEBUG_MODE) debugLog('📚 Notes for date', isoDate, 'group', groupLetter, '→', noteIds.length, 'ids');
 
           if (noteIds.length === 0) {
             openPaymentWithNotes([]);
@@ -15431,7 +15392,7 @@
             .in('id', noteIds);
 
           const titles = (notes || []).map(n => n.title).filter(Boolean);
-          console.log('📝 Note titles for payment screen:', titles);
+          if (DEBUG_MODE) debugLog('📝 Note titles for payment screen:', titles);
           openPaymentWithNotes(titles);
         } catch (err) {
           console.error('❌ Failed to fetch notes for payment screen:', err);
