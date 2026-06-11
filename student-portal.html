@@ -10338,12 +10338,26 @@
           "HHS causes severe dehydration without major ketones.",
           "Fruity breath suggests diabetic ketoacidosis."
         ];
-        // Use calendar day-of-year so every student sees the same sentence on the same day,
-        // and it advances once per day (not per session).
+        // Deterministic shuffle seeded by the current year so:
+        //  - All 200 sentences appear before any repeats
+        //  - The order is randomised (not predictably 1-200)
+        //  - Every student sees the same sentence on the same calendar day
+        //  - The shuffle resets (new random order) each new year
+        function seededShuffle(arr, seed) {
+          const a = arr.slice();
+          let s = seed >>> 0;
+          for (let i = a.length - 1; i > 0; i--) {
+            s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+            const j = s % (i + 1);
+            const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+          }
+          return a;
+        }
         const now = new Date();
         const start = new Date(now.getFullYear(), 0, 0);
         const dayOfYear = Math.floor((now - start) / 86400000);
-        const idx = dayOfYear % sentences.length;
+        const shuffled = seededShuffle(sentences, now.getFullYear());
+        const idx = (dayOfYear - 1 + shuffled.length) % shuffled.length;
         const el = document.getElementById('sotdText');
         if (el) {
           // Get first name from currentStudent if available, fall back after load
@@ -10351,7 +10365,7 @@
             const fullName = (window.currentStudent && window.currentStudent.name) || '';
             const firstName = fullName.trim().split(/\s+/)[0] || '';
             const dear = firstName ? `Dear ${firstName}, always remember — ` : 'Always remember — ';
-            el.innerHTML = `<span style="color:rgba(196,164,95,0.9);font-style:normal;font-weight:600;">${dear}</span>${sentences[idx]}`;
+            el.innerHTML = `<span style="color:rgba(196,164,95,0.9);font-style:normal;font-weight:600;">${dear}</span>${shuffled[idx]}`;
           }
           renderSotd();
           // Re-render once student data loads (in case currentStudent wasn't set yet)
