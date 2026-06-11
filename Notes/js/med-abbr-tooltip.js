@@ -1058,6 +1058,9 @@
     backLink.textContent = '← Back to Portal';
     backLink.addEventListener('click', function (e) {
       e.preventDefault();
+      if (window.opener && !window.opener.closed) {
+        try { window.opener.focus(); window.close(); return; } catch(e2) {}
+      }
       window.location.href = portalUrl;
     });
 

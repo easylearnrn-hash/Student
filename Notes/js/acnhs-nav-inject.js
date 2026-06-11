@@ -313,6 +313,9 @@
       if (!el) return;
       el.addEventListener('click', function (e) {
         e.preventDefault();
+        if (window.opener && !window.opener.closed) {
+          try { window.opener.focus(); window.close(); return; } catch(e2) {}
+        }
         window.location.href = portalUrl;
       });
     });
@@ -877,6 +880,9 @@
       btn.setAttribute('href', '#');
       btn.addEventListener('click', function (e) {
         e.preventDefault();
+        if (window.opener && !window.opener.closed) {
+          try { window.opener.focus(); window.close(); return; } catch(e2) {}
+        }
         window.location.href = portalUrl;
       });
     });
