@@ -6223,6 +6223,39 @@
     // CACHING SYSTEM - Performance Optimization
     // ==========================================================================
     
+    // ==========================================================================
+    // STALE-WHILE-REVALIDATE PERSISTENCE — makes the portal feel instant
+    // Keys are scoped per-student so different accounts don't bleed into each other.
+    // ==========================================================================
+    const SWR_TTL = 24 * 60 * 60 * 1000; // 24 hours max staleness
+
+    function swrKey(email, suffix) {
+      return `arnoma:swr:${email}:${suffix}`;
+    }
+
+    function swrSave(email, suffix, data) {
+      try {
+        localStorage.setItem(swrKey(email, suffix), JSON.stringify({ ts: Date.now(), data }));
+      } catch (_) {} // Quota errors are non-fatal
+    }
+
+    function swrLoad(email, suffix) {
+      try {
+        const raw = localStorage.getItem(swrKey(email, suffix));
+        if (!raw) return null;
+        const { ts, data } = JSON.parse(raw);
+        if (Date.now() - ts > SWR_TTL) return null; // Too stale
+        return data;
+      } catch (_) { return null; }
+    }
+
+    function swrClear(email) {
+      try {
+        const prefix = `arnoma:swr:${email}:`;
+        Object.keys(localStorage).filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k));
+      } catch (_) {}
+    }
+
     const dataCache = new Map();
     const domCache = new Map();
     const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -7238,8 +7271,11 @@
           updated_at: matchingGroup.updated_at ? new Date(matchingGroup.updated_at) : null
         };
         
-        // Cache the result
+        // Cache the result (in-memory + localStorage for next page load)
         setCachedData(cacheKey, scheduleData);
+        if (currentEmail) {
+          swrSave(currentEmail, 'schedule', { ...scheduleData, _cacheGroup: normalizedGroup });
+        }
         
         return scheduleData;
       } catch (e) {
@@ -7800,6 +7836,29 @@
             return;
           }
           
+          // ⚡ STALE-WHILE-REVALIDATE: flash cached student name instantly before network
+          const _cachedStudent = swrLoad(currentEmail, 'student');
+          if (_cachedStudent) {
+            currentStudent = _cachedStudent;
+            window.currentStudent = _cachedStudent;
+            showBasicStudentInfo(_cachedStudent);
+            // Also seed in-memory schedule cache from localStorage
+            const _cachedSchedule = swrLoad(currentEmail, 'schedule');
+            if (_cachedSchedule) {
+              setCachedData(`group-schedule-${_cachedSchedule._cacheGroup}`, _cachedSchedule);
+            }
+            // Flash cached payment summary (unpaid, last paid)
+            const _cachedPay = swrLoad(currentEmail, 'paymentSummary');
+            if (_cachedPay) {
+              const _tu = document.getElementById('totalUnpaid');
+              const _lp = document.getElementById('lastPaid');
+              const _lpd = document.getElementById('lastPaidDate');
+              if (_tu) _tu.textContent = _cachedPay.unpaid;
+              if (_lp) _lp.textContent = _cachedPay.lastPaid;
+              if (_lpd) _lpd.textContent = _cachedPay.lastPaidDate;
+            }
+          }
+
           // Fire student record lookup AND admin check in parallel — saves one full round-trip
           const [
             { data: studentRecord, error: studentError },
@@ -7860,6 +7919,7 @@
             
             currentStudent = studentRecord;
             window.currentStudent = studentRecord; // Also set window property
+            swrSave(currentEmail, 'student', studentRecord); // 💾 persist for instant next load
             await loadPortalData();
           } else {
             // No student record and not admin - deny access
@@ -9211,6 +9271,15 @@
       }
 
       document.getElementById('totalUnpaid').textContent = `$${displayUnpaidAmount.toFixed(0)}`;
+
+      // 💾 Persist payment summary for instant render on next load
+      if (currentEmail) {
+        swrSave(currentEmail, 'paymentSummary', {
+          unpaid: `$${displayUnpaidAmount.toFixed(0)}`,
+          lastPaid: document.getElementById('lastPaid')?.textContent || '',
+          lastPaidDate: document.getElementById('lastPaidDate')?.textContent || ''
+        });
+      }
 
       // ── DEBT LOCK: auto-force on login removed — students are never locked out.
       //    The ignore check above also ensures ignored students see $0 balance. ──
