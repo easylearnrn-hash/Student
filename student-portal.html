@@ -13520,7 +13520,6 @@
     
     // Performance: Cache database queries (30 second TTL)
     let systemsDataCache = {
-      allNotes: null,
       folders: null,
       timestamp: 0,
       ttl: 30000 // 30 seconds
@@ -13552,25 +13551,14 @@
         // Use cached data if valid, otherwise fetch fresh
         let allNotes, folders;
         
+        // Use only the notes already in memory — avoids a full table scan that causes
+        // statement timeout on large student_notes tables.
+        let allNotes = null;
+        let folders;
+
         if (isCacheValid()) {
-          allNotes = systemsDataCache.allNotes;
           folders = systemsDataCache.folders;
         } else {
-          // Fetch ALL notes to count per system (not filtered by student access)
-          // Note: student_notes table might not have 'system' column, so we select all possible variants
-          const { data: fetchedNotes, error: notesError } = await supabaseClient
-            .from('student_notes')
-            .select('id, system_category, category, group_name, deleted')
-            .eq('deleted', false);
-          // Only fetch non-deleted rows with minimal fields — avoids statement timeout on large tables
-          
-          if (notesError) {
-            console.error('❌ Error fetching total notes:', notesError);
-            // Continue anyway - we'll use stats from allSystemNotes instead
-          }
-          
-          allNotes = fetchedNotes;
-          
           // Fetch note folders from database - BOTH group-specific AND global folders
           const { data: fetchedFolders, error } = await supabaseClient
             .from('note_folders')
@@ -13587,28 +13575,17 @@
           folders = fetchedFolders;
           
           // Cache the fetched data
-          systemsDataCache.allNotes = allNotes;
           systemsDataCache.folders = folders;
           systemsDataCache.timestamp = Date.now();
         }
         
-        // Build map of total notes per system
+        // Build map of total notes per system from notes already in memory
         const totalNotesPerSystem = new Map();
-        if (allNotes && allNotes.length > 0) {
-          allNotes.forEach(note => {
-            // CONSISTENT: Use helper function to get system name
+        if (allSystemNotes && allSystemNotes.length > 0) {
+          allSystemNotes.forEach(note => {
             const systemName = getSystemNameFromNote(note);
             totalNotesPerSystem.set(systemName, (totalNotesPerSystem.get(systemName) || 0) + 1);
           });
-        } else {
-          // Fallback: Use allSystemNotes if we couldn't fetch all notes
-          console.warn('⚠️ Could not fetch all notes, using accessible notes for totals');
-          if (allSystemNotes && allSystemNotes.length > 0) {
-            allSystemNotes.forEach(note => {
-              const systemName = getSystemNameFromNote(note);
-              totalNotesPerSystem.set(systemName, (totalNotesPerSystem.get(systemName) || 0) + 1);
-            });
-          }
         }
 
         const assignmentStats = systemAssignmentStats || new Map();
