@@ -522,6 +522,7 @@
       .indicator-dot:hover { transform: scale(1.6) !important; }
 
       .dot-paid    { background: linear-gradient(135deg, #5dd18a, #3da86a); box-shadow: 0 0 5px rgba(93, 209, 138, 0.5); }
+      .dot-free    { background: linear-gradient(135deg, #67e8f9, #22d3ee); box-shadow: 0 0 5px rgba(103, 232, 249, 0.5); }
       .dot-manual  { background: linear-gradient(135deg, #6ea8f7, #3b7fd4); box-shadow: 0 0 5px rgba(110, 168, 247, 0.5); }
       .dot-unpaid  { background: linear-gradient(135deg, #e05555, #b83030); box-shadow: 0 0 5px rgba(224, 85, 85, 0.5); }
       .dot-absent  { background: linear-gradient(135deg, #9e9e9e, #6e6e6e); box-shadow: 0 0 5px rgba(158, 158, 158, 0.4); }
@@ -2823,6 +2824,9 @@
               } else if (paymentInfo.hasPayment) {
                 dotType = 'paid';
                 dotLabel += ' (Paid)';
+              } else if (student.notes && student.notes.includes('[ARNOMA_FREE_STUDENT]')) {
+                dotType = 'free';
+                dotLabel += ' (Free)';
               } else if (dateStr <= getLATodayISO()) {
                 dotType = 'unpaid';
                 dotLabel += ' (Unpaid)';
@@ -2985,7 +2989,8 @@
                     // Only count unpaid for past/today dates - using cached lookup for performance
                     const isAbsent = isAbsentCached(dateStr, student.id);
                     
-                    if (!isAbsent) {
+                    const isFreeStudent = student.notes && student.notes.includes('[ARNOMA_FREE_STUDENT]');
+                    if (!isAbsent && !isFreeStudent) {
                       unpaidTotal += parseFloat(student.price_per_class || 0);
                     }
                   }
@@ -3066,6 +3071,8 @@
               status = 'absent';
             } else if (paymentInfo.hasPayment) {
               status = 'paid';
+            } else if (student.notes && student.notes.includes('[ARNOMA_FREE_STUDENT]')) {
+              status = 'free';
             } else {
               status = 'unpaid';
             }
@@ -3204,6 +3211,11 @@
               statusColor = '#4ade80';
               statusBg = 'rgba(74,222,128,0.2)';
               statusBorder = 'rgba(74,222,128,0.5)';
+            } else if (student.status === 'free') {
+              statusBadge = 'FREE';
+              statusColor = '#34d399';
+              statusBg = 'rgba(52,211,153,0.15)';
+              statusBorder = 'rgba(52,211,153,0.4)';
             } else if (student.status === 'unpaid') {
               statusBadge = 'UNPAID';
               statusColor = '#f87171';
@@ -3304,7 +3316,7 @@
                 <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px;">
                   <div style="flex: 1; min-width: 0;">
                     <div style="color: white; font-weight: 500; margin-bottom: 4px;">${student.name}</div>
-                    <div style="color: rgba(255,255,255,0.5); font-size: 12px;">${student.status === 'unpaid' ? `Owes: $${pricePerClass} • Credit: $${student.balance || 0}` : `Credit: $${student.balance || 0}`}</div>
+                    <div style="color: rgba(255,255,255,0.5); font-size: 12px;">${student.status === 'unpaid' ? `Owes: $${pricePerClass} • Credit: $${student.balance || 0}` : student.status === 'free' ? `Free student • Credit: $${student.balance || 0}` : `Credit: $${student.balance || 0}`}</div>
                   </div>
                   ${actionButtons}
                   <div style="padding: 6px 12px; background: ${statusBg}; border: 1px solid ${statusBorder}; border-radius: 8px; color: ${statusColor}; font-size: 11px; font-weight: 600; letter-spacing: 0.5px;">${statusBadge}</div>
