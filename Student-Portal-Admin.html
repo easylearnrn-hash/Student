@@ -6025,12 +6025,49 @@
           _startClassGroups.map(g =>
             `<option value="${g.group_name}">Group ${g.group_name}${g.schedule ? ' · ' + g.schedule : ''}</option>`
           ).join('');
+
+        // Auto-select group whose schedule matches today's day & current time (±90 min window)
+        const matched = detectCurrentClassGroup(_startClassGroups);
+        if (matched) {
+          select.value = matched;
+          updateStartClassRecipientCount();
+        }
       } catch (e) {
         select.innerHTML = '<option value="">Error loading groups</option>';
         console.error('openStartClassModal:', e);
       }
 
       select.onchange = updateStartClassRecipientCount;
+    }
+
+    function detectCurrentClassGroup(groups) {
+      const DAY_ABBRS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      const now = new Date();
+      const todayAbbr = DAY_ABBRS[now.getDay()];
+      const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+      for (const g of groups) {
+        if (!g.schedule) continue;
+        // Schedule format: "Mon 8:00 PM, Wed 8:00 PM"
+        const entries = g.schedule.split(',').map(s => s.trim());
+        for (const entry of entries) {
+          // Match e.g. "Mon 8:00 PM" or "Mon 08:00 PM"
+          const m = entry.match(/^(\w{3})\s+(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+          if (!m) continue;
+          if (m[1] !== todayAbbr) continue;
+          let hours = parseInt(m[2], 10);
+          const mins = parseInt(m[3], 10);
+          const period = m[4].toUpperCase();
+          if (period === 'PM' && hours !== 12) hours += 12;
+          if (period === 'AM' && hours === 12) hours = 0;
+          const classMinutes = hours * 60 + mins;
+          // Match if within 90 minutes before or after class start
+          if (Math.abs(nowMinutes - classMinutes) <= 90) {
+            return g.group_name;
+          }
+        }
+      }
+      return null;
     }
 
     function closeStartClassModal() {
