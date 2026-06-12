@@ -964,6 +964,11 @@
             localStorage.removeItem('arnoma:session-expiry');
           }
 
+          // Immediately save session to arnoma cache so remember-me restore works on next visit
+          if (data.session && window.ArnomaAuth?.saveSessionSnapshot) {
+            window.ArnomaAuth.saveSessionSnapshot(data.session);
+          }
+
           // Check if this is the hardcoded admin email
           const ADMIN_EMAILS = ['hrachfilm@gmail.com', 'narine@arnoma.com'];
           
@@ -1090,6 +1095,11 @@
           } else {
             localStorage.removeItem('arnoma:remember-me');
             localStorage.removeItem('arnoma:session-expiry');
+          }
+
+          // Immediately save session to arnoma cache so remember-me restore works on next visit
+          if (data.session && window.ArnomaAuth?.saveSessionSnapshot) {
+            window.ArnomaAuth.saveSessionSnapshot(data.session);
           }
 
           // Check if user has student role (with auto-link fallback)
@@ -1240,9 +1250,18 @@
           return;
         }
 
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        let session = null;
+        try {
+          const result = await supabase.auth.getSession();
+          session = result.data.session;
+        } catch (e) { /* ignore */ }
+
+        // Fallback: try restoring from arnoma cache (covers remember-me when Supabase storage is stale)
+        if (!session && window.ArnomaAuth) {
+          try {
+            session = await window.ArnomaAuth.ensureSession(supabase, { redirectToLogin: false });
+          } catch (e) { /* session remains null */ }
+        }
 
         if (session) {
           console.log('✅ Session found, validating against current database...');
