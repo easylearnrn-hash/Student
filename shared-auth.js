@@ -93,7 +93,6 @@
     // Admin emails — full access to everything
     const ADMIN_EMAILS = [
       'hrachfilm@gmail.com',
-      'narine@arnoma.com',
     ];
 
     const rawPath = window.location.pathname.split('/').pop() || 'index.html';
