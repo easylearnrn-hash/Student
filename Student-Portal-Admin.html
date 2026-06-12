@@ -1866,6 +1866,16 @@
         </div>
       </div>
       <div class="header-nav">
+        <button class="back-btn" onclick="openStartClassModal()" style="
+          background: linear-gradient(135deg, var(--gold) 0%, #a8833a 100%);
+          color: #080b14;
+          border-color: transparent;
+          font-weight: 700;
+          gap: 7px;
+        ">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          Start a Class
+        </button>
         <button class="back-btn" onclick="window.location.href='Test-Manager.html'">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
           Test Manager
@@ -5989,7 +5999,357 @@
       renderTemplates();
       await customAlert('Success', 'Template deleted successfully!');
     }
+
+    // ============================================================
+    // START A CLASS — Feature
+    // ============================================================
+    let _startClassGroups = [];
+    let _startClassStudents = [];
+    let _startClassSelectedGroup = null;
+    let _startClassMeetLink = null;
+
+    async function openStartClassModal() {
+      const modal = document.getElementById('startClassModal');
+      modal.style.display = 'flex';
+      document.getElementById('meetLinkInput').value = '';
+      document.getElementById('startClassRecipientCount').textContent = '';
+      document.getElementById('startClassStep1').style.display = 'block';
+      document.getElementById('startClassStep2').style.display = 'none';
+
+      // Load groups
+      const select = document.getElementById('startClassGroupSelect');
+      select.innerHTML = '<option value="">Loading…</option>';
+      try {
+        const { data: groups, error } = await supabaseClient
+          .from('groups')
+          .select('group_name, schedule')
+          .eq('active', true)
+          .order('group_name');
+        if (error) throw error;
+        _startClassGroups = groups || [];
+        select.innerHTML = '<option value="">— Select a Group —</option>' +
+          _startClassGroups.map(g =>
+            `<option value="${g.group_name}">Group ${g.group_name}${g.schedule ? ' · ' + g.schedule : ''}</option>`
+          ).join('');
+      } catch (e) {
+        select.innerHTML = '<option value="">Error loading groups</option>';
+        console.error('openStartClassModal:', e);
+      }
+
+      select.onchange = updateStartClassRecipientCount;
+    }
+
+    function closeStartClassModal() {
+      document.getElementById('startClassModal').style.display = 'none';
+    }
+
+    async function updateStartClassRecipientCount() {
+      const groupName = document.getElementById('startClassGroupSelect').value;
+      const el = document.getElementById('startClassRecipientCount');
+      if (!groupName) { el.textContent = ''; return; }
+      try {
+        const { data, error } = await supabaseClient
+          .from('students')
+          .select('id', { count: 'exact' })
+          .eq('group_name', groupName)
+          .eq('show_in_grid', true)
+          .not('email', 'is', null);
+        if (error) throw error;
+        const count = (data || []).length;
+        el.textContent = `${count} active student${count !== 1 ? 's' : ''} will receive this email`;
+      } catch (e) {
+        el.textContent = '';
+      }
+    }
+
+    function buildStartClassEmailHtml(meetLink) {
+      return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Your Class Is Starting Now</title></head><body style="margin:0;padding:0;background:#0f1424;font-family:'Inter',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#0f1424;padding:32px 16px;">
+  <tr><td align="center">
+    <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:linear-gradient(155deg,#121a30 0%,#0d1220 100%);border-radius:18px;border:1px solid rgba(196,164,95,0.30);border-top:3px solid #c4a45f;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.55);">
+      <!-- Header -->
+      <tr><td style="padding:32px 36px 24px;border-bottom:1px solid rgba(196,164,95,0.14);background:radial-gradient(ellipse at top,rgba(196,164,95,0.09),transparent 60%);">
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#c4a45f;opacity:0.80;margin-bottom:8px;">ARNOMA Student Services</div>
+        <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:26px;font-weight:700;font-style:italic;color:#f0ebe0;margin:0;line-height:1.25;">Your Class Is Starting Now</h1>
+      </td></tr>
+      <!-- Body -->
+      <tr><td style="padding:32px 36px 28px;">
+        <p style="font-size:15px;color:rgba(240,235,224,0.82);line-height:1.75;margin:0 0 24px;">Hi Future Nurse,</p>
+        <p style="font-size:15px;color:rgba(240,235,224,0.82);line-height:1.75;margin:0 0 28px;">It's time for our class! Please click the button below to join the meeting. Before joining, please make sure that <strong style="color:#f0ebe0;">Safari or Chrome</strong> has permission to use your microphone and camera so we can interact smoothly during class.</p>
+        <!-- CTA Button -->
+        <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;"><tr><td align="center" style="border-radius:12px;overflow:hidden;">
+          <a href="${meetLink}" target="_blank" style="display:inline-block;padding:16px 42px;background:linear-gradient(135deg,#c4a45f 0%,#a8833a 100%);color:#080b14;font-family:'Inter',Arial,sans-serif;font-size:16px;font-weight:800;letter-spacing:0.04em;text-decoration:none;border-radius:12px;box-shadow:0 6px 24px rgba(196,164,95,0.38);">▶&nbsp; Start Class</a>
+        </td></tr></table>
+        <p style="font-size:14px;color:rgba(240,235,224,0.50);line-height:1.7;margin:0;border-top:1px solid rgba(196,164,95,0.12);padding-top:24px;">Looking forward to seeing you in class!<br><strong style="color:rgba(240,235,224,0.75);">Best regards,<br>ARNOMA Team</strong></p>
+      </td></tr>
+      <!-- Footer -->
+      <tr><td style="padding:16px 36px;background:rgba(0,0,0,0.20);text-align:center;">
+        <p style="font-size:11px;color:rgba(240,235,224,0.28);margin:0;letter-spacing:0.05em;">ARNOMA Nursing Academy · Student Portal</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>`;
+    }
+
+    async function previewStartClassEmail() {
+      const meetLink = (document.getElementById('meetLinkInput').value || '').trim();
+      const groupName = document.getElementById('startClassGroupSelect').value;
+
+      if (!meetLink) {
+        await customAlert('Missing Info', 'Please enter a Google Meet link.');
+        return;
+      }
+      if (!groupName) {
+        await customAlert('Missing Info', 'Please select a group.');
+        return;
+      }
+
+      // Fetch students
+      try {
+        const { data: students, error } = await supabaseClient
+          .from('students')
+          .select('id, name, email')
+          .eq('group_name', groupName)
+          .eq('show_in_grid', true)
+          .not('email', 'is', null);
+        if (error) throw error;
+        _startClassStudents = (students || []).filter(s => s.email && s.email.trim());
+        _startClassSelectedGroup = groupName;
+        _startClassMeetLink = meetLink;
+      } catch (e) {
+        await customAlert('Error', 'Could not load students: ' + e.message);
+        return;
+      }
+
+      if (_startClassStudents.length === 0) {
+        await customAlert('No Recipients', 'No active students with email addresses found in Group ' + groupName + '.');
+        return;
+      }
+
+      // Render preview
+      const html = buildStartClassEmailHtml(meetLink);
+      const frame = document.getElementById('startClassPreviewFrame');
+      frame.srcdoc = html;
+
+      // Info line
+      document.getElementById('startClassConfirmInfo').innerHTML =
+        `<strong style="color:rgba(196,164,95,0.90);">Group ${groupName}</strong> — ${_startClassStudents.length} recipient${_startClassStudents.length !== 1 ? 's' : ''} will receive this email.<br>
+        <span style="font-size:11px;opacity:0.75;">Subject: <em>Your Class Is Starting Now</em></span>`;
+
+      document.getElementById('startClassStep1').style.display = 'none';
+      document.getElementById('startClassStep2').style.display = 'block';
+    }
+
+    function backToStartClassStep1() {
+      document.getElementById('startClassStep2').style.display = 'none';
+      document.getElementById('startClassStep1').style.display = 'block';
+    }
+
+    async function sendStartClassEmail() {
+      if (!_startClassStudents || _startClassStudents.length === 0) return;
+      const btn = document.getElementById('startClassSendBtn');
+      btn.disabled = true;
+      btn.style.opacity = '0.6';
+      btn.innerHTML = 'Sending…';
+
+      const html = buildStartClassEmailHtml(_startClassMeetLink);
+      const subject = 'Your Class Is Starting Now';
+
+      let sent = 0;
+      let failed = 0;
+
+      for (const student of _startClassStudents) {
+        try {
+          const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({ to: student.email, subject, html })
+          });
+          if (resp.ok) { sent++; } else { failed++; }
+        } catch (e) {
+          failed++;
+        }
+      }
+
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg> Send to All';
+
+      closeStartClassModal();
+
+      if (failed === 0) {
+        await customAlert('Class Started!', `Email sent successfully to ${sent} student${sent !== 1 ? 's' : ''} in Group ${_startClassSelectedGroup}.`);
+      } else {
+        await customAlert('Partial Success', `Sent: ${sent} · Failed: ${failed}. Please retry for any failed recipients.`);
+      }
+    }
+    // ============================================================
   </script>
+  <!-- ============================================================
+       START A CLASS MODAL
+  ============================================================ -->
+  <div id="startClassModal" style="
+    display: none;
+    position: fixed; inset: 0; z-index: 9000;
+    background: rgba(8,11,20,0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  ">
+    <div style="
+      background: linear-gradient(155deg, #121a30 0%, #0d1220 100%);
+      border: 1px solid rgba(196,164,95,0.35);
+      border-top: 2.5px solid var(--gold);
+      border-radius: 22px;
+      max-width: 560px;
+      width: 100%;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.7), 0 0 60px rgba(196,164,95,0.06);
+      overflow: hidden;
+      position: relative;
+    ">
+      <!-- Header -->
+      <div style="
+        padding: 26px 30px 20px;
+        background: radial-gradient(ellipse at top, rgba(196,164,95,0.09), transparent 60%);
+        border-bottom: 1px solid rgba(196,164,95,0.16);
+        display: flex; align-items: center; justify-content: space-between;
+      ">
+        <div>
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:var(--gold);opacity:0.8;margin-bottom:5px;">ARNOMA Student Services</div>
+          <h2 style="font-family:'Playfair Display',Georgia,serif;font-size:22px;font-weight:700;font-style:italic;color:var(--text-primary);margin:0;">Start a Class</h2>
+        </div>
+        <button onclick="closeStartClassModal()" style="
+          background: rgba(196,164,95,0.10);
+          border: 1px solid rgba(196,164,95,0.28);
+          width: 34px; height: 34px;
+          border-radius: 50%;
+          color: var(--gold);
+          font-size: 18px; line-height: 1;
+          cursor: pointer;
+          display: flex; align-items: center; justify-content: center;
+          transition: all 0.2s;
+        " onmouseover="this.style.background='rgba(196,164,95,0.22)';this.style.transform='rotate(90deg)'"
+           onmouseout="this.style.background='rgba(196,164,95,0.10)';this.style.transform='rotate(0)'">×</button>
+      </div>
+
+      <!-- Step 1: Inputs -->
+      <div id="startClassStep1" style="padding:28px 30px;">
+        <!-- Meet Link -->
+        <div style="margin-bottom:20px;">
+          <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--gold);opacity:0.8;margin-bottom:8px;">Google Meet Link</label>
+          <input
+            type="url"
+            id="meetLinkInput"
+            placeholder="https://meet.google.com/xxx-xxxx-xxx"
+            style="
+              width:100%;padding:12px 15px;
+              background:rgba(10,14,28,0.7);
+              border:1px solid rgba(196,164,95,0.28);
+              border-radius:10px;
+              color:var(--text-primary);
+              font-size:14px;
+              font-family:'Inter',sans-serif;
+              transition:all 0.22s;
+              outline:none;
+            "
+            onfocus="this.style.borderColor='rgba(196,164,95,0.60)';this.style.boxShadow='0 0 0 3px rgba(196,164,95,0.10)'"
+            onblur="this.style.borderColor='rgba(196,164,95,0.28)';this.style.boxShadow='none'"
+          >
+        </div>
+
+        <!-- Group Selector -->
+        <div style="margin-bottom:28px;">
+          <label style="display:block;font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--gold);opacity:0.8;margin-bottom:8px;">Send To Group</label>
+          <select
+            id="startClassGroupSelect"
+            style="
+              width:100%;padding:12px 15px;
+              background:rgba(10,14,28,0.7);
+              border:1px solid rgba(196,164,95,0.28);
+              border-radius:10px;
+              color:var(--text-primary);
+              font-size:14px;
+              font-family:'Inter',sans-serif;
+              transition:all 0.22s;
+              outline:none;
+              cursor:pointer;
+            "
+            onfocus="this.style.borderColor='rgba(196,164,95,0.60)'"
+            onblur="this.style.borderColor='rgba(196,164,95,0.28)'"
+          >
+            <option value="">Loading groups...</option>
+          </select>
+          <div id="startClassRecipientCount" style="font-size:12px;color:rgba(196,164,95,0.65);margin-top:6px;min-height:18px;"></div>
+        </div>
+
+        <!-- Preview button -->
+        <button onclick="previewStartClassEmail()" style="
+          width:100%;padding:13px;
+          background: linear-gradient(135deg, var(--gold) 0%, #a8833a 100%);
+          border:none;border-radius:10px;
+          color:#080b14;font-size:14px;font-weight:700;
+          font-family:'Inter',sans-serif;letter-spacing:0.02em;
+          cursor:pointer;transition:all 0.22s;
+          display:flex;align-items:center;justify-content:center;gap:8px;
+        " onmouseover="this.style.filter='brightness(1.08)';this.style.transform='translateY(-1px)'"
+           onmouseout="this.style.filter='none';this.style.transform='translateY(0)'">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          Preview Email
+        </button>
+      </div>
+
+      <!-- Step 2: Email Preview + Confirm -->
+      <div id="startClassStep2" style="display:none;padding:0 30px 28px;">
+        <div style="margin-bottom:16px;">
+          <div style="font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--gold);opacity:0.75;margin-bottom:10px;">Email Preview</div>
+          <iframe
+            id="startClassPreviewFrame"
+            style="width:100%;height:340px;border:1px solid rgba(196,164,95,0.20);border-radius:12px;background:#0f1424;"
+            title="Email Preview"
+          ></iframe>
+        </div>
+        <div id="startClassConfirmInfo" style="
+          font-size:12px;color:rgba(196,164,95,0.75);
+          background:rgba(196,164,95,0.07);
+          border:1px solid rgba(196,164,95,0.18);
+          border-radius:9px;padding:10px 14px;
+          margin-bottom:18px;
+          line-height:1.6;
+        "></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <button onclick="backToStartClassStep1()" style="
+            padding:12px;
+            background:rgba(196,164,95,0.08);
+            border:1px solid rgba(196,164,95,0.25);
+            border-radius:10px;
+            color:var(--gold);font-size:13px;font-weight:600;
+            font-family:'Inter',sans-serif;
+            cursor:pointer;transition:all 0.2s;
+          " onmouseover="this.style.background='rgba(196,164,95,0.16)'"
+             onmouseout="this.style.background='rgba(196,164,95,0.08)'">← Back</button>
+          <button id="startClassSendBtn" onclick="sendStartClassEmail()" style="
+            padding:12px;
+            background: linear-gradient(135deg, var(--gold) 0%, #a8833a 100%);
+            border:none;border-radius:10px;
+            color:#080b14;font-size:13px;font-weight:700;
+            font-family:'Inter',sans-serif;
+            cursor:pointer;transition:all 0.22s;
+            display:flex;align-items:center;justify-content:center;gap:7px;
+          " onmouseover="this.style.filter='brightness(1.08)'"
+             onmouseout="this.style.filter='none'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            Send to All
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
 </body>
 </html>
