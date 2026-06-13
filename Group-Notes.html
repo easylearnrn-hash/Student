@@ -3297,37 +3297,22 @@ async function toggleNoteAccessDropdown(noteId, event, buttonEl) {
     
     for (const student of groupStudents) {
       const manualFree = _noteIndividualGrants.find(g => g.student_id === student.id);
-      const manualPerm = permissions.find(p => p.note_id === noteId && p.student_id === student.id && p.is_accessible);
       
-      let hasAccess = false;
-      let isOverride = false;
-      
-      if (manualFree || manualPerm) {
-        hasAccess = true;
-        isOverride = true;
-        totalSpecificAccess++;
-      } else {
-        if (!note.requires_payment || hasFreeAccess) {
-          hasAccess = true;
-        } else if (isAccessible) {
-          const studentInfo = paymentData.data.get(student.id);
-          const hasPaid = noteDate ? studentInfo.paidDates.has(noteDate) : (studentInfo.paidDates.size > 0);
-          const wasAbsent = noteDate ? studentInfo.absentDates.has(noteDate) : false;
-          
-          if (hasPaid && !wasAbsent) {
-            hasAccess = true;
-          }
-        }
-      }
-      studentsState.push({ student, hasAccess, isOverride });
+      // Checkbox = ONLY individual free-access grants (from note_free_access, access_type='individual').
+      // Payment status or requires_payment flag do NOT affect this checkbox.
+      // Checked = note is unlocked for free. Unchecked = student must pay.
+      const hasAccess = !!manualFree;
+      if (hasAccess) totalSpecificAccess++;
+      studentsState.push({ student, hasAccess });
     }
     
     const allChecked = totalSpecificAccess === groupStudents.length && groupStudents.length > 0;
     
-    let html = `<div style="font-size:12px; font-weight:600; color:var(--gold-light); margin-bottom:10px; border-bottom:1px solid rgba(196,164,95,0.2); padding-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
-       <span>Individual Access</span>
+    let html = `<div style="font-size:12px; font-weight:600; color:var(--gold-light); margin-bottom:4px; border-bottom:1px solid rgba(196,164,95,0.2); padding-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+       <span>Free Access Override</span>
        <span style="font-size:10px; color:rgba(255,255,255,0.4);">${noteDate || 'No Date'}</span>
-    </div>`;
+    </div>
+    <div style="font-size:10px; color:rgba(245,240,232,0.45); margin-bottom:10px; line-height:1.4;">✓ Check = note unlocked for free &nbsp;·&nbsp; Uncheck = paid only</div>`;
     
     html += `<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; padding: 4px; background: rgba(255,255,255,0.05); border-radius: 4px;">
        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:11px; color:var(--text-muted); width:100%;">
@@ -3335,20 +3320,20 @@ async function toggleNoteAccessDropdown(noteId, event, buttonEl) {
                  ${allChecked ? 'checked' : ''} 
                  onchange="toggleNoteSelectAll(${noteId}, this.checked)" 
                  style="width:13px;height:13px;accent-color:var(--emerald);">
-          <span style="user-select:none;">Select All Active Students</span>
+          <span style="user-select:none;">Grant free to all active students</span>
        </label>
     </div>`;
     
     html += `<div style="display:flex; flex-direction:column; gap:8px;">`;
     
-    for (const {student, hasAccess, isOverride} of studentsState) {
+    for (const {student, hasAccess} of studentsState) {
       html += `
         <label style="display:flex; align-items:center; justify-content:space-between; cursor:pointer; font-size:12px; color:var(--text-body); padding:4px; border-radius:4px; transition:background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'">
           <div style="display:flex; align-items:center; gap:8px;">
              <input type="checkbox" class="student-access-cb" data-student-id="${student.id}" onchange="toggleNoteStudentOverride(${noteId}, ${student.id}, this.checked)" ${hasAccess ? 'checked' : ''} style="width:14px;height:14px;accent-color:var(--gold);">
-             <span style="${isOverride ? 'color:var(--emerald); font-weight:600;' : ''}">${student.name}</span>
+             <span style="${hasAccess ? 'color:#4ade80; font-weight:600;' : ''}">${student.name}</span>
           </div>
-          <div style="font-size:10px; color:rgba(255,255,255,0.3);">${hasAccess && !isOverride ? 'Auto' : (isOverride ? 'Manual' : 'Locked')}</div>
+          <div style="font-size:10px; color:${hasAccess ? 'rgba(74,222,128,0.7)' : 'rgba(255,255,255,0.3)'};">${hasAccess ? '✓ Free' : 'Locked'}</div>
         </label>
       `;
     }
@@ -3551,13 +3536,6 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
                   onmouseout="this.style.background='rgba(139,92,246,0.20)';this.style.transform='';this.style.boxShadow='0 2px 6px rgba(139,92,246,0.15)'"
                   title="Manage individual student access — click to open">
               👤 Access <span style="font-size: 9px; opacity:0.7;">▼</span>
-            </span>
-            <span onclick="event.stopPropagation(); viewNote(${note.id})"
-                  style="cursor:pointer; background: rgba(59,130,246,0.18); color: #93c5fd; padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(59,130,246,0.38); display: inline-flex; align-items: center; gap: 5px; transition: all 0.18s; font-size: 11px; font-weight: 700; letter-spacing: 0.2px; box-shadow: 0 2px 6px rgba(59,130,246,0.12);"
-                  onmouseover="this.style.background='rgba(59,130,246,0.32)';this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(59,130,246,0.28)'"
-                  onmouseout="this.style.background='rgba(59,130,246,0.18)';this.style.transform='';this.style.boxShadow='0 2px 6px rgba(59,130,246,0.12)'"
-                  title="Open note PDF">
-              👁 View
             </span>
           </div>
         </div>
