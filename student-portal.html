@@ -13703,19 +13703,18 @@
             
             // PROGRESS CALCULATION (based on POSTED notes, not opened):
             // Progress = (notes posted to this group / total notes in system) * 100
-            // Examples:
-            // - 0 posted out of 50 total → 0% (RED card - not started)
-            // - 10 posted out of 50 total → 20% (BLUE card - in progress)
-            // - 50 posted out of 50 total → 100% (GREEN card - completed)
-            // Note: "Posted" means admin assigned note to this group via note_free_access or student_note_permissions
+            // totalNotesInSystem uses folder.note_templates count (total notes that exist
+            // in the system across all groups) — NOT allSystemNotes (which only contains
+            // notes already posted to this student, causing 1/1 = 100% false positives).
             let progress = 0;
-            
-            if (totalNotesInSystem > 0 && systemNotes > 0) {
+            const trueTotal = totalTemplates > 0 ? totalTemplates : totalNotesInSystem;
+
+            if (trueTotal > 0 && systemNotes > 0) {
               // Calculate percentage: posted / total
-              progress = Math.min(100, Math.round((systemNotes / totalNotesInSystem) * 100));
+              progress = Math.min(100, Math.round((systemNotes / trueTotal) * 100));
             } else if (systemNotes > 0) {
-              // Notes exist but we don't know total - mark as in progress (50%)
-              progress = 50;
+              // Notes exist but we don't know total - mark as in progress
+              progress = Math.min(99, Math.round((systemNotes / Math.max(systemNotes, 1)) * 50));
             } else {
               // No notes posted yet - 0%
               progress = 0;
@@ -13725,7 +13724,7 @@
               id: folder.id,
               name: folder.folder_name,
               icon: folder.icon || '📚',
-              totalTemplates: totalNotesInSystem, // Total notes in system
+              totalTemplates: trueTotal, // Total notes in system (from note_templates count)
               assignedCount: systemNotes, // Posted notes for this group
               progress,
               // 🟡 YELLOW = is_current flag set by admin (regardless of progress)
