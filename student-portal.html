@@ -13595,30 +13595,51 @@
         // statement timeout on large student_notes tables.
         let folders;
 
+        let allNotesCountMap;
+
         if (isCacheValid()) {
           folders = systemsDataCache.folders;
+          allNotesCountMap = systemsDataCache.allNotesCountMap;
         } else {
-          // Fetch note folders from database - BOTH group-specific AND global folders
-          const { data: fetchedFolders, error } = await supabaseClient
-            .from('note_folders')
-            .select('id, folder_name, icon, sort_order, is_current, group_letter, note_templates (id)')
-            .or(`group_letter.eq.${studentGroupLetter},group_letter.is.null`)  // Group-specific OR global
-            .is('deleted_at', null)
-            .order('sort_order', { ascending: true });
+          // Fetch note folders AND total note counts in parallel
+          const [folderResult, noteCountResult] = await Promise.all([
+            // Fetch note folders from database - BOTH group-specific AND global folders
+            supabaseClient
+              .from('note_folders')
+              .select('id, folder_name, icon, sort_order, is_current, group_letter, note_templates (id)')
+              .or(`group_letter.eq.${studentGroupLetter},group_letter.is.null`)
+              .is('deleted_at', null)
+              .order('sort_order', { ascending: true }),
 
-          if (error) {
-            console.error('❌ Error fetching folders:', error);
-            throw error;
+            // Fetch ALL notes' categories to get true totals per system
+            // (not just what's posted to this student — that causes 1/1 = 100% false positives)
+            supabaseClient
+              .from('student_notes')
+              .select('category, system_category')
+              .eq('is_system_note', true)
+          ]);
+
+          if (folderResult.error) {
+            console.error('❌ Error fetching folders:', folderResult.error);
+            throw folderResult.error;
           }
-          
-          folders = fetchedFolders;
-          
+
+          folders = folderResult.data;
+
+          // Build count map: system name → total notes that exist in student_notes
+          allNotesCountMap = new Map();
+          (noteCountResult.data || []).forEach(note => {
+            const cat = note.category || note.system_category;
+            if (cat) allNotesCountMap.set(cat, (allNotesCountMap.get(cat) || 0) + 1);
+          });
+
           // Cache the fetched data
           systemsDataCache.folders = folders;
+          systemsDataCache.allNotesCountMap = allNotesCountMap;
           systemsDataCache.timestamp = Date.now();
         }
-        
-        // Build map of total notes per system from notes already in memory
+
+        // (Legacy) build from student's notes for fallback only — NOT used as denominator
         const totalNotesPerSystem = new Map();
         if (allSystemNotes && allSystemNotes.length > 0) {
           allSystemNotes.forEach(note => {
@@ -13702,21 +13723,36 @@
             }
             
             // PROGRESS CALCULATION (based on POSTED notes, not opened):
-            // Progress = (notes posted to this group / total notes in system) * 100
-            // totalNotesInSystem uses folder.note_templates count (total notes that exist
-            // in the system across all groups) — NOT allSystemNotes (which only contains
-            // notes already posted to this student, causing 1/1 = 100% false positives).
+            // Progress = (notes posted to this group / total notes that exist in student_notes) * 100
+            // trueTotal comes from allNotesCountMap — a DB count of ALL notes for this system,
+            // not just what's posted to this student (which caused 1/1 = 100% false positives).
             let progress = 0;
-            const trueTotal = totalTemplates > 0 ? totalTemplates : totalNotesInSystem;
+
+            // Look up true total from allNotesCountMap (DB count, system-wide)
+            let trueTotal = 0;
+            if (allNotesCountMap && allNotesCountMap.size > 0) {
+              // Try exact match first
+              trueTotal = allNotesCountMap.get(folder.folder_name) || 0;
+              // Try normalized match
+              if (!trueTotal) {
+                const folderNorm = normalizeSystemName(folder.folder_name).toLowerCase();
+                for (const [key, val] of allNotesCountMap.entries()) {
+                  if (normalizeSystemName(key).toLowerCase() === folderNorm) {
+                    trueTotal = val;
+                    break;
+                  }
+                }
+              }
+            }
+            // Fallback: totalTemplates from note_templates join (may be 0 if no templates)
+            if (!trueTotal) trueTotal = totalTemplates;
 
             if (trueTotal > 0 && systemNotes > 0) {
-              // Calculate percentage: posted / total
               progress = Math.min(100, Math.round((systemNotes / trueTotal) * 100));
             } else if (systemNotes > 0) {
-              // Notes exist but we don't know total - mark as in progress
-              progress = Math.min(99, Math.round((systemNotes / Math.max(systemNotes, 1)) * 50));
+              // Notes exist but total unknown — show in-progress but never 100%
+              progress = 50;
             } else {
-              // No notes posted yet - 0%
               progress = 0;
             }
             
@@ -13724,7 +13760,7 @@
               id: folder.id,
               name: folder.folder_name,
               icon: folder.icon || '📚',
-              totalTemplates: trueTotal, // Total notes in system (from note_templates count)
+              totalTemplates: trueTotal, // Total notes that exist in student_notes for this system
               assignedCount: systemNotes, // Posted notes for this group
               progress,
               // 🟡 YELLOW = is_current flag set by admin (regardless of progress)
