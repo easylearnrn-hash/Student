@@ -9423,32 +9423,30 @@
      * @returns {boolean}
      */
     function shouldUnlockNote(note, student, paidDatesSet, absentDatesSet, scheduleData, allNotesWithDates, paymentRecords, freeNoteIds, perGroupClassDate = null, hasPermissionAccess = false) {
-      // 1. Notes that don't require payment are always accessible
-      if (!note.requires_payment) {
-        debugDebug(`🔓 Note ${note.id} unlocked: no payment required`);
-        return true;
-      }
+      // NOTE: requires_payment=false on the note record does NOT unlock it automatically.
+      // All posted notes require payment unless admin explicitly grants free access via
+      // the 🎁 FREE button (which writes to note_free_access → freeNoteIds below).
 
-      // 2. Free-access grant bypasses everything (admin explicitly unlocked for free)
+      // 1. Free-access grant bypasses everything (admin explicitly unlocked for free)
       const hasFreeAccess = freeNoteIds && freeNoteIds.has(note.id);
       if (hasFreeAccess) {
         debugDebug(`🎁 Note ${note.id} unlocked: FREE ACCESS grant`);
         return true;
       }
 
-      // 3. Determine the effective class date for this note.
+      // 2. Determine the effective class date for this note.
       //    perGroupClassDate (from student_note_permissions.class_date or note_free_access.class_date)
       //    takes priority over the global note.class_date.
       const effectiveClassDate = perGroupClassDate
         || (note.class_date ? note.class_date.split('T')[0] : null);
 
-      // 4. Absence check — absent students cannot access paid notes regardless of payment
+      // 3. Absence check — absent students cannot access paid notes regardless of payment
       if (effectiveClassDate && absentDatesSet && absentDatesSet.has(effectiveClassDate)) {
         debugDebug(`🔒 Note ${note.id} LOCKED: student was absent on ${effectiveClassDate}`);
         return false;
       }
 
-      // 5. ✅ PRIMARY CHECK — mirrors Calendar-NEW green dot logic exactly.
+      // 4. ✅ PRIMARY CHECK — mirrors Calendar-NEW green dot logic exactly.
       //    paidDatesSet was built using extractForClassDates() on all payment sources,
       //    so any date showing a green dot on Calendar-NEW will be in this set.
       //    STRICT: a note with a class_date MUST match an exact green-dot paid date.
@@ -9461,7 +9459,7 @@
           return true;
         }
 
-        // 5b. Pre-floor dates: the payment engine only tracks dates ≥ 2026-03-30.
+        // 4b. Pre-floor dates: the payment engine only tracks dates ≥ 2026-03-30.
         //     If this note's class_date is BEFORE that floor, paidDatesSet will never
         //     contain it — not because the student didn't pay, but because the window
         //     doesn't go back that far. If the admin explicitly posted this note to the
@@ -9479,7 +9477,7 @@
         return false;
       }
 
-      // 6. Note has NO class_date at all — unlock if student has any paid date.
+      // 5. Note has NO class_date at all — unlock if student has any paid date.
       //    (Admin posted the note without specifying a class date.)
       if (paidDatesSet.size > 0) {
         debugLog(`[shouldUnlockNote] Note ${note.id}: no class_date — unlocking (student has ${paidDatesSet.size} paid date(s))`);
