@@ -4532,19 +4532,9 @@
         let _startStr = null;
         if (student.start_date) {
             _startStr = student.start_date.split('T')[0];
-        } else if (student.created_at) {
-            // Use LA timezone so a student added at 11pm LA time on June 12
-            // gets _startStr='2026-06-12', not '2026-06-13' (UTC next day).
-            const laStr = new Date(student.created_at).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-            _startStr = laStr; // en-CA produces YYYY-MM-DD
         }
-
-        // IMPORTANT: _startStr is only used to skip dates strictly BEFORE the student joined.
-        // The calendar renders red dots for a student on all class dates since ABSOLUTE_FLOOR,
-        // regardless of start_date. This loop must be consistent with that — if the calendar
-        // shows a red dot, this function must return that date. Therefore, the _startStr gate
-        // uses < (strictly before), not <=, so the join date itself is always included.
-        // The ABSOLUTE_FLOOR (June 1, 2026) is the hard lower bound.
+        // Note: created_at is NOT used as a fallback — calendar dot logic only uses start_date,
+        // so using created_at here causes reminders to miss classes for newly-created students.
         
         let startDate = new Date(ABSOLUTE_FLOOR);
 
@@ -6395,12 +6385,7 @@
         }
 
         const storedDebt = balance < 0 ? Math.abs(balance) : 0;
-        // Use calendar-computed amount if available; fall back to stored balance field only
-        // when we have no calendar data. Do NOT use `|| balance` which would zero-out when
-        // the balance field happens to be 0 and unpaidAmountFromCalendar > 0.
-        const finalBalance = unpaidAmountFromCalendar > 0
-          ? unpaidAmountFromCalendar
-          : (storedDebt > 0 ? storedDebt : balance);
+        const finalBalance = Math.max(unpaidAmountFromCalendar, storedDebt) || balance;
         const finalPrice = pricePerClass || 15;
 
         console.log('💰 Payment reminder calculation:', {
