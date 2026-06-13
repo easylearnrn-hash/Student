@@ -9296,6 +9296,29 @@
       const absenceDisplayDates = new Set();
       const absentDateSet = new Set((absentClasses || []).map(c => c.date ? c.date.substring(0, 10) : '').filter(Boolean));
 
+      // Build date → payment method map from actual payment_records rows
+      // so each "Paid" row shows HOW the student paid (Stripe, Zelle, Cash, etc.)
+      const dateToPaymentMethod = new Map();
+      (prRecordsForUI || []).forEach(pr => {
+        if (!pr || pr.status === 'absent') return;
+        const fallback = (pr.date || '').split('T')[0];
+        const resolved = (pr.for_class_dates || pr.for_class)
+          ? (function() {
+              // reuse extractForClassDates result
+              const dates = [];
+              let raw = pr.for_class_dates != null ? pr.for_class_dates : pr.for_class;
+              if (typeof raw === 'string') { try { raw = JSON.parse(raw); } catch(e) { raw = raw.split(',').map(s=>s.trim()); } }
+              if (!Array.isArray(raw)) raw = raw ? [raw] : [];
+              raw.forEach(d => { const s = String(d||'').split('T')[0]; if(s) dates.push(s); });
+              return dates.length ? dates : (fallback ? [fallback] : []);
+            })()
+          : (fallback ? [fallback] : []);
+        const method = (pr.payment_method || '').toLowerCase().trim();
+        resolved.forEach(d => {
+          if (d && !dateToPaymentMethod.has(d)) dateToPaymentMethod.set(d, method);
+        });
+      });
+
       scheduledDatesForUI.forEach(dateStr => {
         if (!dateStr) return;
         // Hide all history rows before the debt cutoff date (Mar 30, 2026)
@@ -9307,7 +9330,8 @@
           absenceDisplayDates.add(dateStr);
           allEntries.push({ date: classDate, isoDate: dateStr, type: 'absent', amount: pricePerClassValue, statusText: 'Absent', statusClass: 'absent' });
         } else if (paidDatesSet.has(dateStr)) {
-          allEntries.push({ date: classDate, type: 'paid',    amount: pricePerClassValue, statusText: 'Paid',    statusClass: 'paid'    });
+          const method = dateToPaymentMethod.get(dateStr) || '';
+          allEntries.push({ date: classDate, type: 'paid', amount: pricePerClassValue, statusText: 'Paid', statusClass: 'paid', paymentMethod: method });
         } else {
           allEntries.push({ date: classDate, type: 'unpaid',  amount: pricePerClassValue, statusText: 'Unpaid',  statusClass: 'unpaid'  });
         }
@@ -9361,11 +9385,23 @@
         
         const dateStr = `${monthNames[entry.date.getMonth()]} ${entry.date.getDate()}, ${entry.date.getFullYear()}`;
         
-        // Build payment method string with one-time class label if applicable
-        let paymentMethodStr = entry.paymentMethod || '';
+        // Build payment method badge
+        const method = (entry.paymentMethod || '').toLowerCase();
+        let methodBadge = '';
+        if (entry.type === 'paid' && method) {
+          const methodMap = {
+            'stripe':   { label: '💳 Card',  color: 'rgba(99,102,241,0.75)' },
+            'cash':     { label: '💵 Cash',  color: 'rgba(34,197,94,0.65)'  },
+            'zelle':    { label: 'Zelle',     color: 'rgba(100,180,255,0.65)'},
+            'venmo':    { label: 'Venmo',     color: 'rgba(78,190,150,0.65)' },
+            'credit':   { label: '🎁 Credit', color: 'rgba(196,164,95,0.65)' },
+            'excused':  { label: 'Excused',   color: 'rgba(251,146,60,0.65)' },
+          };
+          const found = methodMap[method] || { label: method.charAt(0).toUpperCase()+method.slice(1), color: 'rgba(255,255,255,0.35)' };
+          methodBadge = `<span style="font-size:9px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;padding:2px 7px;border-radius:10px;background:${found.color};color:#fff;margin-left:7px;vertical-align:middle;">${found.label}</span>`;
+        }
         let oneTimeClassLabel = '';
         if (entry.isOneTimeClass) {
-          // Add one-time class label as separate line
           oneTimeClassLabel = '<div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">(One time class)</div>';
         }
         
@@ -9373,9 +9409,9 @@
           <div class="payment-date">${dateStr}</div>
           <div class="payment-status">
             <span class="status-badge ${entry.statusClass}">
-              ${entry.statusText}${paymentMethodStr}
+              ${entry.statusText}
               ${oneTimeClassLabel}
-            </span>
+            </span>${methodBadge}
             ${entry.amount > 0 ? `<span class="payment-amount amount-private" onclick="this.classList.toggle('revealed')">$${entry.amount.toFixed(0)}</span>` : (entry.type === 'absent' ? '<span class="payment-amount">-</span>' : '')}
           </div>
           ${entry.breakdownNote ? `<div class="payment-breakdown-note">${entry.breakdownNote}</div>` : ''}
