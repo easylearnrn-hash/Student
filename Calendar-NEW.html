@@ -4524,8 +4524,6 @@
         const group = groupsData.find(g => g.group_name === student.group_name);
         if (!group) return [];
 
-        const today = getLATodayDate();
-
         // Floor at Jun 1 2026 to avoid scanning all of history.
         const ABSOLUTE_FLOOR = new Date('2026-06-01');
         
@@ -4538,6 +4536,11 @@
         
         let startDate = new Date(ABSOLUTE_FLOOR);
 
+        // Use getLATodayISO() string comparison to avoid UTC/local timezone mismatch.
+        // getLATodayDate() returns a Date object built with local-machine time, which
+        // diverges from the UTC-based dateStr when the machine timezone is not PDT.
+        const todayISO = getLATodayISO();
+
         const unpaidDates = [];
         const oneTimeDates = new Set(
           Array.isArray(group.one_time_schedules)
@@ -4546,8 +4549,9 @@
                 .filter(Boolean)
             : []
         );
-        for (let d = new Date(startDate); d <= today; d.setDate(d.getDate() + 1)) {
+        for (let d = new Date(startDate); ; d.setDate(d.getDate() + 1)) {
           const dateStr = d.toISOString().split('T')[0];
+          if (dateStr > todayISO) break;
           
           if (_startStr && dateStr < _startStr && !manualEnrollments.has(`${student.id}-${dateStr}`)) continue;
 
