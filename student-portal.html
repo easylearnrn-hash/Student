@@ -13595,51 +13595,45 @@
         // statement timeout on large student_notes tables.
         let folders;
 
-        let allNotesCountMap;
-
         if (isCacheValid()) {
           folders = systemsDataCache.folders;
-          allNotesCountMap = systemsDataCache.allNotesCountMap;
         } else {
-          // Fetch note folders AND total note counts in parallel
-          const [folderResult, noteCountResult] = await Promise.all([
-            // Fetch note folders from database - BOTH group-specific AND global folders
-            supabaseClient
-              .from('note_folders')
-              .select('id, folder_name, icon, sort_order, is_current, group_letter, note_templates (id)')
-              .or(`group_letter.eq.${studentGroupLetter},group_letter.is.null`)
-              .is('deleted_at', null)
-              .order('sort_order', { ascending: true }),
+          // Fetch note folders from database - BOTH group-specific AND global folders
+          const { data: fetchedFolders, error } = await supabaseClient
+            .from('note_folders')
+            .select('id, folder_name, icon, sort_order, is_current, group_letter, note_templates (id)')
+            .or(`group_letter.eq.${studentGroupLetter},group_letter.is.null`)  // Group-specific OR global
+            .is('deleted_at', null)
+            .order('sort_order', { ascending: true });
 
-            // Fetch ALL notes' categories to get true totals per system
-            // (not just what's posted to this student — that causes 1/1 = 100% false positives)
-            supabaseClient
-              .from('student_notes')
-              .select('category, system_category')
-              .eq('is_system_note', true)
-          ]);
-
-          if (folderResult.error) {
-            console.error('❌ Error fetching folders:', folderResult.error);
-            throw folderResult.error;
+          if (error) {
+            console.error('❌ Error fetching folders:', error);
+            throw error;
           }
 
-          folders = folderResult.data;
-
-          // Build count map: system name → total notes that exist in student_notes
-          allNotesCountMap = new Map();
-          (noteCountResult.data || []).forEach(note => {
-            const cat = note.category || note.system_category;
-            if (cat) allNotesCountMap.set(cat, (allNotesCountMap.get(cat) || 0) + 1);
-          });
+          folders = fetchedFolders;
 
           // Cache the fetched data
           systemsDataCache.folders = folders;
-          systemsDataCache.allNotesCountMap = allNotesCountMap;
           systemsDataCache.timestamp = Date.now();
         }
 
-        // (Legacy) build from student's notes for fallback only — NOT used as denominator
+        // Build true note totals per system from HTML_NOTES_MAP (client-side, no extra DB query).
+        // HTML_NOTES_MAP is the authoritative catalog of every note that exists.
+        // Counts unique direct HTML files under each system folder:
+        //   Notes/{System}/{file}.html  → attributed to {System}
+        // Sub-folder items (e.g. Notes/Cardiovascular System/EKG HTML/...) are excluded
+        // so the count matches what the admin considers individual notes.
+        const htmlSystemTotals = {};
+        {
+          const countedPaths = new Set(Object.values(HTML_NOTES_MAP));
+          countedPaths.forEach(path => {
+            const match = path.match(/^Notes\/([^\/]+)\/[^\/]+\.html$/);
+            if (match) htmlSystemTotals[match[1]] = (htmlSystemTotals[match[1]] || 0) + 1;
+          });
+        }
+
+        // Build from student's visible notes — used only for notification badges
         const totalNotesPerSystem = new Map();
         if (allSystemNotes && allSystemNotes.length > 0) {
           allSystemNotes.forEach(note => {
@@ -13722,29 +13716,29 @@
               }
             }
             
-            // PROGRESS CALCULATION (based on POSTED notes, not opened):
-            // Progress = (notes posted to this group / total notes that exist in student_notes) * 100
-            // trueTotal comes from allNotesCountMap — a DB count of ALL notes for this system,
-            // not just what's posted to this student (which caused 1/1 = 100% false positives).
+            // PROGRESS CALCULATION (based on POSTED notes):
+            // Progress = (notes posted to this group / total notes in HTML_NOTES_MAP for this system) * 100
+            // HTML_NOTES_MAP is the authoritative catalog so totals are always accurate
+            // regardless of what's in student_notes DB for this specific student.
             let progress = 0;
 
-            // Look up true total from allNotesCountMap (DB count, system-wide)
-            let trueTotal = 0;
-            if (allNotesCountMap && allNotesCountMap.size > 0) {
-              // Try exact match first
-              trueTotal = allNotesCountMap.get(folder.folder_name) || 0;
-              // Try normalized match
-              if (!trueTotal) {
-                const folderNorm = normalizeSystemName(folder.folder_name).toLowerCase();
-                for (const [key, val] of allNotesCountMap.entries()) {
-                  if (normalizeSystemName(key).toLowerCase() === folderNorm) {
-                    trueTotal = val;
-                    break;
-                  }
+            // Look up true total from HTML_NOTES_MAP catalog (client-side, no DB query)
+            let trueTotal = htmlSystemTotals[folder.folder_name] || 0;
+            if (!trueTotal) {
+              // Fuzzy match: normalize both sides (remove spaces, lowercase, 6-char prefix)
+              const folderNorm = (folder.folder_name || '').toLowerCase().replace(/\s+/g, '');
+              for (const [sys, count] of Object.entries(htmlSystemTotals)) {
+                const sysNorm = sys.toLowerCase().replace(/\s+/g, '');
+                if (sysNorm === folderNorm ||
+                    sysNorm.includes(folderNorm) ||
+                    folderNorm.includes(sysNorm) ||
+                    (folderNorm.length >= 6 && sysNorm.startsWith(folderNorm.substring(0, 6)))) {
+                  trueTotal = count;
+                  break;
                 }
               }
             }
-            // Fallback: totalTemplates from note_templates join (may be 0 if no templates)
+            // Final fallback: note_templates count from DB join
             if (!trueTotal) trueTotal = totalTemplates;
 
             if (trueTotal > 0 && systemNotes > 0) {
