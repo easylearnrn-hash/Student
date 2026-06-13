@@ -12332,10 +12332,13 @@
           // 🔐 Use payment-locked notes engine result
           const studentHasPaidForThisNote = notePaymentStatus.get(note.id) || false;
           
-          // 🔥 FIX: Free access notes STILL require payment for the specific date
-          // Free access just means they CAN see it's there, not that it's unlocked
-          // Student can access if: note doesn't require payment, has free access, OR has paid for this date
-          const isPaid = !noteRequiresPayment || hasFreeAccess || freeStudent || studentHasPaidForThisNote;
+          // � PAYMENT ENFORCEMENT: A posted note is ALWAYS locked for unpaid students.
+          // The requires_payment=false flag on the note record is NOT a payment bypass —
+          // it only matters for notes granted via note_free_access (the 🎁 FREE button).
+          // Removing !noteRequiresPayment prevents notes uploaded without the "requires payment"
+          // checkbox from showing as unlocked for all Group students regardless of payment status.
+          // To grant truly free access, admin must use the 🎁 FREE button → note_free_access.
+          const isPaid = hasFreeAccess || freeStudent || studentHasPaidForThisNote;
           
           if (DEBUG_MODE && noteRequiresPayment && !isPaid && !hasFreeAccess) {
             const classDate = note.class_date ? note.class_date.split('T')[0] : 'unknown';
@@ -12394,11 +12397,7 @@
           return transformedNote;
         });
         
-        // ── Payment gate: hide locked notes from view entirely ───────────────
-        // Notes that require payment and the student has NOT paid must not be
-        // visible at all. They only become visible once the student pays.
-        // (Free-access notes and notes that don't require payment are always shown.)
-        allSystemNotes = transformedNotes.filter(note => note.isPaid);
+        allSystemNotes = transformedNotes;
 
         // ── New-student note filter ──────────────────────────────────────────
         // Hide notes whose POSTING date is older than effectiveStartStr (14 days before
