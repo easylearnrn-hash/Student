@@ -8911,52 +8911,6 @@
         }
       });
 
-      // ── Bulk payment forward-allocation ─────────────────────────────────────
-      // When a student pays a lump sum (e.g. $630 = 6 classes) via "Pay Balance"
-      // without specifying for_class_dates, extractForClassDates only marks the
-      // payment date itself as paid. The remaining credits are lost.
-      // Fix: for every payment_records row where for_class_dates is empty AND
-      // amount > pricePerClass, calculate how many classes it covers and allocate
-      // forward to the next unpaid scheduled dates after the payment date.
-      if (pricePerClass > 0) {
-        // Process bulk records in chronological order so earlier payments fill first
-        const bulkRecords = prRecords
-          .filter(pr => {
-            if (pr.status === 'absent') return false;
-            const amount = parseFloat(pr.amount || 0);
-            if (amount < pricePerClass * 2) return false; // only multi-class payments
-            // Must have empty for_class_dates (no explicit allocation)
-            const fcd = pr.for_class_dates;
-            const isEmpty = !fcd || fcd === '[]' || fcd === '{}' || fcd === 'null' ||
-              (Array.isArray(fcd) && fcd.length === 0) ||
-              (typeof fcd === 'string' && fcd.trim().replace(/[\[\]{}\s]/g,'') === '');
-            return isEmpty;
-          })
-          .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-
-        bulkRecords.forEach(pr => {
-          const paymentDateStr = (pr.date || '').split('T')[0];
-          if (!paymentDateStr) return;
-          const totalCredits = Math.floor(parseFloat(pr.amount) / pricePerClass);
-          // The fallback already credited the payment date itself (if it's a scheduled class).
-          // Count how many credits are already consumed by this date being in paidDates.
-          const dateAlreadyCredited = paidDates.has(paymentDateStr) ? 1 : 0;
-          let remaining = totalCredits - dateAlreadyCredited;
-          if (remaining <= 0) return;
-
-          // Allocate remaining credits to next unpaid scheduled dates after paymentDateStr
-          const sortedScheduled = [...scheduledDates].sort();
-          for (const sd of sortedScheduled) {
-            if (remaining <= 0) break;
-            if (sd <= paymentDateStr) continue; // only AFTER the payment date
-            if (paidDates.has(sd) || absentDates.has(sd)) continue;
-            paidDates.add(sd);
-            remaining--;
-            debugLog(`💰 Bulk payment ${paymentDateStr} $${pr.amount} → allocated to ${sd} (${remaining} credits left)`);
-          }
-        });
-      }
-
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
 
       const unpaidClasses  = [];
