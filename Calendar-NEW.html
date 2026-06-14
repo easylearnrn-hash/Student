@@ -3334,7 +3334,10 @@
           const groupContent = `
             <div class="group-section">
               <div style="margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
-                <h3 style="color: var(--accent-cyan); margin: 0; font-size: 16px;">Group ${groupName}</h3>
+                <div style="display: flex; flex-direction: column; gap: 6px;">
+                  <h3 style="color: var(--accent-cyan); margin: 0; font-size: 16px;">Group ${groupName}</h3>
+                  <button class="quick-action-btn secondary" onclick="event.stopPropagation(); sendGroupPaymentReminders(${JSON.stringify(groupName)})" style="padding: 8px 14px; font-size: 12px; background: rgba(138,180,255,0.12); border: 1px solid rgba(138,180,255,0.35); color: #8ab4ff; border-radius: 8px; cursor: pointer; font-weight: 600; transition: all 0.2s; align-self: flex-start;">📧 Send Group Payment Reminders</button>
+                </div>
                 ${cancelButton}
               </div>
               
@@ -7399,6 +7402,69 @@
           currentStudentData.classDate,
           currentStudentData.price
         );
+      }
+
+      async function sendGroupPaymentReminders(groupName) {
+        if (!groupName) return;
+
+        const groupStudents = (studentsByGroup.get(groupName) || []).filter(student => {
+          if (!student || !student.email) return false;
+          const status = String(student.status || '').toLowerCase();
+          return status === 'unpaid';
+        });
+
+        if (groupStudents.length === 0) {
+          await showConfirmDialog('Group Payment Reminders', `<div>No unpaid students with valid email were found in Group ${groupName}.</div>`);
+          return;
+        }
+
+        const confirmed = await showConfirmDialog(
+          'Send Group Payment Reminders?',
+          `
+            <div style="text-align: left; line-height: 1.6;">
+              <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Group:</strong> ${groupName}</div>
+              <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Unpaid students:</strong> ${groupStudents.length}</div>
+              <div style="margin-top: 16px; padding: 12px; background: rgba(138,180,255,0.08); border: 1px solid rgba(138,180,255,0.25); border-radius: 8px; font-size: 14px; color: rgba(255,255,255,0.85);">
+                This will send each unpaid student their own reminder with the exact amount they owe.
+              </div>
+            </div>
+          `
+        );
+        if (!confirmed) return;
+
+        const progressOverlay = document.createElement('div');
+        progressOverlay.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
+          color: white;
+          padding: 16px 22px;
+          border-radius: 12px;
+          border: 1px solid rgba(138, 180, 255, 0.25);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+          z-index: 10000000;
+          font-weight: 600;
+          max-width: 360px;
+          line-height: 1.5;
+        `;
+        progressOverlay.textContent = `Sending reminders to Group ${groupName}...`;
+        document.body.appendChild(progressOverlay);
+
+        let sentCount = 0;
+        let failedCount = 0;
+        for (const student of groupStudents) {
+          try {
+            await sendPaymentReminderEmail(student.id);
+            sentCount++;
+          } catch (err) {
+            failedCount++;
+            console.error('❌ Failed to send group payment reminder:', student.name, err);
+          }
+        }
+
+        progressOverlay.textContent = `✅ Group ${groupName} reminders sent: ${sentCount} sent${failedCount ? `, ${failedCount} failed` : ''}`;
+        setTimeout(() => progressOverlay.remove(), 4500);
       }
 
       async function markAsAbsent() {
