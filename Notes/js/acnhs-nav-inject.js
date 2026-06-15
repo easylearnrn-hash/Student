@@ -148,8 +148,8 @@
       '  padding: 4px 12px; border-radius: 999px;',
       '}',
 
-      /* ── PRINT BUTTON ── */
-      '.acnhs-print-btn {',
+      /* ── NAV ACTION BUTTONS ── */
+      '.acnhs-print-btn, .acnhs-invert-btn {',
       '  display: inline-flex; align-items: center; gap: 7px;',
       '  background: rgba(201,168,76,0.08);',
       '  border: 1px solid rgba(201,168,76,0.28);',
@@ -160,13 +160,43 @@
       '  transition: background .2s, border-color .2s, color .2s, transform .2s, box-shadow .2s;',
       '  flex-shrink: 0; white-space: nowrap;',
       '}',
-      '.acnhs-print-btn:hover {',
+      '.acnhs-print-btn:hover, .acnhs-invert-btn:hover, .acnhs-invert-btn[aria-pressed="true"] {',
       '  background: rgba(201,168,76,0.16);',
       '  border-color: #c9a84c; color: #fff;',
       '  transform: translateY(-1px);',
       '  box-shadow: 0 6px 18px rgba(201,168,76,0.18);',
       '}',
-      '.acnhs-print-btn svg { flex-shrink: 0; }',
+      '.acnhs-print-btn svg, .acnhs-invert-btn svg { flex-shrink: 0; }',
+
+      /* ── LIGHT / COLOR-INVERT READING MODE ── */
+      'body.acnhs-color-inverted {',
+      '  --bg: #ffffff !important; --bg-1: #ffffff !important; --bg-2: #ffffff !important;',
+      '  --surface: #ffffff !important; --surface-2: #ffffff !important; --surface-3: #f6f7f9 !important;',
+      '  --card: #ffffff !important; --panel: #ffffff !important; --cell-dark: #ffffff !important; --cell-dark-2: #ffffff !important;',
+      '  --text: #111111 !important; --ink: #111111 !important; --text-main: #111111 !important; --muted: #4b5563 !important;',
+      '  --line: rgba(17,24,39,0.22) !important; --border: rgba(17,24,39,0.22) !important;',
+      '  background: #ffffff !important; color: #111111 !important;',
+      '}',
+      'body.acnhs-color-inverted, body.acnhs-color-inverted :where(.container, main, article, section, .paper-wrap, .paper, .card, .body, .note-box, .content, .note-body, .page-wrap, .summary-card, .insulin-row, .alert, table, tbody, tr, td) {',
+      '  background-color: #ffffff !important; background-image: none !important; color: #111111 !important; box-shadow: none !important;',
+      '}',
+      'body.acnhs-color-inverted :where(p, li, span, div, td, th, label, small, h1, h2, h3, h4, h5, h6) { color: #111111 !important; text-shadow: none !important; }',
+      'body.acnhs-color-inverted :where(.title-row, .head, .subhead, .note-head, .section-title, .section-heading, thead, th, .table-header) {',
+      '  background: #f1f5f9 !important; background-image: none !important; color: #111111 !important; border-color: rgba(17,24,39,0.22) !important;',
+      '}',
+      'body.acnhs-color-inverted :where(.diff-head) { background: #fde8f0 !important; background-image: none !important; color: #7a1a3a !important; border-color: rgba(180,30,60,0.25) !important; }',
+      'body.acnhs-color-inverted :where(.diff-box) { background: #fff8fb !important; background-image: none !important; color: #111111 !important; }',
+      'body.acnhs-color-inverted :where(.diff-emph) { color: #7a1a3a !important; }',
+      'body.acnhs-color-inverted :where(.section-intro, .alert, .badge, .note-tag, .acnhs-hero-pill, .acnhs-hero-eyebrow) { background: #f8fafc !important; color: #111111 !important; border-color: rgba(17,24,39,0.22) !important; }',
+      'body.acnhs-color-inverted :where(.acnhs-site-nav) { background: rgba(255,255,255,0.96) !important; border-bottom-color: rgba(17,24,39,0.18) !important; box-shadow: 0 4px 24px rgba(15,23,42,0.12) !important; }',
+      'body.acnhs-color-inverted :where(.acnhs-doc-hero) { background: #ffffff !important; border-bottom-color: rgba(17,24,39,0.18) !important; }',
+      'body.acnhs-color-inverted .acnhs-doc-hero::before { display: none !important; }',
+      'body.acnhs-color-inverted :where(.acnhs-nav-back, .acnhs-print-btn, .acnhs-invert-btn) { background: #ffffff !important; border-color: rgba(17,24,39,0.24) !important; color: #111111 !important; box-shadow: none !important; }',
+      'body.acnhs-color-inverted .acnhs-invert-btn[aria-pressed="true"] { background: #e8f0ff !important; border-color: #2563eb !important; color: #0f3b86 !important; }',
+      'body.acnhs-color-inverted :where(b, strong, .blue-word, .emph, .highlight, .key-term, .term) { color: #0a4a8a !important; font-weight: 800 !important; }',
+      'body.acnhs-color-inverted :where(.danger-word, .red, .alert-red, .critical, .warning, [class*="danger"], [class*="red"]) { color: #b91c1c !important; }',
+      'body.acnhs-color-inverted :where(a, .gold, .teal, .cyan, .purple) { color: #0a4a8a !important; }',
+      'body.acnhs-color-inverted :where(svg, path, rect, circle, polyline, line) { color: inherit; }',
 
       /* ── PRINT ── */
       '@media print { .acnhs-site-nav { display: none !important; } body.acnhs-nav-injected { padding-top: 0 !important; } }',
@@ -175,6 +205,7 @@
       '@media (max-width: 768px) {',
       '  .acnhs-nav-inner { padding: 0 20px; }',
       '  .acnhs-nav-crumb { display: none; }',
+      '  .acnhs-invert-btn span, .acnhs-print-btn span { display: none; }',
       '  .acnhs-doc-hero { padding: 36px 20px 32px; margin-bottom: 32px; }',
       '  .acnhs-hero-title { font-size: 1.65rem; }',
       '}'
@@ -271,13 +302,21 @@
           '</svg>' +
           '&#8592; Back to Portal' +
         '</a>' +
+        '<button class="acnhs-invert-btn" type="button" aria-pressed="false" title="Invert note colors">' +
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<circle cx="12" cy="12" r="9"/>' +
+            '<path d="M12 3v18"/>' +
+            '<path d="M12 21a9 9 0 0 0 0-18" fill="currentColor" stroke="none" opacity="0.28"/>' +
+          '</svg>' +
+          '<span>Invert</span>' +
+        '</button>' +
         '<button class="acnhs-print-btn" onclick="acnhsPrintNote()" title="Print this note">' +
           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
             '<polyline points="6 9 6 2 18 2 18 9"/>' +
             '<path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>' +
             '<rect x="6" y="14" width="12" height="8"/>' +
           '</svg>' +
-          'Print' +
+          '<span>Print</span>' +
         '</button>' +
       '</div>';
 
@@ -325,6 +364,41 @@
   /* ─── 6. HTML-escape helper ─────────────────────────────────── */
   function _esc(str) {
     return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /* ─── 6a. COLOR INVERT / LIGHT READING MODE ────────────────── */
+  var COLOR_INVERT_KEY = 'acnhs:color-inverted';
+
+  function getColorInvertPreference() {
+    try { return localStorage.getItem(COLOR_INVERT_KEY) === '1'; }
+    catch (e) { return false; }
+  }
+
+  function setColorInvertPreference(enabled) {
+    try { localStorage.setItem(COLOR_INVERT_KEY, enabled ? '1' : '0'); }
+    catch (e) {}
+  }
+
+  function applyColorInvert(enabled) {
+    document.body.classList.toggle('acnhs-color-inverted', !!enabled);
+    var btn = document.querySelector('.acnhs-invert-btn');
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    btn.setAttribute('title', enabled ? 'Return to dark colors' : 'Invert note colors');
+    var label = btn.querySelector('span');
+    if (label) label.textContent = enabled ? 'Dark' : 'Invert';
+  }
+
+  function initColorInvertToggle() {
+    applyColorInvert(getColorInvertPreference());
+    var btn = document.querySelector('.acnhs-invert-btn');
+    if (!btn || btn.__acnhsInvertWired) return;
+    btn.__acnhsInvertWired = true;
+    btn.addEventListener('click', function () {
+      var enabled = !document.body.classList.contains('acnhs-color-inverted');
+      setColorInvertPreference(enabled);
+      applyColorInvert(enabled);
+    });
   }
 
   /* ─── 6b. Get student name from URL params (portal passes ?studentName=) ── */
@@ -870,6 +944,7 @@
     ensureFonts();
     ensureStyles();
     upgradeHeader();
+    initColorInvertToggle();
 
     /* ── Rewire ALL back-navigation links to go to the portal ──
        Covers .back-btn (new files) and .note-back (older files).
