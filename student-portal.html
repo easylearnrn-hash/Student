@@ -8602,10 +8602,6 @@
      * @param {Object} groupSchedule - Group schedule with days array
      * @returns {Object} { unpaidAmount, unpaidClasses: [] }
      */
-    // DEBT CUTOFF: Only count/show debt and payment history for classes on or after this date.
-    // Used in both calculateUnpaidFromSchedule (debt total) and updatePaymentUI (rendered rows).
-    const DEBT_CUTOFF_STR = '2026-03-30';
-
     /**
      * ✅ MIRRORS Calendar-NEW.html EXACTLY.
      * 
@@ -8613,7 +8609,7 @@
   *  - isAbsent   → student_absences, indexed by class_date
   *  - hasPayment → extractForClassDates() on both `payments` and `payment_records`
   *                 (excused rows treated as paid), plus credit_payments by applied_class_date
-  *  - unpaid     → scheduled date where: !hasPayment && !isAbsent && date <= today
+  *  - unpaid     → scheduled date where: !hasPayment && !isAbsent
      */
     async function calculateUnpaidFromSchedule(student, payments, groupScheduleData) {
       const studentGroup = student.group_name || student.group_letter || student.group;
@@ -8621,6 +8617,8 @@
       const pricePerClass = parseFloat(student.price_per_class) || 50;
       const nowParts = getTodayLAParts();
       if (!nowParts) return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
+
+      const PORTAL_HISTORY_FLOOR_STR = '2026-05-01';
 
       const todayLA = new Date(parseInt(nowParts.year), parseInt(nowParts.month) - 1, parseInt(nowParts.day));
       const nowLA   = new Date(parseInt(nowParts.year), parseInt(nowParts.month) - 1, parseInt(nowParts.day),
@@ -8634,11 +8632,6 @@
         studentStartDate = p.length === 3
           ? new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]))
           : new Date(student.start_date);
-      }
-      if (student.created_at) {
-        const createdDate = new Date(student.created_at);
-        createdDate.setHours(0,0,0,0);
-        if (!studentStartDate) studentStartDate = createdDate;
       }
 
       const normalizedGroup = canonicalizeGroupCode(studentGroup);
@@ -8668,13 +8661,13 @@
         ? names.map(n => `,payer_name.ilike.%${n}%,resolved_student_name.ilike.%${n}%`).join('')
         : '';
 
-      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult, manualEnrollResult] = await Promise.all([
+      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult, manualEnrollResult, visHistResult] = await Promise.all([
         Promise.resolve(
           supabaseClient.from('student_absences').select('class_date').eq('student_id', student.id)
         ).catch(() => ({ data: null, error: true })),
-  // ALL payment_records for this student — ONLY paid/excused, matching Calendar-NEW exactly
+  // ALL payment_records for this student — paid/excused/ignored, matching Calendar-NEW exactly
         Promise.resolve(
-          supabaseClient.from('payment_records').select('*').eq('student_id', student.id).in('status', ['paid', 'excused', 'absent'])
+          supabaseClient.from('payment_records').select('*').eq('student_id', student.id).in('status', ['paid', 'excused', 'ignored', 'absent'])
         ).catch(() => ({ data: null, error: true })),
         Promise.resolve(
           supabaseClient.from('credit_payments').select('class_date, applied_class_date').eq('student_id', student.id)
@@ -8694,6 +8687,13 @@
         // Keep this broad so older rows that missed payment_method still count.
         Promise.resolve(
           supabaseClient.from('payment_records').select('date, payment_method, status, amount').eq('student_id', student.id)
+        ).catch(() => ({ data: [], error: null })),
+        // Visibility history — pause/unpause dates so paused periods are excluded from debt
+        Promise.resolve(
+          supabaseClient.from('student_visibility_history')
+            .select('visible, effective_date')
+            .eq('student_id', student.id)
+            .order('effective_date', { ascending: true })
         ).catch(() => ({ data: [], error: null }))
       ]);
 
@@ -8703,6 +8703,10 @@
       const skipped    = (!skippedResult.error      && skippedResult.data)    ? skippedResult.data   : [];
       const zelleRaw   = (!zelleResult.error        && zelleResult.data)      ? zelleResult.data     : [];
       const manualEnrollRows = (!manualEnrollResult.error && manualEnrollResult.data) ? manualEnrollResult.data : [];
+      // Visibility events sorted ascending — mirrors isStudentActiveOnDate in Calendar-NEW
+      const visHistEvents = (!visHistResult.error && visHistResult.data)
+        ? visHistResult.data.map(r => ({ date: (r.effective_date || '').split('T')[0], visible: r.visible })).sort((a, b) => (a.date < b.date ? -1 : 1))
+        : [];
       const manualEnrollDates = new Set(
         manualEnrollRows
           .filter(r => {
@@ -8744,10 +8748,17 @@
   const paidDates = new Set();
 
       // From payment_records (non-absent only)
+      const ignoredDates = new Set();
+
       prRecords.forEach(pr => {
         if (pr.status === 'absent') return;
         const fallback = (pr.date || '').split('T')[0];
         const resolved = extractForClassDates(pr, fallback);
+        const isIgnoredRecord = String(pr.status || '').toLowerCase() === 'ignored' || String(pr.payment_method || '').toLowerCase() === 'ignored';
+        if (isIgnoredRecord) {
+          resolved.forEach(d => { if (d) ignoredDates.add(d); });
+          return;
+        }
         resolved.forEach(d => { if (d) paidDates.add(d); });
       });
 
@@ -8770,19 +8781,19 @@
       const skippedDates = new Set(skipped.map(s => (s.class_date || '').split('T')[0]).filter(Boolean));
 
       // ── Generate scheduled class dates ──────────────────────────────────────
-      // History floor: Dec 1, 2025. Matches Calendar-NEW exactly.
-      const ABSOLUTE_FLOOR = new Date('2025-12-01');
+      // Portal floor: only classes from May 1, 2026 onward count toward unpaid debt.
+      const ABSOLUTE_FLOOR = new Date(PORTAL_HISTORY_FLOOR_STR);
 
-      // Match Calendar-NEW logic: respect student's start_date/created_at, no forced floor on _studentStartStr.
+      // Match Calendar-NEW payment matching, but apply the portal floor above.
       let _studentStartStr = null;
       if (student.start_date) {
         _studentStartStr = student.start_date.split('T')[0];
       } else if (student.created_at) {
         _studentStartStr = String(student.created_at).split('T')[0];
       }
-      // Never start before the absolute floor
-      if (!_studentStartStr || _studentStartStr < '2025-12-01') {
-        _studentStartStr = '2025-12-01';
+      // Never start before the portal floor.
+      if (!_studentStartStr || _studentStartStr < PORTAL_HISTORY_FLOOR_STR) {
+        _studentStartStr = PORTAL_HISTORY_FLOOR_STR;
       }
 
       const startDate = new Date(ABSOLUTE_FLOOR.getTime());
@@ -8859,7 +8870,7 @@
       // Force-add any manually enrolled dates not already in scheduledDates.
       // These bypass both the created_at filter AND the day-of-week check.
       manualEnrollDates.forEach(d => {
-        if (!scheduledDates.includes(d) && d <= todayDateStr && d >= '2025-12-01') {
+        if (!scheduledDates.includes(d) && d <= todayDateStr && d >= PORTAL_HISTORY_FLOOR_STR) {
           scheduledDates.push(d);
         }
       });
@@ -8873,6 +8884,8 @@
       // This avoids pulling in adjacent unpaid class days (the former back-shift bug).
       if (paidDates.size > 0) {
         paidDates.forEach(paidDate => {
+          if (ignoredDates.has(paidDate)) return;
+          if (paidDate < PORTAL_HISTORY_FLOOR_STR) return;
           if (paidDate < _studentStartStr && !scheduledDates.includes(paidDate)) {
             scheduledDates.push(paidDate);
           }
@@ -8880,62 +8893,47 @@
         scheduledDates.sort();
       }
 
-      // ── Orphan payment matching ──────────────────────────────────────────────
-      // If a payment date lands on a non-class day (e.g. student paid April 12 for
-      // their April 11 class), the Stripe/payment fallback records the payment date
-      // instead of the class date. The paid date won't match any scheduledDate, so
-      // April 11 shows as unpaid and the April 12 payment is invisible.
-      // Fix: find orphaned paidDates (not in scheduledDates) and re-map them to the
-      // nearest unpaid scheduled class within ±3 days.
-      const scheduledSet = new Set(scheduledDates);
-      const orphanedPayments = [];
-      paidDates.forEach(d => {
-        if (!scheduledSet.has(d)) orphanedPayments.push(d);
-      });
-      orphanedPayments.forEach(orphanDate => {
-        const orphanMs = new Date(orphanDate + 'T00:00:00').getTime();
-        let bestMatch = null;
-        let bestDiff  = Infinity;
-        scheduledDates.forEach(sd => {
-          if (paidDates.has(sd) || absentDates.has(sd)) return; // already resolved
-          const sdMs = new Date(sd + 'T00:00:00').getTime();
-          // Only allow backward matching: the payment date must be ON or AFTER the class date.
-          // A payment on Apr 14 cannot cover a class on Apr 15 (student paid for a past class).
-          const diff = orphanMs - sdMs; // positive when orphan is paid AFTER the class
-          const diffDays = diff / 86400000;
-          if (diffDays >= 0 && diffDays <= 3 && diff < bestDiff) { bestMatch = sd; bestDiff = diff; }
-        });
-        if (bestMatch) {
-          paidDates.add(bestMatch);
-          debugLog(`🔀 Orphan payment ${orphanDate} → matched to scheduled class ${bestMatch}`);
-        }
-      });
-
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
 
       const unpaidClasses  = [];
       const absentClasses  = [];
 
-      // DEBT CUTOFF: Uses the module-level DEBT_CUTOFF_STR = '2026-03-30'.
-      // Classes before this date are silently ignored for debt purposes
-      // (paid/absent tracking remains intact for all dates).
-      // EXCEPTION: manually enrolled dates always count regardless of cutoff.
-
       for (const dateStr of scheduledDates) {
-  const isAbsent  = absentDates.has(dateStr);
-  const hasPaid   = paidDates.has(dateStr);
+        if (dateStr < PORTAL_HISTORY_FLOOR_STR) continue;
+        if (ignoredDates.has(dateStr)) continue;
+
+        // ── Pause/unpause gate (mirrors Calendar-NEW isStudentActiveOnDate) ──
+        // Find the most recent visibility event on or before this date.
+        // If that event says visible=false the student was paused → skip.
+        // If there is no prior event, assume active (student existed before tracking).
+        if (visHistEvents.length > 0) {
+          let lastVis = null;
+          for (const ev of visHistEvents) {
+            if (ev.date <= dateStr) lastVis = ev;
+            else break;
+          }
+          if (lastVis !== null && !lastVis.visible) {
+            debugLog(`⏸ ${dateStr}: SKIPPED (student was paused)`);
+            continue;
+          }
+          // Date falls before ALL history entries AND the first recorded event is
+          // visible=true — this means the student was activated/unpaused at that date,
+          // so every date before the first activation is a paused period.
+          if (lastVis === null && visHistEvents[0].visible === true) {
+            debugLog(`⏸ ${dateStr}: SKIPPED (before first activation event)`);
+            continue;
+          }
+        }
+
+        const isAbsent  = absentDates.has(dateStr);
+        const hasPaid   = paidDates.has(dateStr);
         const isManuallyEnrolled = manualEnrollDates.has(dateStr);
 
         if (isAbsent) {
           absentClasses.push({ date: dateStr, amount: 0, status: 'absent' });
         } else if (!hasPaid) {
-          // Manually enrolled dates always count; others respect the debt cutoff
-          if (isManuallyEnrolled || dateStr >= DEBT_CUTOFF_STR) {
-            unpaidClasses.push({ date: dateStr, amount: pricePerClass });
-            debugLog(`🔴 ${dateStr}: UNPAID${isManuallyEnrolled ? ' (manual enrollment)' : ''}`);
-          } else {
-            debugLog(`⏭️ ${dateStr}: UNPAID but before debt cutoff — ignored`);
-          }
+          unpaidClasses.push({ date: dateStr, amount: pricePerClass });
+          debugLog(`🔴 ${dateStr}: UNPAID${isManuallyEnrolled ? ' (manual enrollment)' : ''}`);
         } else {
           debugLog(`🟢 ${dateStr}: PAID`);
         }
@@ -8949,6 +8947,7 @@
         absentClasses,
         paidDates,
         absentDates,
+        ignoredDates,
         scheduledDates,
         prRecords,
         hasSchedule: true
@@ -8964,6 +8963,7 @@
       let absentClasses = []; // Track absent class dates
   let scheduleUnpaidAmount = 0; // Amount derived from schedule analysis
   let paidDatesSet = new Set();
+  let ignoredDatesSet = new Set();
   let scheduledDatesForUI = [];
   let prRecordsForUI = [];
       
@@ -9060,6 +9060,7 @@
   absentClasses        = result.absentClasses || [];
   scheduleUnpaidAmount = result.unpaidAmount  || 0;
   paidDatesSet         = result.paidDates     || new Set();
+  ignoredDatesSet      = result.ignoredDates  || new Set();
   scheduledDatesForUI  = result.scheduledDates || [];
   prRecordsForUI       = result.prRecords     || [];
         
@@ -9289,7 +9290,7 @@
       paymentList.innerHTML = '';
       
       // ── BUILD HISTORY ENTRIES from scheduledDates (the floored master list) ──
-      // scheduledDates comes from calculateUnpaidFromSchedule which floors at Mar 30, 2026.
+      // scheduledDates comes from calculateUnpaidFromSchedule which floors at May 1, 2026.
       // This is the ONLY source of truth — mirrors Calendar-NEW dot rendering exactly.
       // paidDatesSet / absentDates are lookup sets only; they do NOT drive what is shown.
       const allEntries = [];
@@ -9300,7 +9301,7 @@
       // so each "Paid" row shows HOW the student paid (Stripe, Zelle, Cash, etc.)
       const dateToPaymentMethod = new Map();
       (prRecordsForUI || []).forEach(pr => {
-        if (!pr || pr.status === 'absent') return;
+        if (!pr || pr.status === 'absent' || pr.status === 'ignored' || String(pr.payment_method || '').toLowerCase() === 'ignored') return;
         const fallback = (pr.date || '').split('T')[0];
         const resolved = (pr.for_class_dates || pr.for_class)
           ? (function() {
@@ -9321,8 +9322,8 @@
 
       scheduledDatesForUI.forEach(dateStr => {
         if (!dateStr) return;
-        // Hide all history rows before the debt cutoff date (Mar 30, 2026)
-        if (dateStr < DEBT_CUTOFF_STR) return;
+        if (dateStr < '2026-05-01') return;
+        if (ignoredDatesSet.has(dateStr)) return;
         const parts = dateStr.split('-');
         const classDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
 
@@ -9495,13 +9496,13 @@
           return true;
         }
 
-        // 4b. Pre-floor dates: the payment engine only tracks dates ≥ 2026-03-30.
+        // 4b. Pre-floor dates: the payment engine only tracks dates ≥ 2026-05-01.
         //     If this note's class_date is BEFORE that floor, paidDatesSet will never
         //     contain it — not because the student didn't pay, but because the window
         //     doesn't go back that far. If the admin explicitly posted this note to the
         //     student's group (hasPermissionAccess = true), that IS the payment confirmation.
         //     Unlock it so students who paid for older classes can access their notes.
-        const PAYMENT_FLOOR = '2026-03-30';
+        const PAYMENT_FLOOR = '2026-05-01';
         if (effectiveClassDate < PAYMENT_FLOOR && hasPermissionAccess) {
           debugDebug(`🔓 Note ${note.id} unlocked: pre-floor date ${effectiveClassDate} with permission access`);
           return true;

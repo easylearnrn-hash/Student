@@ -525,6 +525,7 @@
       .dot-free    { background: linear-gradient(135deg, #67e8f9, #22d3ee); box-shadow: 0 0 5px rgba(103, 232, 249, 0.5); }
       .dot-manual  { background: linear-gradient(135deg, #6ea8f7, #3b7fd4); box-shadow: 0 0 5px rgba(110, 168, 247, 0.5); }
       .dot-unpaid  { background: linear-gradient(135deg, #e05555, #b83030); box-shadow: 0 0 5px rgba(224, 85, 85, 0.5); }
+      .dot-ignored { background: linear-gradient(135deg, #2a2a2a, #111111); box-shadow: 0 0 5px rgba(0, 0, 0, 0.6); border: 1px solid rgba(255,255,255,0.12); }
       .dot-absent  { background: linear-gradient(135deg, #9e9e9e, #6e6e6e); box-shadow: 0 0 5px rgba(158, 158, 158, 0.4); }
 
       .dot-excused { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 0 5px rgba(16, 185, 129, 0.4); }
@@ -1811,6 +1812,7 @@
       // Performance: Indexed data structures
     let absencesByDateStudent = new Map(); // Key: "date-studentId", Value: true
     let excusedByDateStudent = new Map(); // Legacy (excused now treated as paid)
+    let ignoredByDateStudent = new Map(); // Key: "date-studentId", Value: true
       let skippedClassesByDateGroup = new Map(); // Key: "date-groupName", Value: true
       let studentsByGroup = new Map(); // Key: groupName, Value: students[] (precomputed filter)
       
@@ -1913,6 +1915,7 @@
         });
 
         excusedByDateStudent.clear();
+        ignoredByDateStudent.clear();
         
         // Index skipped classes for O(1) lookup
         skippedClassesByDateGroup.clear();
@@ -1975,8 +1978,15 @@
         // Index payment_records table (treat excused as paid)
         paymentRecordsData.forEach(pr => {
           const forClassDates = extractForClassDates(pr, pr.date);
+          const isIgnoredRecord = String(pr.status || '').toLowerCase() === 'ignored' || String(pr.payment_method || '').toLowerCase() === 'ignored';
           forClassDates.forEach(dateStr => {
             const normalizedDate = normalizeDateString(dateStr);
+            const studentIdStr = pr.student_id ? String(pr.student_id) : '';
+
+            if (isIgnoredRecord && studentIdStr) {
+              ignoredByDateStudent.set(`${normalizedDate}-${studentIdStr}`, true);
+              return;
+            }
             
             if (!paymentIndex.has(normalizedDate)) {
               paymentIndex.set(normalizedDate, new Set());
@@ -1984,8 +1994,8 @@
             
             const studentIds = paymentIndex.get(normalizedDate);
             
-            if (pr.student_id) {
-              studentIds.add(String(pr.student_id));
+            if (studentIdStr) {
+              studentIds.add(studentIdStr);
             }
             
             // ⚡ OPTIMIZED: Use name lookup instead of scanning all students
@@ -2081,6 +2091,11 @@
       function isExcusedCached() {
         return false;
       }
+
+      function isIgnoredCached(dateStr, studentId) {
+        const key = `${dateStr}-${studentId}`;
+        return ignoredByDateStudent.has(key);
+      }
       
       function isClassSkippedCached(dateStr, groupName) {
         const key = `${dateStr}-${groupName}`;
@@ -2142,6 +2157,12 @@
         }
 
         const normalizedDateStr = normalizeDateString(dateStr);
+
+        if (isIgnoredCached(normalizedDateStr, studentId)) {
+          const result = { hasPayment: false, isManual: false, isCredit: false };
+          paymentCache.set(cacheKey, result);
+          return result;
+        }
         
         // ⚡ OPTIMIZED: Use payment index for O(1) lookup instead of O(n) scan
         const hasPayment = paymentIndex.has(normalizedDateStr) && 
@@ -2217,7 +2238,8 @@
           (data || []).forEach(r => {
             const key = String(r.student_id);
             if (!visibilityHistory.has(key)) visibilityHistory.set(key, []);
-            visibilityHistory.get(key).push({ date: r.effective_date, visible: r.visible });
+            // Normalize to YYYY-MM-DD so same-day pause/unpause changes apply immediately.
+            visibilityHistory.get(key).push({ date: normalizeDateString(r.effective_date), visible: r.visible });
           });
         } catch (error) {
           console.error('❌ Error loading visibility history:', error);
@@ -2265,7 +2287,7 @@
           const { data, error } = await supabaseClient
             .from('payment_records')
             .select('*')
-            .in('status', ['paid', 'excused'])
+            .in('status', ['paid', 'excused', 'ignored'])
             .order('date', { ascending: false });
 
           if (error) throw error;
@@ -2526,6 +2548,28 @@
         return datePart;
       }
 
+      function getStudentClassPrice(student) {
+        if (!student) return 0;
+
+        const directPrice = Number(
+          student.price_per_class ?? student.pricePerClass ?? student.pay_per_class
+        );
+        if (Number.isFinite(directPrice) && directPrice > 0) {
+          return directPrice;
+        }
+
+        const groupName = student.group_name || student.groupName;
+        if (groupName) {
+          const group = groupsData.find(g => g.group_name === groupName);
+          const groupPrice = Number(group?.price_per_class);
+          if (Number.isFinite(groupPrice) && groupPrice > 0) {
+            return groupPrice;
+          }
+        }
+
+        return 0;
+      }
+
       function normalizeName(value) {
         return String(value || '')
           .toLowerCase()
@@ -2711,7 +2755,7 @@
                   
                   const paymentInfo = hasPaymentCached(student.id, dateStr, student);
                   const isAbsent = isAbsentCached(dateStr, student.id);
-                  const pricePerClass = parseFloat(student.price_per_class || 0);
+                  const pricePerClass = getStudentClassPrice(student);
                   
                   if (paymentInfo.hasPayment) {
                     paidTotal += pricePerClass;
@@ -2818,6 +2862,9 @@
               if (isSkipped) {
                 dotType = 'canceled';
                 dotLabel += ' (Canceled)';
+              } else if (isIgnoredCached(dateStr, student.id)) {
+                dotType = 'ignored';
+                dotLabel += ' (Ignored)';
               } else if (isAbsent) {
                 dotType = 'absent';
                 dotLabel += ' (Absent)';
@@ -2839,7 +2886,7 @@
                 groupName: group.group_name,
                 classDate: dateStr,
                 studentId: student.id,
-                price: student.price_per_class || 0,
+                price: getStudentClassPrice(student),
                 balance: student.balance || 0
               });
             });
@@ -2984,14 +3031,14 @@
                   const paymentInfo = hasPaymentCached(student.id, dateStr, student);
                   
                   if (paymentInfo.hasPayment) {
-                    paidTotal += parseFloat(student.price_per_class || 0);
+                    paidTotal += getStudentClassPrice(student);
                   } else if (dateStr <= today) {
                     // Only count unpaid for past/today dates - using cached lookup for performance
                     const isAbsent = isAbsentCached(dateStr, student.id);
                     
                     const isFreeStudent = student.notes && student.notes.includes('[ARNOMA_FREE_STUDENT]');
                     if (!isAbsent && !isFreeStudent) {
-                      unpaidTotal += parseFloat(student.price_per_class || 0);
+                      unpaidTotal += getStudentClassPrice(student);
                     }
                   }
                 }
@@ -3067,6 +3114,8 @@
             let status = 'upcoming';
             if (isSkipped) {
               status = 'canceled';
+            } else if (isIgnoredCached(dateStr, student.id)) {
+              status = 'ignored';
             } else if (hasAbsence) {
               status = 'absent';
             } else if (paymentInfo.hasPayment) {
@@ -3085,7 +3134,8 @@
               isManualCashPayment: paymentInfo.isManual,
               isCreditPayment: paymentInfo.isCredit,
               hasAbsence: hasAbsence,
-              isSkipped: isSkipped
+              isSkipped: isSkipped,
+              isIgnored: isIgnoredCached(dateStr, student.id)
             });
           }
         });
@@ -3125,7 +3175,7 @@
         if (unpaidStudents.length > 0) {
           unpaidContent = unpaidStudents.map(student => {
             const studentBalance = parseFloat(student.balance || 0);
-            const pricePerClass = parseFloat(student.price_per_class || 0);
+            const pricePerClass = getStudentClassPrice(student);
             const safeName = student.name.replace(/'/g, "\\'");
             
             // Build action buttons for unpaid students
@@ -3211,6 +3261,11 @@
               statusColor = '#4ade80';
               statusBg = 'rgba(74,222,128,0.2)';
               statusBorder = 'rgba(74,222,128,0.5)';
+            } else if (student.status === 'ignored') {
+              statusBadge = 'IGNORED';
+              statusColor = '#9ca3af';
+              statusBg = 'rgba(156,163,175,0.16)';
+              statusBorder = 'rgba(156,163,175,0.42)';
             } else if (student.status === 'free') {
               statusBadge = 'FREE';
               statusColor = '#34d399';
@@ -3236,7 +3291,7 @@
             // Build action buttons based on status
             let actionButtons = '';
             const studentBalance = parseFloat(student.balance || 0);
-            const pricePerClass = parseFloat(student.price_per_class || 0);
+            const pricePerClass = getStudentClassPrice(student);
             const safeName = student.name.replace(/'/g, "\\'");
             
             if (student.status === 'absent') {
@@ -3246,6 +3301,16 @@
                   <button class="action-icon-btn unmark"
                           data-tooltip="Unmark Absent"
                           onclick="event.stopPropagation(); unmarkAbsent(${student.id}, '${dateStr}')">
+                    <span class="btn-icon">↩️</span>
+                  </button>
+                </div>
+              `;
+            } else if (student.status === 'ignored') {
+              actionButtons = `
+                <div class="student-actions">
+                  <button class="action-icon-btn unmark"
+                          data-tooltip="Unignore Class Day"
+                          onclick="event.stopPropagation(); unignoreClassDay(${student.id}, '${dateStr}')">
                     <span class="btn-icon">↩️</span>
                   </button>
                 </div>
@@ -3280,6 +3345,11 @@
                           onclick="event.stopPropagation(); markExcused(${student.id}, '${dateStr}')">
                     <span class="btn-icon">✅</span>
                   </button>
+                  <button class="action-icon-btn ignore"
+                          data-tooltip="Ignore This Class Day"
+                          onclick="event.stopPropagation(); ignoreClassDay(${student.id}, '${dateStr}')">
+                    <span class="btn-icon">⊘</span>
+                  </button>
                   <button class="action-icon-btn absent"
                           data-tooltip="Mark Absent"
                           onclick="event.stopPropagation(); markAbsent(${student.id}, '${dateStr}')">
@@ -3304,7 +3374,7 @@
                 <div class="student-actions">
                   <button class="action-icon-btn unmark"
                           data-tooltip="Undo credit payment"
-                          onclick="event.stopPropagation(); undoCreditPayment(${student.id}, '${dateStr}', '${safeName}', ${parseFloat(student.price_per_class || 0)})">
+                          onclick="event.stopPropagation(); undoCreditPayment(${student.id}, '${dateStr}', '${safeName}', ${getStudentClassPrice(student)})">
                     <span class="btn-icon">↩️</span>
                   </button>
                 </div>
@@ -3880,6 +3950,7 @@
           manual: 'Paid',
           credit: 'Paid',
           excused: 'Paid',
+          ignored: 'Ignored',
           unpaid: 'Unpaid',
           absent: 'Absent',
           skipped: 'Canceled',
@@ -3894,6 +3965,7 @@
           manual:   '#5dd18a',
           credit:   '#5dd18a',
           excused:  '#5dd18a',
+          ignored:  '#9ca3af',
           unpaid:   '#e05555',
           absent:   '#9e9e9e',
           skipped:  '#9e9e9e',
@@ -3926,6 +3998,7 @@
           email: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>`,
           excuse: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>`,
           absent: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>`,
+          ignore: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 15.5L15.5 8.5"/></svg>`,
           cash:   `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="6" width="22" height="13" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M5 6v13M19 6v13"/></svg>`,
           credit: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/><line x1="6" y1="16" x2="10" y2="16"/></svg>`,
         };
@@ -3934,7 +4007,21 @@
 
         let html = '';
 
-        if (status === 'paid' || status === 'manual' || status === 'credit' || status === 'excused' || status === 'absent') {
+        if (status === 'excused') {
+          // Excused rows must always expose the reverse action.
+          html = `
+            ${emailBtn}
+            <button class="action-btn excused" onclick="unmarkExcused(${studentId},'${classDate}')">
+              <span class="action-btn-icon">↩️</span><span>Unexcuse</span>
+            </button>`;
+        } else if (status === 'ignored') {
+          // Ignored — show Unignore only
+          html = `
+            ${emailBtn}
+            <button class="action-btn ignore" onclick="unignoreClassDay(${studentId},'${classDate}')">
+              <span class="action-btn-icon">${icon.ignore}</span><span>Unignore</span>
+            </button>`;
+        } else if (status === 'paid' || status === 'manual' || status === 'credit' || status === 'absent') {
           // Settled or absent — Email only (full-width via CSS :only-child)
           html = emailBtn;
         } else {
@@ -3951,6 +4038,9 @@
             </button>
             <button class="action-btn absent" onclick="markAsAbsent()">
               <span class="action-btn-icon">${icon.absent}</span><span>Absent</span>
+            </button>
+            <button class="action-btn ignore" onclick="ignoreClassDay(${studentId},'${classDate}')">
+              <span class="action-btn-icon">${icon.ignore}</span><span>Ignore</span>
             </button>
             <div class="quick-actions-pair">
               <button class="action-btn cash" onclick="markPaidManually(${studentId},'${classDate}',${price},'${studentName}')">
@@ -4365,7 +4455,7 @@
 
           // Update student balance so Debt decreases — only for past/today classes.
           // Future classes have not been charged yet, so no debt exists to excuse.
-          const price = parseFloat(student.price_per_class || 0);
+          const price = getStudentClassPrice(student);
           const excuseDate = new Date(dateStr + 'T00:00:00');
           const today = new Date(); today.setHours(0,0,0,0);
           if (price > 0 && excuseDate <= today) {
@@ -4411,6 +4501,129 @@
         }
       }
 
+      async function ignoreClassDay(studentId, dateStr) {
+        try {
+          const student = studentsData.find(s => s.id === studentId);
+          if (!student) return;
+
+          const confirmed = await showConfirmDialog(
+            'Ignore Class Day?',
+            `
+              <div style="text-align: left; line-height: 1.6;">
+                <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Student:</strong> ${student.name}</div>
+                <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Date:</strong> ${dateStr}</div>
+                <div style="margin-top: 16px; padding: 12px; background: rgba(156,163,175,0.1); border: 1px solid rgba(156,163,175,0.3); border-radius: 8px; font-size: 14px; color: rgba(255,255,255,0.85);">
+                  🚫 This will ignore this class day completely for this student.
+                </div>
+              </div>
+            `
+          );
+          if (!confirmed) return;
+
+          const { data: existing } = await supabaseClient
+            .from('payment_records')
+            .select('id')
+            .eq('student_id', studentId)
+            .eq('date', dateStr)
+            .eq('payment_method', 'ignored')
+            .maybeSingle();
+
+          if (existing) {
+            const warnOverlay = document.createElement('div');
+            warnOverlay.style.cssText = `
+              position: fixed;
+              top: 20px;
+              right: 20px;
+              background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+              color: white;
+              padding: 16px 24px;
+              border-radius: 12px;
+              box-shadow: 0 8px 24px rgba(245, 158, 11, 0.4);
+              z-index: 10000000;
+              font-weight: 600;
+              animation: slideInRight 0.3s ease;
+            `;
+            warnOverlay.textContent = '⚠️ This class day is already ignored.';
+            document.body.appendChild(warnOverlay);
+            setTimeout(() => warnOverlay.remove(), 3000);
+            return;
+          }
+
+          const { data: insertedData, error } = await supabaseClient
+            .from('payment_records')
+            .insert([{
+              student_id: studentId,
+              date: dateStr,
+              amount: 0,
+              status: 'ignored',
+              payment_method: 'ignored',
+              notes: 'Ignored class day (Calendar)'
+            }])
+            .select();
+
+          if (error) {
+            console.error('❌ Error ignoring class day:', error);
+            return;
+          }
+
+          if (insertedData && insertedData[0]) {
+            paymentRecordsData.push(insertedData[0]);
+          }
+
+          paymentCache.delete(`${studentId}-${dateStr}`);
+          rebuildAllIndexes();
+          renderCalendar();
+          if (currentModalDate === dateStr) {
+            openDayModal(dateStr, true);
+          }
+        } catch (err) {
+          console.error('❌ Error ignoring class day:', err);
+        }
+      }
+
+      async function unignoreClassDay(studentId, dateStr) {
+        try {
+          const student = studentsData.find(s => s.id === studentId);
+          if (!student) return;
+
+          const confirmed = await showConfirmDialog(
+            'Unignore Class Day?',
+            `
+              <div style="text-align: left; line-height: 1.6;">
+                <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Student:</strong> ${student.name}</div>
+                <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Date:</strong> ${dateStr}</div>
+                <div style="margin-top: 16px; padding: 12px; background: rgba(156,163,175,0.1); border: 1px solid rgba(156,163,175,0.3); border-radius: 8px; font-size: 14px; color: rgba(255,255,255,0.85);">
+                  ↩️ This will restore this day so it can count as unpaid again if no payment or absence exists.
+                </div>
+              </div>
+            `
+          );
+          if (!confirmed) return;
+
+          const { error } = await supabaseClient
+            .from('payment_records')
+            .delete()
+            .eq('student_id', studentId)
+            .eq('date', dateStr)
+            .eq('payment_method', 'ignored');
+
+          if (error) {
+            console.error('❌ Error unignoring class day:', error);
+            return;
+          }
+
+          paymentRecordsData = paymentRecordsData.filter(pr => !(String(pr.student_id) === String(studentId) && String(pr.date).startsWith(dateStr) && String(pr.payment_method || '').toLowerCase() === 'ignored'));
+          paymentCache.delete(`${studentId}-${dateStr}`);
+          rebuildAllIndexes();
+          renderCalendar();
+          if (currentModalDate === dateStr) {
+            openDayModal(dateStr, true);
+          }
+        } catch (err) {
+          console.error('❌ Error unignoring class day:', err);
+        }
+      }
+
       async function unmarkExcused(studentId, dateStr) {
         try {
           const student = studentsData.find(s => s.id === studentId);
@@ -4436,13 +4649,13 @@
           }
 
           const confirmed = await showConfirmDialog(
-            'Remove Excuse?',
+            'Unexcuse Payment?',
             `
               <div style="text-align: left; line-height: 1.6;">
                 <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Student:</strong> ${student.name}</div>
                 <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Date:</strong> ${dateStr}</div>
                 <div style="margin-top: 16px; padding: 12px; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); border-radius: 8px; font-size: 14px; color: rgba(255,255,255,0.85);">
-                  ↩️ This will remove the paid status created by Excuse.
+                  ↩️ This will remove the excused status and restore this class to unpaid/red dot.
                 </div>
               </div>
             `
@@ -4472,7 +4685,7 @@
               font-weight: 600;
               animation: slideInRight 0.3s ease;
             `;
-            errorOverlay.textContent = '❌ Failed to remove paid status. Please try again.';
+            errorOverlay.textContent = '❌ Failed to remove excused status. Please try again.';
             document.body.appendChild(errorOverlay);
             setTimeout(() => errorOverlay.remove(), 4000);
             return;
@@ -4481,7 +4694,7 @@
           paymentRecordsData = paymentRecordsData.filter(pr => !(String(pr.student_id) === String(studentId) && String(pr.date).startsWith(dateStr) && pr.payment_method === 'excused'));
           
           // Revert student balance so Debt increases again
-          const price = parseFloat(student.price_per_class || 0);
+          const price = getStudentClassPrice(student);
           if (price > 0) {
             const newBalance = parseFloat(student.balance || 0) - price;
             const { error: balErr } = await supabaseClient
@@ -4527,8 +4740,8 @@
         const group = groupsData.find(g => g.group_name === student.group_name);
         if (!group) return [];
 
-        // Floor at Jun 1 2026 to avoid scanning all of history.
-        const ABSOLUTE_FLOOR = new Date('2026-06-01');
+        // Floor at May 1 2026 to avoid scanning all of history.
+        const ABSOLUTE_FLOOR = new Date('2026-05-01');
         
         let _startStr = null;
         if (student.start_date) {
@@ -4749,7 +4962,7 @@
           
           if (unpaidDates.length === 0 && ledgerDebt === 0) return;
 
-          const pricePerClass = parseFloat(student.price_per_class || 0);
+          const pricePerClass = getStudentClassPrice(student);
           
           let unpaidAmount = unpaidDates.length * pricePerClass;
           let unpaidCount = unpaidDates.length;
@@ -4854,7 +5067,7 @@
           if (!student) continue;
 
           const currentBal = parseFloat(student.balance || 0);
-          const pricePerClass = parseFloat(student.price_per_class || 0);
+          const pricePerClass = getStudentClassPrice(student);
           if (!Number.isFinite(pricePerClass) || pricePerClass <= 0) continue;
 
           const reduction = selectedCount * pricePerClass;
@@ -6008,9 +6221,20 @@
       // 📧 EMAIL PAYMENT REMINDER SYSTEM
       // ============================================================
 
+      // Stripe failed-payment data fetched inline in the template picker.
+      // Cleared at the start of every picker invocation.
+      let _lastStripeFailedData = null;
+      let _emailPickerStudentId = null;
+      let _emailPickerStudentEmail = null;
+
       async function sendManualReminder(studentId, studentName, classDate = null, pricePerClass = null) {
         try {
           console.log(`Preparing to send manual payment reminder to ${studentName}`, { studentId });
+
+          _emailPickerStudentId = studentId;
+          // Grab the student's email for the Stripe fallback lookup
+          const _pickerStudent = studentsData ? studentsData.find(s => s.id === studentId) : null;
+          _emailPickerStudentEmail = _pickerStudent ? (String(_pickerStudent.email || '').replace(/^\["|"\]$/g, '').trim()) : null;
 
           const templateChoice = await showEmailTemplatePicker(studentName);
           if (!templateChoice) return;
@@ -6161,7 +6385,35 @@
           };
 
           dialog.querySelector('#templateReminder').addEventListener('click', () => cleanup('payment_reminder'));
-          dialog.querySelector('#templateFailed').addEventListener('click', () => cleanup('payment_failed'));
+          dialog.querySelector('#templateFailed').addEventListener('click', async () => {
+            const btn = dialog.querySelector('#templateFailed');
+            btn.disabled = true;
+            btn.innerHTML = `⏳ Fetching Stripe data…`;
+            btn.style.opacity = '0.7';
+
+            _lastStripeFailedData = null;
+            try {
+              const resp = await fetch(`${SUPABASE_URL}/functions/v1/get-stripe-failed-payment`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify({
+                  student_id   : String(_emailPickerStudentId),
+                  student_email: _emailPickerStudentEmail || undefined,
+                }),
+              });
+              if (resp.ok) {
+                const data = await resp.json();
+                if (data.found) _lastStripeFailedData = data;
+              }
+            } catch (stripeErr) {
+              console.warn('⚠️ Stripe lookup failed, continuing without data:', stripeErr);
+            }
+
+            cleanup('payment_failed');
+          });
           dialog.querySelector('#templateCancel').addEventListener('click', () => cleanup(null));
           overlay.addEventListener('click', (e) => {
             if (e.target === overlay) cleanup(null);
@@ -6339,7 +6591,7 @@
             if (group) {
               // DEBT_CUTOFF: matches student-portal.html exactly — only count classes on/after this date
               // Exception: manually enrolled dates always count regardless of cutoff
-              const DEBT_CUTOFF_STR = '2026-06-01';
+              const DEBT_CUTOFF_STR = '2026-05-01';
               const unpaidDates = getUnpaidClassDates(student).filter(d =>
                 d >= DEBT_CUTOFF_STR || manualEnrollments.has(`${student.id}-${d}`)
               );
@@ -6428,11 +6680,18 @@
       async function buildFailedPaymentPayload(studentId, classDate = null, pricePerClass = null) {
         const { student, cleanEmail } = await getStudentEmailInfo(studentId);
 
-        const amount = Number(pricePerClass || student.price_per_class || 15);
+        const stripe = _lastStripeFailedData;
+        const amount = stripe?.amount || Number(pricePerClass || student.price_per_class || 15);
+        const failedDate = stripe?.date || classDate;
+
         const emailHTML = await generateFailedPaymentEmailHTML(
           student.name,
-          classDate,
-          amount
+          failedDate,
+          amount,
+          stripe?.failure_message || null,
+          stripe?.failure_code  || null,
+          stripe?.card_brand    || null,
+          stripe?.card_last4    || null,
         );
 
         return {
@@ -7150,184 +7409,137 @@
         };
       }
 
-      async function generateFailedPaymentEmailHTML(studentName, classDate = null, amount = null) {
+      async function generateFailedPaymentEmailHTML(studentName, classDate = null, amount = null, failureReason = null, failureCode = null, cardBrand = null, cardLast4 = null) {
         const formattedDate = classDate
           ? new Date(classDate + 'T12:00:00').toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
+              weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
             })
           : new Date().toLocaleDateString('en-US', {
-              weekday: 'long',
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
+              weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
             });
         const formattedAmount = Number(amount || 0).toFixed(2);
+        const issuedDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        const firstName = (studentName || '').trim().split(/\s+/)[0] || studentName;
+        const year = new Date().getFullYear();
+
+        const failureCodeDescriptions = {
+          card_declined     : 'Your card was declined by the issuing bank.',
+          insufficient_funds: 'Insufficient funds in the account.',
+          expired_card      : 'The card has expired.',
+          incorrect_cvc     : 'Incorrect card security code (CVC).',
+          processing_error  : 'A processing error occurred during the transaction.',
+          do_not_honor      : 'The payment was declined by your bank.',
+          lost_card         : 'This card has been reported lost.',
+          stolen_card       : 'This card has been reported stolen.',
+          fraudulent        : 'The payment was flagged as potentially fraudulent.',
+          generic_decline   : 'The payment was declined.',
+        };
+
+        const reasonText = failureReason
+          || (failureCode && failureCodeDescriptions[failureCode])
+          || null;
+        const cardText = (cardBrand && cardLast4)
+          ? `${cardBrand.charAt(0).toUpperCase() + cardBrand.slice(1)} ···· ${cardLast4}`
+          : null;
+
+        const cardRow = cardText
+          ? `<tr><td style="padding:10px 22px;font-size:13px;color:rgba(196,164,95,0.65);font-weight:600;border-bottom:1px solid rgba(196,164,95,0.1);font-family:Inter,sans-serif;">Card</td><td style="padding:10px 22px;font-size:13px;color:#e8dfc8;font-weight:500;border-bottom:1px solid rgba(196,164,95,0.1);text-align:right;font-family:Inter,sans-serif;">${cardText}</td></tr>`
+          : '';
+        const reasonRow = reasonText
+          ? `<tr><td style="padding:10px 22px;font-size:13px;color:rgba(196,164,95,0.65);font-weight:600;font-family:Inter,sans-serif;">Reason</td><td style="padding:10px 22px;font-size:13px;color:#f4a4a4;font-weight:500;text-align:right;font-family:Inter,sans-serif;">${reasonText}</td></tr>`
+          : '';
+
+        const bodyIntro = reasonText
+          ? `We were notified by Stripe that your recent payment attempt was unsuccessful. The reason provided by your bank was: <strong style="color:#f4a4a4;">${reasonText}</strong>`
+          : `We were notified that your recent payment attempt was unsuccessful and the funds were not deposited.`;
 
         return `<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Payment Failed</title>
-    <style>
-      body {
-        margin: 0;
-        padding: 0;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-      }
-      .email-wrapper {
-        padding: 20px;
-        max-width: 100%;
-      }
-      .email-container {
-        max-width: 600px;
-        margin: 0 auto;
-        background: white;
-        border-radius: 20px;
-        overflow: hidden;
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
-      }
-      .email-header {
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-        padding: 40px 30px;
-        text-align: center;
-        color: white;
-      }
-      .email-header img {
-        width: 80px;
-        height: auto;
-        margin-bottom: 16px;
-        filter: brightness(0) invert(1);
-        opacity: 0.9;
-      }
-      .email-header h1 {
-        margin: 0;
-        font-size: 28px;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-      }
-      .email-body {
-        padding: 32px 30px;
-        color: #1f2937;
-        line-height: 1.8;
-        font-size: 16px;
-      }
-      .email-body p {
-        margin: 16px 0;
-      }
-      .email-body strong {
-        color: #111827;
-        font-weight: 600;
-      }
-      .info-box {
-        background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(220, 38, 38, 0.08));
-        border-left: 4px solid #ef4444;
-        border-radius: 12px;
-        padding: 20px;
-        margin: 24px 0;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-      }
-      .info-box p {
-        margin: 6px 0;
-        text-align: left;
-      }
-      .divider {
-        height: 1px;
-        background: linear-gradient(to right, transparent, rgba(239, 68, 68, 0.3), transparent);
-        margin: 24px 0;
-      }
-      .email-footer {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 32px 30px;
-        text-align: center;
-        color: white;
-      }
-      .email-footer img {
-        width: 80px;
-        height: auto;
-        margin-bottom: 16px;
-        filter: brightness(0) invert(1);
-        opacity: 0.9;
-      }
-      .email-footer p {
-        margin: 8px 0;
-        font-size: 14px;
-        color: rgba(255, 255, 255, 0.9);
-      }
-      .email-footer strong {
-        color: white;
-        font-weight: 600;
-      }
-      @media only screen and (max-width: 600px) {
-        .email-wrapper {
-          padding: 16px;
-        }
-        .email-header {
-          padding: 30px 20px;
-        }
-        .email-header h1 {
-          font-size: 24px;
-        }
-        .email-body {
-          padding: 24px 20px;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <div class="email-wrapper">
-      <div class="email-container">
-        <!-- Header -->
-        <div class="email-header">
-          <img
-            src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png"
-            alt="ARNOMA Logo"
-          />
-          <h1>Payment Failed</h1>
-        </div>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Payment Failed – ARNOMA</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+</head>
+<body style="margin:0;padding:0;background:#080b14;font-family:Inter,Helvetica,Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#080b14" style="background:#080b14;padding:48px 16px;">
+<tr><td align="center">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;background:#0d1020;border-radius:18px;overflow:hidden;border:1px solid rgba(196,164,95,0.18);box-shadow:0 24px 80px rgba(0,0,0,0.7);">
 
-        <!-- Body -->
-        <div class="email-body">
-          <p>Dear <strong>${studentName}</strong>,</p>
+  <!-- HEADER -->
+  <tr>
+    <td style="background:linear-gradient(170deg,#080b14 0%,#0d1020 60%,#111628 100%);padding:52px 48px 44px;text-align:center;border-bottom:1px solid rgba(196,164,95,0.2);">
+      <div style="width:56px;height:1px;background:linear-gradient(90deg,transparent,#c4a45f,transparent);margin:0 auto 30px;"></div>
+      <img src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png" alt="ARNOMA" width="70" style="display:block;margin:0 auto 20px;opacity:0.9;"/>
+      <p style="margin:0 0 10px;font-size:10px;letter-spacing:5px;text-transform:uppercase;color:rgba(196,164,95,0.55);font-weight:600;font-family:Inter,sans-serif;">Armenian Nurses Online Mentoring Association</p>
+      <h1 style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:28px;font-weight:600;font-style:italic;color:#f5a0a0;letter-spacing:0.5px;">Payment Failed</h1>
+      <div style="width:56px;height:1px;background:linear-gradient(90deg,transparent,rgba(244,100,100,0.6),transparent);margin:24px auto 0;"></div>
+    </td>
+  </tr>
 
-          <p>We have received a notification from the bank indicating that your recent payment attempt was unsuccessful and the funds were not deposited.</p>
+  <!-- ACCOUNT BAND -->
+  <tr>
+    <td style="background:rgba(196,164,95,0.04);padding:20px 48px;border-bottom:1px solid rgba(196,164,95,0.12);">
+      <table width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="font-size:9px;letter-spacing:4px;text-transform:uppercase;color:rgba(196,164,95,0.5);font-weight:700;font-family:Inter,sans-serif;">Account</td>
+          <td style="font-size:9px;letter-spacing:4px;text-transform:uppercase;color:rgba(196,164,95,0.5);font-weight:700;text-align:right;font-family:Inter,sans-serif;">Notice Date</td>
+        </tr>
+        <tr>
+          <td style="font-size:17px;font-weight:700;color:#f5f0e8;padding-top:7px;font-family:Inter,sans-serif;">${studentName}</td>
+          <td style="font-size:13px;font-weight:500;color:rgba(245,240,232,0.5);padding-top:7px;text-align:right;font-family:Inter,sans-serif;">${issuedDate}</td>
+        </tr>
+      </table>
+    </td>
+  </tr>
 
-          <div class="info-box">
-            <p><strong>Payment Details</strong></p>
-            <p><strong>Date:</strong> ${formattedDate}</p>
-            <p><strong>Amount:</strong> $${formattedAmount}</p>
-          </div>
+  <!-- BODY -->
+  <tr>
+    <td style="padding:44px 48px 0;background:#0d1020;">
+      <p style="margin:0 0 10px;font-size:16px;color:#e8dfc8;line-height:1.75;font-family:Inter,sans-serif;">Dear <strong style="color:#c4a45f;">${firstName}</strong>,</p>
+      <p style="margin:0 0 36px;font-size:14px;color:rgba(232,223,200,0.7);line-height:1.9;font-family:Inter,sans-serif;">${bodyIntro}</p>
 
-          <p>Kindly check with your bank to confirm that the payment has been returned to your account. Once confirmed, we would appreciate it if you could resend the payment at your earliest convenience.</p>
+      <p style="margin:0 0 14px;font-size:9px;letter-spacing:4px;text-transform:uppercase;color:rgba(196,164,95,0.55);font-weight:700;font-family:Inter,sans-serif;">Failed Payment Details</p>
 
-          <p>Thank you for your attention to this matter.</p>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid rgba(244,100,100,0.25);border-radius:12px;overflow:hidden;margin-bottom:36px;background:rgba(244,100,100,0.04);">
+        <tr>
+          <td style="padding:10px 22px;font-size:13px;color:rgba(196,164,95,0.65);font-weight:600;border-bottom:1px solid rgba(196,164,95,0.1);font-family:Inter,sans-serif;">Date</td>
+          <td style="padding:10px 22px;font-size:13px;color:#e8dfc8;font-weight:500;border-bottom:1px solid rgba(196,164,95,0.1);text-align:right;font-family:Inter,sans-serif;">${formattedDate}</td>
+        </tr>
+        <tr>
+          <td style="padding:10px 22px;font-size:13px;color:rgba(196,164,95,0.65);font-weight:600;border-bottom:1px solid rgba(196,164,95,0.1);font-family:Inter,sans-serif;">Amount</td>
+          <td style="padding:10px 22px;font-size:15px;color:#f4a4a4;font-weight:700;border-bottom:1px solid rgba(196,164,95,0.1);text-align:right;font-family:Inter,sans-serif;">$${formattedAmount}</td>
+        </tr>
+        ${cardRow}
+        ${reasonRow}
+      </table>
 
-          <div class="divider"></div>
+      <p style="margin:0 0 36px;font-size:14px;color:rgba(232,223,200,0.7);line-height:1.9;font-family:Inter,sans-serif;">Kindly check with your bank to confirm that the payment has been returned to your account. Once confirmed, we would appreciate it if you could resend the payment at your earliest convenience.</p>
 
-          <p style="margin-top: 24px">
-            Best regards,
-            <br />
-            <strong style="color: #ef4444">ARNOMA Team</strong>
-          </p>
-        </div>
+      <div style="width:100%;height:1px;background:linear-gradient(90deg,transparent,rgba(196,164,95,0.25),transparent);margin-bottom:36px;"></div>
 
-        <!-- Footer -->
-        <div class="email-footer">
-          <img
-            src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png"
-            alt="ARNOMA Logo"
-          />
-          <p><strong>ARNOMA – NCLEX RN</strong></p>
-          <p style="margin-top: 12px">nclex.rn@arnoma.us | richy@arnoma.us | 909-808-1818</p>
-          <p style="margin-top: 16px; font-size: 12px; opacity: 0.8">© 2025 ARNOMA. All rights reserved.</p>
-        </div>
-      </div>
-    </div>
-  </body>
+      <p style="margin:0 0 44px;font-size:14px;color:rgba(232,223,200,0.65);line-height:1.8;font-family:Inter,sans-serif;">
+        Best regards,<br/>
+        <strong style="color:#c4a45f;">ARNOMA Team</strong>
+      </p>
+    </td>
+  </tr>
+
+  <!-- FOOTER -->
+  <tr>
+    <td style="background:linear-gradient(170deg,#080b14,#0d1020);padding:36px 48px;text-align:center;border-top:1px solid rgba(196,164,95,0.15);">
+      <div style="width:56px;height:1px;background:linear-gradient(90deg,transparent,#c4a45f,transparent);margin:0 auto 24px;"></div>
+      <img src="https://raw.githubusercontent.com/easylearnrn-hash/ARNOMA/main/richyfesta-logo.png" alt="ARNOMA" width="52" style="display:block;margin:0 auto 16px;opacity:0.6;"/>
+      <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:rgba(196,164,95,0.75);letter-spacing:1px;font-family:Inter,sans-serif;">ARNOMA – NCLEX RN</p>
+      <p style="margin:0 0 14px;font-size:12px;color:rgba(196,164,95,0.35);font-family:Inter,sans-serif;">nclex.rn@arnoma.us &nbsp;·&nbsp; richy@arnoma.us &nbsp;·&nbsp; 909-808-1818</p>
+      <p style="margin:0;font-size:11px;color:rgba(196,164,95,0.2);font-family:Inter,sans-serif;">© ${year} ARNOMA. All rights reserved.</p>
+    </td>
+  </tr>
+
+</table>
+</td></tr>
+</table>
+</body>
 </html>`;
       }
 
