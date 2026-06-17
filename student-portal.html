@@ -8707,6 +8707,7 @@
       const visHistEvents = (!visHistResult.error && visHistResult.data)
         ? visHistResult.data.map(r => ({ date: (r.effective_date || '').split('T')[0], visible: r.visible })).sort((a, b) => (a.date < b.date ? -1 : 1))
         : [];
+      console.log(`[ARNOMA] visHistEvents for ${student.name}:`, JSON.stringify(visHistEvents), '| raw error:', visHistResult.error);
       const manualEnrollDates = new Set(
         manualEnrollRows
           .filter(r => {
@@ -8794,6 +8795,23 @@
       // Never start before the portal floor.
       if (!_studentStartStr || _studentStartStr < PORTAL_HISTORY_FLOOR_STR) {
         _studentStartStr = PORTAL_HISTORY_FLOOR_STR;
+      }
+
+      // ── Pause/unpause correction via visibility history ───────────────────
+      // Find the most recent date on which the student was activated (visible=true).
+      // If that date is LATER than the current _studentStartStr, use it instead.
+      // This ensures classes during a pause period are never counted as debt,
+      // regardless of whether a visible=false entry was ever written to history.
+      // Works with a single "visible=true today" entry (just-unpaused student).
+      if (visHistEvents.length > 0) {
+        const latestActivation = [...visHistEvents].reverse().find(ev => ev.visible === true);
+        if (latestActivation && latestActivation.date >= _studentStartStr) {
+          debugLog(`📌 Pause correction: start date moved from ${_studentStartStr} → ${latestActivation.date} (last unpause)`);
+          console.log(`[ARNOMA] Pause correction for ${student.name}: _studentStartStr moved from ${_studentStartStr} → ${latestActivation.date}`);
+          _studentStartStr = latestActivation.date;
+        }
+      } else {
+        console.log(`[ARNOMA] No visibility history for ${student.name} — cannot detect pause period. _studentStartStr stays at ${_studentStartStr}`);
       }
 
       const startDate = new Date(ABSOLUTE_FLOOR.getTime());
