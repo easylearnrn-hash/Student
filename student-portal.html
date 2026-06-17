@@ -8707,7 +8707,6 @@
       const visHistEvents = (!visHistResult.error && visHistResult.data)
         ? visHistResult.data.map(r => ({ date: (r.effective_date || '').split('T')[0], visible: r.visible })).sort((a, b) => (a.date < b.date ? -1 : 1))
         : [];
-      console.log(`[ARNOMA] visHistEvents for ${student.name}:`, JSON.stringify(visHistEvents), '| raw error:', visHistResult.error);
       const manualEnrollDates = new Set(
         manualEnrollRows
           .filter(r => {
@@ -8795,23 +8794,6 @@
       // Never start before the portal floor.
       if (!_studentStartStr || _studentStartStr < PORTAL_HISTORY_FLOOR_STR) {
         _studentStartStr = PORTAL_HISTORY_FLOOR_STR;
-      }
-
-      // ── Pause/unpause correction via visibility history ───────────────────
-      // Find the most recent date on which the student was activated (visible=true).
-      // If that date is LATER than the current _studentStartStr, use it instead.
-      // This ensures classes during a pause period are never counted as debt,
-      // regardless of whether a visible=false entry was ever written to history.
-      // Works with a single "visible=true today" entry (just-unpaused student).
-      if (visHistEvents.length > 0) {
-        const latestActivation = [...visHistEvents].reverse().find(ev => ev.visible === true);
-        if (latestActivation && latestActivation.date >= _studentStartStr) {
-          debugLog(`📌 Pause correction: start date moved from ${_studentStartStr} → ${latestActivation.date} (last unpause)`);
-          console.log(`[ARNOMA] Pause correction for ${student.name}: _studentStartStr moved from ${_studentStartStr} → ${latestActivation.date}`);
-          _studentStartStr = latestActivation.date;
-        }
-      } else {
-        console.log(`[ARNOMA] No visibility history for ${student.name} — cannot detect pause period. _studentStartStr stays at ${_studentStartStr}`);
       }
 
       const startDate = new Date(ABSOLUTE_FLOOR.getTime());
@@ -8911,6 +8893,35 @@
         scheduledDates.sort();
       }
 
+      // ── Remove paused-period dates from scheduledDates IN-PLACE ──────────────
+      // This must happen BEFORE classification AND before scheduledDates is returned
+      // as scheduledDatesForUI — that array drives both the unpaid total AND the
+      // individual history rows (Jun 16, Jun 11, … cards).  Filtering only inside
+      // the loop below would fix the total but leave the history rows untouched.
+      //
+      // Logic mirrors Calendar-NEW isStudentActiveOnDate exactly:
+      //   • lastVis.visible === false  → student was paused on that date → remove
+      //   • lastVis === null AND first event is visible=true  → student was paused
+      //     before tracking began, activated today → every prior date → remove
+      //   • no history at all → assume always active → keep everything
+      if (visHistEvents.length > 0) {
+        const isActiveOnDate = (dateStr) => {
+          let lastVis = null;
+          for (const ev of visHistEvents) {
+            if (ev.date <= dateStr) lastVis = ev;
+            else break;
+          }
+          if (lastVis !== null) return lastVis.visible;
+          // Before all recorded events: if first event is an activation, the
+          // student was paused before it — treat every earlier date as inactive.
+          return visHistEvents[0].visible !== true;
+        };
+        const before = scheduledDates.length;
+        const active = scheduledDates.filter(isActiveOnDate);
+        scheduledDates.splice(0, scheduledDates.length, ...active);
+        debugLog(`⏸ Pause filter: removed ${before - scheduledDates.length} paused-period dates, ${scheduledDates.length} remain`);
+      }
+
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
 
       const unpaidClasses  = [];
@@ -8919,29 +8930,6 @@
       for (const dateStr of scheduledDates) {
         if (dateStr < PORTAL_HISTORY_FLOOR_STR) continue;
         if (ignoredDates.has(dateStr)) continue;
-
-        // ── Pause/unpause gate (mirrors Calendar-NEW isStudentActiveOnDate) ──
-        // Find the most recent visibility event on or before this date.
-        // If that event says visible=false the student was paused → skip.
-        // If there is no prior event, assume active (student existed before tracking).
-        if (visHistEvents.length > 0) {
-          let lastVis = null;
-          for (const ev of visHistEvents) {
-            if (ev.date <= dateStr) lastVis = ev;
-            else break;
-          }
-          if (lastVis !== null && !lastVis.visible) {
-            debugLog(`⏸ ${dateStr}: SKIPPED (student was paused)`);
-            continue;
-          }
-          // Date falls before ALL history entries AND the first recorded event is
-          // visible=true — this means the student was activated/unpaused at that date,
-          // so every date before the first activation is a paused period.
-          if (lastVis === null && visHistEvents[0].visible === true) {
-            debugLog(`⏸ ${dateStr}: SKIPPED (before first activation event)`);
-            continue;
-          }
-        }
 
         const isAbsent  = absentDates.has(dateStr);
         const hasPaid   = paidDates.has(dateStr);
