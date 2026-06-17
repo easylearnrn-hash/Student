@@ -3788,19 +3788,20 @@
         student.status = statusOrder[(currentIndex + 1) % statusOrder.length];
 
         debugLog(`Status changed to: ${student.status}`);
-        
-        // When unpausing, reset start_date to today so the portal debt floor matches
-        if (student.status === 'active') {
-          const today = new Date().toISOString().split('T')[0];
-          student.start_date = today;
-        }
 
+        // When activating (unpausing), reset start_date to today so the student portal
+        // debt floor moves to today — no debt accumulates during the paused period.
+        const today = new Date().toISOString().split('T')[0];
+        if (student.status === 'active') {
+          student.start_date = today;
+          debugLog(`📅 start_date reset to ${today} on unpause for ${student.name}`);
+        }
+        
         // Save to Supabase
         await saveStudent(student);
 
         // 📅 RECORD VISIBILITY HISTORY so calendar hides/shows the student from the correct date
         try {
-          const today = new Date().toISOString().split('T')[0];
           const visible = student.status === 'active';
           await supabaseClient
             .from('student_visibility_history')
@@ -6453,17 +6454,20 @@
 
         debugLog(`Modal status changed to: ${currentStudent.status}`);
 
-        // When unpausing, reset start_date to today so the portal debt floor matches
+        // When activating (unpausing), reset start_date to today so the student portal
+        // debt floor moves to today — no debt accumulates during the paused period.
+        const today = new Date().toISOString().split('T')[0];
         if (currentStudent.status === 'active') {
-          const today = new Date().toISOString().split('T')[0];
           currentStudent.start_date = today;
+          const startDateInput = document.getElementById('modalStartDate');
+          if (startDateInput) startDateInput.value = today;
+          debugLog(`📅 start_date reset to ${today} on unpause for ${currentStudent.name}`);
         }
 
         await saveStudent(currentStudent);
 
         // 📅 RECORD VISIBILITY HISTORY so calendar hides/shows the student from the correct date
         try {
-          const today = new Date().toISOString().split('T')[0];
           const visible = currentStudent.status === 'active';
           await supabaseClient
             .from('student_visibility_history')
@@ -6604,9 +6608,6 @@
           debugLog(`${student.name} calendar visibility: OFF - price_per_class set to 0`);
         } else {
           debugLog(`${student.name} calendar visibility: ON`);
-          // When re-enabling, reset start_date to today so the portal debt floor matches
-          const today = new Date().toISOString().split('T')[0];
-          student.start_date = today;
         }
 
         // Save to Supabase

@@ -8661,7 +8661,7 @@
         ? names.map(n => `,payer_name.ilike.%${n}%,resolved_student_name.ilike.%${n}%`).join('')
         : '';
 
-      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult, manualEnrollResult, visHistResult] = await Promise.all([
+      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult, manualEnrollResult] = await Promise.all([
         Promise.resolve(
           supabaseClient.from('student_absences').select('class_date').eq('student_id', student.id)
         ).catch(() => ({ data: null, error: true })),
@@ -8687,13 +8687,6 @@
         // Keep this broad so older rows that missed payment_method still count.
         Promise.resolve(
           supabaseClient.from('payment_records').select('date, payment_method, status, amount').eq('student_id', student.id)
-        ).catch(() => ({ data: [], error: null })),
-        // Visibility history — pause/unpause dates so paused periods are excluded from debt
-        Promise.resolve(
-          supabaseClient.from('student_visibility_history')
-            .select('visible, effective_date')
-            .eq('student_id', student.id)
-            .order('effective_date', { ascending: true })
         ).catch(() => ({ data: [], error: null }))
       ]);
 
@@ -8703,10 +8696,6 @@
       const skipped    = (!skippedResult.error      && skippedResult.data)    ? skippedResult.data   : [];
       const zelleRaw   = (!zelleResult.error        && zelleResult.data)      ? zelleResult.data     : [];
       const manualEnrollRows = (!manualEnrollResult.error && manualEnrollResult.data) ? manualEnrollResult.data : [];
-      // Visibility events sorted ascending — mirrors isStudentActiveOnDate in Calendar-NEW
-      const visHistEvents = (!visHistResult.error && visHistResult.data)
-        ? visHistResult.data.map(r => ({ date: (r.effective_date || '').split('T')[0], visible: r.visible })).sort((a, b) => (a.date < b.date ? -1 : 1))
-        : [];
       const manualEnrollDates = new Set(
         manualEnrollRows
           .filter(r => {
@@ -8893,34 +8882,10 @@
         scheduledDates.sort();
       }
 
-      // ── Remove paused-period dates from scheduledDates IN-PLACE ──────────────
-      // This must happen BEFORE classification AND before scheduledDates is returned
-      // as scheduledDatesForUI — that array drives both the unpaid total AND the
-      // individual history rows (Jun 16, Jun 11, … cards).  Filtering only inside
-      // the loop below would fix the total but leave the history rows untouched.
-      //
-      // Logic mirrors Calendar-NEW isStudentActiveOnDate exactly:
-      //   • lastVis.visible === false  → student was paused on that date → remove
-      //   • lastVis === null AND first event is visible=true  → student was paused
-      //     before tracking began, activated today → every prior date → remove
-      //   • no history at all → assume always active → keep everything
-      if (visHistEvents.length > 0) {
-        const isActiveOnDate = (dateStr) => {
-          let lastVis = null;
-          for (const ev of visHistEvents) {
-            if (ev.date <= dateStr) lastVis = ev;
-            else break;
-          }
-          if (lastVis !== null) return lastVis.visible;
-          // Before all recorded events: if first event is an activation, the
-          // student was paused before it — treat every earlier date as inactive.
-          return visHistEvents[0].visible !== true;
-        };
-        const before = scheduledDates.length;
-        const active = scheduledDates.filter(isActiveOnDate);
-        scheduledDates.splice(0, scheduledDates.length, ...active);
-        debugLog(`⏸ Pause filter: removed ${before - scheduledDates.length} paused-period dates, ${scheduledDates.length} remain`);
-      }
+      // ── Pause/unpause gate: _studentStartStr is the debt floor ─────────────
+      // When a student is unpaused, Student-Manager sets start_date = today.
+      // The portal reads that as _studentStartStr and the scheduledDates loop above
+      // already skips every date < _studentStartStr.  Nothing extra needed here.
 
       // ── Classify each scheduled date — exactly as Calendar-NEW does ─────────
 
