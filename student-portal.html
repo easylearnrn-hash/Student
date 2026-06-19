@@ -12031,7 +12031,7 @@
         //    Before: round1(payments 6q) → round2(perms 2q) → round3(free 2q)
         //    After:  round1(all 4 note-access + payments in parallel)
         // ─────────────────────────────────────────────────────────────────────
-        const [studentPermRes, groupPermRes, freeIndividualRes, freeGroupRes, paymentDataResult] = await Promise.all([
+        const [studentPermRes, groupPermRes, freeIndividualRes, freeGroupRes, paymentDataResult, noteVideoResult] = await Promise.all([
           // 1. Student-specific permissions (accessible + blocked)
           supabaseClient
             .from('student_note_permissions')
@@ -12067,8 +12067,27 @@
           ensurePaymentsData().catch((err) => {
             console.error('❌ Failed loading payments in materials flow:', err);
             return currentPayments || [];
-          })
+          }),
+
+          // 6. Note video URLs from portal_settings
+          supabaseClient
+            .from('portal_settings')
+            .select('setting_key, setting_value')
+            .like('setting_key', 'html_video:%')
+            .then(({ data }) => {
+              const map = {};
+              (data || []).forEach(row => {
+                const path = row.setting_key.replace('html_video:', '');
+                const val = row.setting_value;
+                map[path] = (typeof val === 'string') ? val : (val?.url || '');
+              });
+              return map;
+            })
+            .catch(() => ({}))
         ]);
+
+        // Build note path → video URL lookup (available in card builder below)
+        const htmlNoteVideoMap = noteVideoResult || {};
 
         const permError = studentPermRes.error || groupPermRes.error;
         const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
@@ -12380,7 +12399,8 @@
                   title: note.title || 'Note',
                   url: htmlPath,
                   noteId: note.id,
-                  type: 'html'
+                  type: 'html',
+                  videoUrl: htmlNoteVideoMap[htmlPath] || null
                 }];
               }
               // Fallback: if the note has a pdf_url, open it via Protected-PDF-Viewer
@@ -14219,7 +14239,12 @@
           const _attUrl = '${attachment.url}';
           const clickHandler = `event.stopPropagation(); markNoteAsOpened(${note.id}); if(window.currentStudent && window.currentStudent.id){ sessionStorage.setItem('studentRecordId', window.currentStudent.id); localStorage.setItem('studentRecordId', window.currentStudent.id); } (function(){ var u='${attachment.url}'; if(window.currentStudent && window.currentStudent.name){ u += (u.indexOf('?')>=0?'&':'?') + 'studentName=' + encodeURIComponent(window.currentStudent.name); } window.open(u,'_blank'); })()`;
 
-          
+          // Media (video) button — only shown if a video URL is linked to this note
+          const videoUrl = attachment.videoUrl || '';
+          const mediaBtn = videoUrl
+            ? `<button style="width:100%;padding:11px 16px;border-radius:10px;background:rgba(96,165,250,0.07);border:1px solid rgba(96,165,250,0.22);color:rgba(147,197,253,0.9);font-family:Inter,system-ui,sans-serif;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:10px;text-align:left;transition:background 0.18s,border-color 0.18s;" onclick="event.stopPropagation(); openNoteVideoPlayer(${JSON.stringify(videoUrl).replace(/'/g, '&#39;')}, ${JSON.stringify(attachment.title || note.title || '').replace(/'/g, '&#39;')})" onmouseover="this.style.background='rgba(96,165,250,0.16)';this.style.borderColor='rgba(96,165,250,0.45)'" onmouseout="this.style.background='rgba(96,165,250,0.07)';this.style.borderColor='rgba(96,165,250,0.22)'"><div style="width:28px;height:28px;border-radius:7px;background:rgba(96,165,250,0.12);border:1px solid rgba(96,165,250,0.25);display:flex;align-items:center;justify-content:center;flex-shrink:0;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="rgba(147,197,253,0.9)" stroke-width="2"/><path d="M10 8L16 12L10 16V8Z" fill="rgba(147,197,253,0.9)"/></svg></div><span style="flex:1;">▶ Media</span></button>`
+            : '';
+
           attachmentsHTML += `
             <button style="
               width: 100%;
@@ -14270,6 +14295,7 @@
               </div>
             </button>
           `;
+          attachmentsHTML += mediaBtn;
         });
         attachmentsHTML += '</div>';
       } else if (note.attachments && note.attachments.length > 0 && !note.isPaid) {
@@ -15190,6 +15216,17 @@
        Opens payment.html in a glass iframe overlay when student clicks Pay Now.
        Listens for postMessage events from payment.html to close on success.
   ====================================================================== -->
+  <!-- ── NOTE VIDEO PLAYER MODAL ── -->
+  <div id="noteVideoPlayerModal" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.9);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);align-items:center;justify-content:center;padding:16px;flex-direction:column;gap:12px;">
+    <div style="width:100%;max-width:840px;display:flex;align-items:center;justify-content:space-between;padding:0 4px;">
+      <div id="noteVideoTitle" style="font-size:15px;font-weight:700;color:rgba(245,240,232,0.88);font-family:Inter,sans-serif;letter-spacing:0.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:calc(100% - 52px);"></div>
+      <button onclick="closeNoteVideoPlayer()" style="width:40px;height:40px;border-radius:50%;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.35);color:#ef4444;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background 0.15s;" onmouseover="this.style.background='rgba(239,68,68,0.28)'" onmouseout="this.style.background='rgba(239,68,68,0.15)'">✕</button>
+    </div>
+    <div style="width:100%;max-width:840px;aspect-ratio:16/9;background:#000;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+      <iframe id="noteVideoIframe" src="" allow="autoplay; encrypted-media" allowfullscreen style="width:100%;height:100%;border:none;"></iframe>
+    </div>
+  </div>
+
   <!-- ── ABSENCE INFO POPUP ── -->
   <div id="absenceInfoModal" style="
     display:none; position:fixed; inset:0; z-index:99998;
@@ -15320,6 +15357,31 @@
         .filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v));
       return Array.from(new Set(out));
     }
+
+    /* ── Note Video Player ── */
+    function openNoteVideoPlayer(videoUrl, noteTitle) {
+      const modal = document.getElementById('noteVideoPlayerModal');
+      const iframe = document.getElementById('noteVideoIframe');
+      const titleEl = document.getElementById('noteVideoTitle');
+      if (!modal || !iframe) return;
+      titleEl.textContent = noteTitle || 'Media';
+      iframe.src = videoUrl;
+      modal.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+    }
+    function closeNoteVideoPlayer() {
+      const modal = document.getElementById('noteVideoPlayerModal');
+      const iframe = document.getElementById('noteVideoIframe');
+      if (modal) modal.style.display = 'none';
+      if (iframe) iframe.src = '';
+      document.body.style.overflow = '';
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+      const vmod = document.getElementById('noteVideoPlayerModal');
+      if (vmod) {
+        vmod.addEventListener('click', e => { if (e.target === vmod) closeNoteVideoPlayer(); });
+      }
+    });
 
     /* ── Payment modal helpers ── */
     // ── ABSENCE INFO POPUP ──────────────────────────────────────────────────

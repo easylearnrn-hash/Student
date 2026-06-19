@@ -284,6 +284,17 @@
     }
     .html-note-row:hover { background: rgba(102,126,234,0.18); border-color: rgba(102,126,234,0.4); color: white; }
     .html-note-row.hidden-by-search { display: none; }
+    /* ── NOTE VIDEO WRAPPER ── */
+    .html-note-item { display: flex; align-items: center; gap: 6px; }
+    .html-note-item .html-note-row { flex: 1; min-width: 0; }
+    .html-note-video-btn {
+      flex-shrink: 0; padding: 6px 9px; border-radius: 7px; font-size: 11px; font-weight: 700;
+      cursor: pointer; border: 1px solid rgba(102,126,234,0.35); background: rgba(102,126,234,0.10);
+      color: rgba(180,190,255,0.85); transition: all 0.15s; white-space: nowrap; letter-spacing: 0.02em;
+    }
+    .html-note-video-btn:hover { background: rgba(102,126,234,0.25); border-color: rgba(102,126,234,0.6); color: #fff; }
+    .html-note-video-btn.has-video { background: rgba(74,222,128,0.10); border-color: rgba(74,222,128,0.35); color: rgba(74,222,128,0.9); }
+    .html-note-video-btn.has-video:hover { background: rgba(74,222,128,0.22); border-color: rgba(74,222,128,0.6); color: #4ade80; }
 
     @keyframes fadeInUp {
       from { opacity: 0; transform: translateY(8px); }
@@ -2454,6 +2465,26 @@
 
     </div>
     
+    <!-- Add/Edit Video Modal -->
+    <div id="htmlVideoModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:200000;backdrop-filter:blur(10px);align-items:center;justify-content:center;">
+      <div style="background:#0d1627;border:1px solid rgba(102,126,234,0.35);border-radius:18px;padding:32px 28px;width:100%;max-width:520px;margin:20px;box-shadow:0 24px 60px rgba(0,0,0,0.6);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+          <div>
+            <div style="font-size:17px;font-weight:800;color:#fff;margin-bottom:3px;">🎬 Note Video</div>
+            <div id="htmlVideoModalNoteName" style="font-size:12px;color:rgba(255,255,255,0.45);max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+          </div>
+          <button onclick="closeHtmlVideoModal()" style="width:34px;height:34px;border-radius:50%;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.4);color:#ef4444;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;">✕</button>
+        </div>
+        <label style="display:block;font-size:12px;font-weight:700;color:rgba(255,255,255,0.5);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:8px;">Google Drive Video URL</label>
+        <input id="htmlVideoUrlInput" type="url" placeholder="https://drive.google.com/file/d/.../view" style="width:100%;padding:12px 14px;background:rgba(255,255,255,0.06);border:1px solid rgba(102,126,234,0.3);border-radius:10px;color:#fff;font-size:14px;outline:none;margin-bottom:8px;box-sizing:border-box;">
+        <p style="font-size:11px;color:rgba(255,255,255,0.35);margin-bottom:20px;">Paste a Google Drive share link. Make sure sharing is set to <em>Anyone with the link</em>.</p>
+        <div style="display:flex;gap:10px;">
+          <button onclick="saveHtmlVideoUrl()" style="flex:1;padding:12px;background:rgba(102,126,234,0.25);border:1px solid rgba(102,126,234,0.5);border-radius:10px;color:#a5b4fc;font-size:14px;font-weight:700;cursor:pointer;">💾 Save</button>
+          <button id="htmlVideoRemoveBtn" onclick="removeHtmlVideoUrl()" style="padding:12px 16px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:10px;color:#f87171;font-size:14px;cursor:pointer;display:none;">Remove</button>
+        </div>
+      </div>
+    </div>
+
     <!-- HTML Note Viewer Modal -->
     <div id="htmlNoteModal" style="
       display: none;
@@ -2785,7 +2816,7 @@
       
       // Load data for tab (with caching)
       if (tab === 'students') loadStudents();
-      if (tab === 'notes') loadNotes();
+      if (tab === 'notes') { loadNotes(); initHtmlNoteVideoButtons(); }
       if (tab === 'settings') loadSettings();
     }
     
@@ -2906,6 +2937,125 @@
     });
 
     // ── HTML NOTES BROWSER ──────────────────────────────────────────
+
+    // Cache of note path → video URL loaded from portal_settings
+    let _htmlNoteVideos = null; // null = not loaded yet
+    let _currentVideoPath = null; // note path being edited
+
+    async function loadHtmlNoteVideos() {
+      if (_htmlNoteVideos !== null) return _htmlNoteVideos;
+      try {
+        const { data, error } = await supabaseClient
+          .from('portal_settings')
+          .select('setting_key, setting_value')
+          .like('setting_key', 'html_video:%');
+        _htmlNoteVideos = {};
+        if (!error && data) {
+          data.forEach(row => {
+            const path = row.setting_key.replace('html_video:', '');
+            const val = row.setting_value;
+            _htmlNoteVideos[path] = (typeof val === 'string') ? val : (val?.url || '');
+          });
+        }
+      } catch(e) { _htmlNoteVideos = {}; }
+      return _htmlNoteVideos;
+    }
+
+    async function initHtmlNoteVideoButtons() {
+      const videos = await loadHtmlNoteVideos();
+      // Wrap every .html-note-row in .html-note-item and add video button
+      document.querySelectorAll('.html-note-row').forEach(row => {
+        if (row.closest('.html-note-item')) return; // already wrapped
+        const path = (() => {
+          const m = row.getAttribute('onclick').match(/openHtmlNote\('([^']+)'\)/);
+          return m ? m[1] : null;
+        })();
+        if (!path) return;
+        const wrapper = document.createElement('div');
+        wrapper.className = 'html-note-item';
+        row.parentNode.insertBefore(wrapper, row);
+        wrapper.appendChild(row);
+        const hasVideo = !!(videos[path]);
+        const btn = document.createElement('button');
+        btn.className = 'html-note-video-btn' + (hasVideo ? ' has-video' : '');
+        btn.title = hasVideo ? 'Edit or remove video' : 'Add video';
+        btn.textContent = hasVideo ? '🎬 Video' : '+ Video';
+        btn.onclick = (e) => { e.stopPropagation(); openHtmlVideoModal(path, row.textContent.trim()); };
+        wrapper.appendChild(btn);
+      });
+    }
+
+    function openHtmlVideoModal(path, noteName) {
+      _currentVideoPath = path;
+      const modal = document.getElementById('htmlVideoModal');
+      const input = document.getElementById('htmlVideoUrlInput');
+      const removeBtn = document.getElementById('htmlVideoRemoveBtn');
+      const nameEl = document.getElementById('htmlVideoModalNoteName');
+      nameEl.textContent = noteName || path;
+      const existing = (_htmlNoteVideos || {})[path] || '';
+      input.value = existing;
+      removeBtn.style.display = existing ? 'block' : 'none';
+      modal.style.display = 'flex';
+    }
+
+    function closeHtmlVideoModal() {
+      document.getElementById('htmlVideoModal').style.display = 'none';
+      _currentVideoPath = null;
+    }
+
+    function convertDriveUrl(url) {
+      // Converts share URL to embed URL
+      const m = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+      if (m) return `https://drive.google.com/file/d/${m[1]}/preview`;
+      return url; // pass through if already embed or unknown format
+    }
+
+    async function saveHtmlVideoUrl() {
+      const raw = document.getElementById('htmlVideoUrlInput').value.trim();
+      if (!raw) { alert('Please enter a URL.'); return; }
+      const url = convertDriveUrl(raw);
+      const key = 'html_video:' + _currentVideoPath;
+      const { error } = await supabaseClient
+        .from('portal_settings')
+        .upsert({ setting_key: key, setting_value: { url } }, { onConflict: 'setting_key' });
+      if (error) { alert('Failed to save: ' + error.message); return; }
+      if (!_htmlNoteVideos) _htmlNoteVideos = {};
+      _htmlNoteVideos[_currentVideoPath] = url;
+      // Update the button in the DOM
+      const row = [...document.querySelectorAll('.html-note-row')].find(r => {
+        const m = r.getAttribute('onclick').match(/openHtmlNote\('([^']+)'\)/);
+        return m && m[1] === _currentVideoPath;
+      });
+      if (row) {
+        const btn = row.closest('.html-note-item')?.querySelector('.html-note-video-btn');
+        if (btn) { btn.textContent = '🎬 Video'; btn.className = 'html-note-video-btn has-video'; btn.title = 'Edit or remove video'; }
+      }
+      closeHtmlVideoModal();
+    }
+
+    async function removeHtmlVideoUrl() {
+      if (!_currentVideoPath) return;
+      const key = 'html_video:' + _currentVideoPath;
+      const { error } = await supabaseClient
+        .from('portal_settings')
+        .delete()
+        .eq('setting_key', key);
+      if (error) { alert('Failed to remove: ' + error.message); return; }
+      if (_htmlNoteVideos) delete _htmlNoteVideos[_currentVideoPath];
+      const row = [...document.querySelectorAll('.html-note-row')].find(r => {
+        const m = r.getAttribute('onclick').match(/openHtmlNote\('([^']+)'\)/);
+        return m && m[1] === _currentVideoPath;
+      });
+      if (row) {
+        const btn = row.closest('.html-note-item')?.querySelector('.html-note-video-btn');
+        if (btn) { btn.textContent = '+ Video'; btn.className = 'html-note-video-btn'; btn.title = 'Add video'; }
+      }
+      closeHtmlVideoModal();
+    }
+
+    // Close video modal on backdrop click or Escape
+    document.getElementById('htmlVideoModal').addEventListener('click', e => { if (e.target === document.getElementById('htmlVideoModal')) closeHtmlVideoModal(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('htmlVideoModal').style.display === 'flex') closeHtmlVideoModal(); });
 
     function openHtmlNote(path) {
       window.open(path, '_blank');
