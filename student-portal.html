@@ -12088,6 +12088,19 @@
 
         // Build note path → video URL lookup (available in card builder below)
         const htmlNoteVideoMap = noteVideoResult || {};
+        // Secondary lookup: slug-based so titles like "Hemothorax & Pneumothorax"
+        // match paths like "Hemothorax-and-Pneumothorax.html" (& vs "and" mismatch).
+        const _noteSlug = str => (str || '').toLowerCase().replace(/&/g, ' ').replace(/\band\b/g, ' ').replace(/[^a-z0-9]/g, '');
+        const htmlNoteVideoBySlug = {};
+        Object.entries(htmlNoteVideoMap).forEach(([path, url]) => {
+          const filename = path.split('/').pop().replace(/\.html$/i, '');
+          htmlNoteVideoBySlug[_noteSlug(filename)] = url;
+        });
+        const _getVideoUrl = title => {
+          const p = resolveHtmlNotePath(title);
+          if (p && htmlNoteVideoMap[p]) return htmlNoteVideoMap[p];
+          return htmlNoteVideoBySlug[_noteSlug(title)] || null;
+        };
 
         const permError = studentPermRes.error || groupPermRes.error;
         const freeAccessError = freeIndividualRes.error || freeGroupRes.error;
@@ -12400,7 +12413,7 @@
                   url: htmlPath,
                   noteId: note.id,
                   type: 'html',
-                  videoUrl: htmlNoteVideoMap[htmlPath] || null
+                  videoUrl: _getVideoUrl(note.title)
                 }];
               }
               // Fallback: if the note has a pdf_url, open it via Protected-PDF-Viewer
@@ -12409,7 +12422,8 @@
                   title: note.title || 'Note',
                   url: `Protected-PDF-Viewer.html?note=${note.id}`,
                   noteId: note.id,
-                  type: 'pdf'
+                  type: 'pdf',
+                  videoUrl: _getVideoUrl(note.title)
                 }];
               }
               return [];
