@@ -970,73 +970,72 @@
   }
 
   /* ─── FLOATING MEDIA BUTTON ────────────────────────────────────
-   * If the portal passed ?videoUrl=... when opening this note,
-   * inject a floating "▶ Media" button that plays the video in an
-   * overlay modal. No changes needed in individual note files.
+   * Fetches this note's video from Supabase using the note's own
+   * file path as the key — works regardless of how the note is
+   * opened. Falls back to ?videoUrl= param if present.
    * ─────────────────────────────────────────────────────────────*/
   (function () {
-    var videoUrl;
-    try { videoUrl = new URLSearchParams(window.location.search).get('videoUrl'); } catch (e) {}
-    if (!videoUrl) return;
+    var SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+    var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
 
-    function injectMediaButton() {
-      if (document.getElementById('acnhs-media-fab')) return;
+    function getNotePath() {
+      try {
+        var raw = decodeURIComponent(window.location.pathname);
+        var idx = raw.indexOf('/Notes/');
+        if (idx === -1) return null;
+        return raw.slice(idx + 1); // e.g. "Notes/Respiratory System/Hemothorax-and-Pneumothorax.html"
+      } catch (e) { return null; }
+    }
 
-      /* ── Overlay modal ── */
+    function injectMediaUI(videoUrl) {
+      if (!videoUrl || document.getElementById('acnhs-media-fab')) return;
+
+      /* Overlay */
       var overlay = document.createElement('div');
       overlay.id = 'acnhs-media-overlay';
-      overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.92);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);align-items:center;justify-content:center;flex-direction:column;gap:14px;';
+      overlay.style.cssText = 'display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,0.92);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:16px;box-sizing:border-box;';
 
       var top = document.createElement('div');
-      top.style.cssText = 'width:100%;max-width:860px;display:flex;align-items:center;justify-content:space-between;padding:0 6px;';
+      top.style.cssText = 'width:100%;max-width:860px;display:flex;align-items:center;justify-content:space-between;padding:0 4px;';
 
-      var title = document.createElement('div');
-      title.style.cssText = 'font-family:Inter,sans-serif;font-size:15px;font-weight:700;color:rgba(245,240,232,0.88);';
-      title.textContent = document.title.replace(/ [–—|].*$/, '').trim() || 'Media';
+      var titleEl = document.createElement('div');
+      titleEl.style.cssText = 'font-family:Inter,sans-serif;font-size:15px;font-weight:700;color:rgba(245,240,232,0.88);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:calc(100% - 52px);';
+      titleEl.textContent = (document.title || '').replace(/\s*[\u2013\u2014|].*$/, '').trim() || 'Media';
 
       var closeBtn = document.createElement('button');
-      closeBtn.textContent = '✕';
+      closeBtn.textContent = '\u2715';
       closeBtn.style.cssText = 'width:40px;height:40px;border-radius:50%;background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.35);color:#ef4444;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;';
-      closeBtn.addEventListener('click', function () {
-        overlay.style.display = 'none';
-        iframe.src = '';
-        document.body.style.overflow = '';
-      });
-      overlay.addEventListener('click', function (e) {
-        if (e.target === overlay) { closeBtn.click(); }
-      });
-
-      top.appendChild(title);
-      top.appendChild(closeBtn);
-
-      var wrap = document.createElement('div');
-      wrap.style.cssText = 'width:100%;max-width:860px;aspect-ratio:16/9;background:#000;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);box-shadow:0 20px 60px rgba(0,0,0,0.6);';
 
       var iframe = document.createElement('iframe');
       iframe.allow = 'autoplay; encrypted-media';
       iframe.allowFullscreen = true;
       iframe.style.cssText = 'width:100%;height:100%;border:none;';
 
+      function closeOverlay() {
+        overlay.style.display = 'none';
+        iframe.src = '';
+        document.body.style.overflow = '';
+      }
+      closeBtn.addEventListener('click', closeOverlay);
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) closeOverlay(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && overlay.style.display === 'flex') closeOverlay(); });
+
+      var wrap = document.createElement('div');
+      wrap.style.cssText = 'width:100%;max-width:860px;aspect-ratio:16/9;background:#000;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);box-shadow:0 20px 60px rgba(0,0,0,0.6);';
       wrap.appendChild(iframe);
+      top.appendChild(titleEl);
+      top.appendChild(closeBtn);
       overlay.appendChild(top);
       overlay.appendChild(wrap);
       document.body.appendChild(overlay);
 
-      /* ── Floating button ── */
+      /* Floating button */
       var fab = document.createElement('button');
       fab.id = 'acnhs-media-fab';
       fab.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="flex-shrink:0"><circle cx="12" cy="12" r="10" stroke="rgba(147,197,253,0.95)" stroke-width="2"/><path d="M10 8L16 12L10 16V8Z" fill="rgba(147,197,253,0.95)"/></svg>Media';
       fab.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:8px;padding:11px 20px;background:rgba(10,20,50,0.88);border:1px solid rgba(96,165,250,0.45);border-radius:50px;color:rgba(147,197,253,0.95);font-family:Inter,sans-serif;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,0.5);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);letter-spacing:0.02em;transition:background 0.18s,border-color 0.18s,box-shadow 0.18s;';
-      fab.addEventListener('mouseover', function () {
-        fab.style.background = 'rgba(20,40,90,0.95)';
-        fab.style.borderColor = 'rgba(96,165,250,0.75)';
-        fab.style.boxShadow = '0 8px 32px rgba(96,165,250,0.25)';
-      });
-      fab.addEventListener('mouseout', function () {
-        fab.style.background = 'rgba(10,20,50,0.88)';
-        fab.style.borderColor = 'rgba(96,165,250,0.45)';
-        fab.style.boxShadow = '0 6px 24px rgba(0,0,0,0.5)';
-      });
+      fab.addEventListener('mouseover', function () { fab.style.background = 'rgba(20,40,90,0.95)'; fab.style.borderColor = 'rgba(96,165,250,0.75)'; fab.style.boxShadow = '0 8px 32px rgba(96,165,250,0.25)'; });
+      fab.addEventListener('mouseout',  function () { fab.style.background = 'rgba(10,20,50,0.88)'; fab.style.borderColor = 'rgba(96,165,250,0.45)'; fab.style.boxShadow = '0 6px 24px rgba(0,0,0,0.5)'; });
       fab.addEventListener('click', function () {
         iframe.src = videoUrl;
         overlay.style.display = 'flex';
@@ -1045,10 +1044,36 @@
       document.body.appendChild(fab);
     }
 
+    function fetchAndInject() {
+      // 1. URL param (instant, no network — portal still passes it)
+      try {
+        var paramUrl = new URLSearchParams(window.location.search).get('videoUrl');
+        if (paramUrl) { injectMediaUI(paramUrl); return; }
+      } catch (e) {}
+
+      // 2. Fetch from Supabase using this note's own path
+      var notePath = getNotePath();
+      if (!notePath) return;
+      var settingKey = 'html_video:' + notePath;
+      var apiUrl = SUPABASE_URL + '/rest/v1/portal_settings?setting_key=eq.' + encodeURIComponent(settingKey) + '&select=setting_value&limit=1';
+
+      fetch(apiUrl, {
+        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY }
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data[0]) return;
+        var val = data[0].setting_value;
+        var url = (typeof val === 'string') ? val : (val && val.url) ? val.url : null;
+        if (url) injectMediaUI(url);
+      })
+      .catch(function () {});
+    }
+
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', injectMediaButton);
+      document.addEventListener('DOMContentLoaded', fetchAndInject);
     } else {
-      injectMediaButton();
+      fetchAndInject();
     }
   })();
 
