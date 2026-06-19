@@ -1026,10 +1026,10 @@
 
       /* Cover the Google Drive "open in new tab" icon (top-right corner of iframe) */
       var logoCover = document.createElement('div');
-      logoCover.style.cssText = 'position:absolute;top:0;right:0;width:56px;height:48px;z-index:10;cursor:default;pointer-events:all;background:#202124;display:flex;align-items:center;justify-content:center;';
+      logoCover.style.cssText = 'position:absolute;top:0;right:0;width:72px;height:64px;z-index:10;cursor:default;pointer-events:all;background:transparent;display:flex;align-items:center;justify-content:center;';
       var logoImg = document.createElement('img');
       logoImg.src = '../images/acnhs-seal.png';
-      logoImg.style.cssText = 'width:30px;height:30px;object-fit:contain;opacity:0.85;';
+      logoImg.style.cssText = 'width:52px;height:52px;object-fit:contain;opacity:0.92;';
       logoImg.onerror = function () { logoImg.style.display = 'none'; };
       logoCover.appendChild(logoImg);
       wrap.appendChild(logoCover);
