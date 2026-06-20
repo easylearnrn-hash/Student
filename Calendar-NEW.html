@@ -1583,7 +1583,836 @@
         console.error('❌ Supabase SDK not loaded! Make sure you are accessing via http://localhost:8000, not file://');
         
         // Create error overlay immediately
-        showCalToast('❌ Failed to load calendar data. Please refresh the page.', 'error');
+        const errorOverlay = document.createElement('div');
+        errorOverlay.style.cssText = `
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
+          border: 1px solid rgba(239, 68, 68, 0.5);
+          border-radius: 16px;
+          padding: 32px;
+          max-width: 500px;
+          box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+          z-index: 99999999;
+          animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        `;
+        errorOverlay.innerHTML = `
+          <h3 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 600; color: #ef4444; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+            ❌ Supabase SDK Failed to Load
+          </h3>
+          <div style="margin-bottom: 24px; color: rgba(255,255,255,0.85); font-size: 15px; line-height: 1.6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+            <p style="margin: 0 0 12px 0;">Please ensure you are accessing the page via:</p>
+            <p style="margin: 0 0 12px 0; padding: 12px; background: rgba(138, 180, 255, 0.1); border: 1px solid rgba(138, 180, 255, 0.3); border-radius: 8px; font-family: 'Courier New', monospace;">
+              http://localhost:8000/Calendar-NEW.html
+            </p>
+            <p style="margin: 0; color: rgba(255,255,255,0.6);">Not: <span style="font-family: 'Courier New', monospace;">file:///...</span></p>
+          </div>
+        `;
+        document.body.appendChild(errorOverlay);
+        throw new Error('Supabase SDK not loaded');
+      }
+      
+      const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      // ============================================================
+      // 🔒 ADMIN AUTHENTICATION
+      // ============================================================
+      async function requireAdminSession() {
+        try {
+          const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+          
+          if (sessionError || !session) {
+            // Access denied notification
+            const errorOverlay = document.createElement('div');
+            errorOverlay.style.cssText = `
+              position: fixed;
+              top: 50%;
+              left: 50%;
+              transform: translate(-50%, -50%);
+              background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
+              border: 1px solid rgba(239, 68, 68, 0.5);
+              border-radius: 16px;
+              padding: 32px;
+              max-width: 400px;
+              box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+              z-index: 99999999;
+              text-align: center;
+              animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            `;
+            errorOverlay.innerHTML = `
+              <div style="font-size: 48px; margin-bottom: 16px;">⛔</div>
+              <h3 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 600; color: #ef4444; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+                Access Denied
+              </h3>
+              <p style="margin: 0 0 16px 0; color: rgba(255,255,255,0.85); font-size: 15px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+                Admin Only
+              </p>
+              <p style="margin: 0; color: rgba(255,255,255,0.6); font-size: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+                Redirecting to student portal...
+              </p>
+            `;
+            document.body.appendChild(errorOverlay);
+            
+            setTimeout(() => {
+              window.location.href = 'student-portal.html';
+            }, 2000);
+            return false;
+          }
+
+          const { data: adminAccount, error: adminError } = await supabaseClient
+            .from('admin_accounts')
+            .select('*')
+            .eq('auth_user_id', session.user.id)
+            .single();
+
+          // Hardcoded fallback — RLS can block admin_accounts reads even for valid admins
+          const HARDCODED_ADMINS = ['hrachfilm@gmail.com'];
+          const isHardcodedAdmin = HARDCODED_ADMINS.includes((session.user.email || '').toLowerCase());
+          if (adminError) console.warn('⚠️ admin_accounts query failed (RLS?), using hardcoded fallback:', adminError.message);
+          if (!adminAccount && !isHardcodedAdmin) {
+            // Access denied notification
+            const errorOverlay = document.createElement('div');
+            errorOverlay.style.cssText = `
+              position: fixed;
+              top: 50%;
+              left: 50%;
+              transform: translate(-50%, -50%);
+              background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
+              border: 1px solid rgba(239, 68, 68, 0.5);
+              border-radius: 16px;
+              padding: 32px;
+              max-width: 400px;
+              box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+              z-index: 99999999;
+              text-align: center;
+              animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            `;
+            errorOverlay.innerHTML = `
+              <div style="font-size: 48px; margin-bottom: 16px;">⛔</div>
+              <h3 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 600; color: #ef4444; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+                Access Denied
+              </h3>
+              <p style="margin: 0 0 16px 0; color: rgba(255,255,255,0.85); font-size: 15px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+                Admin Only
+              </p>
+              <p style="margin: 0; color: rgba(255,255,255,0.6); font-size: 14px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+                Redirecting to student portal...
+              </p>
+            `;
+            document.body.appendChild(errorOverlay);
+            
+            setTimeout(() => {
+              window.location.href = 'student-portal.html';
+            }, 2000);
+            return false;
+          }
+
+          return true;
+        } catch (error) {
+          console.error('❌ Admin auth error:', error);
+          
+          // Access denied notification
+          const errorOverlay = document.createElement('div');
+          errorOverlay.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
+            border: 1px solid rgba(239, 68, 68, 0.5);
+            border-radius: 16px;
+            padding: 32px;
+            max-width: 400px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            z-index: 99999999;
+            text-align: center;
+            animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          `;
+          errorOverlay.innerHTML = `
+            <div style="font-size: 48px; margin-bottom: 16px;">⛔</div>
+            <h3 style="margin: 0 0 12px 0; font-size: 20px; font-weight: 600; color: #ef4444; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+              Access Denied
+            </h3>
+            <p style="margin: 0; color: rgba(255,255,255,0.85); font-size: 15px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+              Admin Only
+            </p>
+          `;
+          document.body.appendChild(errorOverlay);
+          
+          setTimeout(() => {
+            window.location.href = 'student-portal.html';
+          }, 2000);
+          return false;
+        }
+      }
+
+      // ============================================================
+      // 📊 DATA MANAGEMENT
+      // ============================================================
+      
+  const LA_TIMEZONE = 'America/Los_Angeles';
+  window.CALENDAR_DEBUG = false; // Set to true in console to debug specific students
+  const DEBUG_STUDENT_NAME = 'sona husikyan';
+  const DEBUG_TARGET_DATE = '2026-01-29'; // Focus on problematic date
+      const laDateFormatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: LA_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+
+      function getLATodayISO() {
+        return laDateFormatter.format(new Date());
+      }
+
+      function getLATodayDate() {
+        const parts = laDateFormatter.formatToParts(new Date());
+        const year = Number(parts.find(part => part.type === 'year')?.value);
+        const month = Number(parts.find(part => part.type === 'month')?.value);
+        const day = Number(parts.find(part => part.type === 'day')?.value);
+        return new Date(year, month - 1, day);
+      }
+
+      function getLAWeekday(dateStr) {
+        const normalized = normalizeDateString(dateStr);
+        if (!normalized) return '';
+        const date = new Date(`${normalized}T12:00:00Z`);
+        return new Intl.DateTimeFormat('en-US', {
+          timeZone: LA_TIMEZONE,
+          weekday: 'long'
+        }).format(date);
+      }
+
+      // Global data stores
+      let currentDate = getLATodayDate();
+      let studentsData = [];
+      let groupsData = [];
+      // History of toggle/status events: studentId (string) → [{date, visible}] sorted asc
+      let visibilityHistory = new Map();
+      let paymentsData = [];
+      let paymentRecordsData = [];
+      let absencesData = [];
+      let skippedClassesData = [];
+      let creditPaymentsData = [];
+      let manualEnrollmentsData = []; // payment_records rows with payment_method='manual_enrollment'
+      let manualEnrollments = new Set(); // "studentId-dateStr" — O(1) bypass for created_at filter
+      
+      // Note names cache for tag search autocomplete
+      window.noteNamesCache = [];
+
+      // Performance: Cache payment matching results
+      let paymentCache = new Map(); // Key: "studentId-date", Value: boolean
+      
+      // Performance: Pre-parsed student aliases
+      let studentAliasesCache = new Map(); // Key: studentId, Value: aliases array
+      let nameToStudentIds = new Map(); // Key: normalized name/alias, Value: Set(studentIds) for payment index
+      
+      // Performance: Indexed data structures
+    let absencesByDateStudent = new Map(); // Key: "date-studentId", Value: true
+    let excusedByDateStudent = new Map(); // Legacy (excused now treated as paid)
+    let ignoredByDateStudent = new Map(); // Key: "date-studentId", Value: true
+      let skippedClassesByDateGroup = new Map(); // Key: "date-groupName", Value: true
+      let studentsByGroup = new Map(); // Key: groupName, Value: students[] (precomputed filter)
+      
+      // ⚡ PERFORMANCE: Payment index for O(1) lookups instead of O(n) scans
+      // Structure: paymentIndex[date] = Set(studentIds)
+      let paymentIndex = new Map(); // Key: "date", Value: Set of student IDs who paid
+
+      function clearAllCaches() {
+        // ⚡ PERFORMANCE: Only clear payment cache on month navigation
+        // Keep indexes intact - they're rebuilt on data refresh only (refresh button)
+        // This preserves the O(1) lookup performance across month changes
+        paymentCache.clear();
+      }
+
+      function clearPaymentCache() {
+        paymentCache.clear();
+      }
+      
+      function rebuildAllIndexes() {
+        // Clear and rebuild ALL caches - used on data refresh
+        paymentCache.clear();
+        studentAliasesCache.clear();
+        nameToStudentIds.clear();
+  absencesByDateStudent.clear();
+        skippedClassesByDateGroup.clear();
+        studentsByGroup.clear();
+        paymentIndex.clear();
+        buildIndexes();
+      }
+      
+      function buildIndexes() {
+        // Pre-parse all student aliases FIRST (needed by payment index)
+        studentAliasesCache.clear();
+        studentsData.forEach(student => {
+          let aliases = [];
+          
+          if (Array.isArray(student.aliases)) {
+            aliases = student.aliases;
+          } else if (typeof student.aliases === 'string' && student.aliases.trim()) {
+            try {
+              const parsed = JSON.parse(student.aliases);
+              
+              if (Array.isArray(parsed)) {
+                aliases = parsed;
+              } else {
+                aliases = [];
+              }
+            } catch (e) {
+              aliases = student.aliases.split(',').map(a => a.trim()).filter(a => a);
+            }
+          }
+          
+          studentAliasesCache.set(student.id, aliases);
+        });
+        
+        // ⚡ PERFORMANCE: Build name → studentIds lookup for O(1) payment matching
+        // Converts O(payments × students) to O(1) during payment index build
+        nameToStudentIds.clear();
+        studentsData.forEach(student => {
+          // Add student name (use normalizeName for fuzzy matching like "Sona Husikyan")
+          const normalizedName = normalizeName(student.name);
+          if (normalizedName) {
+            if (!nameToStudentIds.has(normalizedName)) {
+              nameToStudentIds.set(normalizedName, new Set());
+            }
+            nameToStudentIds.get(normalizedName).add(String(student.id));
+          }
+          
+          // Add all aliases
+          const aliases = getStudentAliases(student.id);
+          aliases.forEach(alias => {
+            const normalizedAlias = normalizeName(alias);
+            if (normalizedAlias) {
+              if (!nameToStudentIds.has(normalizedAlias)) {
+                nameToStudentIds.set(normalizedAlias, new Set());
+              }
+              nameToStudentIds.get(normalizedAlias).add(String(student.id));
+            }
+          });
+        });
+        
+        // ⚡ PERFORMANCE: Precompute students by group (avoid repeated filters)
+        studentsByGroup.clear();
+        studentsData.forEach(student => {
+          const groupName = student.group_name;
+          if (!groupName) return;
+          
+          if (!studentsByGroup.has(groupName)) {
+            studentsByGroup.set(groupName, []);
+          }
+          studentsByGroup.get(groupName).push(student);
+        });
+        
+        // Index absences for O(1) lookup
+        absencesByDateStudent.clear();
+        absencesData.forEach(a => {
+          const date = (a.class_date || '').split('T')[0];
+          const key = `${date}-${a.student_id}`;
+          absencesByDateStudent.set(key, true);
+        });
+
+        excusedByDateStudent.clear();
+        ignoredByDateStudent.clear();
+        
+        // Index skipped classes for O(1) lookup
+        skippedClassesByDateGroup.clear();
+        skippedClassesData.forEach(s => {
+          const date = (s.class_date || '').split('T')[0];
+          const key = `${date}-${s.group_name}`;
+          skippedClassesByDateGroup.set(key, true);
+        });
+        
+        // ⚡ PERFORMANCE: Build payment index for O(1) lookups
+        paymentIndex.clear();
+        
+        // Index payments table
+        paymentsData.forEach(p => {
+          const forClassDates = extractForClassDates(p, p.date);
+          forClassDates.forEach(dateStr => {
+            const normalizedDate = normalizeDateString(dateStr);
+            
+            if (!paymentIndex.has(normalizedDate)) {
+              paymentIndex.set(normalizedDate, new Set());
+            }
+            
+            const studentIds = paymentIndex.get(normalizedDate);
+            
+            // Add all possible student IDs from this payment
+            const paymentStudentId = p.student_id || p.linked_student_id || p.derived_student_id || 
+                                    p.resolved_student_id || p.studentid || null;
+            
+            if (paymentStudentId) {
+              studentIds.add(String(paymentStudentId));
+            }
+            
+            // ⚡ OPTIMIZED: Use name lookup instead of scanning all students
+            // Match by payer_name, resolved_student_name, student_name
+            const namesToCheck = [
+              p.payer_name,
+              p.resolved_student_name,
+              p.student_name,
+              p.student_full_name,
+              p.studentname,
+              p.studentNameFromMessage,
+              p.studentNameHint,
+              p.student_name_hint,
+              p.studentName,
+              p.student_display_name,
+              p.student_name_display,
+              p.student
+            ].filter(Boolean);
+            
+            namesToCheck.forEach(name => {
+              const normalizedName = normalizeName(name);
+              if (normalizedName && nameToStudentIds.has(normalizedName)) {
+                const matchedIds = nameToStudentIds.get(normalizedName);
+                matchedIds.forEach(id => studentIds.add(id));
+              }
+            });
+          });
+        });
+        
+        // Index payment_records table (treat excused as paid)
+        paymentRecordsData.forEach(pr => {
+          const forClassDates = extractForClassDates(pr, pr.date);
+          const isIgnoredRecord = String(pr.status || '').toLowerCase() === 'ignored' || String(pr.payment_method || '').toLowerCase() === 'ignored';
+          forClassDates.forEach(dateStr => {
+            const normalizedDate = normalizeDateString(dateStr);
+            const studentIdStr = pr.student_id ? String(pr.student_id) : '';
+
+            if (isIgnoredRecord && studentIdStr) {
+              ignoredByDateStudent.set(`${normalizedDate}-${studentIdStr}`, true);
+              return;
+            }
+            
+            if (!paymentIndex.has(normalizedDate)) {
+              paymentIndex.set(normalizedDate, new Set());
+            }
+            
+            const studentIds = paymentIndex.get(normalizedDate);
+            
+            if (studentIdStr) {
+              studentIds.add(studentIdStr);
+            }
+            
+            // ⚡ OPTIMIZED: Use name lookup instead of scanning all students
+            const namesToCheck = [
+              pr.student_name,
+              pr.student_full_name,
+              pr.student
+            ].filter(Boolean);
+            
+            namesToCheck.forEach(name => {
+              const normalizedName = normalizeName(name);
+              if (normalizedName && nameToStudentIds.has(normalizedName)) {
+                const matchedIds = nameToStudentIds.get(normalizedName);
+                matchedIds.forEach(id => studentIds.add(id));
+              }
+            });
+          });
+        });
+
+        // Index credit_payments table (applied_class_date is the date it covers)
+        creditPaymentsData.forEach(cp => {
+          const dateStr = (cp.applied_class_date || cp.class_date || '').split('T')[0];
+          if (!dateStr) return;
+          const normalizedDate = normalizeDateString(dateStr);
+          if (!paymentIndex.has(normalizedDate)) {
+            paymentIndex.set(normalizedDate, new Set());
+          }
+          if (cp.student_id) {
+            paymentIndex.get(normalizedDate).add(String(cp.student_id));
+          }
+        });
+
+        // ── Orphan payment re-mapping ────────────────────────────────────────────
+        // A payment recorded on a non-class day (e.g. paid April 12 for April 11
+        // class, or April 14 for April 13) becomes an "orphan": it's in the index
+        // under the payment date, but the calendar only ever queries class dates.
+        // Fix: for each indexed payment date that falls on a non-scheduled day,
+        // find the nearest scheduled class date within ±3 days and add the same
+        // student IDs under that class date as well.
+        const scheduledClassDates = new Set();
+        const dayMap = { Monday:1, Tuesday:2, Wednesday:3, Thursday:4, Friday:5, Saturday:6, Sunday:0,
+                         Mon:1, Tue:2, Wed:3, Thu:4, Fri:5, Sat:6, Sun:0 };
+        groupsData.forEach(group => {
+          if (!group.schedule) return;
+          const activeDayNums = Object.entries(dayMap)
+            .filter(([name]) => group.schedule.includes(name))
+            .map(([, num]) => num);
+          if (activeDayNums.length === 0) return;
+          const today = new Date(); today.setHours(0,0,0,0);
+          for (let i = 0; i <= 14; i++) {
+            const d = new Date(today); d.setDate(today.getDate() - i);
+            if (activeDayNums.includes(d.getDay())) {
+              const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+              scheduledClassDates.add(ds);
+            }
+          }
+        });
+
+        paymentIndex.forEach((studentIds, paymentDateStr) => {
+          if (scheduledClassDates.has(paymentDateStr)) return;
+          const payMs = new Date(paymentDateStr + 'T00:00:00').getTime();
+          let bestDate = null, bestDiff = Infinity;
+          scheduledClassDates.forEach(classDateStr => {
+            const diff = Math.abs(new Date(classDateStr + 'T00:00:00').getTime() - payMs);
+            if (diff < bestDiff && diff / 86400000 <= 3) { bestDiff = diff; bestDate = classDateStr; }
+          });
+          if (bestDate) {
+            if (!paymentIndex.has(bestDate)) paymentIndex.set(bestDate, new Set());
+            studentIds.forEach(id => paymentIndex.get(bestDate).add(id));
+          }
+        });
+
+        // Rebuild manual enrollments Set for created_at bypass
+        manualEnrollments.clear();
+        manualEnrollmentsData.forEach(me => {
+          if (me.student_id && me.date) {
+            const d = me.date.split('T')[0];
+            manualEnrollments.add(`${me.student_id}-${d}`);
+          }
+        });
+
+      } // end buildIndexes()
+      
+      function getStudentAliases(studentId) {
+        return studentAliasesCache.get(studentId) || [];
+      }
+      
+      function isAbsentCached(dateStr, studentId) {
+        const key = `${dateStr}-${studentId}`;
+        return absencesByDateStudent.has(key);
+      }
+
+      function isExcusedCached() {
+        return false;
+      }
+
+      function isIgnoredCached(dateStr, studentId) {
+        const key = `${dateStr}-${studentId}`;
+        return ignoredByDateStudent.has(key);
+      }
+      
+      function isClassSkippedCached(dateStr, groupName) {
+        const key = `${dateStr}-${groupName}`;
+        return skippedClassesByDateGroup.has(key);
+      }
+
+      /**
+       * Returns true if the student should appear as a dot on dateStr.
+       *
+       * Rules (checked in order):
+       *   1. If this student has visibility history records:
+       *      a. Find the most recent record where effective_date <= dateStr.
+       *      b. If found → return record.visible.
+       *      c. If dateStr is BEFORE all history records → assume the student
+       *         was visible (they were active before we started tracking);
+       *         but graduated students are never shown.
+       *   2. No history at all → fall back to current fields:
+       *      - show_in_grid === false OR status is paused/graduated → hide.
+       *      - Otherwise show.
+       *
+       * This means:
+       *   - Toggled off on Apr 1: history `{visible:false, date:'Apr 1'}` is
+       *     saved → dots hidden from Apr 1 onward.
+       *   - Re-enabled on Apr 10: history `{visible:true, date:'Apr 10'}` is
+       *     saved → Apr 1–9 remain hidden, Apr 10+ show again.
+       *   - Student with no history who is currently paused: hidden everywhere
+       *     (immediate fix – no stale historical dots).
+       */
+      function isStudentActiveOnDate(student, dateStr) {
+        const history = visibilityHistory.get(String(student.id));
+
+        if (history && history.length > 0) {
+          // Walk the sorted-ascending array to find the most recent event ≤ dateStr
+          let lastEvent = null;
+          for (const event of history) {
+            if (event.date <= dateStr) lastEvent = event;
+            else break; // array is sorted; no need to continue
+          }
+
+          if (lastEvent !== null) return lastEvent.visible;
+
+          // dateStr is before all recorded events → assume visible unless graduated
+          return student.status !== 'graduated';
+        }
+
+        // No history: fall back to current student fields
+        const isCurrentlyOff = student.status === 'paused' ||
+                               student.status === 'graduated' ||
+                               student.show_in_grid === false ||
+                               student.show_in_grid === 'false';
+        return !isCurrentlyOff;
+      }
+
+      function hasPaymentCached(studentId, dateStr, student) {
+        const cacheKey = `${studentId}-${dateStr}`;
+        
+        if (paymentCache.has(cacheKey)) {
+          return paymentCache.get(cacheKey);
+        }
+
+        const normalizedDateStr = normalizeDateString(dateStr);
+
+        if (isIgnoredCached(normalizedDateStr, studentId)) {
+          const result = { hasPayment: false, isManual: false, isCredit: false };
+          paymentCache.set(cacheKey, result);
+          return result;
+        }
+        
+        // ⚡ OPTIMIZED: Use payment index for O(1) lookup instead of O(n) scan
+        const hasPayment = paymentIndex.has(normalizedDateStr) && 
+                          paymentIndex.get(normalizedDateStr).has(String(studentId));
+        
+        // Check if payment is manual (from payment_records table with payment_method='cash')
+        let isManual = false;
+        let isCredit = false;
+        if (hasPayment) {
+          const manualPayment = paymentRecordsData.find(pr => 
+            String(pr.student_id) === String(studentId) && 
+            normalizeDateString(pr.date) === normalizedDateStr &&
+            pr.payment_method === 'cash'
+          );
+          isManual = !!manualPayment;
+
+          if (!isManual) {
+            const creditPayment = creditPaymentsData.find(cp =>
+              String(cp.student_id) === String(studentId) &&
+              normalizeDateString(cp.applied_class_date || cp.class_date) === normalizedDateStr
+            );
+            isCredit = !!creditPayment;
+          }
+        }
+        
+        const result = { hasPayment, isManual, isCredit };
+        paymentCache.set(cacheKey, result);
+        return result;
+      }
+
+      // Active filters
+      const filters = {
+        classes: true,
+        payments: true,
+        absences: true,
+        skipped: true
+      };
+
+      // Month names
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+        'July', 'August', 'September', 'October', 'November', 'December'];
+
+      // ============================================================
+      // 🔄 DATA LOADING FUNCTIONS
+      // ============================================================
+
+      async function loadStudents() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('students')
+            .select('*')
+            .order('name', { ascending: true });
+
+          if (error) throw error;
+          studentsData = data || [];
+          
+          return studentsData;
+        } catch (error) {
+          console.error('❌ Error loading students:', error);
+          return [];
+        }
+      }
+
+      async function loadVisibilityHistory() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('student_visibility_history')
+            .select('student_id, visible, effective_date')
+            .order('effective_date', { ascending: true });
+
+          if (error) throw error;
+          visibilityHistory.clear();
+          (data || []).forEach(r => {
+            const key = String(r.student_id);
+            if (!visibilityHistory.has(key)) visibilityHistory.set(key, []);
+            // Normalize to YYYY-MM-DD so same-day pause/unpause changes apply immediately.
+            visibilityHistory.get(key).push({ date: normalizeDateString(r.effective_date), visible: r.visible });
+          });
+        } catch (error) {
+          console.error('❌ Error loading visibility history:', error);
+        }
+      }
+
+      async function loadGroups() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('groups')
+            .select('*')
+            .eq('active', true)
+            .order('group_name', { ascending: true });
+
+          if (error) throw error;
+          groupsData = data || [];
+          return groupsData;
+        } catch (error) {
+          console.error('❌ Error loading groups:', error);
+          return [];
+        }
+      }
+
+      async function loadPayments() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('payments')
+            .select('*')
+            .order('email_date', { ascending: false });
+
+          if (error) throw error;
+          paymentsData = data || [];
+          
+          return paymentsData;
+        } catch (error) {
+          console.error('❌ Error loading payments:', error);
+          console.error('Supabase client exists:', !!supabaseClient);
+          console.error('Error details:', error.message, error.code, error.details);
+          return [];
+        }
+      }
+
+      async function loadPaymentRecords() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('payment_records')
+            .select('*')
+            .in('status', ['paid', 'excused', 'ignored'])
+            .order('date', { ascending: false });
+
+          if (error) throw error;
+          paymentRecordsData = data || [];
+          
+          return paymentRecordsData;
+        } catch (error) {
+          console.error('❌ Error loading payment records:', error);
+          return [];
+        }
+      }
+
+      async function loadManualEnrollments() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('payment_records')
+            .select('student_id, date')
+            .eq('payment_method', 'manual_enrollment');
+          if (error) throw error;
+          manualEnrollmentsData = data || [];
+          return manualEnrollmentsData;
+        } catch (error) {
+          console.error('❌ Error loading manual enrollments:', error);
+          return [];
+        }
+      }
+
+      async function loadAbsences() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('student_absences')
+            .select('*')
+            .order('class_date', { ascending: false });
+
+          if (error) throw error;
+          absencesData = data || [];
+          return absencesData;
+        } catch (error) {
+          console.error('❌ Error loading absences:', error);
+          return [];
+        }
+      }
+
+      async function loadSkippedClasses() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('skipped_classes')
+            .select('*')
+            .order('class_date', { ascending: false });
+
+          if (error) throw error;
+          skippedClassesData = data || [];
+          return skippedClassesData;
+        } catch (error) {
+          console.error('❌ Error loading skipped classes:', error);
+          return [];
+        }
+      }
+
+      async function loadCreditPayments() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('credit_payments')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (error) throw error;
+          creditPaymentsData = data || [];
+          return creditPaymentsData;
+        } catch (error) {
+          console.error('❌ Error loading credit payments:', error);
+          return [];
+        }
+      }
+
+      // Load note names for tag autocomplete
+      async function loadNoteNames() {
+        try {
+          const { data, error } = await supabaseClient
+            .from('student_notes')
+            .select('title')
+            .order('title');
+          
+          if (error) {
+            console.error('❌ Error loading note names:', error);
+            return;
+          }
+          
+          window.noteNamesCache = data.map(note => note.title).filter(Boolean);
+        } catch (err) {
+          console.error('❌ Error loading note names:', err);
+        }
+      }
+
+      async function loadAllData() {
+        const loadingEl = document.createElement('div');
+        loadingEl.className = 'loading';
+        loadingEl.innerHTML = '<div class="spinner"></div> <span style="margin-left: 15px;">Loading calendar data...</span>';
+        
+        const grid = document.getElementById('calendarGrid');
+        const originalContent = grid.innerHTML;
+        grid.innerHTML = '';
+        grid.appendChild(loadingEl);
+
+        try {
+          await Promise.all([
+            loadStudents(),
+            loadVisibilityHistory(),
+            loadGroups(),
+            loadPayments(),
+            loadPaymentRecords(),
+            loadManualEnrollments(),
+            loadAbsences(),
+            loadSkippedClasses(),
+            loadCreditPayments(),
+            loadNoteNames() // Load note names for tag autocomplete
+          ]);
+
+          // Build indexes for optimized lookups
+          buildIndexes();
+        } catch (error) {
+          console.error('❌ Error loading data:', error);
+          
+          // Error notification
+          showCalToast('❌ Failed to load calendar data. Please refresh the page.', 'error');
         } finally {
           grid.innerHTML = originalContent;
         }
@@ -6281,7 +7110,39 @@
         );
         if (!confirmed) return;
 
-        showCalToast(`Sending reminders to Group ${groupName}...`, 'success');
+        const progressOverlay = document.createElement('div');
+        progressOverlay.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
+          color: white;
+          padding: 16px 22px;
+          border-radius: 12px;
+          border: 1px solid rgba(138, 180, 255, 0.25);
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+          z-index: 10000000;
+          font-weight: 600;
+          max-width: 360px;
+          line-height: 1.5;
+        `;
+        progressOverlay.textContent = `Sending reminders to Group ${groupName}...`;
+        document.body.appendChild(progressOverlay);
+
+        let sentCount = 0;
+        let failedCount = 0;
+        for (const student of groupStudents) {
+          try {
+            await sendPaymentReminderEmail(student.id);
+            sentCount++;
+          } catch (err) {
+            failedCount++;
+            console.error('❌ Failed to send group payment reminder:', student.name, err);
+          }
+        }
+
+        progressOverlay.textContent = `✅ Group ${groupName} reminders sent: ${sentCount} sent${failedCount ? `, ${failedCount} failed` : ''}`;
+        setTimeout(() => progressOverlay.remove(), 4500);
       }
 
       async function markAsAbsent() {
@@ -6385,7 +7246,23 @@
           document.getElementById('studentBalance').textContent = formatCurrency(newBalance) + ' $';
           
           // Success notification
-          showCalToast('', 'success');
+          const successOverlay = document.createElement('div');
+          successOverlay.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #8ab4ff 0%, #a855f7 100%);
+            color: white;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(138, 180, 255, 0.4);
+            z-index: 10000000;
+            font-weight: 600;
+            animation: slideInRight 0.3s ease;
+          `;
+          successOverlay.innerHTML = `✅ Credit of ${formatCurrency(amount)} $ added!<br>New balance: ${formatCurrency(newBalance)} $`;
+          document.body.appendChild(successOverlay);
+          setTimeout(() => successOverlay.remove(), 3000);
         } catch (error) {
           console.error('❌ Error adding credit:', error);
           
