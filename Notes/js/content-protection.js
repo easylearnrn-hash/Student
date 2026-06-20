@@ -25,7 +25,15 @@
     currentEmail = (extractEmail(localStorage.getItem('arnoma:auth:user')) ||
                     extractEmail(localStorage.getItem('arnoma:auth:session'))).trim().toLowerCase();
   } catch(e) {}
-  var isAdmin = currentEmail === 'hrachfilm@gmail.com';
+
+  function isFromAdminPortal() {
+    try { return !!(window.opener && window.opener.location && /Student-Portal-Admin\.html/i.test(window.opener.location.pathname)); } catch(e) { return false; }
+  }
+
+  var isAdmin = currentEmail === 'hrachfilm@gmail.com' ||
+                window.location.protocol === 'file:' ||
+                (new URLSearchParams(window.location.search)).get('adminView') === '1' ||
+                isFromAdminPortal();
 
   /* ── Print blocking (everyone) ────────────────────────────────── */
   window.addEventListener('beforeprint', function (e) { e.stopImmediatePropagation(); });
