@@ -6342,13 +6342,26 @@
     }
 
     async function previewStartClassEmail() {
-      const meetLink = (document.getElementById('meetLinkInput').value || '').trim();
+      let meetLink = (document.getElementById('meetLinkInput').value || '').trim();
       const groupName = document.getElementById('startClassGroupSelect').value;
 
       if (!meetLink) {
         await customAlert('Missing Info', 'Please enter a Google Meet link.');
         return;
       }
+
+      // Normalize: ensure https:// prefix
+      if (!/^https?:\/\//i.test(meetLink)) {
+        meetLink = 'https://' + meetLink;
+        document.getElementById('meetLinkInput').value = meetLink;
+      }
+
+      // Validate it looks like a real URL
+      try { new URL(meetLink); } catch (e) {
+        await customAlert('Invalid Link', 'The link you entered doesn\'t look like a valid URL. Please paste the full Google Meet link (e.g. https://meet.google.com/abc-def-ghi).');
+        return;
+      }
+
       if (!groupName) {
         await customAlert('Missing Info', 'Please select a group.');
         return;
@@ -6434,14 +6447,19 @@
       if (sent > 0) {
         try {
           const settingKey = 'active_videocall_' + String(_startClassSelectedGroup).toUpperCase();
-          await supabaseClient
+          const { error: upsertErr } = await supabaseClient
             .from('portal_settings')
             .upsert(
               { setting_key: settingKey, setting_value: { inviteUrl: _startClassMeetLink, started_at: new Date().toISOString(), title: 'Join the Class' } },
               { onConflict: 'setting_key' }
             );
+          if (upsertErr) {
+            console.error('portal_settings upsert failed:', upsertErr);
+            await customAlert('Warning', 'Emails were sent but the student portal "Join Class" button could not be activated.\n\nError: ' + upsertErr.message + '\n\nStudents can still use the link from their email.');
+          }
         } catch (e) {
           console.error('portal_settings upsert failed:', e);
+          await customAlert('Warning', 'Emails were sent but the student portal "Join Class" button could not be activated. Students can still use the link from their email.');
         }
       }
 
