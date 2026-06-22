@@ -58,7 +58,8 @@
         /* ── Status Colors ── */
         --status-paid:    #5dd18a;
         --status-unpaid:  #e05555;
-        --status-absent:  #9e9e9e;
+        --status-absent:       #9e9e9e;
+        --status-absent-paid: #d946ef;
         --status-excused: #10b981;
         --status-credit:  #f5c842;
         --status-skipped: #6b7280;
@@ -526,7 +527,8 @@
       .dot-manual  { background: linear-gradient(135deg, #6ea8f7, #3b7fd4); box-shadow: 0 0 5px rgba(110, 168, 247, 0.5); }
       .dot-unpaid  { background: linear-gradient(135deg, #e05555, #b83030); box-shadow: 0 0 5px rgba(224, 85, 85, 0.5); }
       .dot-ignored { background: linear-gradient(135deg, #2a2a2a, #111111); box-shadow: 0 0 5px rgba(0, 0, 0, 0.6); border: 1px solid rgba(255,255,255,0.12); }
-      .dot-absent  { background: linear-gradient(135deg, #9e9e9e, #6e6e6e); box-shadow: 0 0 5px rgba(158, 158, 158, 0.4); }
+      .dot-absent       { background: linear-gradient(135deg, #9e9e9e, #6e6e6e); box-shadow: 0 0 5px rgba(158, 158, 158, 0.4); }
+      .dot-absent-paid { background: linear-gradient(135deg, #e879f9, #a21caf); box-shadow: 0 0 6px rgba(217, 70, 239, 0.65); }
 
       .dot-excused { background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 0 5px rgba(16, 185, 129, 0.4); }
       .action-icon-btn.excused {
@@ -2850,8 +2852,13 @@
                 dotType = 'ignored';
                 dotLabel += ' (Ignored)';
               } else if (isAbsent) {
-                dotType = 'absent';
-                dotLabel += ' (Absent)';
+                if (paymentInfo.hasPayment) {
+                  dotType = 'absent-paid';
+                  dotLabel += ' (Absent - Paid)';
+                } else {
+                  dotType = 'absent';
+                  dotLabel += ' (Absent)';
+                }
               } else if (paymentInfo.hasPayment) {
                 dotType = 'paid';
                 dotLabel += ' (Paid)';
@@ -3101,7 +3108,7 @@
             } else if (isIgnoredCached(dateStr, student.id)) {
               status = 'ignored';
             } else if (hasAbsence) {
-              status = 'absent';
+              status = paymentInfo.hasPayment ? 'absent-paid' : 'absent';
             } else if (paymentInfo.hasPayment) {
               status = 'paid';
             } else if (student.notes && student.notes.includes('[ARNOMA_FREE_STUDENT]')) {
@@ -3265,6 +3272,11 @@
               statusColor = '#fbbf24';
               statusBg = 'rgba(251,191,36,0.2)';
               statusBorder = 'rgba(251,191,36,0.5)';
+            } else if (student.status === 'absent-paid') {
+              statusBadge = 'ABSENT • PAID';
+              statusColor = '#d946ef';
+              statusBg = 'rgba(217,70,239,0.15)';
+              statusBorder = 'rgba(217,70,239,0.45)';
             } else if (student.status === 'canceled') {
               statusBadge = 'CANCELED';
               statusColor = '#9e9e9e';
@@ -3278,7 +3290,7 @@
             const pricePerClass = getStudentClassPrice(student);
             const safeName = student.name.replace(/'/g, "\\'");
             
-            if (student.status === 'absent') {
+            if (student.status === 'absent' || student.status === 'absent-paid') {
               // Unmark absent button only
               actionButtons = `
                 <div class="student-actions">
@@ -4077,7 +4089,7 @@
             <button class="action-btn ignore" onclick="unignoreClassDay(${studentId},'${classDate}')">
               <span class="action-btn-icon">${icon.ignore}</span><span>Unignore</span>
             </button>`;
-        } else if (status === 'paid' || status === 'manual' || status === 'credit' || status === 'absent') {
+        } else if (status === 'paid' || status === 'manual' || status === 'credit' || status === 'absent' || status === 'absent-paid') {
           // Settled or absent — Email only (full-width via CSS :only-child)
           html = emailBtn;
         } else {
