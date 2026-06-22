@@ -3825,27 +3825,37 @@
             return;
           }
           
-          // Calculate statistics (FIX: student_sessions doesn't have duration_seconds, page_views, or notes_viewed)
-          // We need to calculate duration from session_start and session_end
-          const activeSession = sessions?.find(s => s.is_active);
+          // A session is "really online" only if last_activity is within 10 minutes.
+          // is_active=true can be stale (tab left open, beforeunload never fired).
+          const ONLINE_THRESHOLD_MS = 10 * 60 * 1000;
+          const MAX_SESSION_MS      = 12 * 60 * 60 * 1000; // cap each session at 12h to filter stuck sessions
+          const now = new Date();
+
+          const activeSession = sessions?.find(s => {
+            if (!s.is_active) return false;
+            const lastAct = s.last_activity ? new Date(s.last_activity) : null;
+            return lastAct && (now - lastAct) < ONLINE_THRESHOLD_MS;
+          });
+
+          // Most-recent session regardless of is_active (for offline last-seen)
+          const latestSession = sessions?.[0] || null;
           const totalSessions = sessions?.length || 0;
-          
-          // Calculate total seconds by summing up session durations
+
+          // Calculate total study seconds.
+          // For sessions with session_end: use session_end - session_start.
+          // For sessions without session_end: use last_activity - session_start.
+          // Cap each session at MAX_SESSION_MS to ignore permanently-stuck rows.
           const totalSeconds = sessions?.reduce((sum, s) => {
-            if (s.session_end && s.session_start) {
-              const start = new Date(s.session_start);
-              const end = new Date(s.session_end);
-              return sum + Math.floor((end - start) / 1000);
-            }
-            // For active sessions, calculate from start to now
-            if (s.is_active && s.session_start) {
-              const start = new Date(s.session_start);
-              const now = new Date();
-              return sum + Math.floor((now - start) / 1000);
-            }
-            return sum;
+            if (!s.session_start) return sum;
+            const start  = new Date(s.session_start);
+            const end    = s.session_end
+              ? new Date(s.session_end)
+              : (s.last_activity ? new Date(s.last_activity) : null);
+            if (!end) return sum;
+            const dur = Math.max(0, Math.min(end - start, MAX_SESSION_MS));
+            return sum + Math.floor(dur / 1000);
           }, 0) || 0;
-          
+
           const totalHours = (totalSeconds / 3600).toFixed(1);
           const avgSessionMinutes = totalSessions > 0 ? ((totalSeconds / totalSessions) / 60).toFixed(1) : 0;
           
@@ -3860,10 +3870,13 @@
           
           // Current Status Section
           if (activeSession) {
-            const loginTime = new Date(activeSession.session_start);
+            const loginTime    = new Date(activeSession.session_start);
             const lastActivity = new Date(activeSession.last_activity);
-            const now = new Date();
-            const sessionDuration = Math.floor((now - loginTime) / 1000 / 60); // minutes
+            // Duration = last real activity − login (not "now"), capped at 12h
+            const sessionDuration = Math.min(
+              Math.floor((lastActivity - loginTime) / 1000 / 60),
+              12 * 60
+            );
             const idleMinutes = Math.floor((now - lastActivity) / 1000 / 60);
             
             statusHTML += `
@@ -3877,25 +3890,34 @@
                   <span class="status-value">${loginTime.toLocaleString()}</span>
                 </div>
                 <div class="status-row">
-                  <span class="status-label">Session Duration:</span>
-                  <span class="status-value">${sessionDuration} minutes</span>
+                  <span class="status-label">Active Study Time:</span>
+                  <span class="status-value">${sessionDuration} min</span>
                 </div>
                 <div class="status-row">
                   <span class="status-label">Last Activity:</span>
-                  <span class="status-value">${idleMinutes === 0 ? 'Just now' : idleMinutes + ' minutes ago'}</span>
+                  <span class="status-value">${idleMinutes === 0 ? 'Just now' : idleMinutes + ' min ago'}</span>
                 </div>
               </div>
             `;
-          } else if (sessions && sessions.length > 0) {
-            const lastSession = sessions[0];
-            // Calculate last session duration
+          } else if (latestSession) {
+            // Offline — determine last-seen from session_end or last_activity
+            const lastSeen = latestSession.session_end
+              ? new Date(latestSession.session_end)
+              : (latestSession.last_activity ? new Date(latestSession.last_activity) : null);
+
             let lastSessionMinutes = 0;
-            if (lastSession.session_end && lastSession.session_start) {
-              const start = new Date(lastSession.session_start);
-              const end = new Date(lastSession.session_end);
-              lastSessionMinutes = Math.floor((end - start) / 1000 / 60);
+            if (latestSession.session_start) {
+              const s = new Date(latestSession.session_start);
+              const e = lastSeen || s;
+              lastSessionMinutes = Math.min(
+                Math.floor((e - s) / 1000 / 60),
+                12 * 60
+              );
             }
-            const lastSeen = new Date(lastSession.session_end || lastSession.last_activity);
+            const minutesAgo = lastSeen ? Math.floor((now - lastSeen) / 1000 / 60) : null;
+            const lastSeenStr = lastSeen
+              ? (minutesAgo < 60 ? `${minutesAgo} min ago` : lastSeen.toLocaleString())
+              : 'Unknown';
             
             statusHTML += `
               <div class="status-indicator offline">
@@ -3905,11 +3927,11 @@
               <div class="status-details">
                 <div class="status-row">
                   <span class="status-label">Last Seen:</span>
-                  <span class="status-value">${lastSeen.toLocaleString()}</span>
+                  <span class="status-value">${lastSeenStr}</span>
                 </div>
                 <div class="status-row">
-                  <span class="status-label">Last Session Duration:</span>
-                  <span class="status-value">${lastSessionMinutes} minutes</span>
+                  <span class="status-label">Last Session:</span>
+                  <span class="status-value">${lastSessionMinutes} min</span>
                 </div>
               </div>
             `;

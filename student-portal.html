@@ -14490,6 +14490,20 @@
     // ==========================================================================
     let sessionId = null;
     let sessionHeartbeatInterval = null;
+    // Tracks the last time the student actually touched the page.
+    // Used to skip heartbeats when the tab is just sitting idle/open in background.
+    let lastUserInteractionAt = Date.now();
+    // Cached access token for keepalive fetch during page unload.
+    let _sessionAccessToken = null;
+
+    // Record real user activity
+    (['mousedown', 'keydown', 'scroll', 'touchstart', 'click']).forEach(evt =>
+      document.addEventListener(evt, () => { lastUserInteractionAt = Date.now(); }, { passive: true })
+    );
+    // Also count tab becoming visible again as activity
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) lastUserInteractionAt = Date.now();
+    });
     
     async function startSession() {
       // CRITICAL VALIDATION: Check for admin modes FIRST (before student check)
@@ -14542,7 +14556,12 @@
         
         if (DEBUG_MODE) debugLog('Session started:', data);
         sessionId = data.id;
-        
+
+        // Cache the current access token for the keepalive end-session fetch.
+        supabaseClient.auth.getSession().then(({ data: sd }) => {
+          _sessionAccessToken = sd?.session?.access_token || null;
+        });
+
         // PERFORMANCE FIX: Heartbeat every 5 minutes instead of 2 minutes
         // Reduces Supabase load by 60% while still tracking activity
         intervalManager.set('sessionHeartbeat', updateSessionActivity, 5 * 60 * 1000); // 5 minutes
@@ -14561,20 +14580,26 @@
     
     async function updateSessionActivity() {
       if (!sessionId) return;
-      
+
+      // Skip heartbeat if the student has been idle for more than 6 minutes.
+      // This ensures last_activity reflects real usage, not just "tab was open".
+      const idleSec = (Date.now() - lastUserInteractionAt) / 1000;
+      if (idleSec > 6 * 60) {
+        debugDebug(`Session heartbeat skipped — idle for ${Math.round(idleSec / 60)} min`);
+        return;
+      }
+
       try {
         const { error } = await supabaseClient
           .from('student_sessions')
           .update({ last_activity: new Date().toISOString() })
           .eq('id', sessionId);
-        // If the row is no longer accessible (stale session / RLS), stop retrying
         if (error) {
           debugDebug('Session heartbeat rejected — clearing stale sessionId:', error.message);
           sessionId = null;
           intervalManager.clear('sessionHeartbeat');
         }
       } catch {
-        // Network or CORS error — silently clear so we stop hammering the endpoint
         sessionId = null;
         intervalManager.clear('sessionHeartbeat');
       }
@@ -14582,23 +14607,36 @@
     
     async function endSession() {
       if (!sessionId) return;
-      
+      const currentSessionId = sessionId;
+      const endTime = new Date().toISOString();
+      sessionId = null;
+      intervalManager.clear('sessionHeartbeat');
+      if (sessionHeartbeatInterval) {
+        clearInterval(sessionHeartbeatInterval);
+        sessionHeartbeatInterval = null;
+      }
+
+      // Use keepalive fetch so the request survives even when the page is being closed.
+      // The Supabase client uses its own fetch without keepalive, so we call the REST
+      // API directly here with the cached token.
       try {
-        await supabaseClient
-          .from('student_sessions')
-          .update({
-            session_end: new Date().toISOString(),
-            is_active: false
-          })
-          .eq('id', sessionId);
+        const token = _sessionAccessToken || SUPABASE_ANON_KEY;
+        await fetch(
+          `${SUPABASE_URL}/rest/v1/student_sessions?id=eq.${currentSessionId}`,
+          {
+            method: 'PATCH',
+            keepalive: true,
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${token}`,
+              'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({ session_end: endTime, is_active: false })
+          }
+        );
       } catch {
         // Fire-and-forget — ignore errors on page unload
-      } finally {
-        sessionId = null;
-        if (sessionHeartbeatInterval) {
-          clearInterval(sessionHeartbeatInterval);
-          sessionHeartbeatInterval = null;
-        }
       }
     }
     
