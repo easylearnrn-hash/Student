@@ -12022,7 +12022,193 @@
         };
       });
     }
-    
+
+    // ── Credit date picker modal ──────────────────────────────────────────────
+    function showCreditDatePicker(unpaidDates, currentBalance, classPrice) {
+      return new Promise((resolve) => {
+        const existing = document.querySelector('.credit-picker-overlay');
+        if (existing) existing.remove();
+
+        const maxSelectable = Math.floor(currentBalance / classPrice);
+
+        function fmtDate(d) {
+          const p = d.split('-');
+          return new Date(+p[0], +p[1] - 1, +p[2])
+            .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+        }
+
+        const rowsHtml = unpaidDates.map((d, i) => {
+          const canSelect = i < maxSelectable;
+          return `
+          <label class="cpicker-row" data-date="${d}" style="
+            display:flex;align-items:center;gap:14px;
+            padding:13px 16px;border-radius:10px;
+            border:1px solid rgba(196,164,95,0.12);
+            background:rgba(196,164,95,0.04);
+            cursor:${canSelect ? 'pointer' : 'not-allowed'};
+            transition:all 0.18s ease;
+            opacity:${canSelect ? '1' : '0.38'};
+          ">
+            <input type="checkbox" class="cpicker-cb" value="${d}" ${canSelect ? '' : 'disabled'} style="display:none">
+            <div class="cpicker-check" style="
+              width:20px;height:20px;flex-shrink:0;
+              border:2px solid rgba(196,164,95,0.4);border-radius:5px;
+              background:transparent;transition:all 0.18s ease;
+              display:flex;align-items:center;justify-content:center;
+            "></div>
+            <span style="color:rgba(255,255,255,0.82);font-size:14px;font-weight:500;">${fmtDate(d)}</span>
+            <span style="margin-left:auto;color:rgba(196,164,95,0.7);font-size:13px;font-weight:600;">$${classPrice.toFixed(2)}</span>
+          </label>`;
+        }).join('');
+
+        const overlay = document.createElement('div');
+        overlay.className = 'credit-picker-overlay';
+        overlay.style.cssText = `
+          position:fixed;top:0;left:0;right:0;bottom:0;
+          background:rgba(0,0,0,0.75);backdrop-filter:blur(14px);
+          display:flex;align-items:center;justify-content:center;
+          z-index:999999;animation:fadeIn 0.2s ease;
+        `;
+
+        overlay.innerHTML = `
+          <div style="
+            background:rgba(10,14,26,0.97);
+            border:1px solid rgba(196,164,95,0.22);border-top:3px solid #c4a45f;
+            border-radius:16px;padding:0;
+            max-width:460px;width:92%;max-height:85vh;
+            display:flex;flex-direction:column;
+            backdrop-filter:blur(24px);
+            box-shadow:0 32px 80px rgba(0,0,0,0.55),0 0 0 1px rgba(196,164,95,0.08);
+            animation:slideUp 0.28s cubic-bezier(0.34,1.56,0.64,1);
+          ">
+            <div style="padding:28px 28px 20px;border-bottom:1px solid rgba(196,164,95,0.1);">
+              <div style="
+                font-family:'Playfair Display',Georgia,serif;
+                font-size:20px;font-weight:700;color:#c4a45f;
+                text-align:center;margin-bottom:10px;
+              ">Apply Credit Payment</div>
+              <div style="width:36px;height:1px;background:linear-gradient(90deg,transparent,rgba(196,164,95,0.5),transparent);margin:0 auto 16px;"></div>
+              <div style="display:flex;justify-content:center;gap:0;">
+                <div style="text-align:center;flex:1;">
+                  <div style="color:rgba(255,255,255,0.4);font-size:10px;letter-spacing:0.9px;text-transform:uppercase;margin-bottom:4px;">Credit Balance</div>
+                  <div style="color:#c4a45f;font-size:18px;font-weight:700;">$${currentBalance.toFixed(2)}</div>
+                </div>
+                <div style="width:1px;background:rgba(196,164,95,0.15);margin:0 4px;"></div>
+                <div style="text-align:center;flex:1;">
+                  <div style="color:rgba(255,255,255,0.4);font-size:10px;letter-spacing:0.9px;text-transform:uppercase;margin-bottom:4px;">Per Class</div>
+                  <div style="color:rgba(255,255,255,0.7);font-size:18px;font-weight:700;">$${classPrice.toFixed(2)}</div>
+                </div>
+                <div style="width:1px;background:rgba(196,164,95,0.15);margin:0 4px;"></div>
+                <div style="text-align:center;flex:1;">
+                  <div style="color:rgba(255,255,255,0.4);font-size:10px;letter-spacing:0.9px;text-transform:uppercase;margin-bottom:4px;">Can Cover</div>
+                  <div style="color:rgba(255,255,255,0.7);font-size:18px;font-weight:700;">${maxSelectable}</div>
+                </div>
+              </div>
+            </div>
+            <div style="
+              flex:1;overflow-y:auto;padding:14px 20px;
+              display:flex;flex-direction:column;gap:7px;
+              scrollbar-width:thin;scrollbar-color:rgba(196,164,95,0.3) transparent;
+            ">
+              ${rowsHtml}
+            </div>
+            <div style="padding:14px 24px 22px;border-top:1px solid rgba(196,164,95,0.1);">
+              <div id="cpickerSummary" style="
+                text-align:center;color:rgba(255,255,255,0.4);
+                font-size:13px;margin-bottom:14px;min-height:18px;
+              ">Select the classes you want to pay for</div>
+              <div style="display:flex;gap:12px;">
+                <button id="cpickerCancel" style="
+                  flex:1;padding:12px 18px;
+                  background:rgba(255,255,255,0.06);
+                  border:1px solid rgba(255,255,255,0.14);
+                  border-radius:10px;color:rgba(255,255,255,0.65);
+                  font-size:14px;font-weight:600;letter-spacing:0.3px;
+                  cursor:pointer;transition:all 0.2s ease;
+                ">Cancel</button>
+                <button id="cpickerApply" disabled style="
+                  flex:1;padding:12px 18px;
+                  background:rgba(196,164,95,0.15);
+                  border:1px solid rgba(196,164,95,0.2);
+                  border-radius:10px;color:rgba(196,164,95,0.35);
+                  font-size:14px;font-weight:700;letter-spacing:0.4px;
+                  cursor:not-allowed;transition:all 0.2s ease;
+                ">Apply</button>
+              </div>
+            </div>
+          </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        const applyBtn  = overlay.querySelector('#cpickerApply');
+        const cancelBtn = overlay.querySelector('#cpickerCancel');
+        const summaryEl = overlay.querySelector('#cpickerSummary');
+
+        function getSelected() {
+          return [...overlay.querySelectorAll('.cpicker-cb:checked')].map(cb => cb.value);
+        }
+
+        function updateUI() {
+          const sel = getSelected();
+          if (sel.length === 0) {
+            summaryEl.textContent = 'Select the classes you want to pay for';
+            summaryEl.style.color = 'rgba(255,255,255,0.4)';
+            applyBtn.disabled = true;
+            applyBtn.style.cssText += ';background:rgba(196,164,95,0.15);color:rgba(196,164,95,0.35);border-color:rgba(196,164,95,0.2);cursor:not-allowed;';
+          } else {
+            const total     = classPrice * sel.length;
+            const remaining = +(currentBalance - total).toFixed(2);
+            summaryEl.innerHTML = `<span style="color:#c4a45f;font-weight:600;">${sel.length} ${sel.length===1?'class':'classes'} &nbsp;·&nbsp; $${total.toFixed(2)}</span>&ensp;<span style="color:rgba(255,255,255,0.38);">· Remaining: <strong style="color:rgba(255,255,255,0.65);">$${remaining.toFixed(2)}</strong></span>`;
+            summaryEl.style.color = '';
+            applyBtn.disabled = false;
+            applyBtn.style.cssText += ';background:linear-gradient(135deg,#b8933d,#c4a45f,#dcc07a);color:#0a0e1a;border-color:transparent;cursor:pointer;box-shadow:0 4px 20px rgba(196,164,95,0.25);';
+          }
+        }
+
+        overlay.querySelectorAll('.cpicker-row').forEach(row => {
+          const cb    = row.querySelector('.cpicker-cb');
+          const check = row.querySelector('.cpicker-check');
+          if (cb.disabled) return;
+
+          row.addEventListener('mouseenter', () => { if (!cb.checked) row.style.background = 'rgba(196,164,95,0.09)'; });
+          row.addEventListener('mouseleave', () => { if (!cb.checked) row.style.background = 'rgba(196,164,95,0.04)'; });
+
+          row.addEventListener('click', () => {
+            if (!cb.checked && getSelected().length >= maxSelectable) return;
+            cb.checked = !cb.checked;
+            if (cb.checked) {
+              check.style.cssText += ';background:#c4a45f;border-color:#c4a45f;';
+              check.innerHTML = `<svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7.5L10 1" stroke="#0a0e1a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+              row.style.background = 'rgba(196,164,95,0.12)';
+              row.style.borderColor = 'rgba(196,164,95,0.35)';
+            } else {
+              check.style.cssText += ';background:transparent;border-color:rgba(196,164,95,0.4);';
+              check.innerHTML = '';
+              row.style.background = 'rgba(196,164,95,0.04)';
+              row.style.borderColor = 'rgba(196,164,95,0.12)';
+            }
+            updateUI();
+          });
+        });
+
+        cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.background='rgba(255,255,255,0.11)'; cancelBtn.style.color='rgba(255,255,255,0.9)'; });
+        cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.background='rgba(255,255,255,0.06)'; cancelBtn.style.color='rgba(255,255,255,0.65)'; });
+        applyBtn.addEventListener('mouseenter',  () => { if (!applyBtn.disabled) { applyBtn.style.transform='translateY(-2px)'; applyBtn.style.boxShadow='0 8px 28px rgba(196,164,95,0.4)'; } });
+        applyBtn.addEventListener('mouseleave',  () => { applyBtn.style.transform=''; applyBtn.style.boxShadow=applyBtn.disabled?'':'0 4px 20px rgba(196,164,95,0.25)'; });
+
+        cancelBtn.addEventListener('click', () => { overlay.remove(); resolve(null); });
+        applyBtn.addEventListener('click', () => {
+          const sel = getSelected();
+          if (!sel.length) return;
+          overlay.remove();
+          resolve(sel);
+        });
+        overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); resolve(null); } });
+      });
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
      * Loads classroom notes/assignments filtered by student's group and payment status.
      * 
@@ -15736,25 +15922,16 @@
       }
 
       const currentBalance = parseFloat(latestStudent?.balance) || 0;
-      const payableClassCount = Math.min(unpaidDates.length, Math.floor(currentBalance / classPrice));
 
-      if (payableClassCount <= 0) {
+      if (Math.floor(currentBalance / classPrice) <= 0) {
         const needAmount = classPrice - currentBalance;
         showCustomAlert(`You need $${needAmount.toFixed(2)} more credit to pay for 1 class.`, 'error');
         return;
       }
 
-      const datesToApply = unpaidDates.slice(0, payableClassCount);
-      const totalToApply = classPrice * datesToApply.length;
-      const newBalance = +(currentBalance - totalToApply).toFixed(2);
-
-      const confirmed = await showCustomConfirm(
-        `Apply $${totalToApply.toFixed(2)} credit to ${datesToApply.length} unpaid ${datesToApply.length === 1 ? 'class' : 'classes'}? New credit balance will be $${newBalance.toFixed(2)}.`,
-        'Apply Credit Payment',
-        false
-      );
-
-      if (!confirmed) return;
+      // Let the student choose which dates to apply credit to
+      const datesToApply = await showCreditDatePicker(unpaidDates, currentBalance, classPrice);
+      if (!datesToApply || datesToApply.length === 0) return; // cancelled
 
       // Guard against stale UI state: skip class dates already covered by credit entries.
       const { data: existingCredits, error: existingCreditsErr } = await supabaseClient
