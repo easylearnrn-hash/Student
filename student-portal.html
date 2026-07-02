@@ -11855,7 +11855,7 @@
       }, 5000);
     }
     
-    function showCustomConfirm(message) {
+    function showCustomConfirm(message, title = null, isDanger = true) {
       return new Promise((resolve) => {
         // Remove existing overlay if any
         const existing = document.querySelector('.custom-confirm-overlay');
@@ -11869,16 +11869,91 @@
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0, 0, 0, 0.6);
-          backdrop-filter: blur(8px);
+          background: rgba(0, 0, 0, 0.72);
+          backdrop-filter: blur(12px);
           display: flex;
           align-items: center;
           justify-content: center;
           z-index: 999999;
           animation: fadeIn 0.2s ease;
         `;
-        
-        overlay.innerHTML = `
+
+        if (!isDanger) {
+          // ── Gold / ARNOMA premium variant ──────────────────────────────────
+          overlay.innerHTML = `
+            <div class="custom-confirm-box" style="
+              background: rgba(10, 14, 26, 0.97);
+              border: 1px solid rgba(196, 164, 95, 0.22);
+              border-top: 3px solid #c4a45f;
+              border-radius: 16px;
+              padding: 36px 36px 32px;
+              max-width: 440px;
+              width: 90%;
+              backdrop-filter: blur(24px);
+              box-shadow: 0 32px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(196,164,95,0.08);
+              animation: slideUp 0.28s cubic-bezier(0.34,1.56,0.64,1);
+            ">
+              <div style="
+                font-family: 'Playfair Display', Georgia, serif;
+                font-size: 20px;
+                font-weight: 700;
+                color: #c4a45f;
+                text-align: center;
+                letter-spacing: 0.3px;
+                margin-bottom: 14px;
+              ">${title || 'Confirm'}</div>
+              <div style="
+                width: 40px;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, rgba(196,164,95,0.5), transparent);
+                margin: 0 auto 20px;
+              "></div>
+              <div style="
+                color: rgba(255,255,255,0.78);
+                font-size: 15px;
+                text-align: center;
+                margin-bottom: 28px;
+                line-height: 1.65;
+                font-weight: 400;
+              ">${message}</div>
+              <div style="display: flex; gap: 12px;">
+                <button class="confirm-cancel-btn" style="
+                  flex: 1;
+                  padding: 12px 18px;
+                  background: rgba(255,255,255,0.06);
+                  border: 1px solid rgba(255,255,255,0.14);
+                  border-radius: 10px;
+                  color: rgba(255,255,255,0.65);
+                  font-size: 14px;
+                  font-weight: 600;
+                  letter-spacing: 0.3px;
+                  cursor: pointer;
+                  transition: all 0.2s ease;
+                " onmouseover="this.style.background='rgba(255,255,255,0.11)';this.style.color='rgba(255,255,255,0.9)'" onmouseout="this.style.background='rgba(255,255,255,0.06)';this.style.color='rgba(255,255,255,0.65)'">
+                  Cancel
+                </button>
+                <button class="confirm-ok-btn" style="
+                  flex: 1;
+                  padding: 12px 18px;
+                  background: linear-gradient(135deg, #b8933d, #c4a45f, #dcc07a);
+                  border: none;
+                  border-radius: 10px;
+                  color: #0a0e1a;
+                  font-size: 14px;
+                  font-weight: 700;
+                  letter-spacing: 0.4px;
+                  cursor: pointer;
+                  transition: all 0.2s ease;
+                  box-shadow: 0 4px 20px rgba(196,164,95,0.25);
+                " onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 28px rgba(196,164,95,0.40)'" onmouseout="this.style.transform='';this.style.boxShadow='0 4px 20px rgba(196,164,95,0.25)'">
+                  Confirm
+                </button>
+              </div>
+            </div>
+          `;
+        } else {
+          // ── Danger / red variant (deletions) ──────────────────────────────
+          overlay.innerHTML = `
           <div class="custom-confirm-box" style="
             background: linear-gradient(145deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1));
             border: 1px solid rgba(239, 68, 68, 0.3);
@@ -11924,10 +11999,10 @@
             </div>
           </div>
         `;
-        
+        } // end isDanger else
+
         document.body.appendChild(overlay);
-        
-        // Handle button clicks
+
         overlay.querySelector('.confirm-cancel-btn').onclick = () => {
           overlay.remove();
           resolve(false);
@@ -15629,31 +15704,23 @@
     async function payFromCredit() {
       const student = window.currentStudent;
       if (isFreeStudent(student)) {
-        if (typeof customAlert === 'function') {
-          await customAlert('Free Student', 'This student is marked as Free. No payment is required.');
-        }
+        showCustomAlert('This student is marked as Free. No payment is required.', 'info');
         return;
       }
       if (!student || !student.id) {
-        if (typeof customAlert === 'function') {
-          await customAlert('Payment Error', 'Student information is missing. Please refresh and try again.');
-        }
+        showCustomAlert('Student information is missing. Please refresh and try again.', 'error');
         return;
       }
 
       const unpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []).sort((a, b) => a.localeCompare(b));
       if (unpaidDates.length === 0) {
-        if (typeof customAlert === 'function') {
-          await customAlert('No Unpaid Classes', 'There are no unpaid classes to cover from credit.');
-        }
+        showCustomAlert('There are no unpaid classes to cover from credit.', 'info');
         return;
       }
 
       const classPrice = parseFloat(student.price_per_class) || 50;
       if (classPrice <= 0) {
-        if (typeof customAlert === 'function') {
-          await customAlert('Payment Error', 'Invalid class price. Please contact admin.');
-        }
+        showCustomAlert('Invalid class price. Please contact admin.', 'error');
         return;
       }
 
@@ -15664,9 +15731,7 @@
         .single();
 
       if (latestStudentErr) {
-        if (typeof customAlert === 'function') {
-          await customAlert('Credit Check Failed', `Could not verify latest credit balance: ${latestStudentErr.message}`);
-        }
+        showCustomAlert(`Could not verify latest credit balance: ${latestStudentErr.message}`, 'error');
         return;
       }
 
@@ -15675,9 +15740,7 @@
 
       if (payableClassCount <= 0) {
         const needAmount = classPrice - currentBalance;
-        if (typeof customAlert === 'function') {
-          await customAlert('Insufficient Credit', `You need $${needAmount.toFixed(2)} more credit to pay for 1 class.`);
-        }
+        showCustomAlert(`You need $${needAmount.toFixed(2)} more credit to pay for 1 class.`, 'error');
         return;
       }
 
@@ -15685,15 +15748,11 @@
       const totalToApply = classPrice * datesToApply.length;
       const newBalance = +(currentBalance - totalToApply).toFixed(2);
 
-      let confirmed = false;
-      if (typeof customConfirm === 'function') {
-        confirmed = await customConfirm(
-          'Pay From Credit?',
-          `Apply $${totalToApply.toFixed(2)} credit to ${datesToApply.length} unpaid ${datesToApply.length === 1 ? 'class' : 'classes'}? New credit balance will be $${newBalance.toFixed(2)}.`
-        );
-      } else {
-        confirmed = window.confirm(`Apply $${totalToApply.toFixed(2)} credit to ${datesToApply.length} unpaid ${datesToApply.length === 1 ? 'class' : 'classes'}?`);
-      }
+      const confirmed = await showCustomConfirm(
+        `Apply $${totalToApply.toFixed(2)} credit to ${datesToApply.length} unpaid ${datesToApply.length === 1 ? 'class' : 'classes'}? New credit balance will be $${newBalance.toFixed(2)}.`,
+        'Apply Credit Payment',
+        false
+      );
 
       if (!confirmed) return;
 
@@ -15705,9 +15764,7 @@
         .in('class_date', datesToApply);
 
       if (existingCreditsErr) {
-        if (typeof customAlert === 'function') {
-          await customAlert('Payment Error', `Could not verify existing credit payments: ${existingCreditsErr.message}`);
-        }
+        showCustomAlert(`Could not verify existing credit payments: ${existingCreditsErr.message}`, 'error');
         return;
       }
 
@@ -15715,9 +15772,7 @@
       const insertDates = datesToApply.filter(d => !existingSet.has(d));
 
       if (insertDates.length === 0) {
-        if (typeof customAlert === 'function') {
-          await customAlert('Already Paid', 'These classes are already covered. Refreshing data now.');
-        }
+        showCustomAlert('These classes are already covered. Refreshing data now.', 'info');
         window.location.reload();
         return;
       }
@@ -15737,9 +15792,7 @@
         .insert(rows);
 
       if (insertErr) {
-        if (typeof customAlert === 'function') {
-          await customAlert('Payment Error', `Failed to apply credit payment: ${insertErr.message}`);
-        }
+        showCustomAlert(`Failed to apply credit payment: ${insertErr.message}`, 'error');
         return;
       }
 
@@ -15754,19 +15807,15 @@
           .delete()
           .eq('student_id', student.id)
           .in('class_date', insertDates);
-        if (typeof customAlert === 'function') {
-          await customAlert('Payment Error', `Failed to update credit balance: ${updateErr.message}`);
-        }
+        showCustomAlert(`Failed to update credit balance: ${updateErr.message}`, 'error');
         return;
       }
 
       window.currentStudent.balance = actualNewBalance;
-      if (typeof customAlert === 'function') {
-        await customAlert(
-          'Credit Payment Applied',
-          `$${actualTotalToApply.toFixed(2)} was applied from credit to ${insertDates.length} unpaid ${insertDates.length === 1 ? 'class' : 'classes'}. Remaining credit: $${actualNewBalance.toFixed(2)}.`
-        );
-      }
+      showCustomAlert(
+        `$${actualTotalToApply.toFixed(2)} was applied from credit to ${insertDates.length} unpaid ${insertDates.length === 1 ? 'class' : 'classes'}. Remaining credit: $${actualNewBalance.toFixed(2)}.`,
+        'success'
+      );
 
       window.location.reload();
     }
