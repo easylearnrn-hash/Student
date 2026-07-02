@@ -7109,15 +7109,22 @@
       async function sendGroupPaymentReminders(groupName) {
         if (!groupName) return;
 
+        const today = getLATodayISO();
         const groupStudents = (studentsByGroup.get(groupName) || []).filter(student => {
           if (!student) return false;
+          // Must be active (not paused, graduated, or hidden)
+          const status = String(student.status || '').toLowerCase();
+          if (status === 'paused' || status === 'graduated') return false;
+          if (!student.show_in_grid || student.show_in_grid === 'false') return false;
+          // Must be active today
+          if (!isStudentActiveOnDate(student, today)) return false;
           // Must have a valid email
           let email = String(student.email || '').trim();
           if (email.startsWith('[')) {
             try { const arr = JSON.parse(email); if (Array.isArray(arr) && arr.length) email = String(arr[0]).trim(); } catch(_) {}
           }
           if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
-          // Must have at least one actual unpaid class date (computed, not DB status field)
+          // Must have at least one actual unpaid class date
           return getUnpaidClassDates(student).length > 0;
         });
 
