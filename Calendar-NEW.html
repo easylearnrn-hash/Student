@@ -7120,37 +7120,104 @@
           return;
         }
 
-        const confirmed = await showConfirmDialog(
-          'Send Group Payment Reminders?',
-          `
-            <div style="text-align: left; line-height: 1.6;">
-              <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Group:</strong> ${groupName}</div>
-              <div style="margin-bottom: 12px; font-size: 15px;"><strong style="color: #8ab4ff;">Unpaid students:</strong> ${groupStudents.length}</div>
-              <div style="margin-top: 16px; padding: 12px; background: rgba(138,180,255,0.08); border: 1px solid rgba(138,180,255,0.25); border-radius: 8px; font-size: 14px; color: rgba(255,255,255,0.85);">
-                This will send each unpaid student their own reminder with the exact amount they owe.
+        // Build a real payload for the first student so admin sees the exact email
+        let previewHTML = '<p style="color:rgba(255,255,255,0.5);text-align:center;padding:40px;">Building preview…</p>';
+        try {
+          const firstPayload = await buildPaymentReminderPayload(groupStudents[0].id);
+          previewHTML = firstPayload.html;
+        } catch (e) {
+          console.warn('⚠️ Could not build preview email:', e);
+        }
+
+        // Show the email preview modal
+        const confirmed = await new Promise((resolve) => {
+          const existing = document.querySelector('.email-preview-overlay');
+          if (existing) existing.remove();
+
+          const overlay = document.createElement('div');
+          overlay.className = 'email-preview-overlay';
+          overlay.style.cssText = `
+            position:fixed;inset:0;
+            background:rgba(0,0,0,0.82);backdrop-filter:blur(14px);
+            display:flex;align-items:center;justify-content:center;
+            z-index:9999999;animation:fadeIn 0.2s ease;
+          `;
+
+          overlay.innerHTML = `
+            <div style="
+              background:rgba(10,14,26,0.97);
+              border:1px solid rgba(196,164,95,0.22);border-top:3px solid #c4a45f;
+              border-radius:16px;width:min(780px,95vw);max-height:90vh;
+              display:flex;flex-direction:column;
+              backdrop-filter:blur(24px);
+              box-shadow:0 32px 80px rgba(0,0,0,0.6),0 0 0 1px rgba(196,164,95,0.08);
+              animation:slideUp 0.28s cubic-bezier(0.34,1.56,0.64,1);
+              overflow:hidden;
+            ">
+              <!-- Header -->
+              <div style="padding:20px 24px 16px;border-bottom:1px solid rgba(196,164,95,0.12);flex-shrink:0;">
+                <div style="font-family:'Playfair Display',Georgia,serif;font-size:18px;font-weight:700;color:#c4a45f;margin-bottom:6px;">Email Preview</div>
+                <div style="font-size:13px;color:rgba(255,255,255,0.45);">
+                  Sample shown for <strong style="color:rgba(255,255,255,0.7);">${groupStudents[0].name}</strong>
+                  &nbsp;·&nbsp; Will send to
+                  <strong style="color:#c4a45f;">${groupStudents.length} unpaid student${groupStudents.length > 1 ? 's' : ''}</strong>
+                  in Group ${groupName}
+                </div>
+              </div>
+              <!-- iframe preview -->
+              <div style="flex:1;overflow:hidden;background:#fff;position:relative;">
+                <iframe id="emailPreviewFrame" style="width:100%;height:100%;border:none;display:block;" srcdoc=""></iframe>
+              </div>
+              <!-- Footer buttons -->
+              <div style="padding:16px 24px;border-top:1px solid rgba(196,164,95,0.12);display:flex;gap:12px;flex-shrink:0;">
+                <button id="epCancel" style="
+                  flex:1;padding:12px 18px;
+                  background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.14);
+                  border-radius:10px;color:rgba(255,255,255,0.65);
+                  font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;
+                ">Cancel</button>
+                <button id="epSend" style="
+                  flex:2;padding:12px 18px;
+                  background:linear-gradient(135deg,#b8933d,#c4a45f,#dcc07a);
+                  border:none;border-radius:10px;color:#0a0e1a;
+                  font-size:14px;font-weight:700;letter-spacing:0.4px;cursor:pointer;
+                  transition:all 0.2s;box-shadow:0 4px 20px rgba(196,164,95,0.25);
+                ">Send to ${groupStudents.length} Student${groupStudents.length > 1 ? 's' : ''}</button>
               </div>
             </div>
-          `
-        );
+          `;
+
+          document.body.appendChild(overlay);
+
+          // Inject email HTML into iframe
+          const frame = overlay.querySelector('#emailPreviewFrame');
+          frame.srcdoc = previewHTML;
+
+          const cancelBtn = overlay.querySelector('#epCancel');
+          const sendBtn   = overlay.querySelector('#epSend');
+
+          cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.background='rgba(255,255,255,0.11)'; cancelBtn.style.color='rgba(255,255,255,0.9)'; });
+          cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.background='rgba(255,255,255,0.06)'; cancelBtn.style.color='rgba(255,255,255,0.65)'; });
+          sendBtn.addEventListener('mouseenter',   () => { sendBtn.style.transform='translateY(-2px)'; sendBtn.style.boxShadow='0 8px 28px rgba(196,164,95,0.4)'; });
+          sendBtn.addEventListener('mouseleave',   () => { sendBtn.style.transform=''; sendBtn.style.boxShadow='0 4px 20px rgba(196,164,95,0.25)'; });
+
+          cancelBtn.addEventListener('click', () => { overlay.remove(); resolve(false); });
+          sendBtn.addEventListener('click',   () => { overlay.remove(); resolve(true); });
+          overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+        });
+
         if (!confirmed) return;
 
         const progressOverlay = document.createElement('div');
         progressOverlay.style.cssText = `
-          position: fixed;
-          top: 20px;
-          right: 20px;
+          position: fixed; top: 20px; right: 20px;
           background: linear-gradient(135deg, #1a1f35 0%, #0f1419 100%);
-          color: white;
-          padding: 16px 22px;
-          border-radius: 12px;
-          border: 1px solid rgba(138, 180, 255, 0.25);
-          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-          z-index: 10000000;
-          font-weight: 600;
-          max-width: 360px;
-          line-height: 1.5;
+          color: white; padding: 16px 22px; border-radius: 12px;
+          border: 1px solid rgba(196,164,95,0.3);
+          box-shadow: 0 16px 40px rgba(0,0,0,0.45);
+          z-index: 10000000; font-weight: 600; max-width: 360px; line-height: 1.5;
         `;
-        progressOverlay.textContent = `Sending reminders to Group ${groupName}...`;
+        progressOverlay.textContent = `Sending reminders to Group ${groupName}…`;
         document.body.appendChild(progressOverlay);
 
         let sentCount = 0;
@@ -7159,6 +7226,7 @@
           try {
             await sendPaymentReminderEmail(student.id);
             sentCount++;
+            progressOverlay.textContent = `Sending… ${sentCount}/${groupStudents.length}`;
           } catch (err) {
             failedCount++;
             console.error('❌ Failed to send group payment reminder:', student.name, err);
