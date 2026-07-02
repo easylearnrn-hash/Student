@@ -6171,12 +6171,54 @@
           unpaidClassDetails
         );
 
+        // If student has credit, inject a paragraph explaining how to use it
+        let finalEmailHTML = emailHTML;
+        if (balance > 0) {
+          const firstName = (student.name || '').trim().split(/\s+/)[0] || student.name;
+          const creditSection = `
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 32px;">
+              <tr>
+                <td style="
+                  background:linear-gradient(135deg,rgba(196,164,95,0.10),rgba(196,164,95,0.04));
+                  border:1px solid rgba(196,164,95,0.3);
+                  border-left:4px solid #c4a45f;
+                  border-radius:12px;
+                  padding:24px 28px;
+                  font-family:Inter,Helvetica,Arial,sans-serif;
+                ">
+                  <p style="margin:0 0 10px;font-size:13px;font-weight:700;color:#c4a45f;letter-spacing:1px;text-transform:uppercase;">
+                    ✦ &nbsp;You Have $${balance.toFixed(2)} in Available Credit
+                  </p>
+                  <p style="margin:0;font-size:14px;color:rgba(212,196,160,0.85);line-height:1.85;">
+                    ${firstName}, you currently have <strong style="color:#e8d082;">$${balance.toFixed(2)}</strong> in credit on your ARNOMA account.
+                    You can apply this credit toward your outstanding balance directly from your student portal — no payment method needed:
+                  </p>
+                  <ol style="margin:14px 0 0;padding-left:20px;font-size:14px;color:rgba(212,196,160,0.8);line-height:2;">
+                    <li>Log in to your portal at <a href="https://student.richyfesta.com" style="color:#c4a45f;text-decoration:none;font-weight:600;">student.richyfesta.com</a></li>
+                    <li>In the <strong style="color:#e8d082;">Payment History</strong> section, click <strong style="color:#c4a45f;">&ldquo;Pay From Credit&rdquo;</strong></li>
+                    <li>Select the class dates you want to cover and confirm</li>
+                  </ol>
+                  <p style="margin:14px 0 0;font-size:13px;color:rgba(196,164,95,0.55);font-style:italic;">
+                    Your credit covers $${finalPrice.toFixed(2)} per class — enough for ${Math.floor(balance / finalPrice)} class session${Math.floor(balance / finalPrice) !== 1 ? 's' : ''}.
+                  </p>
+                </td>
+              </tr>
+            </table>
+          `;
+          // Inject before closing </body> tag; fallback: append to end
+          if (finalEmailHTML.includes('</body>')) {
+            finalEmailHTML = finalEmailHTML.replace('</body>', creditSection + '</body>');
+          } else {
+            finalEmailHTML += creditSection;
+          }
+        }
+
         return {
           studentId,
           student,
           cleanEmail,
           subject: 'Payment Reminder - ARNOMA NCLEX-RN',
-          html: emailHTML,
+          html: finalEmailHTML,
           emailType: 'payment_reminder',
           templateName: 'Payment Reminder',
           amount: finalBalance
