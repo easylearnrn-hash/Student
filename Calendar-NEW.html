@@ -6163,12 +6163,15 @@
           unpaidClassDetails
         });
 
+        const studentCreditBalance = balance > 0 ? balance : 0;
+
         const emailHTML = await generatePaymentReminderEmailHTML(
           student.name,
           finalBalance,
           finalPrice,
           studentId,
-          unpaidClassDetails
+          unpaidClassDetails,
+          studentCreditBalance
         );
 
         return {
@@ -6179,7 +6182,8 @@
           html: emailHTML,
           emailType: 'payment_reminder',
           templateName: 'Payment Reminder',
-          amount: finalBalance
+          amount: finalBalance,
+          creditBalance: studentCreditBalance
         };
       }
 
@@ -6488,7 +6492,36 @@
         }
       }
 
-      async function generatePaymentReminderEmailHTML(studentName, balance, pricePerClass, studentId = null, unpaidClassDetails = []) {
+      function buildCreditCalloutHTML(creditBalance, amountDue) {
+        const canCover = creditBalance >= amountDue;
+        return `
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:620px;margin:0 auto 32px;">
+          <tr><td style="
+            background:linear-gradient(135deg,rgba(16,185,129,0.12),rgba(5,150,105,0.06));
+            border:1px solid rgba(16,185,129,0.35);border-left:4px solid #10b981;
+            border-radius:12px;padding:22px 26px;font-family:Inter,Helvetica,Arial,sans-serif;
+          ">
+            <p style="margin:0 0 8px;font-size:14px;font-weight:700;color:#a7f3d0;letter-spacing:0.3px;">
+              💳 &nbsp;You Have Account Credit Available
+            </p>
+            <p style="margin:0 0 14px;font-size:13px;color:rgba(212,196,160,0.85);line-height:1.7;">
+              Your account currently has <strong style="color:#10b981;">$${Number(creditBalance).toFixed(2)}</strong> in credit.
+              ${canCover
+                ? `This fully covers your outstanding balance — you can apply it instantly without making a new payment.`
+                : `This can partially offset your outstanding balance of <strong style="color:#f59e0b;">$${Number(amountDue).toFixed(2)}</strong>.`
+              }
+            </p>
+            <p style="margin:0;font-size:13px;color:rgba(212,196,160,0.7);line-height:1.7;">
+              To apply your credit: log in to your <strong style="color:#e8d082;">Student Portal</strong>
+              → go to <em>Payment History</em> → click the
+              <strong style="color:#10b981;">"Pay From Credit"</strong> button.
+              Your balance will be updated immediately.
+            </p>
+          </td></tr>
+        </table>`;
+      }
+
+      async function generatePaymentReminderEmailHTML(studentName, balance, pricePerClass, studentId = null, unpaidClassDetails = [], creditBalance = 0) {
         // Helper function to format date beautifully
         function formatClassDate(dateStr) {
           const date = new Date(dateStr + 'T12:00:00');
@@ -6635,7 +6668,13 @@
               .replace(/\{\{UnpaidClassCount\}\}/gi, actualUnpaidCount.toString())
               .replace(/\{\{TeacherEmail\}\}/gi, 'arnomaschool@gmail.com')
               .replace(/\{\{TeacherName\}\}/gi, 'ARNOMA Team');
-            
+
+            // Inject credit callout before </body> if student has credit
+            if (creditBalance > 0) {
+              const creditHtml = buildCreditCalloutHTML(creditBalance, actualAmountDue);
+              emailHTML = emailHTML.replace(/<\/body>/i, creditHtml + '</body>');
+            }
+
             return emailHTML;
           }
         } catch (e) {
@@ -6806,7 +6845,11 @@
 </body>
 </html>`;
         
-        return fallbackHTML;
+        let finalFallbackHTML = fallbackHTML;
+        if (creditBalance > 0) {
+          finalFallbackHTML = fallbackHTML.replace(/<\/body>/i, buildCreditCalloutHTML(creditBalance, actualAmountDue) + '</body>');
+        }
+        return finalFallbackHTML;
       }
 
       function generateAbsenceNotificationEmailHTML(studentName, classDate) {
@@ -7133,19 +7176,51 @@
           return;
         }
 
-        // Build a real payload for the first student so admin sees the exact email
-        let previewHTML = '<p style="color:rgba(255,255,255,0.5);text-align:center;padding:40px;">Building preview…</p>';
-        try {
-          const firstPayload = await buildPaymentReminderPayload(groupStudents[0].id);
-          previewHTML = firstPayload.html;
-        } catch (e) {
-          console.warn('⚠️ Could not build preview email:', e);
+        // Build ALL payloads so admin can scroll through every email before sending
+        const allPayloads = [];
+        {
+          const buildOverlay = document.createElement('div');
+          buildOverlay.style.cssText = `
+            position:fixed;inset:0;background:rgba(0,0,0,0.82);backdrop-filter:blur(14px);
+            display:flex;align-items:center;justify-content:center;z-index:9999999;
+          `;
+          buildOverlay.innerHTML = `<div style="
+            background:rgba(10,14,26,0.97);border:1px solid rgba(196,164,95,0.22);
+            border-top:3px solid #c4a45f;border-radius:16px;padding:40px 48px;
+            text-align:center;color:#c4a45f;font-family:'Playfair Display',Georgia,serif;
+            font-size:18px;font-weight:700;min-width:320px;
+            box-shadow:0 32px 80px rgba(0,0,0,0.6);
+          ">
+            <div id="buildStatus">Building email previews… 0 / ${groupStudents.length}</div>
+            <div style="margin-top:16px;height:4px;background:rgba(196,164,95,0.15);border-radius:2px;overflow:hidden;">
+              <div id="buildBar" style="height:100%;background:linear-gradient(90deg,#b8933d,#dcc07a);border-radius:2px;width:0%;transition:width 0.3s;"></div>
+            </div>
+          </div>`;
+          document.body.appendChild(buildOverlay);
+
+          for (let i = 0; i < groupStudents.length; i++) {
+            try {
+              const p = await buildPaymentReminderPayload(groupStudents[i].id);
+              allPayloads.push(p);
+            } catch(e) {
+              console.warn('⚠️ Could not build payload for', groupStudents[i].name, e);
+              allPayloads.push(null);
+            }
+            const pct = Math.round(((i + 1) / groupStudents.length) * 100);
+            const statusEl = buildOverlay.querySelector('#buildStatus');
+            const barEl = buildOverlay.querySelector('#buildBar');
+            if (statusEl) statusEl.textContent = `Building email previews… ${i + 1} / ${groupStudents.length}`;
+            if (barEl) barEl.style.width = pct + '%';
+          }
+          buildOverlay.remove();
         }
 
-        // Show the email preview modal
+        // Show prev/next preview modal
         const confirmed = await new Promise((resolve) => {
           const existing = document.querySelector('.email-preview-overlay');
           if (existing) existing.remove();
+
+          let currentIdx = 0;
 
           const overlay = document.createElement('div');
           overlay.className = 'email-preview-overlay';
@@ -7168,29 +7243,37 @@
               overflow:hidden;
             ">
               <!-- Header -->
-              <div style="padding:18px 24px 14px;border-bottom:1px solid rgba(196,164,95,0.12);flex-shrink:0;">
-                <div style="font-family:'Playfair Display',Georgia,serif;font-size:18px;font-weight:700;color:#c4a45f;margin-bottom:5px;">Email Preview</div>
-                <div style="font-size:13px;color:rgba(255,255,255,0.45);">
-                  Sample shown for <strong style="color:rgba(255,255,255,0.7);">${groupStudents[0].name}</strong>
-                  &nbsp;·&nbsp; Will send to
-                  <strong style="color:#c4a45f;">${groupStudents.length} unpaid student${groupStudents.length > 1 ? 's' : ''}</strong>
-                  in Group ${groupName} — each student receives their own personalised email
+              <div style="padding:16px 20px;border-bottom:1px solid rgba(196,164,95,0.12);flex-shrink:0;">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                  <div style="font-family:'Playfair Display',Georgia,serif;font-size:17px;font-weight:700;color:#c4a45f;">Email Preview</div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <button id="epPrev" style="
+                      padding:6px 14px;background:rgba(196,164,95,0.1);border:1px solid rgba(196,164,95,0.25);
+                      border-radius:8px;color:#c4a45f;font-size:13px;font-weight:600;cursor:pointer;
+                    ">← Prev</button>
+                    <span id="epCounter" style="font-size:13px;color:rgba(255,255,255,0.55);white-space:nowrap;min-width:100px;text-align:center;"></span>
+                    <button id="epNext" style="
+                      padding:6px 14px;background:rgba(196,164,95,0.1);border:1px solid rgba(196,164,95,0.25);
+                      border-radius:8px;color:#c4a45f;font-size:13px;font-weight:600;cursor:pointer;
+                    ">Next →</button>
+                  </div>
                 </div>
+                <div id="epSubtitle" style="margin-top:6px;font-size:12px;color:rgba(255,255,255,0.4);"></div>
               </div>
               <!-- iframe preview -->
               <div style="flex:1;min-height:0;overflow:hidden;background:#fff;">
                 <iframe id="emailPreviewFrame" style="width:100%;height:100%;border:none;display:block;" srcdoc=""></iframe>
               </div>
-              <!-- Footer buttons -->
-              <div style="padding:14px 24px 18px;border-top:1px solid rgba(196,164,95,0.12);display:flex;gap:12px;flex-shrink:0;">
+              <!-- Footer -->
+              <div style="padding:12px 20px 16px;border-top:1px solid rgba(196,164,95,0.12);display:flex;gap:12px;flex-shrink:0;">
                 <button id="epCancel" style="
-                  flex:1;padding:12px 18px;
+                  flex:1;padding:11px 18px;
                   background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.14);
                   border-radius:10px;color:rgba(255,255,255,0.65);
                   font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;
                 ">Cancel</button>
                 <button id="epSend" style="
-                  flex:2;padding:12px 18px;
+                  flex:2;padding:11px 18px;
                   background:linear-gradient(135deg,#b8933d,#c4a45f,#dcc07a);
                   border:none;border-radius:10px;color:#0a0e1a;
                   font-size:14px;font-weight:700;letter-spacing:0.4px;cursor:pointer;
@@ -7202,12 +7285,32 @@
 
           document.body.appendChild(overlay);
 
-          // Inject email HTML into iframe
-          const frame = overlay.querySelector('#emailPreviewFrame');
-          frame.srcdoc = previewHTML;
+          const frame    = overlay.querySelector('#emailPreviewFrame');
+          const counter  = overlay.querySelector('#epCounter');
+          const subtitle = overlay.querySelector('#epSubtitle');
+          const prevBtn  = overlay.querySelector('#epPrev');
+          const nextBtn  = overlay.querySelector('#epNext');
+          const cancelBtn= overlay.querySelector('#epCancel');
+          const sendBtn  = overlay.querySelector('#epSend');
 
-          const cancelBtn = overlay.querySelector('#epCancel');
-          const sendBtn   = overlay.querySelector('#epSend');
+          function showEmail(idx) {
+            const payload = allPayloads[idx];
+            const student = groupStudents[idx];
+            counter.textContent = `${idx + 1} of ${allPayloads.length}`;
+            subtitle.innerHTML = payload
+              ? `<strong style="color:rgba(255,255,255,0.7);">${student.name}</strong> &nbsp;·&nbsp; ${payload.cleanEmail}${payload.creditBalance > 0 ? ` &nbsp;<span style="color:#10b981;">· Has $${payload.creditBalance.toFixed(2)} credit</span>` : ''}`
+              : `<span style="color:#ef4444;">${student.name} — failed to build preview</span>`;
+            frame.srcdoc = payload ? payload.html : '<p style="padding:40px;text-align:center;color:#ef4444;">Could not build preview for this student.</p>';
+            prevBtn.disabled = idx === 0;
+            nextBtn.disabled = idx === allPayloads.length - 1;
+            prevBtn.style.opacity = idx === 0 ? '0.35' : '1';
+            nextBtn.style.opacity = idx === allPayloads.length - 1 ? '0.35' : '1';
+          }
+
+          showEmail(0);
+
+          prevBtn.addEventListener('click', () => { if (currentIdx > 0) { currentIdx--; showEmail(currentIdx); } });
+          nextBtn.addEventListener('click', () => { if (currentIdx < allPayloads.length - 1) { currentIdx++; showEmail(currentIdx); } });
 
           cancelBtn.addEventListener('mouseenter', () => { cancelBtn.style.background='rgba(255,255,255,0.11)'; cancelBtn.style.color='rgba(255,255,255,0.9)'; });
           cancelBtn.addEventListener('mouseleave', () => { cancelBtn.style.background='rgba(255,255,255,0.06)'; cancelBtn.style.color='rgba(255,255,255,0.65)'; });
