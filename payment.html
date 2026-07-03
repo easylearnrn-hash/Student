@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ARNOMA – Secure Payment</title>
     <script src="https://js.stripe.com/v3/"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -496,7 +497,11 @@
       /* ── CONFIG ── */
       const STRIPE_PK = 'pk_live_51HKvyeKHAwZsjk64kBQ6PrmVb409AuCXdDmCPQX3z5y3j4sRc9CZDomsG8TXrBDa6xapO2jtWlpOl8pTR92FlNYX00vCScBYzF';
       const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
       const CREATE_PI_ENDPOINT = `${SUPABASE_URL}/functions/v1/create-payment-intent`;
+
+      // Supabase client — used as fallback when running standalone (not inside portal iframe).
+      const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
       /* ── Parse URL params (set by student-portal.html) ── */
       const params = new URLSearchParams(window.location.search);
@@ -803,6 +808,49 @@
             date           : today,
           }, '*');
         } catch(_){}
+
+        // Fallback: when running standalone (no portal iframe parent), write payment_records
+        // directly here using the Supabase client. The portal's postMessage handler handles
+        // the iframe case; this guard prevents double-writes.
+        if (window.parent === window) {
+          try {
+            const { subtotal } = getAmountBreakdown();
+            const classDates = forClassDatesArr.length ? forClassDatesArr : [today];
+            const studentId  = INVOICE.studentId || null;
+            const perClass   = classDates.length > 1
+              ? +(subtotal / classDates.length).toFixed(2)
+              : subtotal;
+
+            const rows = classDates.map(d => ({
+              student_id    : studentId,
+              date          : d,
+              amount        : perClass,
+              status        : 'paid',
+              payment_method: 'stripe',
+            }));
+
+            // Idempotency: skip dates that already have a stripe record
+            const { data: existing } = await supabaseClient
+              .from('payment_records')
+              .select('date')
+              .eq('student_id', studentId)
+              .eq('payment_method', 'stripe')
+              .in('date', classDates);
+            const already = new Set((existing || []).map(r => r.date));
+            const toInsert = rows.filter(r => !already.has(r.date));
+
+            if (toInsert.length > 0) {
+              const { error } = await supabaseClient.from('payment_records').insert(toInsert);
+              if (error) {
+                console.error('[ARNOMA] Standalone payment_records insert failed:', error.message);
+              } else {
+                console.log('[ARNOMA] ✅ Standalone Stripe payment recorded — rows:', toInsert);
+              }
+            }
+          } catch (e) {
+            console.error('[ARNOMA] Standalone payment_records write error:', e);
+          }
+        }
 
         // Auto-close after 3 s
         setTimeout(() => {
