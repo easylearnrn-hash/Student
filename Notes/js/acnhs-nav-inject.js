@@ -8,6 +8,10 @@
  */
 (function () {
 
+  /* Skip nav injection when this page is loaded inside an iframe
+     (e.g. EKG strip files embedded in EKG.html). */
+  if (window !== window.top) return;
+
   /* ─── 1. INJECT GOOGLE FONTS if not present ─────────────────── */
   function ensureFonts() {
     if (document.querySelector('link[href*="Playfair+Display"]')) return;
