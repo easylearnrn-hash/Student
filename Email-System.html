@@ -3963,6 +3963,13 @@
           
           return name.includes(searchTerm) || email.includes(searchTerm) || group.includes(searchTerm);
         });
+
+        // Also filter matching subscribers
+        const filteredSubscribers = manualSendSubscribers.filter(sub => {
+          const name = ([sub.first_name, sub.last_name].filter(Boolean).join(' ') || sub.full_name || '').toLowerCase();
+          const email = (sub.email || '').toLowerCase();
+          return name.includes(searchTerm) || email.includes(searchTerm);
+        });
         
         // Add filtered students to dropdown
         filteredStudents.forEach(student => {
@@ -3976,9 +3983,20 @@
           option.dataset.price = student.price_per_class ? '$' + student.price_per_class.toFixed(2) : '';
           selector.appendChild(option);
         });
+
+        // Add filtered subscribers to dropdown (with sub_ prefix so they're distinguishable)
+        filteredSubscribers.forEach(sub => {
+          const subName = [sub.first_name, sub.last_name].filter(Boolean).join(' ') || sub.full_name || '';
+          const option = document.createElement('option');
+          option.value = `sub_${sub.id}`;
+          option.textContent = `${subName} (Subscriber) - ${sub.email || 'No email'}`;
+          option.dataset.email = sub.email || '';
+          option.dataset.name = subName;
+          selector.appendChild(option);
+        });
         
         // Show or hide dropdown based on results
-        if (filteredStudents.length === 0) {
+        if (filteredStudents.length === 0 && filteredSubscribers.length === 0) {
           const noResultOption = document.createElement('option');
           noResultOption.value = '';
           noResultOption.textContent = `No students match "${searchInput.value}"`;
@@ -4396,12 +4414,27 @@
               const studentId = selector.value;
               
               if (studentId) {
-                const student = manualSendStudents.find(s => s.id == studentId);
-                if (!student || !student.email) {
-                  showDesignAlert('Selected student has no email address', { type: 'error', title: 'No Email' });
-                  return;
+                let recipientEmail, recipientName;
+                if (String(studentId).startsWith('sub_')) {
+                  // It's a subscriber
+                  const subId = String(studentId).replace('sub_', '');
+                  const sub = manualSendSubscribers.find(s => String(s.id) === subId);
+                  if (!sub || !sub.email) {
+                    showDesignAlert('Selected subscriber has no email address', { type: 'error', title: 'No Email' });
+                    return;
+                  }
+                  recipientEmail = sub.email;
+                  recipientName = [sub.first_name, sub.last_name].filter(Boolean).join(' ') || sub.full_name || 'Subscriber';
+                } else {
+                  const student = manualSendStudents.find(s => s.id == studentId);
+                  if (!student || !student.email) {
+                    showDesignAlert('Selected student has no email address', { type: 'error', title: 'No Email' });
+                    return;
+                  }
+                  recipientEmail = student.email;
+                  recipientName = student.name;
                 }
-                recipients.push({ email: student.email, name: student.name });
+                recipients.push({ email: recipientEmail, name: recipientName });
               } else if (searchInput) {
                 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
                 const rawEmails = searchInput.split(',').map(e => e.trim()).filter(e => e);
@@ -4414,11 +4447,18 @@
                     showDesignAlert(`Invalid email address: ${rawEmail}`, { type: 'error', title: 'Invalid Email' });
                     return;
                   }
-                  // Try to find student by email to get their real name
+                  // Try to find student or subscriber by email to get their real name
                   const matchedStudent = manualSendStudents.find(s =>
                     (s.email || '').toLowerCase() === rawEmail.toLowerCase()
                   );
-                  const recipientName = matchedStudent ? matchedStudent.name : 'Student';
+                  const matchedSub = !matchedStudent && manualSendSubscribers.find(s =>
+                    (s.email || '').toLowerCase() === rawEmail.toLowerCase()
+                  );
+                  const recipientName = matchedStudent
+                    ? matchedStudent.name
+                    : matchedSub
+                      ? ([matchedSub.first_name, matchedSub.last_name].filter(Boolean).join(' ') || matchedSub.full_name)
+                      : 'Student';
                   recipients.push({ email: rawEmail, name: recipientName });
                 }
               } else {
