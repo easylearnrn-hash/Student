@@ -1616,7 +1616,7 @@
                   >
                     <option value="individual">Individual Student</option>
                     <option value="active">All Active Students</option>
-                    <option value="all">All Students</option>
+                    <option value="all">All Students + Subscribers</option>
                     <option value="group">By Group</option>
                     <option value="custom">Custom Selection</option>
                   </select>
@@ -3836,6 +3836,7 @@
       // MANUAL SEND EMAIL FUNCTIONS
       // ============================================================
       let manualSendStudents = [];
+      let manualSendSubscribers = []; // email subscribers (not enrolled students)
 
       async function openManualSendModal() {
         const modal = document.getElementById('manualSendModal');
@@ -3908,6 +3909,17 @@
           if (error) throw error;
 
           manualSendStudents = students || [];
+
+          // Also load active subscribers so they can receive "All Students" broadcasts
+          try {
+            const { data: subs } = await supabaseClient
+              .from('subscribers')
+              .select('id, full_name, email')
+              .eq('status', 'active');
+            manualSendSubscribers = (subs || []).filter(s => s.email);
+          } catch (_) {
+            manualSendSubscribers = [];
+          }
 
           // Initially hide dropdown (will show when user types)
           selector.style.display = 'none';
@@ -4154,8 +4166,10 @@
             break;
           
           case 'all':
-            count = manualSendStudents.length;
-            recipientText = `All Students (${count} students)`;
+            const allStudentEmails = new Set(manualSendStudents.filter(s => s.email).map(s => s.email.toLowerCase()));
+            const uniqueSubCount = manualSendSubscribers.filter(s => !allStudentEmails.has(s.email.toLowerCase())).length;
+            count = manualSendStudents.filter(s => s.email).length + uniqueSubCount;
+            recipientText = `All Students + Subscribers (${count} total)`;
             break;
           
           case 'group':
@@ -4421,10 +4435,17 @@
               break;
 
             case 'all':
-              // All students
+              // All students + active subscribers
               recipients = manualSendStudents
                 .filter(s => s.email)
                 .map(s => ({ email: s.email, name: s.name }));
+              // Add subscribers (skip duplicates already in students)
+              const studentEmails = new Set(recipients.map(r => r.email.toLowerCase()));
+              manualSendSubscribers.forEach(sub => {
+                if (!studentEmails.has(sub.email.toLowerCase())) {
+                  recipients.push({ email: sub.email, name: sub.full_name });
+                }
+              });
               break;
 
             case 'group':

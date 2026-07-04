@@ -599,6 +599,8 @@
         <span id="forgotPassword">Forgot Password?</span>
         <span style="margin: 0 8px;">•</span>
         <span id="registerBtn">Sign Up</span>
+        <span style="margin: 0 8px;">•</span>
+        <span id="subscribeBtn">Subscribe</span>
       </div>
 
     </div>
@@ -669,6 +671,51 @@
 
         <div class="error-message" id="waitingErrorMessage"></div>
         <div class="success-message" id="waitingSuccessMessage"></div>
+      </div>
+    </div>
+
+    <!-- SUBSCRIBE MODAL -->
+    <div class="modal-overlay" id="subscribeModal">
+      <div class="registration-modal">
+        <div class="modal-close" id="closeSubscribeModal">✕</div>
+
+        <div style="text-align: center; margin-bottom: 24px;">
+          <h2 style="
+            margin-bottom: 6px;
+            background: linear-gradient(135deg, rgba(196,164,95,0.9), rgba(196,164,95,0.6));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+          ">Stay Updated</h2>
+          <p style="color: var(--text-muted); font-size: 13px;">Subscribe to receive announcements</p>
+        </div>
+
+        <div class="input-group">
+          <div class="input-label">Full Name *</div>
+          <input type="text" id="subFullName" class="input-box" placeholder="Enter your full name" />
+          <div class="field-error" id="errorSubFullName"></div>
+        </div>
+
+        <div class="input-group">
+          <div class="input-label">Email Address *</div>
+          <input type="email" id="subEmail" class="input-box" placeholder="your.email@example.com" />
+          <div class="field-error" id="errorSubEmail"></div>
+        </div>
+
+        <div class="input-group">
+          <div class="input-label">Phone Number</div>
+          <input type="tel" id="subPhone" class="input-box" placeholder="+1 (555) 123-4567" />
+        </div>
+
+        <button class="login-btn" id="submitSubscribe" style="margin-top: 24px;">
+          Subscribe
+        </button>
+
+        <div class="error-message" id="subErrorMessage"></div>
+        <div class="success-message" id="subSuccessMessage"></div>
       </div>
     </div>
 
@@ -1451,6 +1498,79 @@
         } finally {
           submitWaitingList.disabled = false;
           submitWaitingList.textContent = 'Submit Registration';
+        }
+      };
+
+      // ============================================================
+      // SUBSCRIBE MODAL
+      // ============================================================
+      const subscribeBtn = document.getElementById('subscribeBtn');
+      const subscribeModal = document.getElementById('subscribeModal');
+      const closeSubscribeModal = document.getElementById('closeSubscribeModal');
+      const submitSubscribe = document.getElementById('submitSubscribe');
+      const subErrorMessage = document.getElementById('subErrorMessage');
+      const subSuccessMessage = document.getElementById('subSuccessMessage');
+
+      subscribeBtn.onclick = () => {
+        subscribeModal.classList.add('active');
+        document.getElementById('subFullName').value = '';
+        document.getElementById('subEmail').value = '';
+        document.getElementById('subPhone').value = '';
+        document.getElementById('errorSubFullName').classList.remove('show');
+        document.getElementById('errorSubEmail').classList.remove('show');
+        subErrorMessage.style.display = 'none';
+        subSuccessMessage.style.display = 'none';
+      };
+
+      closeSubscribeModal.onclick = () => subscribeModal.classList.remove('active');
+      subscribeModal.onclick = e => { if (e.target === subscribeModal) subscribeModal.classList.remove('active'); };
+
+      submitSubscribe.onclick = async () => {
+        const fullName = document.getElementById('subFullName').value.trim();
+        const email = document.getElementById('subEmail').value.trim();
+        const phone = document.getElementById('subPhone').value.trim();
+
+        // Validate
+        let valid = true;
+        document.getElementById('errorSubFullName').classList.remove('show');
+        document.getElementById('errorSubEmail').classList.remove('show');
+        if (!fullName) {
+          showFieldError(document.getElementById('errorSubFullName'), 'Full name is required');
+          valid = false;
+        }
+        if (!email) {
+          showFieldError(document.getElementById('errorSubEmail'), 'Email is required');
+          valid = false;
+        } else if (!validateEmail(email)) {
+          showFieldError(document.getElementById('errorSubEmail'), 'Please enter a valid email');
+          valid = false;
+        }
+        if (!valid) return;
+
+        submitSubscribe.disabled = true;
+        submitSubscribe.textContent = 'Subscribing...';
+        subErrorMessage.style.display = 'none';
+        subSuccessMessage.style.display = 'none';
+
+        try {
+          const { error } = await supabaseClient
+            .from('subscribers')
+            .insert([{ full_name: fullName, email: email.toLowerCase(), phone: phone || null }]);
+
+          if (error) throw new Error(error.message);
+
+          subSuccessMessage.textContent = '✅ You\'re subscribed! We\'ll keep you updated.';
+          subSuccessMessage.style.display = 'block';
+
+          setTimeout(() => {
+            subscribeModal.classList.remove('active');
+          }, 3000);
+        } catch (err) {
+          subErrorMessage.textContent = err.message || 'Subscription failed. Please try again.';
+          subErrorMessage.style.display = 'block';
+        } finally {
+          submitSubscribe.disabled = false;
+          submitSubscribe.textContent = 'Subscribe';
         }
       };
 
