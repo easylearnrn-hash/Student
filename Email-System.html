@@ -3929,8 +3929,9 @@
         // Clear current options
         selector.innerHTML = '<option value="">Select a student...</option>';
         
-        // If no search term, hide dropdown
+        // If no search term, hide dropdown and clear any stale selection
         if (searchTerm === '') {
+          selector.innerHTML = '<option value="">Select a student...</option>';
           selector.style.display = 'none';
           return;
         }
@@ -4456,12 +4457,6 @@
             return;
           }
 
-          // Validate we have recipients
-          if (recipients.length === 0) {
-            showDesignAlert('No valid email addresses found for selected recipients', { type: 'error', title: 'No Recipients' });
-            return;
-          }
-
           // Get form values
           const subject = document.getElementById('manualEmailSubject').value.trim();
           const title = document.getElementById('manualEmailTitle').value.trim();
@@ -4476,8 +4471,13 @@
 
           // Confirm if sending to multiple recipients
           if (recipients.length > 1) {
-            const confirmMsg = `You are about to send this email to ${recipients.length} recipients. Continue?`;
-            const confirmed = confirm(confirmMsg);
+            const confirmed = await showDesignConfirm({
+              title: 'Send to Multiple Recipients',
+              message: `You are about to send this email to <strong>${recipients.length} recipients</strong>. Continue?`,
+              confirmText: 'Send',
+              cancelText: 'Cancel',
+              type: 'warning',
+            });
             if (!confirmed) return;
           }
 
@@ -4519,6 +4519,9 @@
             
             try {
               // Replace variables in body content for this specific recipient
+              let personalizedSubject = subject
+                .replace(/\{\{StudentName\}\}/g, recipient.name)
+                .replace(/\{\{Email\}\}/g, recipient.email);
               let personalizedBody = bodyContent
                 .replace(/\{\{StudentName\}\}/g, recipient.name)
                 .replace(/\{\{Email\}\}/g, recipient.email);
@@ -4529,7 +4532,7 @@
               // Build request body
               const emailData = {
                 to: recipient.email,
-                subject: subject,
+                subject: personalizedSubject,
                 html: fullHTML,
               };
 
