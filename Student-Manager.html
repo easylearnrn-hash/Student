@@ -3043,6 +3043,17 @@
           await loadActiveGroupsFromManager(true);
           syncAllGroupDrivenUI();
           loadStudents();
+
+          // These queries need an authenticated session — run them here
+          try { await loadNotifications(); } catch (_) {}
+          try { await subscribeToRegistrations(); } catch (_) {}
+          try {
+            const { data: subs } = await supabaseClient
+              .from('subscribers').select('id', { count: 'exact', head: true }).eq('status', 'active');
+            const subCount = subs?.length ?? 0;
+            const badge = document.getElementById('subscribedBadge');
+            if (badge && subCount > 0) { badge.textContent = subCount; badge.style.display = 'flex'; }
+          } catch (_) {}
         });
       } else {
         // Keep errors visible even in production
@@ -7081,32 +7092,6 @@
         // ⚡ Initialize performance optimizations
         DOMCache.init();
         debugLog('⚡ Performance optimizations initialized');
-        
-        try {
-          await loadNotifications();
-        } catch (error) {
-          console.warn('⚠️ Could not load notifications:', error);
-        }
-        
-        try {
-          await subscribeToRegistrations();
-        } catch (error) {
-          console.warn('⚠️ Could not subscribe to registrations:', error);
-        }
-
-        // Load subscriber badge count on init
-        try {
-          const { data: subs } = await supabaseClient
-            .from('subscribers')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'active');
-          const subCount = subs?.length ?? 0;
-          const badge = document.getElementById('subscribedBadge');
-          if (badge && subCount > 0) {
-            badge.textContent = subCount;
-            badge.style.display = 'flex';
-          }
-        } catch (_) { /* badge stays hidden */ }
         
         // Add scroll listener for lazy loading
         window.addEventListener('scroll', handleScroll, { passive: true });
