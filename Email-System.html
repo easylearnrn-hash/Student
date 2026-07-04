@@ -1627,7 +1627,7 @@
                       type="text" 
                       id="studentSearchInput" 
                       class="form-input" 
-                      placeholder="🔍 Type to search students OR enter email manually..."
+                      placeholder="🔍 Search students OR enter one or more emails separated by commas..."
                       oninput="filterStudentDropdown(); updateSelectedRecipients();"
                       style="margin-bottom: 12px;"
                     />
@@ -1641,7 +1641,7 @@
                       <option value="">Loading students...</option>
                     </select>
                     <div style="font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 6px;">
-                      💡 Type to search students, or enter an email address directly
+                      💡 Select a student from the list, or type email addresses directly — separate multiple with commas. Unrecognized emails will receive "Dear Student,"
                     </div>
                   </div>
 
@@ -3935,10 +3935,9 @@
           return;
         }
         
-        // Check if it looks like an email address
+        // Check if it looks like an email address or contains comma (multi-email mode)
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (emailRegex.test(searchTerm)) {
-          // It's an email address, don't show dropdown
+        if (emailRegex.test(searchTerm) || searchTerm.includes(',')) {
           selector.style.display = 'none';
           return;
         }
@@ -4136,8 +4135,14 @@
           case 'individual':
             const searchInput = document.getElementById('studentSearchInput').value.trim();
             if (searchInput) {
-              recipientText = searchInput;
-              count = 1;
+              if (searchInput.includes(',')) {
+                const parts = searchInput.split(',').map(e => e.trim()).filter(e => e);
+                count = parts.length;
+                recipientText = parts.join(', ');
+              } else {
+                recipientText = searchInput;
+                count = 1;
+              }
             }
             break;
           
@@ -4384,11 +4389,23 @@
                 recipients.push({ email: student.email, name: student.name });
               } else if (searchInput) {
                 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                if (!emailRegex.test(searchInput)) {
+                const rawEmails = searchInput.split(',').map(e => e.trim()).filter(e => e);
+                if (rawEmails.length === 0) {
                   showDesignAlert('Please enter a valid email address or select a student', { type: 'error', title: 'Invalid Email' });
                   return;
                 }
-                recipients.push({ email: searchInput, name: searchInput.split('@')[0] });
+                for (const rawEmail of rawEmails) {
+                  if (!emailRegex.test(rawEmail)) {
+                    showDesignAlert(`Invalid email address: ${rawEmail}`, { type: 'error', title: 'Invalid Email' });
+                    return;
+                  }
+                  // Try to find student by email to get their real name
+                  const matchedStudent = manualSendStudents.find(s =>
+                    (s.email || '').toLowerCase() === rawEmail.toLowerCase()
+                  );
+                  const recipientName = matchedStudent ? matchedStudent.name : 'Student';
+                  recipients.push({ email: rawEmail, name: recipientName });
+                }
               } else {
                 showDesignAlert('Please select a student or enter an email address', { type: 'warning', title: 'No Recipient' });
                 return;
