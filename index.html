@@ -694,9 +694,15 @@
         </div>
 
         <div class="input-group">
-          <div class="input-label">Full Name *</div>
-          <input type="text" id="subFullName" class="input-box" placeholder="Enter your full name" />
-          <div class="field-error" id="errorSubFullName"></div>
+          <div class="input-label">First Name *</div>
+          <input type="text" id="subFirstName" class="input-box" placeholder="Enter your first name" />
+          <div class="field-error" id="errorSubFirstName"></div>
+        </div>
+
+        <div class="input-group">
+          <div class="input-label">Last Name *</div>
+          <input type="text" id="subLastName" class="input-box" placeholder="Enter your last name" />
+          <div class="field-error" id="errorSubLastName"></div>
         </div>
 
         <div class="input-group">
@@ -706,8 +712,19 @@
         </div>
 
         <div class="input-group">
-          <div class="input-label">Phone Number</div>
+          <div class="input-label">Phone Number *</div>
           <input type="tel" id="subPhone" class="input-box" placeholder="+1 (555) 123-4567" />
+          <div class="field-error" id="errorSubPhone"></div>
+        </div>
+
+        <div class="input-group">
+          <div class="input-label">Preferred Language *</div>
+          <select id="subLanguage" class="input-box">
+            <option value="">Select language</option>
+            <option value="Armenian">Armenian</option>
+            <option value="English">English</option>
+          </select>
+          <div class="field-error" id="errorSubLanguage"></div>
         </div>
 
         <button class="login-btn" id="submitSubscribe" style="margin-top: 24px;">
@@ -1513,11 +1530,13 @@
 
       subscribeBtn.onclick = () => {
         subscribeModal.classList.add('active');
-        document.getElementById('subFullName').value = '';
+        document.getElementById('subFirstName').value = '';
+        document.getElementById('subLastName').value = '';
         document.getElementById('subEmail').value = '';
         document.getElementById('subPhone').value = '';
-        document.getElementById('errorSubFullName').classList.remove('show');
-        document.getElementById('errorSubEmail').classList.remove('show');
+        document.getElementById('subLanguage').value = '';
+        ['errorSubFirstName','errorSubLastName','errorSubEmail','errorSubPhone','errorSubLanguage']
+          .forEach(id => document.getElementById(id).classList.remove('show'));
         subErrorMessage.style.display = 'none';
         subSuccessMessage.style.display = 'none';
       };
@@ -1526,25 +1545,26 @@
       subscribeModal.onclick = e => { if (e.target === subscribeModal) subscribeModal.classList.remove('active'); };
 
       submitSubscribe.onclick = async () => {
-        const fullName = document.getElementById('subFullName').value.trim();
-        const email = document.getElementById('subEmail').value.trim();
-        const phone = document.getElementById('subPhone').value.trim();
+        const firstName = document.getElementById('subFirstName').value.trim();
+        const lastName  = document.getElementById('subLastName').value.trim();
+        const email     = document.getElementById('subEmail').value.trim();
+        const phone     = document.getElementById('subPhone').value.trim();
+        const language  = document.getElementById('subLanguage').value;
 
-        // Validate
+        // Validate — same rules as waiting list
         let valid = true;
-        document.getElementById('errorSubFullName').classList.remove('show');
-        document.getElementById('errorSubEmail').classList.remove('show');
-        if (!fullName) {
-          showFieldError(document.getElementById('errorSubFullName'), 'Full name is required');
-          valid = false;
-        }
+        ['errorSubFirstName','errorSubLastName','errorSubEmail','errorSubPhone','errorSubLanguage']
+          .forEach(id => document.getElementById(id).classList.remove('show'));
+
+        if (!firstName) { showFieldError(document.getElementById('errorSubFirstName'), 'First name is required'); valid = false; }
+        if (!lastName)  { showFieldError(document.getElementById('errorSubLastName'),  'Last name is required');  valid = false; }
         if (!email) {
-          showFieldError(document.getElementById('errorSubEmail'), 'Email is required');
-          valid = false;
+          showFieldError(document.getElementById('errorSubEmail'), 'Email is required'); valid = false;
         } else if (!validateEmail(email)) {
-          showFieldError(document.getElementById('errorSubEmail'), 'Please enter a valid email');
-          valid = false;
+          showFieldError(document.getElementById('errorSubEmail'), 'Please enter a valid email'); valid = false;
         }
+        if (!phone)    { showFieldError(document.getElementById('errorSubPhone'),    'Phone number is required'); valid = false; }
+        if (!language) { showFieldError(document.getElementById('errorSubLanguage'), 'Please select a language'); valid = false; }
         if (!valid) return;
 
         submitSubscribe.disabled = true;
@@ -1555,7 +1575,14 @@
         try {
           const { error } = await supabaseClient
             .from('subscribers')
-            .insert([{ full_name: fullName, email: email.toLowerCase(), phone: phone || null }]);
+            .insert([{
+              first_name: firstName,
+              last_name: lastName,
+              full_name: `${firstName} ${lastName}`,
+              email: email.toLowerCase(),
+              phone: phone,
+              preferred_language: language,
+            }]);
 
           if (error) throw new Error(error.message);
 
