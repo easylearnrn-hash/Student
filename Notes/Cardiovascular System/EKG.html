@@ -879,12 +879,16 @@
 (function () {
   const MARGIN = '200px';
 
+  function needsLoad(iframe) {
+    return !iframe.src || iframe.src === window.location.href || iframe.src === 'about:blank';
+  }
+
   // ── Loader: set src when near viewport ──
   const loadObserver = new IntersectionObserver((entries) => {
     entries.forEach(el => {
       if (el.isIntersecting) {
         const iframe = el.target;
-        if (!iframe.src || iframe.src === window.location.href) {
+        if (needsLoad(iframe)) {
           iframe.src = iframe.dataset.src;
         }
         loadObserver.unobserve(iframe);
@@ -897,7 +901,7 @@
     entries.forEach(el => {
       const iframe = el.target;
       // Only message if already loaded
-      if (!iframe.src || iframe.src === window.location.href) return;
+      if (needsLoad(iframe)) return;
       try {
         iframe.contentWindow.postMessage(
           el.isIntersecting ? 'ekgPlay' : 'ekgPause', '*'
@@ -910,6 +914,28 @@
     loadObserver.observe(iframe);
     visObserver.observe(iframe);
   });
+
+  // ── Safari / mobile fallback ──────────────────────────────────
+  // On iOS Safari and some Android browsers, IntersectionObserver does not
+  // re-fire after an ancestor transitions from display:none to visible.
+  // This note uses a body guard (display:none) that is removed by note-guard.js
+  // after the DOM is ready. Without this fallback, all strips stay blank.
+  // We run two sweeps (300ms and 900ms) to catch both fast and slow guard removal.
+  function loadVisibleStrips() {
+    const iframes = document.querySelectorAll('iframe.ekg-iframe');
+    iframes.forEach(iframe => {
+      if (!needsLoad(iframe)) return; // already loaded
+      const rect = iframe.getBoundingClientRect();
+      const inRange = rect.bottom >= -(window.innerHeight * 0.5) &&
+                      rect.top   <= window.innerHeight * 1.5;
+      if (inRange) {
+        iframe.src = iframe.dataset.src;
+        loadObserver.unobserve(iframe); // stop watching — already triggered
+      }
+    });
+  }
+  setTimeout(loadVisibleStrips, 300);
+  setTimeout(loadVisibleStrips, 900);
 }());
 </script>
 <script src="../js/content-protection.js"></script>
