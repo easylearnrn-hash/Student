@@ -9059,6 +9059,8 @@
       currentTotalUnpaid = displayUnpaidAmount;
       window.currentTotalUnpaid = displayUnpaidAmount;
       window.currentUnpaidClasses = unpaidClasses.map(c => c.date);
+      // Store full schedule so openPaymentModal can refresh unpaid dates if page is stale.
+      window.currentScheduledClasses = scheduledDatesForUI ? [...scheduledDatesForUI] : [];
       
       // Calculate last paid — group by the latest payment transaction time (created_at)
       // so one Stripe payment that covers multiple classes shows all covered class dates.
@@ -15886,7 +15888,7 @@
     }
     // ──────────────────────────────────────────────────────────────────────────
 
-    function openPaymentModal() {
+    async function openPaymentModal() {
       const student = window.currentStudent;
       const amount  = window.currentTotalUnpaid || 0;
 
@@ -15904,7 +15906,43 @@
         return;
       }
 
-      const unpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
+      // Re-fetch latest paid dates so a stale open tab doesn't use the wrong class dates.
+      // This guards against: portal loaded at 5 PM showing Jun 28 unpaid, student pays at 7 PM
+      // after Jul 3 class happened — without refresh the snapshot would still say Jun 28.
+      let unpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
+      let freshAmount = amount; // will be recalculated if unpaid list changes
+      try {
+        const { data: freshPaid } = await supabaseClient
+          .from('payment_records')
+          .select('date')
+          .eq('student_id', student.id)
+          .in('status', ['paid', 'excused', 'absent']);
+        if (freshPaid) {
+          const paidSet = new Set(freshPaid.map(r => (r.date || '').split('T')[0]));
+          // Rebuild unpaid list: keep only dates NOT yet paid, then add any new ones from schedule
+          unpaidDates = unpaidDates.filter(d => !paidSet.has(d));
+          // Also include scheduled class dates up to today that aren't paid/absent
+          const todayStr = new Date().toISOString().split('T')[0];
+          const scheduledDates = normalizeClassDateList(window.currentScheduledClasses || []);
+          scheduledDates.forEach(d => {
+            if (d <= todayStr && !paidSet.has(d) && !unpaidDates.includes(d)) unpaidDates.push(d);
+          });
+          unpaidDates.sort();
+          window.currentUnpaidClasses = unpaidDates;
+          // Recalculate amount from refreshed list so Stripe charge matches actual debt
+          const pricePerClass = parseFloat(student.price_per_class) || 50;
+          freshAmount = unpaidDates.length * pricePerClass;
+          window.currentTotalUnpaid = freshAmount;
+        }
+      } catch (_) { /* fall back to cached list and amount */ }
+
+      if (freshAmount <= 0) {
+        if (typeof customAlert === 'function') {
+          customAlert('No Balance Due', 'You have no unpaid balance at this time.');
+        }
+        return;
+      }
+
       // Keep a local snapshot so success mapping still works even if iframe message
       // misses forClassDates after a redirect/auth step.
       window._lastStripeClassDates = unpaidDates;
@@ -15913,7 +15951,7 @@
         student_id      : String(student?.id || ''),
         email           : student?.email   || '',
         group_name      : String(student?.group_name || student?.group_letter || ''),
-        amount          : String(amount),
+        amount          : String(freshAmount),
         currency        : 'usd',
         invoice_ref     : `balance-${student?.id || 'unknown'}`,
         for_class       : unpaidDates.join(','),
