@@ -879,19 +879,22 @@
 (function () {
   const MARGIN = '200px';
 
-  function needsLoad(iframe) {
-    return !iframe.src || iframe.src === window.location.href || iframe.src === 'about:blank';
+  function isLoaded(iframe) {
+    return iframe.src && iframe.src !== window.location.href;
+  }
+
+  function loadIframe(iframe) {
+    if (!isLoaded(iframe)) {
+      iframe.src = iframe.dataset.src;
+    }
   }
 
   // ── Loader: set src when near viewport ──
   const loadObserver = new IntersectionObserver((entries) => {
     entries.forEach(el => {
       if (el.isIntersecting) {
-        const iframe = el.target;
-        if (needsLoad(iframe)) {
-          iframe.src = iframe.dataset.src;
-        }
-        loadObserver.unobserve(iframe);
+        loadIframe(el.target);
+        loadObserver.unobserve(el.target);
       }
     });
   }, { rootMargin: MARGIN });
@@ -901,7 +904,7 @@
     entries.forEach(el => {
       const iframe = el.target;
       // Only message if already loaded
-      if (needsLoad(iframe)) return;
+      if (!isLoaded(iframe)) return;
       try {
         iframe.contentWindow.postMessage(
           el.isIntersecting ? 'ekgPlay' : 'ekgPause', '*'
@@ -915,27 +918,30 @@
     visObserver.observe(iframe);
   });
 
-  // ── Safari / mobile fallback ──────────────────────────────────
-  // On iOS Safari and some Android browsers, IntersectionObserver does not
-  // re-fire after an ancestor transitions from display:none to visible.
-  // This note uses a body guard (display:none) that is removed by note-guard.js
-  // after the DOM is ready. Without this fallback, all strips stay blank.
-  // We run two sweeps (300ms and 900ms) to catch both fast and slow guard removal.
-  function loadVisibleStrips() {
-    const iframes = document.querySelectorAll('iframe.ekg-iframe');
-    iframes.forEach(iframe => {
-      if (!needsLoad(iframe)) return; // already loaded
+  // ── Safari/mobile fallback ──────────────────────────────────────
+  // The IntersectionObserver is set up while body is still display:none
+  // (note-guard.js runs later as a deferred script). On Safari the observer
+  // never re-fires after the guard makes the body visible, so iframes stay
+  // blank. Force-load every iframe in/near the viewport once the page is
+  // fully loaded, then keep scrolling covered by the observer.
+  function forceLoadVisible() {
+    const margin = 300;
+    document.querySelectorAll('iframe.ekg-iframe').forEach(iframe => {
+      if (isLoaded(iframe)) return;
       const rect = iframe.getBoundingClientRect();
-      const inRange = rect.bottom >= -(window.innerHeight * 0.5) &&
-                      rect.top   <= window.innerHeight * 1.5;
-      if (inRange) {
-        iframe.src = iframe.dataset.src;
-        loadObserver.unobserve(iframe); // stop watching — already triggered
+      if (rect.bottom > -margin && rect.top < window.innerHeight + margin) {
+        loadIframe(iframe);
+        loadObserver.unobserve(iframe);
       }
     });
   }
-  setTimeout(loadVisibleStrips, 300);
-  setTimeout(loadVisibleStrips, 900);
+
+  window.addEventListener('load', function () {
+    // Run immediately, then again after a short delay in case the guard
+    // removal (or nav-inject reflow) happens just after window load.
+    forceLoadVisible();
+    setTimeout(forceLoadVisible, 400);
+  });
 }());
 </script>
 <script src="../js/content-protection.js"></script>
