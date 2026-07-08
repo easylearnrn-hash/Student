@@ -8509,7 +8509,7 @@
         group: student.group_name || student.group
       });
 
-      const cacheKey = `payments-v31-${student.id}`;
+      const cacheKey = `payments-v32-${student.id}`;
       const cached = getCachedData(cacheKey);
       if (cached) {
         debugDebug('⚡ Using cached calendar payment status for student:', student.id);
@@ -8664,7 +8664,7 @@
         ? names.map(n => `,payer_name.ilike.%${n}%,resolved_student_name.ilike.%${n}%`).join('')
         : '';
 
-      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult, manualEnrollResult] = await Promise.all([
+      const [absencesResult, paymentRecordsResult, creditResult, skippedResult, zelleResult, visibilityResult, manualEnrollResult] = await Promise.all([
         Promise.resolve(
           supabaseClient.from('student_absences').select('class_date').eq('student_id', student.id)
         ).catch(() => ({ data: null, error: true })),
@@ -8686,6 +8686,13 @@
             .select('for_class, for_class_dates, email_date, amount, status, payer_name, resolved_student_name, student_id, linked_student_id')
             .or(`student_id.eq.${student.id},linked_student_id.eq.${student.id}${nameFilters}`)
         ).catch(() => ({ data: [], error: null })),
+        Promise.resolve(
+          supabaseClient
+            .from('student_visibility_history')
+            .select('visible, effective_date')
+            .eq('student_id', student.id)
+            .order('effective_date', { ascending: true })
+        ).catch(() => ({ data: [], error: null })),
         // Manual enrollments — dates bypassing created_at filter, mirrors Calendar-NEW.
         // Keep this broad so older rows that missed payment_method still count.
         Promise.resolve(
@@ -8698,6 +8705,7 @@
       const credits    = (!creditResult.error       && creditResult.data)     ? creditResult.data    : [];
       const skipped    = (!skippedResult.error      && skippedResult.data)    ? skippedResult.data   : [];
       const zelleRaw   = (!zelleResult.error        && zelleResult.data)      ? zelleResult.data     : [];
+      const visibilityRows = (!visibilityResult.error && visibilityResult.data) ? visibilityResult.data : [];
       const manualEnrollRows = (!manualEnrollResult.error && manualEnrollResult.data) ? manualEnrollResult.data : [];
       const manualEnrollDates = new Set(
         manualEnrollRows
@@ -8713,6 +8721,36 @@
           .map(r => (r.date || '').split('T')[0])
           .filter(Boolean)
       );
+
+      // Mirror Calendar-NEW visibility gating so paused windows do not accrue debt.
+      const visibilityHistory = visibilityRows
+        .map(r => ({ date: normalizeDateString(r.effective_date), visible: r.visible }))
+        .filter(r => !!r.date)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      const isStudentActiveOnDate = (dateStr) => {
+        if (visibilityHistory.length > 0) {
+          let lastEvent = null;
+          for (const event of visibilityHistory) {
+            if (event.date <= dateStr) lastEvent = event;
+            else break;
+          }
+
+          if (lastEvent !== null) {
+            return lastEvent.visible === true || String(lastEvent.visible).toLowerCase() === 'true';
+          }
+
+          const status = String(student.status || '').toLowerCase();
+          return status !== 'graduated';
+        }
+
+        const status = String(student.status || '').toLowerCase();
+        const isCurrentlyOff = status === 'paused' ||
+                               status === 'graduated' ||
+                               student.show_in_grid === false ||
+                               student.show_in_grid === 'false';
+        return !isCurrentlyOff;
+      };
 
       const normalizePaymentName = value => String(value || '')
         .toLowerCase()
@@ -8817,6 +8855,7 @@
         const day   = String(d.getDate()).padStart(2, '0');
         const dateStr = `${year}-${month}-${day}`;
         if (_studentStartStr && dateStr < _studentStartStr && !manualEnrollDates.has(dateStr)) continue; // Match Calendar logic
+        if (!isStudentActiveOnDate(dateStr)) continue;
         if (!scheduleActiveDays.includes(daysOfWeek[d.getDay()])) continue;
         if (skippedDates.has(dateStr)) continue;
         // Always include today — debt is owed for today's class regardless of whether it has started yet
@@ -8829,6 +8868,7 @@
           const otDate = ot.date ? ot.date.substring(0, 10) : null;
           if (!otDate) return;
           if (_studentStartStr && otDate < _studentStartStr && !manualEnrollDates.has(otDate)) return; // Match Calendar logic
+          if (!isStudentActiveOnDate(otDate)) return;
           const [y,mo,dy] = otDate.split('-');
           if (new Date(+y, +mo-1, +dy) > todayLA) return;
           if (skippedDates.has(otDate) || scheduledDates.includes(otDate)) return;
@@ -8862,6 +8902,7 @@
       // Force-add any manually enrolled dates not already in scheduledDates.
       // These bypass both the created_at filter AND the day-of-week check.
       manualEnrollDates.forEach(d => {
+        if (!isStudentActiveOnDate(d)) return;
         if (!scheduledDates.includes(d) && d <= todayDateStr && d >= PORTAL_HISTORY_FLOOR_STR) {
           scheduledDates.push(d);
         }
@@ -15906,34 +15947,28 @@
         return;
       }
 
-      // Re-fetch latest paid dates so a stale open tab doesn't use the wrong class dates.
-      // This guards against: portal loaded at 5 PM showing Jun 28 unpaid, student pays at 7 PM
-      // after Jul 3 class happened — without refresh the snapshot would still say Jun 28.
+      // Re-fetch using the same debt engine as the portal UI so the amount passed to
+      // payment.html stays identical to what the student sees on the portal cards.
       let unpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
       let freshAmount = amount; // will be recalculated if unpaid list changes
       try {
-        const { data: freshPaid } = await supabaseClient
-          .from('payment_records')
-          .select('date')
-          .eq('student_id', student.id)
-          .in('status', ['paid', 'excused', 'absent']);
-        if (freshPaid) {
-          const paidSet = new Set(freshPaid.map(r => (r.date || '').split('T')[0]));
-          // Rebuild unpaid list: keep only dates NOT yet paid, then add any new ones from schedule
-          unpaidDates = unpaidDates.filter(d => !paidSet.has(d));
-          // Also include scheduled class dates up to today that aren't paid/absent
-          const todayStr = new Date().toISOString().split('T')[0];
-          const scheduledDates = normalizeClassDateList(window.currentScheduledClasses || []);
-          scheduledDates.forEach(d => {
-            if (d <= todayStr && !paidSet.has(d) && !unpaidDates.includes(d)) unpaidDates.push(d);
-          });
-          unpaidDates.sort();
-          window.currentUnpaidClasses = unpaidDates;
-          // Recalculate amount from refreshed list so Stripe charge matches actual debt
-          const pricePerClass = parseFloat(student.price_per_class) || 50;
-          freshAmount = unpaidDates.length * pricePerClass;
-          window.currentTotalUnpaid = freshAmount;
+        let scheduleData = currentGroupScheduleData;
+        if (!scheduleData || !scheduleData.schedule) {
+          const groupName = getStudentGroup(student);
+          if (groupName) {
+            scheduleData = await getGroupSchedule(groupName);
+            currentGroupScheduleData = scheduleData || currentGroupScheduleData;
+          }
         }
+
+        const freshResult = await calculateUnpaidFromSchedule(student, [], scheduleData || {});
+        unpaidDates = normalizeClassDateList((freshResult.unpaidClasses || []).map(c => c.date)).sort();
+        const scheduledDates = normalizeClassDateList(freshResult.scheduledDates || []);
+
+        window.currentUnpaidClasses = unpaidDates;
+        window.currentScheduledClasses = scheduledDates;
+        freshAmount = Number(freshResult.unpaidAmount || 0);
+        window.currentTotalUnpaid = freshAmount;
       } catch (_) { /* fall back to cached list and amount */ }
 
       if (freshAmount <= 0) {
