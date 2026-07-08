@@ -24,11 +24,11 @@
   <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <!-- GSAP for Christmas Tree Animation -->
-  <script src="https://unpkg.com/gsap@3/dist/gsap.min.js"></script>
+  <!-- GSAP for Christmas Tree Animation (defer — cosmetic only, does not block portal load) -->
+  <script src="https://unpkg.com/gsap@3/dist/gsap.min.js" defer></script>
   
-  <!-- Google API -->
-  <script src="https://apis.google.com/js/api.js"></script>
+  <!-- Google API (async — not used on portal critical path) -->
+  <script src="https://apis.google.com/js/api.js" async defer></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   
   <!-- Google Fonts - Dancing Script for Christmas -->
@@ -4988,8 +4988,48 @@
        END PREMIUM UPGRADE
        ============================================================================ */
   </style>
+
+  <!-- ── Portal boot loader: visible instantly via CSS, no JS required ── -->
+  <style>
+    #portalBootLoader {
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+      background: #080c14;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      transition: opacity 0.35s ease;
+    }
+    #portalBootLoader.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .pbl-ring {
+      width: 48px; height: 48px;
+      border: 3px solid rgba(196,164,95,0.18);
+      border-top-color: #c4a45f;
+      border-radius: 50%;
+      animation: pblSpin 0.8s linear infinite;
+    }
+    .pbl-text {
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: rgba(196,164,95,0.6);
+      letter-spacing: 0.06em;
+    }
+    @keyframes pblSpin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
+  <!-- Boot loader — shown immediately, hidden once initPortal() completes -->
+  <div id="portalBootLoader">
+    <div class="pbl-ring"></div>
+    <div class="pbl-text">ARNOMA</div>
+  </div>
   <!-- Christmas Tree - Fixed Right Side -->
   <div id="christmas-tree-container">
     <canvas id="christmas-tree-canvas"></canvas>
@@ -14996,6 +15036,14 @@
     let _authReadyResolve;
     window.authReadyPromise = new Promise(resolve => { _authReadyResolve = resolve; });
 
+    function _hideBootLoader() {
+      const el = document.getElementById('portalBootLoader');
+      if (el) {
+        el.classList.add('hidden');
+        setTimeout(() => { try { el.remove(); } catch(_) {} }, 400);
+      }
+    }
+
     (async function initPortal() {
       try {
         perfTimer.mark('Portal init START');
@@ -15011,6 +15059,7 @@
         
         if (!currentStudent) {
           // checkAuthentication() will handle redirect
+          _hideBootLoader();
           return;
         }
         
@@ -15031,6 +15080,7 @@
         // Actually load portal data since checkAuthentication relies on it
         // The IIFE has an early exit for impersonation, so we must call it here
         await loadPortalData();
+        _hideBootLoader(); // Content is ready — remove the boot screen
         
         // Check if admin chat mode - hide portal content and show only forum
         if (currentStudent && currentStudent.isAdminChatMode) {
@@ -15078,10 +15128,15 @@
       } catch (error) {
         console.error('❌ Portal initialization failed:', error);
         _authReadyResolve(); // Always unblock Christmas IIFE even on failure
+        _hideBootLoader();
         alert('Failed to load portal. Please try again.');
         window.location.href = 'index.html';
       }
     })();
+
+    // Safety net: if initPortal silently stalls for any reason, remove the loader
+    // after 8 seconds so students are not permanently stuck on the boot screen.
+    setTimeout(_hideBootLoader, 8000);
   </script>
 
   <!-- ============================================================================
@@ -15089,6 +15144,8 @@
        ============================================================================ -->
   <script>
     (function() {
+      // GSAP is deferred — wait for it before starting the animation
+      function _initChristmasTree() {
       const arr = [];
       const canvas = document.getElementById('christmas-tree-canvas');
       if (!canvas) return;
@@ -15189,6 +15246,16 @@
         y: ch * 1.2,
         ease: "power2.inOut"
       });
+      } // end _initChristmasTree
+
+      // GSAP is deferred — run once it's available
+      if (typeof gsap !== 'undefined') {
+        _initChristmasTree();
+      } else {
+        window.addEventListener('load', function() {
+          if (typeof gsap !== 'undefined') _initChristmasTree();
+        });
+      }
     })();
   </script>
 
@@ -15307,8 +15374,15 @@
         }
       }
       
-      // Start animation with GSAP ticker
-      gsap.ticker.add(render);
+      // Start animation with GSAP ticker (guard: GSAP may be deferred)
+      if (typeof gsap !== 'undefined') {
+        gsap.ticker.add(render);
+      } else {
+        window.addEventListener('load', function() {
+          if (typeof gsap !== 'undefined') gsap.ticker.add(render);
+          else requestAnimationFrame(function loop() { render(); requestAnimationFrame(loop); });
+        });
+      }
     }
   </script>
 
