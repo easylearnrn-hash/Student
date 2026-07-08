@@ -8429,6 +8429,29 @@ ORDER BY timestamp DESC;</pre>
           const currentTimeInSeconds = nowLA.hours * 3600 + nowLA.minutes * 60 + nowLA.seconds;
           const nowLADate = new Date(nowLA.year, nowLA.month - 1, nowLA.day, nowLA.hours, nowLA.minutes, nowLA.seconds);
 
+          // Build date range for the next 7 days
+          const dateStrings = [];
+          for (let i = 0; i <= 7; i++) {
+            const d = new Date(nowLADate);
+            d.setDate(d.getDate() + i);
+            dateStrings.push(formatDateYYYYMMDD(d));
+          }
+
+          // Fetch skipped classes so canceled sessions are excluded
+          const skippedSet = new Set();
+          try {
+            const { data: skippedRows } = await supabaseClient
+              .from('skipped_classes')
+              .select('group_name, class_date')
+              .in('class_date', dateStrings);
+            (skippedRows || []).forEach(r => {
+              const dateStr = (r.class_date || '').split('T')[0];
+              if (dateStr && r.group_name) {
+                skippedSet.add(`${r.group_name.toUpperCase().replace(/^GROUP\s*/i, '')}|${dateStr}`);
+              }
+            });
+          } catch (_) { /* non-critical */ }
+
           let closestClass = null;
           let minSeconds = Infinity;
 
@@ -8490,6 +8513,10 @@ ORDER BY timestamp DESC;</pre>
 
                 // Only consider future classes
                 if (totalDiffSeconds > 0 && totalDiffSeconds < minSeconds) {
+                  // Skip canceled classes
+                  const groupLetter = (group.name || '').toUpperCase().replace(/^GROUP\s*/i, '');
+                  if (skippedSet.has(`${groupLetter}|${checkDateStr}`)) return;
+
                   minSeconds = totalDiffSeconds;
 
                   let dayLabel = '';
