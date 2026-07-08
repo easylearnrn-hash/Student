@@ -8690,10 +8690,34 @@ ORDER BY timestamp DESC;</pre>
           const groups = await loadGroupsFromSupabase();
           if (!groups || groups.length === 0) return [];
 
-          const allClasses = [];
           const nowLA = TimezoneUtils.getCurrentTimeInZone('America/Los_Angeles');
           const currentTimeInSeconds = nowLA.hours * 3600 + nowLA.minutes * 60 + nowLA.seconds;
           const nowLADate = new Date(nowLA.year, nowLA.month - 1, nowLA.day, nowLA.hours, nowLA.minutes, nowLA.seconds);
+
+          // Build date range for the next 7 days
+          const dateStrings = [];
+          for (let i = 0; i <= 7; i++) {
+            const d = new Date(nowLADate);
+            d.setDate(d.getDate() + i);
+            dateStrings.push(formatDateYYYYMMDD(d));
+          }
+
+          // Fetch skipped classes for this window so we can filter them out
+          const skippedSet = new Set();
+          try {
+            const { data: skippedRows } = await supabaseClient
+              .from('skipped_classes')
+              .select('group_name, class_date')
+              .in('class_date', dateStrings);
+            (skippedRows || []).forEach(r => {
+              const dateStr = (r.class_date || '').split('T')[0];
+              if (dateStr && r.group_name) {
+                skippedSet.add(`${r.group_name.toUpperCase().replace(/^GROUP\s*/i, '')}|${dateStr}`);
+              }
+            });
+          } catch (_) { /* non-critical — proceed without skip filter */ }
+
+          const allClasses = [];
 
           for (let daysAhead = 0; daysAhead <= 7; daysAhead++) {
             const checkDayIndex = (nowLA.getDay() + daysAhead) % 7;
@@ -8763,6 +8787,10 @@ ORDER BY timestamp DESC;</pre>
                 if (totalDiffSeconds < -7200) return;
 
                 if (totalDiffSeconds > 0) {
+                  // Skip canceled classes
+                  const groupLetter = (group.name || '').toUpperCase().replace(/^GROUP\s*/i, '');
+                  if (skippedSet.has(`${groupLetter}|${checkDateStr}`)) return;
+
                   let dayLabel = '';
                   if (daysAhead === 0) dayLabel = 'Today';
                   else if (daysAhead === 1) dayLabel = 'Tomorrow';
