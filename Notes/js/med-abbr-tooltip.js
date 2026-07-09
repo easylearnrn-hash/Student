@@ -19,6 +19,7 @@
     'IV':       'Intravenous',
     'IM':       'Intramuscular',
     'SQ':       'Subcutaneous',
+    'SubQ':     'Subcutaneous',
     'SC':       'Subcutaneous',
     'PO':       'By Mouth (Per Os)',
     'SL':       'Sublingual',
