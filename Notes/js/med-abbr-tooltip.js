@@ -229,6 +229,8 @@
     'DKA':      'Diabetic Ketoacidosis',
     'HHS':      'Hyperosmolar Hyperglycemic State',
     'HHNS':     'Hyperosmolar Hyperglycemic Nonketotic Syndrome',
+    'osmolality':  'How thick/concentrated the blood is because of too much glucose, sodium, and other particles',
+    'osmolarity':  'How thick/concentrated the blood is because of too much glucose, sodium, and other particles',
     'HbA1c':    'Glycosylated Hemoglobin (3-month avg blood sugar)',
     'A1c':      'Glycosylated Hemoglobin',
     'FBG':      'Fasting Blood Glucose',
