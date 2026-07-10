@@ -860,7 +860,7 @@
       '<!DOCTYPE html>\n<html lang="en">\n<head>\n' +
       '<meta charset="UTF-8"/>\n' +
       '<meta name="viewport" content="width=device-width, initial-scale=1.0"/>\n' +
-      '<title>' + safeTitle + ' \u2014 Print</title>\n' +
+      '<title>' + safeTitle + '</title>\n' +
       linkBlocks +
       styleBlocks +
       '<style id="arnoma-print-override">\n' + printOverride + '\n</style>\n' +
