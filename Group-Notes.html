@@ -893,6 +893,14 @@
             <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()" style="width: 15px; height: 15px; cursor: pointer; accent-color: var(--gold);">
             <span>Select All</span>
           </label>
+          <button
+            id="registerHtmlNotesBtn"
+            onclick="registerMissingHtmlNotes()"
+            title="Register any HTML notes from the admin panel that are missing from Group Notes"
+            style="flex-shrink:0; padding: 6px 12px; background: rgba(102,126,234,0.18); border: 1px solid rgba(102,126,234,0.45); border-radius: 8px; color: rgba(200,210,255,0.9); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background 0.2s;"
+            onmouseover="this.style.background='rgba(102,126,234,0.32)'"
+            onmouseout="this.style.background='rgba(102,126,234,0.18)'"
+          >📋 Register HTML Notes</button>
         </div>
         
         <!-- Global Batch Action Bar -->
@@ -1589,6 +1597,392 @@
       { name: 'Nursing Skills and Fundamentals', icon: '📋' },
       { name: 'Pharmacology', icon: '💉' }
     ];
+
+    // ─── HTML Notes Catalog ──────────────────────────────────────────────────
+    // Master list of every HTML note file from the admin HTML Notes panel,
+    // mapped to its Group-Notes system_category. Used by registerMissingHtmlNotes()
+    // to auto-register any HTML notes that are missing from student_notes in Supabase.
+    const ADMIN_HTML_NOTES_CATALOG = [
+      // ── Endocrine System ──────────────────────────────────────────────────
+      { system: 'Endocrine System', title: 'Endocrine System Overview' },
+      { system: 'Endocrine System', title: 'Diabetes Mellitus' },
+      { system: 'Endocrine System', title: 'DKA & HHNS' },
+      { system: 'Endocrine System', title: 'Diabetes Insipidus & SIADH' },
+      { system: 'Endocrine System', title: 'Thyroid Gland & Hormones' },
+      { system: 'Endocrine System', title: 'Adrenal Gland (AD & CD)' },
+      { system: 'Endocrine System', title: 'Parathyroid Disorders' },
+      { system: 'Endocrine System', title: 'Insulin' },
+      { system: 'Endocrine System', title: 'Mixing Insulin Guidelines' },
+      { system: 'Endocrine System', title: 'Insulin Storage & Checking' },
+      { system: 'Endocrine System', title: 'Metformin' },
+      { system: 'Endocrine System', title: 'Insulin Patch / Patch Pump' },
+      { system: 'Endocrine System', title: 'Endocrine Medications' },
+      // ── Cardiovascular System ──────────────────────────────────────────────
+      { system: 'Cardiovascular System', title: 'Heart Structure & Circulation' },
+      { system: 'Cardiovascular System', title: 'Heart Attack / Heart Failure / Cardiac Arrest' },
+      { system: 'Cardiovascular System', title: 'Right & Left Heart Failure' },
+      { system: 'Cardiovascular System', title: 'Hypertension, Hypotension, CO & SV' },
+      { system: 'Cardiovascular System', title: 'EKG' },
+      { system: 'Cardiovascular System', title: 'Cardiac Biomarkers' },
+      { system: 'Cardiovascular System', title: 'Cardiac Tamponade' },
+      { system: 'Cardiovascular System', title: 'Cardiomyopathy' },
+      { system: 'Cardiovascular System', title: 'CABG & PCI' },
+      { system: 'Cardiovascular System', title: 'Infective Endocarditis' },
+      { system: 'Cardiovascular System', title: 'Ischemic Heart Disease' },
+      { system: 'Cardiovascular System', title: 'Pacemakers & ICDs' },
+      { system: 'Cardiovascular System', title: 'Pericarditis' },
+      { system: 'Cardiovascular System', title: 'PVD / PAD / DVT' },
+      { system: 'Cardiovascular System', title: 'Shock Management' },
+      { system: 'Cardiovascular System', title: 'Blood Vessels & Lymphatics' },
+      { system: 'Cardiovascular System', title: 'Anticoagulants' },
+      { system: 'Cardiovascular System', title: "Buerger's Disease" },
+      { system: 'Cardiovascular System', title: 'CPR' },
+      { system: 'Cardiovascular System', title: 'IV Gauges & Their Uses' },
+      { system: 'Cardiovascular System', title: 'Pulses' },
+      { system: 'Cardiovascular System', title: 'Vital Signs' },
+      { system: 'Cardiovascular System', title: 'Cardiovascular Medications' },
+      // ── Respiratory System ─────────────────────────────────────────────────
+      { system: 'Respiratory System', title: 'Physiology of Breathing' },
+      { system: 'Respiratory System', title: 'ARDS' },
+      { system: 'Respiratory System', title: 'Asthma' },
+      { system: 'Respiratory System', title: 'COPD' },
+      { system: 'Respiratory System', title: 'Chronic Bronchitis' },
+      { system: 'Respiratory System', title: 'Emphysema' },
+      { system: 'Respiratory System', title: 'Hemothorax & Pneumothorax' },
+      { system: 'Respiratory System', title: 'Incentive Spirometry & Pulmonary Hygiene' },
+      { system: 'Respiratory System', title: 'Mask Types & Respiratory System' },
+      { system: 'Respiratory System', title: 'Pleural Effusion' },
+      { system: 'Respiratory System', title: 'Pneumonia' },
+      { system: 'Respiratory System', title: 'Pulmonary Embolism' },
+      { system: 'Respiratory System', title: 'Sleep Apnea' },
+      { system: 'Respiratory System', title: 'Tracheostomy' },
+      { system: 'Respiratory System', title: 'Tuberculosis' },
+      { system: 'Respiratory System', title: 'Respiratory Medications' },
+      // ── Gastrointestinal & Hepatic System ─────────────────────────────────
+      { system: 'Gastrointestinal & Hepatic System', title: 'Abdominal Quadrants' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Alcoholism' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Appendicitis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'B Vitamins' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Botulism' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Celiac Disease' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Central Line vs PICC Line' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Cholecystitis & Cholelithiasis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Colonoscopy' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Colostomy' },
+      { system: 'Gastrointestinal & Hepatic System', title: "Crohn's Disease" },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Cystic Fibrosis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Digestive System' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Diverticulosis & Diverticulitis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Dumping Syndrome' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Epiglottitis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'GERD' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Gastric & Peptic Ulcers' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Gastroesophageal Issues' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Hirschsprung Disease' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Intussusception' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Irritable Bowel Syndrome' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Lactose Intolerance' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Lead Poisoning' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Liver Cirrhosis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Lower GI Obstruction' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Metabolic Syndrome' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'NG Tube & TPN' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'PUD & Gastritis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Pancreatitis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Peritonitis & Sepsis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Phenylketonuria PKU' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Physical Exam & Bowel Sounds' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Physical Examination Sounds' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Portal Vein' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Pyloric Stenosis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Roux-en-Y Gastric Bypass' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'SBO vs LBO' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Ulcerative Colitis' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Vegan / Vegetarian Diets' },
+      { system: 'Gastrointestinal & Hepatic System', title: 'Vitamins & Minerals' },
+      // ── Renal ──────────────────────────────────────────────────────────────
+      { system: 'Renal', title: 'Kidney Anatomy' },
+      { system: 'Renal', title: 'Acute Kidney Injury' },
+      { system: 'Renal', title: 'Chronic Kidney Disease' },
+      { system: 'Renal', title: 'Dialysis' },
+      { system: 'Renal', title: 'Dialysis Disequilibrium Syndrome' },
+      { system: 'Renal', title: 'Glomerular Filtration Rate (GFR)' },
+      { system: 'Renal', title: 'Glomerulonephritis' },
+      { system: 'Renal', title: 'Nephrotic Syndrome' },
+      { system: 'Renal', title: 'Polycystic Kidney Disease' },
+      { system: 'Renal', title: 'Renal Calculi' },
+      { system: 'Renal', title: 'Pyelonephritis' },
+      { system: 'Renal', title: 'Cystitis' },
+      { system: 'Renal', title: 'Urinary Tract Infections' },
+      { system: 'Renal', title: 'Urinary Catheters & CBI' },
+      { system: 'Renal', title: 'Urinary Incontinence' },
+      { system: 'Renal', title: 'Pheochromocytoma' },
+      { system: 'Renal', title: 'Hemolytic Uremic Syndrome' },
+      { system: 'Renal', title: 'Wilms Tumor' },
+      { system: 'Renal', title: 'Urine Sample Collection' },
+      { system: 'Renal', title: 'Renal & Urinary Medications' },
+      // ── Mental Health ──────────────────────────────────────────────────────
+      { system: 'Mental Health', title: 'Mental Health Overview' },
+      { system: 'Mental Health', title: 'Anxiety Disorders' },
+      { system: 'Mental Health', title: 'Bipolar & Personality Disorders' },
+      { system: 'Mental Health', title: 'Schizophrenia' },
+      { system: 'Mental Health', title: 'Delirium, Depression & Dementia' },
+      { system: 'Mental Health', title: "Alzheimer's Disease" },
+      { system: 'Mental Health', title: 'Cognitive Impairments & ADHD' },
+      { system: 'Mental Health', title: 'Personality Disorders' },
+      { system: 'Mental Health', title: 'Eating Disorders' },
+      { system: 'Mental Health', title: 'Substance Abuse & Addiction' },
+      { system: 'Mental Health', title: 'Suicide Risk Assessment' },
+      { system: 'Mental Health', title: 'Serotonin Syndrome' },
+      { system: 'Mental Health', title: 'ECT' },
+      { system: 'Mental Health', title: 'Defense Mechanisms' },
+      { system: 'Mental Health', title: 'Therapeutic Relationships' },
+      { system: 'Mental Health', title: 'Legal, Ethical & Safety' },
+      { system: 'Mental Health', title: 'Core Ethical Principles' },
+      { system: 'Mental Health', title: 'Mental Health Medications' },
+      // ── Maternal Health ────────────────────────────────────────────────────
+      { system: 'Maternal Health', title: 'Antepartum Care' },
+      { system: 'Maternal Health', title: 'Intrapartum Care' },
+      { system: 'Maternal Health', title: 'VEAL CHOP — FHR Patterns' },
+      { system: 'Maternal Health', title: 'Postpartum & Newborn Care' },
+      { system: 'Maternal Health', title: 'APGAR Score' },
+      { system: 'Maternal Health', title: 'Nonstress Test (NST)' },
+      { system: 'Maternal Health', title: 'Biophysical Profile (BPP) & CST' },
+      { system: 'Maternal Health', title: "Naegele's Rule & Antepartum Complications" },
+      { system: 'Maternal Health', title: 'GDM & Gestational Hypertension' },
+      { system: 'Maternal Health', title: 'Gestational HTN / Preeclampsia / Eclampsia' },
+      { system: 'Maternal Health', title: 'Placenta Previa & Abruption' },
+      { system: 'Maternal Health', title: 'Ectopic Pregnancy' },
+      { system: 'Maternal Health', title: 'Hyperemesis Gravidarum' },
+      { system: 'Maternal Health', title: 'TORCH Infections & Medications' },
+      { system: 'Maternal Health', title: 'Female Reproductive Cycle' },
+      { system: 'Maternal Health', title: 'Menstrual Cycle Made Easy' },
+      { system: 'Maternal Health', title: 'Fertilization & Implantation' },
+      { system: 'Maternal Health', title: 'Pregnancy Assessment Signs' },
+      { system: 'Maternal Health', title: 'Leopold Maneuvers' },
+      { system: 'Maternal Health', title: 'Medications in Pregnancy' },
+      { system: 'Maternal Health', title: 'Infant Bonding' },
+      // ── Pediatrics ─────────────────────────────────────────────────────────
+      { system: 'Pediatrics', title: 'Developmental Stages' },
+      { system: 'Pediatrics', title: 'Care of the Newborn' },
+      { system: 'Pediatrics', title: 'Cardiovascular Nursing' },
+      { system: 'Pediatrics', title: 'Respiratory Disorders' },
+      { system: 'Pediatrics', title: 'GI Disorders' },
+      { system: 'Pediatrics', title: 'Renal & GU' },
+      { system: 'Pediatrics', title: 'Hematological & Oncological' },
+      { system: 'Pediatrics', title: 'Neuro & Psych Disorders' },
+      { system: 'Pediatrics', title: 'Musculoskeletal' },
+      { system: 'Pediatrics', title: 'Integumentary' },
+      { system: 'Pediatrics', title: 'Infectious Diseases' },
+      { system: 'Pediatrics', title: 'Pediatric Diabetes' },
+      { system: 'Pediatrics', title: 'Fever, Dehydration & PKU' },
+      { system: 'Pediatrics', title: 'Kawasaki Disease' },
+      { system: 'Pediatrics', title: 'Reye Syndrome' },
+      { system: 'Pediatrics', title: 'Rickets' },
+      { system: 'Pediatrics', title: 'Eye, Ear & Throat' },
+      { system: 'Pediatrics', title: 'Pediatric Medications' },
+      { system: 'Pediatrics', title: 'Medication Administration' },
+      // ── Cancer ─────────────────────────────────────────────────────────────
+      { system: 'Cancer', title: 'Cancer Overview' },
+      { system: 'Cancer', title: 'Tumor Grading' },
+      { system: 'Cancer', title: 'Hematological Cancers' },
+      { system: 'Cancer', title: 'GI Cancers' },
+      { system: 'Cancer', title: 'Large Organ Cancers' },
+      { system: 'Cancer', title: 'Skin Cancer' },
+      { system: 'Cancer', title: 'Female Reproductive Cancers' },
+      { system: 'Cancer', title: 'Male Reproductive Cancers' },
+      { system: 'Cancer', title: 'SCLC (Small Cell Lung Cancer)' },
+      // ── Autoimmune & Infectious Disorders ─────────────────────────────────
+      { system: 'Autoimmune & Infectious Disorders', title: 'Autoimmune Diseases' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'Lupus' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'Rheumatoid Arthritis' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'Myasthenia Gravis' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'Guillain-Barré Syndrome' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'HIV' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'Hepatitis' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'C. Difficile' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'SARS / COVID' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'Immunodeficiency' },
+      { system: 'Autoimmune & Infectious Disorders', title: 'Autoimmune Medications' },
+      // ── Neurology ──────────────────────────────────────────────────────────
+      { system: 'Neurology', title: '12 Cranial Nerves' },
+      { system: 'Neurology', title: 'Autonomic Dysreflexia' },
+      { system: 'Neurology', title: 'Autonomic Nervous System' },
+      { system: 'Neurology', title: 'Brain Tumors' },
+      { system: 'Neurology', title: 'Cerebral Aneurysms' },
+      { system: 'Neurology', title: 'Cerebral Palsy' },
+      { system: 'Neurology', title: 'Clonus' },
+      { system: 'Neurology', title: 'Encephalitis' },
+      { system: 'Neurology', title: 'Glasgow Coma Scale' },
+      { system: 'Neurology', title: 'Hydrocephalus' },
+      { system: 'Neurology', title: 'Increased ICP' },
+      { system: 'Neurology', title: 'Multiple Sclerosis' },
+      { system: 'Neurology', title: 'Meningitis' },
+      { system: 'Neurology', title: 'Neuro Imaging & Diagnostics' },
+      { system: 'Neurology', title: 'Orientation' },
+      { system: 'Neurology', title: "Parkinson's Disease" },
+      { system: 'Neurology', title: 'Scleroderma' },
+      { system: 'Neurology', title: 'Seizure Disorders' },
+      { system: 'Neurology', title: 'Spinal Cord Injury (Full)' },
+      { system: 'Neurology', title: 'Stroke' },
+      { system: 'Neurology', title: 'Sympathetic vs Parasympathetic' },
+      { system: 'Neurology', title: 'TBI & Concussion' },
+      { system: 'Neurology', title: 'Trigeminal Neuralgia' },
+      { system: 'Neurology', title: "Vertigo & Ménière's Disease" },
+      // ── Musculoskeletal Disorders ──────────────────────────────────────────
+      { system: 'Musculoskeletal Disorders', title: 'MSK Overview' },
+      { system: 'Musculoskeletal Disorders', title: 'Fractures' },
+      { system: 'Musculoskeletal Disorders', title: 'Connective Tissue Disorders' },
+      { system: 'Musculoskeletal Disorders', title: 'Musculoskeletal Conditions' },
+      { system: 'Musculoskeletal Disorders', title: 'Osteomyelitis' },
+      { system: 'Musculoskeletal Disorders', title: 'Sprains, Strains & Dislocations' },
+      { system: 'Musculoskeletal Disorders', title: 'Mobility & Assistive Devices' },
+      // ── Fluids, Electrolytes & Nutrition ──────────────────────────────────
+      { system: 'Fluids, Electrolytes & Nutrition', title: 'Acid-Base Balance & ABGs' },
+      { system: 'Fluids, Electrolytes & Nutrition', title: 'Electrolyte Imbalances' },
+      { system: 'Fluids, Electrolytes & Nutrition', title: 'IV Fluids & Medications' },
+      { system: 'Fluids, Electrolytes & Nutrition', title: 'IV Therapy & Complications' },
+      // ── Nursing Skills and Fundamentals ───────────────────────────────────
+      { system: 'Nursing Skills and Fundamentals', title: 'Fundamentals Overview' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Head-to-Toe Assessment' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Vital Signs Interpretation' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Pain Assessment' },
+      { system: 'Nursing Skills and Fundamentals', title: "Maslow's Hierarchy" },
+      { system: 'Nursing Skills and Fundamentals', title: 'Nursing Diagnosis' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Delegation' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Scope of Practice' },
+      { system: 'Nursing Skills and Fundamentals', title: 'SBAR Communication' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Informed Consent' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Precautions' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Skin Integrity & Pressure Injuries' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Client Positioning' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Oxygenation Basics' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Nursing Calculations' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Emergency Triage Tag Colors' },
+      { system: 'Nursing Skills and Fundamentals', title: 'Documentation & Informatics' },
+      // ── Psycho-Social Aspects ──────────────────────────────────────────────
+      { system: 'Psycho-Social Aspects', title: 'Psychosocial Overview' },
+      { system: 'Psycho-Social Aspects', title: 'Abuse & Violence' },
+      { system: 'Psycho-Social Aspects', title: 'End-of-Life Care' },
+      { system: 'Psycho-Social Aspects', title: 'Aging Changes' },
+      // ── EENT ───────────────────────────────────────────────────────────────
+      { system: 'EENT', title: 'EENT Master Overview' },
+      { system: 'EENT', title: 'Ear Disorders' },
+      { system: 'EENT', title: 'Nose Disorders' },
+      { system: 'EENT', title: 'Throat & Upper Airway' },
+      { system: 'EENT', title: 'Gingivitis' },
+      // ── Eye Disorders ──────────────────────────────────────────────────────
+      { system: 'Eye Disorders', title: 'Eye Anatomy' },
+      { system: 'Eye Disorders', title: 'Glaucoma' },
+      { system: 'Eye Disorders', title: 'Cataracts' },
+      { system: 'Eye Disorders', title: 'Macular Degeneration' },
+      { system: 'Eye Disorders', title: 'Retinal Detachment' },
+      { system: 'Eye Disorders', title: 'Diabetic Retinopathy' },
+      { system: 'Eye Disorders', title: 'Conjunctivitis' },
+      // ── Medical-Surgical Care ──────────────────────────────────────────────
+      { system: 'Medical-Surgical Care', title: 'MedSurg Master Overview' },
+      { system: 'Medical-Surgical Care', title: 'MedSurg Priorities' },
+      { system: 'Medical-Surgical Care', title: 'Pre-op & Post-op Care' },
+      { system: 'Medical-Surgical Care', title: 'Postoperative Surgical Emergencies' },
+      { system: 'Medical-Surgical Care', title: 'Orthopedic Post-op Care' },
+      { system: 'Medical-Surgical Care', title: 'Shock Management & Emergency Care' },
+      // ── Reproductive and Sexual Health System ─────────────────────────────
+      { system: 'Reproductive and Sexual Health System', title: 'Reproductive Health Overview' },
+      { system: 'Reproductive and Sexual Health System', title: 'Reproductive Anatomy' },
+      { system: 'Reproductive and Sexual Health System', title: 'Female Reproductive Cycle' },
+      { system: 'Reproductive and Sexual Health System', title: 'Contraception & Family Planning' },
+      { system: 'Reproductive and Sexual Health System', title: 'STIs / STDs' },
+      { system: 'Reproductive and Sexual Health System', title: 'Infertility' },
+      { system: 'Reproductive and Sexual Health System', title: 'BPH' },
+      { system: 'Reproductive and Sexual Health System', title: 'TURP & Prostatectomy' },
+      { system: 'Reproductive and Sexual Health System', title: 'Priapism' },
+      // ── Pharmacology ───────────────────────────────────────────────────────
+      { system: 'Pharmacology', title: 'Nursing Overview of Common Medications' },
+      { system: 'Pharmacology', title: 'General Pharmacology' },
+      { system: 'Pharmacology', title: 'Medication Calculation & Administration' },
+      { system: 'Pharmacology', title: 'Drug Dosage Math' },
+      { system: 'Pharmacology', title: 'High-Alert Medications' },
+      { system: 'Pharmacology', title: 'ACE Inhibitors' },
+      { system: 'Pharmacology', title: 'ARBs' },
+      { system: 'Pharmacology', title: 'Beta Blockers' },
+      { system: 'Pharmacology', title: 'Calcium Channel Blockers' },
+      { system: 'Pharmacology', title: 'Autoimmune & Inflammatory Medications' },
+      { system: 'Pharmacology', title: 'Burns & Dermatology Medications' },
+      { system: 'Pharmacology', title: 'EENT Medications' },
+      { system: 'Pharmacology', title: 'Emergency / Shock / Surgical Medications' },
+      { system: 'Pharmacology', title: 'Fluids, Electrolytes & IV Therapy' },
+      { system: 'Pharmacology', title: 'Gastrointestinal Medications' },
+      { system: 'Pharmacology', title: 'Infectious Diseases Medications' },
+      { system: 'Pharmacology', title: 'Maternal Health Medications' },
+      { system: 'Pharmacology', title: 'Pediatric Medications' },
+      { system: 'Pharmacology', title: 'Renal & Urinary Medications' },
+    ];
+
+    // Registers any HTML notes from ADMIN_HTML_NOTES_CATALOG that are not yet
+    // in student_notes. Safe to run repeatedly — skips notes already present.
+    async function registerMissingHtmlNotes() {
+      const btn = document.getElementById('registerHtmlNotesBtn');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Registering...'; }
+
+      try {
+        // Reload allNotes fresh (bypass cache) so we have the latest DB state
+        const freshNotes = await fetchAll(
+          'student_notes',
+          'id, title, system_category, category, group_name, class_date, description, pdf_url, requires_payment, video_url, created_at, file_size, file_name',
+          { col: 'class_date', asc: false },
+          q => q.eq('deleted', false)
+        );
+        allNotes = freshNotes || [];
+        setCachedData('notes', allNotes);
+
+        const normalize = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const existingTitles = new Set(allNotes.map(n => normalize(n.title)));
+
+        const missing = ADMIN_HTML_NOTES_CATALOG.filter(n => !existingTitles.has(normalize(n.title)));
+
+        if (missing.length === 0) {
+          await customAlert('✅ All up to date', 'All HTML notes are already registered in Group Notes — nothing new to add.');
+          return;
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        const inserts = missing.map(n => ({
+          title: n.title,
+          description: n.title,
+          group_name: n.system,
+          category: n.system,
+          system_category: n.system,
+          class_date: today,
+          pdf_url: '',
+          file_name: '',
+          file_size: 0,
+          requires_payment: true,
+          is_system_note: true,
+          deleted: false
+        }));
+
+        const { data, error } = await supabaseClient
+          .from('student_notes')
+          .insert(inserts)
+          .select('id, title, system_category, category, group_name, class_date, description, pdf_url, requires_payment, video_url, created_at, file_size, file_name');
+
+        if (error) throw error;
+
+        // Merge new records and re-render
+        allNotes = [...allNotes, ...(data || [])];
+        setCachedData('notes', allNotes);
+        clearCache('permissions');
+        clearCache('freeAccess');
+        await loadData(true);
+
+        await customAlert(`✅ Registered ${(data || []).length} HTML notes`, `${(data || []).length} new notes are now visible in Group Notes and ready to post for students.`);
+      } catch (err) {
+        console.error('❌ registerMissingHtmlNotes error:', err);
+        await customAlert('Error', 'Failed to register HTML notes: ' + err.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '📋 Register HTML Notes'; }
+      }
+    }
 
     let currentGroup = 'Group A';
     let allNotes = [];
