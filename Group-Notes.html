@@ -1932,7 +1932,7 @@
           { col: 'class_date', asc: false },
           q => q.eq('deleted', false)
         );
-        allNotes = freshNotes || [];
+        allNotes = filterToHtmlCatalog(freshNotes || []);
         setCachedData('notes', allNotes);
 
         const normalize = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -2036,6 +2036,26 @@
           DATA_CACHE[k].timestamp = 0;
         });
       }
+    }
+
+    // ─── Catalog filter ───────────────────────────────────────────────────────
+    // Group Notes shows ONLY notes whose title matches ADMIN_HTML_NOTES_CATALOG.
+    // When the same title has multiple DB records (old PDF + new HTML), the HTML
+    // record (pdf_url === '') is kept and the PDF record is dropped.
+    function filterToHtmlCatalog(notes) {
+      const normalize = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const catalogSet = new Set(ADMIN_HTML_NOTES_CATALOG.map(n => normalize(n.title)));
+      const seenTitles = new Map();
+      (notes || []).forEach(note => {
+        const key = normalize(note.title);
+        if (!catalogSet.has(key)) return; // not in catalog — hide it
+        const existing = seenTitles.get(key);
+        // Prefer HTML note (pdf_url === '') over old PDF; otherwise keep first seen
+        if (!existing || (note.pdf_url === '' && existing.pdf_url !== '')) {
+          seenTitles.set(key, note);
+        }
+      });
+      return Array.from(seenTitles.values());
     }
 
     // 🚀 PERFORMANCE: DOM CACHE - Cache frequently accessed elements
@@ -2349,7 +2369,7 @@
           }
 
           // Store in cache and variables
-          allNotes = notesResult.data || [];
+          allNotes = filterToHtmlCatalog(notesResult.data || []);
           permissions = permsResult.data || [];
           freeAccessGrants = freeAccessResult.data || [];
 
@@ -2357,7 +2377,7 @@
           if (!permsCache) setCachedData('permissions', permissions);
           if (!freeAccessCache) setCachedData('freeAccess', freeAccessGrants);
         } else {
-          allNotes = notesCache;
+          allNotes = filterToHtmlCatalog(notesCache);
           permissions = permsCache;
           freeAccessGrants = freeAccessCache;
         }
