@@ -638,6 +638,7 @@ body.acnhs-color-inverted .nclex-rules-list li::before { color: #4f46e5 !importa
   width: 260px;
   height: calc(100vh - 72px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   z-index: 999;
   transition: left 0.3s ease;
   background: var(--navy-900);
@@ -671,15 +672,47 @@ body.acnhs-color-inverted .nclex-rules-list li::before { color: #4f46e5 !importa
 #toc-toggle:hover { background: var(--gold-400); }
 .toc-inner { padding: 8px 0 24px; }
 .toc-title {
-  padding: 14px 14px 10px;
+  padding: 14px 14px 8px;
   font-size: 0.6rem;
   font-weight: 800;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: rgba(201,168,76,0.45);
-  border-bottom: 1px solid rgba(201,168,76,0.12);
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
+.toc-search-wrap {
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid rgba(201,168,76,0.12);
+}
+.toc-search {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(201,168,76,0.18);
+  border-radius: 6px;
+  padding: 5px 10px 5px 28px;
+  font-size: 0.68rem;
+  color: #f0ece3;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(201,168,76,0.5)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 9px center;
+  transition: border-color 0.15s;
+}
+.toc-search::placeholder { color: rgba(201,168,76,0.3); }
+.toc-search:focus { border-color: rgba(201,168,76,0.4); background-color: rgba(255,255,255,0.06); }
+.toc-no-results {
+  padding: 14px;
+  font-size: 0.65rem;
+  color: rgba(201,168,76,0.35);
+  text-align: center;
+  display: none;
+}
+body.acnhs-color-inverted .toc-search { background-color: rgba(0,0,0,0.04) !important; border-color: rgba(30,58,138,0.2) !important; color: #1e293b !important; }
+body.acnhs-color-inverted .toc-search::placeholder { color: rgba(30,58,138,0.3) !important; }
+body.acnhs-color-inverted .toc-search:focus { border-color: rgba(30,58,138,0.4) !important; }
+body.acnhs-color-inverted .toc-no-results { color: rgba(30,41,59,0.4) !important; }
 .toc-part-btn {
   width: 100%;
   background: none;
@@ -6437,6 +6470,23 @@ body.acnhs-color-inverted #toc-resume-go { background: #1e3a8a !important; color
     titleEl.textContent = 'Sections 1\u2013294';
     inner.appendChild(titleEl);
 
+    // ── Search box ──
+    var searchWrap = document.createElement('div');
+    searchWrap.className = 'toc-search-wrap';
+    var searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.className = 'toc-search';
+    searchInput.placeholder = 'Search sections\u2026';
+    searchInput.autocomplete = 'off';
+    searchInput.spellcheck = false;
+    searchWrap.appendChild(searchInput);
+    inner.appendChild(searchWrap);
+
+    var noResults = document.createElement('div');
+    noResults.className = 'toc-no-results';
+    noResults.textContent = 'No sections found';
+    inner.appendChild(noResults);
+
     var toggle; // declared here so click-handler in list items can close sidebar
 
     partDefs.forEach(function (part) {
@@ -6496,6 +6546,42 @@ body.acnhs-color-inverted #toc-resume-go { background: #1e3a8a !important; color
 
     sidebar.appendChild(inner);
     document.body.appendChild(sidebar);
+
+    // ── Search filtering ──
+    searchInput.addEventListener('input', function () {
+      var q = searchInput.value.trim().toLowerCase();
+      var anyVisible = false;
+      inner.querySelectorAll('.toc-part-btn').forEach(function (btn) {
+        var list = btn.nextElementSibling;
+        if (!list) return;
+        if (!q) {
+          // Reset: collapse all, show all buttons
+          btn.style.display = '';
+          list.querySelectorAll('li').forEach(function (li) { li.style.display = ''; });
+          list.classList.remove('expanded');
+          btn.classList.remove('expanded');
+          return;
+        }
+        var matchCount = 0;
+        list.querySelectorAll('li').forEach(function (li) {
+          var text = li.textContent.toLowerCase();
+          var show = text.indexOf(q) !== -1;
+          li.style.display = show ? '' : 'none';
+          if (show) matchCount++;
+        });
+        if (matchCount > 0) {
+          btn.style.display = '';
+          list.classList.add('expanded');
+          btn.classList.add('expanded');
+          anyVisible = true;
+        } else {
+          btn.style.display = 'none';
+          list.classList.remove('expanded');
+          btn.classList.remove('expanded');
+        }
+      });
+      noResults.style.display = (q && !anyVisible) ? 'block' : 'none';
+    });
 
     toggle = document.createElement('button');
     toggle.id = 'toc-toggle';
