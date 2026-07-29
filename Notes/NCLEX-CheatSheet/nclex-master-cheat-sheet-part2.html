@@ -784,6 +784,78 @@ body.acnhs-color-inverted .toc-section-list li a.toc-active { color: #1e3a8a !im
 body.acnhs-color-inverted #toc-toggle { background: #1e3a8a !important; color: #fff !important; }
 body.acnhs-color-inverted #toc-toggle:hover { background: #1e40af !important; }
 body.acnhs-color-inverted .toc-num { color: rgba(30,41,59,0.35) !important; }
+/* ── Resume banner ── */
+#toc-resume-banner {
+  position: fixed;
+  bottom: 28px;
+  right: 20px;
+  background: #071c30;
+  border: 1px solid rgba(201,168,76,0.3);
+  border-left: 3px solid var(--gold-500);
+  border-radius: 10px;
+  padding: 12px 16px;
+  z-index: 1100;
+  max-width: 290px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.65);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  animation: resumeIn 0.3s ease;
+}
+@keyframes resumeIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+#toc-resume-banner .rb-label {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--gold-500, #c9a84c);
+}
+#toc-resume-banner .rb-section {
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: #f0ece3;
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#toc-resume-banner .rb-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 2px;
+}
+#toc-resume-go {
+  background: var(--gold-500, #c9a84c);
+  color: #04111f;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+#toc-resume-go:hover { background: var(--gold-400, #d4b56a); }
+#toc-resume-dismiss {
+  background: none;
+  border: none;
+  color: rgba(240,236,227,0.38);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-family: inherit;
+  padding: 4px 6px;
+  transition: color 0.15s;
+}
+#toc-resume-dismiss:hover { color: rgba(240,236,227,0.65); }
+body.acnhs-color-inverted #toc-resume-banner { background: #f8fafc !important; border-color: rgba(30,58,138,0.25) !important; border-left-color: #1e3a8a !important; }
+body.acnhs-color-inverted .rb-label { color: #1e3a8a !important; }
+body.acnhs-color-inverted .rb-section { color: #1e293b !important; }
+body.acnhs-color-inverted #toc-resume-go { background: #1e3a8a !important; color: #fff !important; }
 </style>
 
 <script>
@@ -6304,6 +6376,37 @@ body.acnhs-color-inverted .toc-num { color: rgba(30,41,59,0.35) !important; }
 <script src="../js/note-guard.js"></script>
 <script>
 (function () {
+  var BOOKMARK_KEY = 'nclex-cheatsheet-v1-bookmark';
+
+  function saveBookmark(num, title) {
+    try { localStorage.setItem(BOOKMARK_KEY, JSON.stringify({ n: num, title: title, ts: Date.now() })); } catch(e) {}
+  }
+
+  function showResumeBanner(saved) {
+    if (document.getElementById('toc-resume-banner')) return;
+    var banner = document.createElement('div');
+    banner.id = 'toc-resume-banner';
+    banner.innerHTML =
+      '<div class="rb-label">&#128205; Resume Reading</div>' +
+      '<div class="rb-section">Section ' + saved.n + ' — ' + saved.title + '</div>' +
+      '<div class="rb-actions">' +
+        '<button id="toc-resume-go" type="button">Continue →</button>' +
+        '<button id="toc-resume-dismiss" type="button">Dismiss</button>' +
+      '</div>';
+    document.body.appendChild(banner);
+    var timer = setTimeout(function () { if (banner.parentNode) banner.remove(); }, 12000);
+    document.getElementById('toc-resume-go').addEventListener('click', function () {
+      clearTimeout(timer);
+      var target = document.getElementById('section-' + saved.n);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      banner.remove();
+    });
+    document.getElementById('toc-resume-dismiss').addEventListener('click', function () {
+      clearTimeout(timer);
+      banner.remove();
+    });
+  }
+
   function buildTOC() {
     // Assign IDs to all h2 section headings (handles "Section 1" and plain "60")
     document.querySelectorAll('h2').forEach(function (h2) {
@@ -6417,6 +6520,12 @@ body.acnhs-color-inverted .toc-num { color: rgba(30,41,59,0.35) !important; }
         var active = sidebar.querySelector('a[href="#' + id + '"]');
         if (!active) return;
         active.classList.add('toc-active');
+        // Save bookmark
+        var sectionNum = parseInt(id.replace('section-', ''), 10);
+        var h2 = entry.target;
+        var numSpan = h2.querySelector('.section-num');
+        var sectionTitle = h2.textContent.replace(numSpan ? numSpan.textContent : '', '').trim();
+        saveBookmark(sectionNum, sectionTitle);
         // Auto-expand the part that contains the active section; collapse all others
         var parentList = active.closest('.toc-section-list');
         if (parentList) {
@@ -6437,10 +6546,21 @@ body.acnhs-color-inverted .toc-num { color: rgba(30,41,59,0.35) !important; }
     });
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', buildTOC);
-  } else {
+  function init() {
     buildTOC();
+    // Show resume banner if a bookmark exists and user isn't already at that section
+    try {
+      var saved = JSON.parse(localStorage.getItem(BOOKMARK_KEY));
+      if (saved && saved.n && window.location.hash !== '#section-' + saved.n) {
+        setTimeout(function () { showResumeBanner(saved); }, 1400);
+      }
+    } catch(e) {}
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
   }
 })();
 </script>
