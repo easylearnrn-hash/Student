@@ -972,10 +972,17 @@
         loginBtn.classList.add('loading');
         hideMessages();
 
-        // Safety net: if the auth call never resolves (network hang, Supabase timeout),
-        // unblock the button after 20 seconds so the user isn't stuck indefinitely.
+        // Clear any stale/stuck Supabase session from a previous login.
+        // A dangling session token can cause signInWithPassword to hang
+        // while the client tries to silently refresh/exchange the old token.
+        try {
+          await supabase.auth.signOut();
+        } catch (_) { /* ignore — we don't care if there was no session */ }
+
+        // Safety net: if the auth call still never resolves (network hang, Supabase timeout),
+        // unblock the button after 25 seconds so the user isn't stuck indefinitely.
         const _loginTimeout = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Connection timed out. Please check your internet and try again.')), 20000)
+          setTimeout(() => reject(new Error('Connection timed out. Please check your internet and try again.')), 25000)
         );
 
         try {
@@ -989,6 +996,8 @@
           // Check if it's an email confirmation error
           if (errorMsg.toLowerCase().includes('email') && errorMsg.toLowerCase().includes('confirm')) {
             showError(errorMsg + ' <a href="#" onclick="resendConfirmationEmail(); return false;" style="color: #00f5ff; text-decoration: underline; margin-left: 8px;">Resend confirmation email</a>');
+          } else if (errorMsg.toLowerCase().includes('timed out')) {
+            showError(errorMsg + ' <a href="#" onclick="localStorage.clear();sessionStorage.clear();location.reload();" style="color:#c9a84c;text-decoration:underline;margin-left:6px;">Clear cache &amp; reload</a>');
           } else {
             showError(errorMsg);
           }
