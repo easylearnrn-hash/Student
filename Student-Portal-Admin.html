@@ -6626,7 +6626,7 @@
       try {
         const { data: students, error } = await supabaseClient
           .from('students')
-          .select('id, name, email, price_per_class')
+          .select('id, name, email, price_per_class, balance')
           .eq('group_name', groupName)
           .neq('status', 'paused')
           .neq('status', 'graduate')
@@ -6649,11 +6649,18 @@
           });
         }
 
-        // Attach unpaid total to each student object
-        _startClassStudents = activeStudents.map(s => ({
-          ...s,
-          _unpaidTotal: unpaidByStudent[s.id] || 0,
-        }));
+        // Attach unpaid total to each student object.
+        // Use the same logic as Calendar-NEW: take the max of
+        // (sum of unpaid payment_records) vs (abs of negative balance on students table).
+        // This ensures historical/manual debt stored in students.balance is included.
+        _startClassStudents = activeStudents.map(s => {
+          const unpaidFromRecords = unpaidByStudent[s.id] || 0;
+          const storedDebt = (parseFloat(s.balance) || 0) < 0 ? Math.abs(parseFloat(s.balance)) : 0;
+          return {
+            ...s,
+            _unpaidTotal: Math.max(unpaidFromRecords, storedDebt),
+          };
+        });
         _startClassSelectedGroup = groupName;
         _startClassMeetLink = meetLink;
       } catch (e) {
