@@ -9258,8 +9258,29 @@
         });
       }
 
-      // ── DEBT LOCK: auto-force on login removed — students are never locked out.
-      //    The ignore check above also ensures ignored students see $0 balance. ──
+      // ── DEBT LOCK: if unpaid balance > $300 redirect to payment gate ──
+      const _isAdminViewing = sessionStorage.getItem('is_admin_viewing') === 'true' ||
+                              localStorage.getItem('is_admin_viewing') === 'true';
+      const _gateUrlParams  = new URLSearchParams(window.location.search);
+      const _isImpersonating = !!_gateUrlParams.get('impersonate');
+      if (!_isAdminViewing && !_isImpersonating && displayUnpaidAmount > 300) {
+        debugLog('🔒 DEBT LOCK: balance $' + displayUnpaidAmount.toFixed(0) + ' > $300 — redirecting to payment gate');
+        const _unpaidDatesList = normalizeClassDateList(window.currentUnpaidClasses || []);
+        const _gateParams = new URLSearchParams({
+          student_name    : student?.name    || '',
+          student_id      : String(student?.id || ''),
+          email           : student?.email   || '',
+          group_name      : String(student?.group_name || student?.group_letter || ''),
+          amount          : String(displayUnpaidAmount),
+          currency        : 'usd',
+          invoice_ref     : `balance-${student?.id || 'unknown'}`,
+          for_class       : _unpaidDatesList.join(','),
+          for_class_dates : JSON.stringify(_unpaidDatesList),
+          gate            : '1',
+        });
+        window.location.replace('payment.html?' + _gateParams.toString());
+        return;
+      }
 
       // Show / hide Pay Now button based on balance
       const payNowBtn = document.getElementById('payNowBtn');

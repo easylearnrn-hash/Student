@@ -392,6 +392,48 @@
       .success-title { font-size:16px; font-weight:800; color:var(--text); margin-bottom:5px; }
       .success-sub { font-size:12px; color:var(--muted2); font-weight:400; line-height:1.5; }
 
+      /* ── Gate banner (shown when student is locked out for balance > $300) ── */
+      .gate-banner {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        background: rgba(192, 57, 43, 0.10);
+        border: 1px solid rgba(192, 57, 43, 0.35);
+        border-radius: 14px;
+        padding: 14px 16px;
+        margin-bottom: 18px;
+        position: relative;
+        overflow: hidden;
+      }
+      .gate-banner::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 10%; right: 10%;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(192,57,43,0.5), transparent);
+      }
+      .gate-banner-icon {
+        font-size: 22px;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .gate-banner-title {
+        font-size: 13px;
+        font-weight: 800;
+        color: #e74c3c;
+        margin-bottom: 4px;
+        letter-spacing: 0.02em;
+      }
+      .gate-banner-body {
+        font-size: 11.5px;
+        color: rgba(245,240,232,0.75);
+        line-height: 1.55;
+      }
+      .gate-banner-amount {
+        color: #e74c3c;
+        font-weight: 800;
+      }
+
       /* Notes unlock preview */
       .notes-unlock-section {
         margin: 14px 0 0;
@@ -465,6 +507,9 @@
         </div>
       </div>
 
+      <!-- Gate banner (injected by JS when gate=1) -->
+      <div id="gateBanner" style="display:none;"></div>
+
       <!-- Notes that will unlock after payment -->
       <div id="notesUnlockSection" class="notes-unlock-section" style="display:none;"></div>
 
@@ -500,6 +545,7 @@
 
       /* ── Parse URL params (set by student-portal.html) ── */
       const params = new URLSearchParams(window.location.search);
+      const IS_GATE = params.get('gate') === '1'; // locked-out mode
       const INVOICE = {
         studentName  : params.get('student')         || params.get('student_name') || 'Student',
         studentEmail : params.get('email')            || '',
@@ -606,6 +652,22 @@
 
       /* ── Render summary ── */
       function renderSummary() {
+        // Gate mode: show locked-out banner
+        if (IS_GATE) {
+          document.title = 'ARNOMA – Account Locked';
+          const gb = document.getElementById('gateBanner');
+          if (gb) {
+            gb.style.display = 'flex';
+            gb.className = 'gate-banner';
+            gb.innerHTML = `
+              <div class="gate-banner-icon">🔒</div>
+              <div>
+                <div class="gate-banner-title">Account Access Restricted</div>
+                <div class="gate-banner-body">Your outstanding balance of <span class="gate-banner-amount">${fmt(INVOICE.amountDollars,'usd')}</span> exceeds the $300 limit. Please clear your balance below to regain full access to the student portal.</div>
+              </div>`;
+          }
+        }
+
         $name.textContent = INVOICE.studentName;
         // Pre-fill amount input with full balance
         if (INVOICE.amountDollars > 0) {
@@ -804,9 +866,14 @@
           }, '*');
         } catch(_){}
 
-        // Auto-close after 3 s
+        // Auto-close / redirect after 3 s
         setTimeout(() => {
-          try { window.parent.postMessage({ type:'ARNOMA_CLOSE_PAYMENT' }, '*'); } catch(_){}
+          if (IS_GATE) {
+            // Full-page gate: return to student portal
+            window.location.replace('student-portal.html');
+          } else {
+            try { window.parent.postMessage({ type:'ARNOMA_CLOSE_PAYMENT' }, '*'); } catch(_){}
+          }
         }, 3000);
       }
 
