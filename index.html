@@ -972,12 +972,17 @@
         loginBtn.classList.add('loading');
         hideMessages();
 
+        // Safety net: if the auth call never resolves (network hang, Supabase timeout),
+        // unblock the button after 20 seconds so the user isn't stuck indefinitely.
+        const _loginTimeout = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Connection timed out. Please check your internet and try again.')), 20000)
+        );
+
         try {
-          if (mode === 'admin') {
-            await handleAdminLogin(email, password);
-          } else {
-            await handleStudentLogin(email, password);
-          }
+          const _loginAction = mode === 'admin'
+            ? handleAdminLogin(email, password)
+            : handleStudentLogin(email, password);
+          await Promise.race([_loginAction, _loginTimeout]);
         } catch (error) {
           const errorMsg = error.message || 'An error occurred. Please try again.';
           
