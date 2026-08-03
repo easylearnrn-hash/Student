@@ -6627,7 +6627,7 @@
       try {
         const { data: students, error } = await supabaseClient
           .from('students')
-          .select('id, name, email, price_per_class, balance')
+          .select('id, name, email, price_per_class, balance, start_date')
           .eq('group_name', groupName)
           .eq('show_in_grid', true)
           .neq('status', 'paused')
@@ -6636,35 +6636,102 @@
         if (error) throw error;
 
         const activeStudents = (students || []).filter(s => s.email && s.email.trim());
-
-        // Fetch unpaid payment_records for all active students in this group.
-        // Use COUNT × price_per_class (not SUM(amount)) because amount is often
-        // NULL/0 in unpaid rows — price_per_class is the source of truth.
         const studentIds = activeStudents.map(s => s.id);
-        let unpaidCountByStudent = {};
-        if (studentIds.length > 0) {
-          const { data: prRows } = await supabaseClient
-            .from('payment_records')
-            .select('student_id')
-            .in('student_id', studentIds)
-            .eq('status', 'unpaid');
-          (prRows || []).forEach(r => {
-            unpaidCountByStudent[r.student_id] = (unpaidCountByStudent[r.student_id] || 0) + 1;
-          });
-        }
 
-        // Attach unpaid total to each student object.
-        // Free students (no price_per_class) are never blocked.
-        _startClassStudents = activeStudents.map(s => {
-          const pricePerClass = parseFloat(s.price_per_class) || 0;
-          if (pricePerClass === 0) return { ...s, _unpaidTotal: 0 };
-          const unpaidFromRecords = (unpaidCountByStudent[s.id] || 0) * pricePerClass;
-          const storedDebt = (parseFloat(s.balance) || 0) < 0 ? Math.abs(parseFloat(s.balance)) : 0;
-          return {
-            ...s,
-            _unpaidTotal: Math.max(unpaidFromRecords, storedDebt),
-          };
+        // ── Schedule-based unpaid calculation (mirrors Calendar-NEW.html logic) ──
+        // Debt = scheduled class dates since start_date with no paid/excused/absent entry.
+        const DEBT_FLOOR = '2026-05-01';
+        const todayStr = new Date().toISOString().split('T')[0];
+
+        // Load all necessary data in parallel
+        const [groupRes, prRes, zelleRes, absRes, skippedRes] = await Promise.all([
+          supabaseClient.from('groups').select('schedule, one_time_schedules').eq('group_name', groupName).single(),
+          studentIds.length > 0
+            ? supabaseClient.from('payment_records').select('student_id, date, status')
+                .in('student_id', studentIds).gte('date', DEBT_FLOOR)
+            : Promise.resolve({ data: [] }),
+          studentIds.length > 0
+            ? supabaseClient.from('payments').select('student_id, linked_student_id, for_class')
+                .or(`student_id.in.(${studentIds.join(',')}),linked_student_id.in.(${studentIds.join(',')})`)
+                .gte('for_class', DEBT_FLOOR)
+            : Promise.resolve({ data: [] }),
+          studentIds.length > 0
+            ? supabaseClient.from('student_absences').select('student_id, class_date')
+                .in('student_id', studentIds).gte('class_date', DEBT_FLOOR)
+            : Promise.resolve({ data: [] }),
+          supabaseClient.from('skipped_classes').select('class_date')
+            .eq('group_name', groupName).gte('class_date', DEBT_FLOOR),
+        ]);
+
+        const groupData = groupRes.data || {};
+
+        // Build covered-date sets per student (paid / excused / absent / cancelled = not a debt)
+        const coveredByStudent = {}; // studentId → Set<'YYYY-MM-DD'>
+        (prRes.data || []).forEach(r => {
+          if (['paid','excused','absent','cancelled'].includes(r.status)) {
+            const d = (r.date || '').split('T')[0];
+            if (!coveredByStudent[r.student_id]) coveredByStudent[r.student_id] = new Set();
+            coveredByStudent[r.student_id].add(d);
+          }
         });
+        (zelleRes.data || []).forEach(p => {
+          const sid = p.linked_student_id || p.student_id;
+          const d = (p.for_class || '').split('T')[0];
+          if (sid && d) {
+            if (!coveredByStudent[sid]) coveredByStudent[sid] = new Set();
+            coveredByStudent[sid].add(d);
+          }
+        });
+
+        // Build absence set per student
+        const absentByStudent = {};
+        (absRes.data || []).forEach(a => {
+          const d = (a.class_date || '').split('T')[0];
+          if (!absentByStudent[a.student_id]) absentByStudent[a.student_id] = new Set();
+          absentByStudent[a.student_id].add(d);
+        });
+
+        // Skipped class dates for this group
+        const skippedSet = new Set((skippedRes.data || []).map(s => (s.class_date || '').split('T')[0]));
+
+        // Parse group schedule into weekday numbers (0=Sun … 6=Sat)
+        const DAY_MAP = {sun:0,mon:1,tue:2,wed:3,thu:4,fri:5,sat:6};
+        const weekdays = (groupData.schedule || '').toLowerCase().split(',').map(seg => {
+          const m = seg.trim().match(/^(sun|mon|tue|wed|thu|fri|sat)/);
+          return m ? DAY_MAP[m[1]] : null;
+        }).filter(d => d !== null);
+
+        const oneTimeDates = new Set(
+          (Array.isArray(groupData.one_time_schedules) ? groupData.one_time_schedules : [])
+            .map(ot => (ot.date || '').split('T')[0]).filter(Boolean)
+        );
+
+        // Compute unpaid for each student
+        activeStudents.forEach(s => {
+          const pricePerClass = parseFloat(s.price_per_class) || 0;
+          if (pricePerClass === 0) { s._unpaidTotal = 0; return; }
+
+          const startFloor = s.start_date
+            ? (s.start_date.split('T')[0] > DEBT_FLOOR ? s.start_date.split('T')[0] : DEBT_FLOOR)
+            : DEBT_FLOOR;
+
+          const covered = coveredByStudent[s.id] || new Set();
+          const absent  = absentByStudent[s.id]  || new Set();
+
+          let unpaidCount = 0;
+          for (let d = new Date(startFloor + 'T12:00:00'); ; d.setDate(d.getDate() + 1)) {
+            const dateStr = d.toISOString().split('T')[0];
+            if (dateStr > todayStr) break;
+            if (!weekdays.includes(d.getDay()) && !oneTimeDates.has(dateStr)) continue;
+            if (skippedSet.has(dateStr)) continue;
+            if (covered.has(dateStr) || absent.has(dateStr)) continue;
+            unpaidCount++;
+          }
+
+          s._unpaidTotal = unpaidCount * pricePerClass;
+        });
+
+        _startClassStudents = activeStudents.map(s => ({ ...s }));
         _startClassSelectedGroup = groupName;
         _startClassMeetLink = meetLink;
       } catch (e) {
