@@ -6425,6 +6425,7 @@
           .from('students')
           .select('id', { count: 'exact' })
           .eq('group_name', groupName)
+          .eq('show_in_grid', true)
           .neq('status', 'paused')
           .neq('status', 'graduate')
           .not('email', 'is', null);
@@ -6628,6 +6629,7 @@
           .from('students')
           .select('id, name, email, price_per_class, balance')
           .eq('group_name', groupName)
+          .eq('show_in_grid', true)
           .neq('status', 'paused')
           .neq('status', 'graduate')
           .not('email', 'is', null);
@@ -6635,26 +6637,28 @@
 
         const activeStudents = (students || []).filter(s => s.email && s.email.trim());
 
-        // Fetch unpaid payment_records for all students in this group at once
+        // Fetch unpaid payment_records for all active students in this group.
+        // Use COUNT × price_per_class (not SUM(amount)) because amount is often
+        // NULL/0 in unpaid rows — price_per_class is the source of truth.
         const studentIds = activeStudents.map(s => s.id);
-        let unpaidByStudent = {};
+        let unpaidCountByStudent = {};
         if (studentIds.length > 0) {
           const { data: prRows } = await supabaseClient
             .from('payment_records')
-            .select('student_id, amount')
+            .select('student_id')
             .in('student_id', studentIds)
             .eq('status', 'unpaid');
           (prRows || []).forEach(r => {
-            unpaidByStudent[r.student_id] = (unpaidByStudent[r.student_id] || 0) + (parseFloat(r.amount) || 0);
+            unpaidCountByStudent[r.student_id] = (unpaidCountByStudent[r.student_id] || 0) + 1;
           });
         }
 
         // Attach unpaid total to each student object.
-        // Use the same logic as Calendar-NEW: take the max of
-        // (sum of unpaid payment_records) vs (abs of negative balance on students table).
-        // This ensures historical/manual debt stored in students.balance is included.
+        // Free students (no price_per_class) are never blocked.
         _startClassStudents = activeStudents.map(s => {
-          const unpaidFromRecords = unpaidByStudent[s.id] || 0;
+          const pricePerClass = parseFloat(s.price_per_class) || 0;
+          if (pricePerClass === 0) return { ...s, _unpaidTotal: 0 };
+          const unpaidFromRecords = (unpaidCountByStudent[s.id] || 0) * pricePerClass;
           const storedDebt = (parseFloat(s.balance) || 0) < 0 ? Math.abs(parseFloat(s.balance)) : 0;
           return {
             ...s,
