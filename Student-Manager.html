@@ -2010,6 +2010,7 @@
           <option value="no-group">No Group</option>
         </select>
         <select id="statusFilter" class="filter-select">
+          <option value="all-students">All Students</option>
           <option value="">All Statuses</option>
           <option value="active" selected>Active</option>
           <option value="paused">Paused</option>
@@ -3831,11 +3832,10 @@
         groupMap.forEach((groupStudents, groupCode) => {
           const letter = groupCode === '__none__' ? '?' : groupCode;
           const label = groupCode === '__none__' ? 'No Group' : `Group ${groupCode}`;
-          // Weekly revenue: sum of price_per_class for ACTIVE students with calendar toggle ON.
-          // portalBlocked is intentionally ignored for revenue totals.
+          // Weekly revenue: sum of price_per_class for non-free students × classes per week
           const classesPerWeek = groupScheduleMap[groupCode] || 1;
           const weeklyRevenue = groupStudents
-            .filter(s => (s.status || 'active') === 'active' && s.showInCalendar !== false)
+            .filter(s => !s.isFree)
             .reduce((sum, s) => sum + (parseFloat(s.price_per_class) || 0), 0) * classesPerWeek;
           totalWeekly += weeklyRevenue;
           const revenueStr = weeklyRevenue > 0 ? `$${weeklyRevenue.toLocaleString('en-US', { maximumFractionDigits: 0 })}/wk` : '';
@@ -3905,7 +3905,8 @@
         debugLog(`📋 Rendering ${sourceStudents.length} students, view=${currentViewMode}`);
 
         // Stacks view: show group deck tiles (no drill-in)
-        if (currentViewMode === 'stacks' && !DOMCache.searchInput?.value && !DOMCache.groupFilter?.value && !DOMCache.paymentFilter?.value && !DOMCache.sortFilter?.value) {
+        const allStudentsMode = document.getElementById('statusFilter')?.value === 'all-students';
+        if (currentViewMode === 'stacks' && !allStudentsMode && !DOMCache.searchInput?.value && !DOMCache.groupFilter?.value && !DOMCache.paymentFilter?.value && !DOMCache.sortFilter?.value) {
           renderGroupStacks(sourceStudents);
           return;
         }
@@ -4354,10 +4355,19 @@
       // ============================================
       
       function applyFilters() {
-        const searchTerm = document.getElementById('searchInput')?.value.toLowerCase() || '';
-        const groupFilter = document.getElementById('groupFilter')?.value || '';
         const statusFilter = document.getElementById('statusFilter')?.value || '';
-        const paymentFilter = document.getElementById('paymentFilter')?.value || '';
+        const allStudentsMode = statusFilter === 'all-students';
+
+        // All Students mode: force flat list and bypass restrictive filters.
+        if (allStudentsMode) {
+          currentViewMode = 'stacks';
+          selectedStackGroup = null;
+          document.getElementById('groupViewHeader').classList.remove('visible');
+        }
+
+        const searchTerm = allStudentsMode ? '' : (document.getElementById('searchInput')?.value.toLowerCase() || '');
+        const groupFilter = allStudentsMode ? '' : (document.getElementById('groupFilter')?.value || '');
+        const paymentFilter = allStudentsMode ? '' : (document.getElementById('paymentFilter')?.value || '');
         const sortFilter = document.getElementById('sortFilter')?.value || '';
         
         // Start with all students
@@ -4382,7 +4392,7 @@
           }
           
           // Group filter
-          if (groupFilter) {
+          if (!allStudentsMode && groupFilter) {
             const normalizedCode = student.groupCode || canonicalizeGroupCode(student.group || '');
             if (groupFilter === 'no-group') {
               if (normalizedCode) return false;
@@ -4394,7 +4404,7 @@
           
           // Status filter — skip when a search term is active (search all students)
           // graduated students are hidden by default unless filter is explicitly 'graduated'
-          if (!searchTerm) {
+          if (!allStudentsMode && !searchTerm) {
             if (student.status === 'graduated' && statusFilter !== 'graduated') {
               return false;
             }
@@ -4404,16 +4414,16 @@
           }
           
           // Payment filter
-          if (paymentFilter === 'unpaid') {
+          if (!allStudentsMode && paymentFilter === 'unpaid') {
             const credit = student.balance || 0;
             if (credit >= 0) return false;
-          } else if (paymentFilter === 'credit') {
+          } else if (!allStudentsMode && paymentFilter === 'credit') {
             const credit = student.balance || 0;
             if (credit <= 0) return false;
           }
           
           // Group stack drill-in filter
-          if (currentViewMode === 'group' && selectedStackGroup) {
+          if (!allStudentsMode && currentViewMode === 'group' && selectedStackGroup) {
             const key = student.groupCode || '__none__';
             if (key !== selectedStackGroup) return false;
           }
@@ -7280,7 +7290,22 @@
         }
         
         if (DOMCache.statusFilter) {
-          DOMCache.statusFilter.addEventListener('change', applyFilters);
+          DOMCache.statusFilter.addEventListener('change', function() {
+            if (this.value === 'all-students') {
+              const searchInput = document.getElementById('searchInput');
+              const groupFilter = document.getElementById('groupFilter');
+              const paymentFilter = document.getElementById('paymentFilter');
+              const sortFilter = document.getElementById('sortFilter');
+              const clearBtn = document.getElementById('searchClearBtn');
+
+              if (searchInput) searchInput.value = '';
+              if (groupFilter) groupFilter.value = '';
+              if (paymentFilter) paymentFilter.value = '';
+              if (sortFilter) sortFilter.value = '';
+              if (clearBtn) clearBtn.classList.remove('visible');
+            }
+            applyFilters();
+          });
         }
         
         if (DOMCache.paymentFilter) {
