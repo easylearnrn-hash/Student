@@ -3899,7 +3899,15 @@
         const label = groupCode === '__none__' ? 'No Group' : `Group ${groupCode}`;
         document.getElementById('groupViewTitle').textContent = label;
         document.getElementById('groupViewHeader').classList.add('visible');
-        applyFilters();
+
+        // Fast path: render selected group immediately from current visible dataset.
+        const sourceStudents = getCurrentSourceStudents();
+        filteredStudents = sourceStudents.filter(student => {
+          const key = student.groupCode || '__none__';
+          return key === groupCode;
+        });
+        currentlyRenderedCount = 30;
+        renderStudentCards();
       }
 
       function showStacksView() {
@@ -3909,16 +3917,20 @@
         applyFilters();
       }
 
+      function getCurrentSourceStudents() {
+        return filteredStudents.length > 0 ||
+               DOMCache.searchInput?.value ||
+               DOMCache.groupFilter?.value ||
+               DOMCache.paymentFilter?.value ||
+               DOMCache.sortFilter?.value
+          ? filteredStudents
+          : students;
+      }
+
       function renderStudentCards(forceFullRender = false) {
         const grid = DOMCache.studentsGrid || document.getElementById('studentsGrid');
 
-        const sourceStudents = filteredStudents.length > 0 ||
-                               DOMCache.searchInput?.value ||
-                               DOMCache.groupFilter?.value ||
-                               DOMCache.paymentFilter?.value ||
-                               DOMCache.sortFilter?.value
-          ? filteredStudents
-          : students;
+        const sourceStudents = getCurrentSourceStudents();
 
         debugLog(`📋 Rendering ${sourceStudents.length} students, view=${currentViewMode}`);
 
