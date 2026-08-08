@@ -9245,8 +9245,8 @@
       }
 
       // ── AUTO-UNBLOCK: if student has paid off their balance, clear portal_blocked ──
-      if (student?.portal_blocked && displayUnpaidAmount === 0) {
-        debugLog('✅ AUTO-UNBLOCK: balance is $0 — clearing portal_blocked for student', student?.id);
+      if (student?.portal_blocked && displayUnpaidAmount <= 300) {
+        debugLog('✅ AUTO-UNBLOCK: balance $' + displayUnpaidAmount + ' ≤ $300 — clearing portal_blocked for student', student?.id);
         student.portal_blocked = false;
         supabaseClient.from('students').update({ portal_blocked: false }).eq('id', student.id);
         // fire-and-forget: portal proceeds normally; DB catches up in background
@@ -9280,6 +9280,11 @@
       // Applies to real students AND admin impersonation (so admin sees the same view as student).
       if (displayUnpaidAmount > 300) {
         debugLog('🔒 DEBT LOCK: balance $' + displayUnpaidAmount.toFixed(0) + ' > $300 — redirecting to payment gate');
+        // Auto-enable portal_blocked so Student-Manager card shows the red toggle
+        if (student && !student.portal_blocked) {
+          student.portal_blocked = true;
+          supabaseClient.from('students').update({ portal_blocked: true }).eq('id', student.id);
+        }
         const _unpaidDatesList = normalizeClassDateList(window.currentUnpaidClasses || []);
         const _gateParams = new URLSearchParams({
           student_name    : student?.name    || '',
