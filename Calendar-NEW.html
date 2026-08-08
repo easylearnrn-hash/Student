@@ -2414,9 +2414,6 @@
 
           // Build indexes for optimized lookups
           buildIndexes();
-
-          // Sync portal_blocked for all students based on real debt (fire-and-forget)
-          setTimeout(syncPortalBlockedStatus, 0);
         } catch (error) {
           console.error('❌ Error loading data:', error);
           
@@ -2428,47 +2425,7 @@
       }
 
       // ============================================================
-      // � PORTAL BLOCK SYNC
-      // Runs once after data loads. Uses getUnpaidClassDates (full schedule-based
-      // calculation) to auto-set portal_blocked in the DB for every student.
-      // ============================================================
-      async function syncPortalBlockedStatus() {
-        const updates = []; // { id, portal_blocked }
-        studentsData.forEach(student => {
-          if (!student.group_name || student.status === 'paused' || student.status === 'graduated') return;
-          if (student.show_in_grid === false || student.show_in_grid === 'false') return;
-
-          const pricePerClass = getStudentClassPrice(student);
-          const isFree = !pricePerClass || student.notes?.includes('[ARNOMA_FREE_STUDENT]');
-          if (isFree) return;
-
-          const unpaidDates = getUnpaidClassDates(student);
-          const unpaidAmount = unpaidDates.length * pricePerClass;
-          const shouldBlock = unpaidAmount > 300;
-
-          if (shouldBlock && !student.portal_blocked) {
-            updates.push({ id: student.id, portal_blocked: true });
-            student.portal_blocked = true;
-          } else if (!shouldBlock && student.portal_blocked) {
-            updates.push({ id: student.id, portal_blocked: false });
-            student.portal_blocked = false;
-          }
-        });
-
-        if (updates.length === 0) return;
-
-        // Batch update in chunks of 20
-        for (let i = 0; i < updates.length; i += 20) {
-          const chunk = updates.slice(i, i + 20);
-          for (const u of chunk) {
-            await supabaseClient.from('students').update({ portal_blocked: u.portal_blocked }).eq('id', u.id);
-          }
-        }
-        console.log(`[ARNOMA] 🔒 portal_blocked synced for ${updates.length} student(s)`);
-      }
-
-      // ============================================================
-      // �📅 CALENDAR RENDERING
+      // 📅 CALENDAR RENDERING
       // ============================================================
 
       // Parse schedule string (e.g., "Mon 8:00 PM, Wed 8:00 PM")
