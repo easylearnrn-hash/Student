@@ -9244,10 +9244,28 @@
         });
       }
 
-      // ── DEBT LOCK: if unpaid balance > $300 redirect to payment gate ──
-      // Applies to real students AND admin impersonation (so admin sees the same view as student).
+      // ── ADMIN PORTAL BLOCK: admin manually blocked this student ──
       const _isAdminViewingForGate = sessionStorage.getItem('is_admin_viewing') === 'true' ||
                                      localStorage.getItem('is_admin_viewing') === 'true';
+      if (student?.portal_blocked) {
+        debugLog('🔒 PORTAL BLOCK: admin has manually blocked this student — redirecting to payment gate');
+        const _blockParams = new URLSearchParams({
+          student_name    : student?.name    || '',
+          student_id      : String(student?.id || ''),
+          email           : student?.email   || '',
+          group_name      : String(student?.group_name || student?.group_letter || ''),
+          amount          : String(displayUnpaidAmount || 0),
+          currency        : 'usd',
+          invoice_ref     : `block-${student?.id || 'unknown'}`,
+          gate            : '1',
+          is_admin        : _isAdminViewingForGate ? '1' : '0',
+        });
+        window.location.replace('payment.html?' + _blockParams.toString());
+        return;
+      }
+
+      // ── DEBT LOCK: if unpaid balance > $300 redirect to payment gate ──
+      // Applies to real students AND admin impersonation (so admin sees the same view as student).
       if (displayUnpaidAmount > 300) {
         debugLog('🔒 DEBT LOCK: balance $' + displayUnpaidAmount.toFixed(0) + ' > $300 — redirecting to payment gate');
         const _unpaidDatesList = normalizeClassDateList(window.currentUnpaidClasses || []);

@@ -791,6 +791,22 @@
       }
       .elegant-toggle input:checked + .elegant-toggle-slider:before { transform: translateX(18px); }
 
+      /* Portal-block toggle (red variant) */
+      .block-portal-toggle { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 2px; }
+      .block-portal-toggle .elegant-toggle input:checked + .elegant-toggle-slider {
+        background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+        border-color: rgba(239,68,68,0.6);
+        box-shadow: 0 0 12px rgba(239,68,68,0.4), inset 0 1px 2px rgba(255,255,255,0.1);
+      }
+      .block-portal-label {
+        font-family: var(--font-sans);
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.10em;
+        color: rgba(239,68,68,0.6);
+        font-weight: 700;
+      }
+
       /* Status pill (card) */
       .status-pill {
         padding: 7px 14px;
@@ -3395,7 +3411,8 @@
                 isFree: isFreeStudent,
                 status: s.status || 'active',
                 showInCalendar: s.show_in_grid !== false,
-                start_date: s.start_date ? s.start_date.split('T')[0] : null
+                start_date: s.start_date ? s.start_date.split('T')[0] : null,
+                portalBlocked: s.portal_blocked === true
               };
               
               debugLog(`👤 Student ${mappedStudent.id} (${mappedStudent.name}):`, {
@@ -3546,6 +3563,7 @@
             status: student.status || 'active',
             role: student.role || 'student',  // CRITICAL: Must be 'student' or 'admin'
             show_in_grid: student.showInCalendar !== false,
+            portal_blocked: student.portalBlocked === true,
             start_date: student.start_date || null,
             updated_at: new Date().toISOString()
           };
@@ -3750,6 +3768,13 @@
               </div>
               <div class="student-card-actions">
                 <div class="status-pill ${student.status}" data-action="cycle-status" data-student-id="${student.id}">${student.status}</div>
+                <div class="block-portal-toggle" onclick="event.stopPropagation()">
+                  <label class="elegant-toggle">
+                    <input type="checkbox" ${student.portalBlocked ? 'checked' : ''} data-action="toggle-portal-block" data-student-id="${student.id}" />
+                    <span class="elegant-toggle-slider"></span>
+                  </label>
+                  <div class="block-portal-label">Block</div>
+                </div>
               </div>
             </div>
           </div>`;
@@ -7018,6 +7043,18 @@
         renderStudentCards();
       }
 
+      async function togglePortalBlock(studentId, isBlocked) {
+        const student = students.find(s => s.id === studentId);
+        if (!student) return;
+        student.portalBlocked = isBlocked;
+        try {
+          await supabaseClient.from('students').update({ portal_blocked: isBlocked }).eq('id', studentId);
+          debugLog(`🔒 Portal block ${isBlocked ? 'ON' : 'OFF'} for ${student.name}`);
+        } catch (err) {
+          console.error('togglePortalBlock failed:', err);
+        }
+      }
+
       function closeModal() {
         // Restore body scroll
         document.body.style.overflow = '';
@@ -7221,6 +7258,12 @@
               toggleCalendarVisibility(studentId, e.target.checked);
               return;
             }
+
+            // Check if clicked on portal-block toggle
+            if (e.target.type === 'checkbox' && e.target.dataset.action === 'toggle-portal-block') {
+              togglePortalBlock(studentId, e.target.checked);
+              return;
+            }
             
             // Check if clicked on status pill
             if (e.target.dataset.action === 'cycle-status') {
@@ -7230,19 +7273,22 @@
             }
 
             // Otherwise open modal
-            if (!e.target.closest('.card-toggle') && !e.target.closest('.status-pill')) {
+            if (!e.target.closest('.card-toggle') && !e.target.closest('.status-pill') && !e.target.closest('.block-portal-toggle')) {
               openModal(studentId);
             }
           });
 
           // Also listen for change events on checkboxes (backup)
           studentsGrid.addEventListener('change', function(e) {
+            const card = e.target.closest('.student-card');
+            if (!card) return;
+            const studentId = parseInt(card.dataset.studentId);
             if (e.target.type === 'checkbox' && e.target.dataset.action === 'toggle-calendar') {
-              const card = e.target.closest('.student-card');
-              if (!card) return;
-              const studentId = parseInt(card.dataset.studentId);
               debugLog(`🔄 Toggle changed! studentId=${studentId}, checked=${e.target.checked}`);
               toggleCalendarVisibility(studentId, e.target.checked);
+            }
+            if (e.target.type === 'checkbox' && e.target.dataset.action === 'toggle-portal-block') {
+              togglePortalBlock(studentId, e.target.checked);
             }
           });
         }
