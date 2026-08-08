@@ -209,25 +209,18 @@
       '@media (max-width: 768px) {',
       '  body.acnhs-nav-injected { padding-top: 56px !important; }',
       '  .acnhs-site-nav { height: 56px; }',
-      '  .acnhs-nav-inner { height: 56px; padding: 0 14px; gap: 8px; }',
+      /* hide brand — center the 3 action buttons symmetrically */
+      '  .acnhs-nav-inner { height: 56px; padding: 0 20px; gap: 12px; justify-content: center; }',
+      '  .acnhs-nav-brand { display: none; }',
       '  .acnhs-nav-crumb { display: none; }',
-      /* brand: only show institution name, hide subtitle */
-      '  .acnhs-nav-brand-text .acnhs-t2 { display: none; }',
-      '  .acnhs-nav-brand-text .acnhs-t1 { font-size: 12px; }',
-      '  .acnhs-nav-logo { width: 26px; height: 26px; }',
-      /* back button: keep icon+text but reduce padding */
-      '  .acnhs-nav-back { padding: 6px 12px; font-size: 11px; gap: 5px; }',
-      /* icon-only buttons on small screens */
+      /* back button: compact pill */
+      '  .acnhs-nav-back { padding: 8px 20px; font-size: 12px; gap: 6px; }',
+      /* icon-only invert + print buttons, equal size to back */
       '  .acnhs-invert-btn span, .acnhs-print-btn span { display: none; }',
-      '  .acnhs-invert-btn, .acnhs-print-btn { padding: 7px 9px; }',
+      '  .acnhs-invert-btn, .acnhs-print-btn { padding: 8px 14px; }',
       '  .acnhs-doc-hero { padding: 28px 16px 24px; margin-bottom: 24px; }',
       '  .acnhs-hero-title { font-size: 1.45rem; }',
       '  .acnhs-hero-subtitle { font-size: 13px; }',
-      '}',
-      /* ── SMALL PHONE ≤ 480 px ── */
-      '@media (max-width: 480px) {',
-      '  .acnhs-nav-brand-text .acnhs-t1 { display: none; }',
-      '  .acnhs-nav-logo { display: none; }',
       '}'
     ].join('\n');
     document.head.appendChild(s);
