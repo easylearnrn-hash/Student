@@ -3460,12 +3460,21 @@
         // Fetch students and groups (limit to prevent overload)
         const [studentsResult, groupsResult] = await Promise.all([
           supabaseClient.from('students').select('*').order('name').limit(500),
-          supabaseClient.from('groups').select('*')
+          supabaseClient
+            .from('groups')
+            .select('group_name, schedule, active')
+            .eq('active', true)
+            .order('group_name', { ascending: true })
         ]);
         
         if (studentsResult.error) {
           console.error('❌ Students query error:', studentsResult.error);
           throw studentsResult.error;
+        }
+
+        if (groupsResult.error) {
+          console.error('❌ Groups query error:', groupsResult.error);
+          throw groupsResult.error;
         }
         
         const students = studentsResult.data || [];
@@ -3557,7 +3566,7 @@
         setCachedDOM('groupFilterSelect', groupFilter);
         const currentSelection = groupFilter.value;
         const options = ['<option value="">All Groups</option>'];
-        Array.from(uniqueGroups).sort().forEach(code => {
+        Array.from(uniqueGroups).forEach(code => {
           options.push(`<option value="${code}">${formatGroupLabel(code)}</option>`);
         });
         groupFilter.innerHTML = options.join('');
