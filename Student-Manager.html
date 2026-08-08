@@ -3876,6 +3876,7 @@
       function openGroupStack(groupCode) {
         currentViewMode = 'group';
         selectedStackGroup = groupCode;
+        window._groupViewOpenedAt = Date.now();
         const label = groupCode === '__none__' ? 'No Group' : `Group ${groupCode}`;
         document.getElementById('groupViewTitle').textContent = label;
         document.getElementById('groupViewHeader').classList.add('visible');
@@ -7367,6 +7368,31 @@
             }
             if (e.target.type === 'checkbox' && e.target.dataset.action === 'toggle-portal-block') {
               togglePortalBlock(studentId, e.target.checked);
+            }
+          });
+
+          // Global click-away for group view: if click is away from cards, go back to stacks.
+          document.addEventListener('click', function(e) {
+            if (!(currentViewMode === 'group' && selectedStackGroup)) return;
+            if (Date.now() - (window._groupViewOpenedAt || 0) < 180) return;
+
+            const clickedCard = e.target.closest('.student-card');
+            if (clickedCard) return;
+
+            const SAFE_ZONE_PX = 2;
+            const clickX = e.clientX;
+            const clickY = e.clientY;
+            const cards = studentsGrid.querySelectorAll('.student-card');
+            const withinSafeZone = Array.from(cards).some(cardEl => {
+              const rect = cardEl.getBoundingClientRect();
+              return clickX >= rect.left - SAFE_ZONE_PX &&
+                     clickX <= rect.right + SAFE_ZONE_PX &&
+                     clickY >= rect.top - SAFE_ZONE_PX &&
+                     clickY <= rect.bottom + SAFE_ZONE_PX;
+            });
+
+            if (!withinSafeZone) {
+              showStacksView();
             }
           });
         }
