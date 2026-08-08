@@ -3370,6 +3370,20 @@
           .filter(alias => alias && alias.length > 0); // Remove empty entries
       }
 
+      function buildStudentSearchBlob(student) {
+        return [
+          student.name,
+          student.group,
+          student.phone,
+          Array.isArray(student.email) ? student.email.join(' ') : student.email,
+          student.notes,
+          Array.isArray(student.aliases) ? student.aliases.join(' ') : student.aliases,
+          student.balance,
+          student.price_per_class,
+          student.status
+        ].filter(Boolean).join(' ').toLowerCase();
+      }
+
       async function loadStudents() {
         if (!supabaseClient) {
           console.error('❌ Supabase not initialized');
@@ -3448,6 +3462,8 @@
                 start_date: s.start_date ? s.start_date.split('T')[0] : null,
                 portalBlocked: s.portal_blocked === true
               };
+
+              mappedStudent._searchBlob = buildStudentSearchBlob(mappedStudent);
               
               debugLog(`👤 Student ${mappedStudent.id} (${mappedStudent.name}):`, {
                 supabase_show_in_grid: s.show_in_grid,
@@ -3553,6 +3569,8 @@
           console.error('❌ Supabase not initialized');
           return false;
         }
+
+        student._searchBlob = buildStudentSearchBlob(student);
 
         let studentData = null; // Declare here so it's accessible in catch block
 
@@ -4374,17 +4392,7 @@
         filteredStudents = students.filter(student => {
           // Search filter - searches across all fields
           if (searchTerm) {
-            const searchableText = [
-              student.name,
-              student.group,
-              student.phone,
-              Array.isArray(student.email) ? student.email.join(' ') : student.email,
-              student.notes,
-              Array.isArray(student.aliases) ? student.aliases.join(' ') : student.aliases,
-              student.balance,
-              student.price_per_class,
-              student.status
-            ].filter(Boolean).join(' ').toLowerCase();
+            const searchableText = student._searchBlob || buildStudentSearchBlob(student);
             
             if (!searchableText.includes(searchTerm)) {
               return false;
@@ -7384,10 +7392,21 @@
             const clickedCard = e.target.closest('.student-card');
             if (clickedCard) return;
 
+            // Fast path: clicks outside the grid should immediately return to stacks
+            // without scanning all student card bounds.
+            if (!e.target.closest('#studentsGrid')) {
+              showStacksView();
+              return;
+            }
+
             const SAFE_ZONE_PX = 2;
             const clickX = e.clientX;
             const clickY = e.clientY;
             const cards = studentsGrid.querySelectorAll('.student-card');
+            if (cards.length === 0) {
+              showStacksView();
+              return;
+            }
             const withinSafeZone = Array.from(cards).some(cardEl => {
               const rect = cardEl.getBoundingClientRect();
               return clickX >= rect.left - SAFE_ZONE_PX &&
