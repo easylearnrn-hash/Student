@@ -48,19 +48,9 @@
       '  padding: 0 40px;',
       '  display: flex; align-items: center; justify-content: space-between; gap: 20px;',
       '}',
-      '.acnhs-nav-right {',
-      '  display: inline-flex; align-items: center; gap: 10px;',
-      '  margin-left: auto; flex-shrink: 0;',
-      '}',
       '.acnhs-nav-brand {',
       '  display: flex; align-items: center; gap: 12px;',
       '  text-decoration: none; flex-shrink: 0;',
-      '}',
-      '.acnhs-brand-short {',
-      '  display: none;',
-      '  font-family: \'Playfair Display\', Georgia, serif;',
-      '  font-size: 14px; font-weight: 700;',
-      '  color: #c9a84c; letter-spacing: .03em;',
       '}',
       '.acnhs-nav-logo {',
       '  width: 34px; height: 34px; border-radius: 50%;',
@@ -98,7 +88,6 @@
       '  transition: background .2s, border-color .2s, color .2s, transform .2s, box-shadow .2s;',
       '  flex-shrink: 0; white-space: nowrap;',
       '}',
-      '.acnhs-nav-back .acnhs-back-label { display: inline; }',
       '.acnhs-nav-back:hover {',
       '  background: rgba(201,168,76,0.16);',
       '  border-color: #c9a84c; color: #fff;',
@@ -216,36 +205,29 @@
       /* ── PRINT ── */
       '@media print { .acnhs-site-nav { display: none !important; } body.acnhs-nav-injected { padding-top: 0 !important; } }',
 
-      /* ── MOBILE ── */
-      '@media (max-width: 1024px) {',
-      '  .acnhs-nav-inner { padding: 0 18px; gap: 12px; }',
-      '  .acnhs-nav-back { padding: 8px 14px; }',
-      '  .acnhs-print-btn, .acnhs-invert-btn { padding: 8px 12px; }',
-      '}',
+      /* ── MOBILE ≤ 768 px ── */
       '@media (max-width: 768px) {',
-      '  body.acnhs-nav-injected { padding-top: 68px !important; }',
-      '  .acnhs-site-nav { height: 68px; }',
-      '  .acnhs-nav-inner { padding: 0 12px; gap: 10px; }',
-      '  .acnhs-nav-brand-text { display: none; }',
-      '  .acnhs-brand-short { display: inline; }',
+      '  body.acnhs-nav-injected { padding-top: 56px !important; }',
+      '  .acnhs-site-nav { height: 56px; }',
+      '  .acnhs-nav-inner { height: 56px; padding: 0 14px; gap: 8px; }',
       '  .acnhs-nav-crumb { display: none; }',
-      '  .acnhs-nav-back { padding: 7px 10px; font-size: 11px; gap: 6px; }',
-      '  .acnhs-nav-back .acnhs-back-label { display: none; }',
-      '  .acnhs-nav-back::after { content: "Back"; }',
-      '  .acnhs-nav-right { gap: 8px; }',
-      '  .acnhs-print-btn, .acnhs-invert-btn { min-width: 40px; justify-content: center; padding: 7px 10px; }',
+      /* brand: only show institution name, hide subtitle */
+      '  .acnhs-nav-brand-text .acnhs-t2 { display: none; }',
+      '  .acnhs-nav-brand-text .acnhs-t1 { font-size: 12px; }',
+      '  .acnhs-nav-logo { width: 26px; height: 26px; }',
+      /* back button: keep icon+text but reduce padding */
+      '  .acnhs-nav-back { padding: 6px 12px; font-size: 11px; gap: 5px; }',
+      /* icon-only buttons on small screens */
       '  .acnhs-invert-btn span, .acnhs-print-btn span { display: none; }',
+      '  .acnhs-invert-btn, .acnhs-print-btn { padding: 7px 9px; }',
       '  .acnhs-doc-hero { padding: 28px 16px 24px; margin-bottom: 24px; }',
-      '  .acnhs-hero-title { font-size: 1.42rem; line-height: 1.2; }',
-      '  .acnhs-hero-subtitle { font-size: 14px; margin-bottom: 14px; }',
-      '  .acnhs-hero-meta { gap: 8px; font-size: 10px; }',
-      '  :where(table) { display: block; width: 100% !important; overflow-x: auto; -webkit-overflow-scrolling: touch; }',
-      '  :where(pre) { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }',
-      '  :where(img, iframe, video) { max-width: 100%; height: auto; }',
+      '  .acnhs-hero-title { font-size: 1.45rem; }',
+      '  .acnhs-hero-subtitle { font-size: 13px; }',
       '}',
+      /* ── SMALL PHONE ≤ 480 px ── */
       '@media (max-width: 480px) {',
-      '  .acnhs-nav-back::after { content: "Portal"; }',
-      '  .acnhs-print-btn { display: none; }',
+      '  .acnhs-nav-brand-text .acnhs-t1 { display: none; }',
+      '  .acnhs-nav-logo { display: none; }',
       '}'
     ].join('\n');
     document.head.appendChild(s);
@@ -322,7 +304,6 @@
       '<div class="acnhs-nav-inner">' +
         '<a href="' + portalUrl + '" class="acnhs-nav-brand">' +
           (logoUrl ? '<img class="acnhs-nav-logo" src="' + logoUrl + '" alt="ACNHS Seal" onerror="this.style.display=\'none\'">' : '') +
-          '<span class="acnhs-brand-short">ACNHS</span>' +
           '<div class="acnhs-nav-brand-text">' +
             '<span class="acnhs-t1">Armenian College of Nursing</span>' +
             '<span class="acnhs-t2">&amp; Health Sciences</span>' +
@@ -335,12 +316,11 @@
           '<span class="sep">&rsaquo;</span>' +
           '<span class="curr">' + _esc(category) + '</span>' +
         '</nav>' +
-        '<div class="acnhs-nav-right">' +
         '<a href="' + portalUrl + '" class="acnhs-nav-back">' +
           '<svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">' +
             '<path d="M8 2.5L4 6.5L8 10.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
           '</svg>' +
-          '<span class="acnhs-back-label">Back to Portal</span>' +
+          '&#8592; Back to Portal' +
         '</a>' +
         '<button class="acnhs-invert-btn" type="button" aria-pressed="false" title="Invert note colors">' +
           '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -358,7 +338,6 @@
           '</svg>' +
           '<span>Print</span>' +
         '</button>' +
-        '</div>' +
       '</div>';
 
     /* ── Build the hero ── */
