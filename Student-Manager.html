@@ -4126,6 +4126,12 @@
 
         const normalizeDate = (value) => {
           if (!value) return '';
+          if (value instanceof Date) {
+            const y = value.getFullYear();
+            const m = String(value.getMonth() + 1).padStart(2, '0');
+            const d = String(value.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+          }
           const raw = String(value).trim();
           if (!raw) return '';
           if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
@@ -4193,7 +4199,7 @@
         const groupCodes = Array.from(new Set(payingStudents.map(s => s.groupCode).filter(Boolean)));
 
         const [prRes, skipRes, grpRes, paymentsRes, creditsRes, absencesRes, visibilityRes] = await Promise.all([
-          supabaseClient.from('payment_records').select('student_id,date,for_class,for_class_dates,status,payment_method,amount').in('student_id', studentIds),
+          supabaseClient.from('payment_records').select('student_id,date,status,payment_method,amount').in('student_id', studentIds),
           groupCodes.length
             ? supabaseClient.from('skipped_classes').select('group_name,class_date').in('group_name', groupCodes).gte('class_date', FLOOR)
             : Promise.resolve({ data: [], error: null }),
@@ -4289,17 +4295,15 @@
           }
         });
 
-        const idsByName = new Map();
+        const portalNamesByStudent = new Map();
         payingStudents.forEach(s => {
           const sid = String(s.id);
           const aliases = Array.isArray(s.aliases) ? s.aliases : [];
-          [s.name, ...aliases]
-            .map(normalizeName)
+          const names = [s.name, ...aliases]
             .filter(Boolean)
-            .forEach(nameKey => {
-              if (!idsByName.has(nameKey)) idsByName.set(nameKey, new Set());
-              idsByName.get(nameKey).add(sid);
-            });
+            .map(n => String(n).replace(/[^a-zA-Z0-9 ]/g, '').trim().toLowerCase())
+            .filter(Boolean);
+          portalNamesByStudent.set(sid, names);
         });
 
         payments.forEach(p => {
@@ -4313,14 +4317,17 @@
             .forEach(id => { if (paidByStudent.has(id)) matchedIds.add(id); });
 
           if (matchedIds.size === 0) {
-            [p.payer_name, p.resolved_student_name]
-              .map(normalizeName)
-              .filter(Boolean)
-              .forEach(nameKey => {
-                const ids = idsByName.get(nameKey);
-                if (!ids) return;
-                ids.forEach(id => matchedIds.add(id));
-              });
+            const paymentTextFields = [p.payer_name, p.resolved_student_name]
+              .map(v => String(v || '').toLowerCase())
+              .filter(Boolean);
+
+            portalNamesByStudent.forEach((names, id) => {
+              if (!names.length) return;
+              const hasNameMatch = names.some(name =>
+                paymentTextFields.some(field => field.includes(name))
+              );
+              if (hasNameMatch) matchedIds.add(id);
+            });
           }
 
           matchedIds.forEach(id => {
