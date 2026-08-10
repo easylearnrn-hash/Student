@@ -580,32 +580,64 @@
         align-self: stretch;
         background: rgba(74,222,128,0.18);
       }
-      .debt-alert-list {
+      .debt-alert {
         margin-top: 10px;
         padding: 14px 20px;
         background: rgba(239,68,68,0.06);
-        border: 1px solid rgba(239,68,68,0.2);
+        border: 1px solid rgba(239,68,68,0.22);
         border-radius: 14px;
+        position: relative;
+        z-index: 10;
+      }
+      .debt-alert-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        user-select: none;
+        gap: 10px;
       }
       .debt-alert-title {
         font-size: 10px;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: rgba(239,68,68,0.65);
-        margin-bottom: 10px;
+        letter-spacing: 0.12em;
+        color: rgba(239,68,68,0.75);
       }
+      .debt-alert-count {
+        font-size: 10px;
+        font-weight: 700;
+        color: rgba(239,68,68,0.6);
+        background: rgba(239,68,68,0.1);
+        border-radius: 20px;
+        padding: 2px 8px;
+        margin-left: auto;
+      }
+      .debt-alert-chevron {
+        font-size: 11px;
+        color: rgba(239,68,68,0.5);
+        transition: transform 0.2s;
+      }
+      .debt-alert-chevron.open { transform: rotate(180deg); }
+      .debt-alert-list {
+        display: none;
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .debt-alert-list.collapsed { display: none; }
       .debt-alert-row {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        font-size: 12px;
         padding: 5px 0;
         border-bottom: 1px solid rgba(239,68,68,0.08);
-        font-size: 12px;
       }
       .debt-alert-row:last-child { border-bottom: none; }
       .debt-alert-name { color: rgba(245,240,232,0.85); font-weight: 500; }
-      .debt-alert-amount { color: #f87171; font-weight: 700; font-size: 11px; }
+      .debt-alert-amount { color: #f87171; font-weight: 700; font-variant-numeric: tabular-nums; }
       #groupViewHeader {
         display: none;
         max-width: 1400px;
@@ -4047,60 +4079,90 @@
         }
 
         grid.innerHTML = html;
-        updateDebtAlertList();
+        // Async: calculate real debt per student and append alert section
+        buildDebtAlertSection(sourceStudents);
       }
 
-      async function updateDebtAlertList() {
-        const grid = document.getElementById('studentsGrid');
-        if (!grid) return;
-        const existing = grid.querySelector('.debt-alert-list');
-        if (existing) existing.remove();
+      async function buildDebtAlertSection(sourceStudents) {
+        const FLOOR = '2026-05-01';
+        const today = new Date().toISOString().split('T')[0];
+        const DAY_IDX = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
 
-        const floor = '2026-05-01';
-        const todayMs = Date.now();
-        const floorMs = new Date(floor).getTime();
+        const payingStudents = sourceStudents.filter(s => !s.isFree && s.showInCalendar && parseFloat(s.price_per_class) > 0);
+        if (!payingStudents.length) return;
+        const ids = payingStudents.map(s => s.id);
 
-        const candidates = students.filter(s => !s.isFree && s.id);
-        if (!candidates.length) return;
+        const [prRes, skipRes, grpRes] = await Promise.all([
+          supabaseClient.from('payment_records').select('student_id,date').in('student_id', ids).in('status', ['paid','excused','ignored']),
+          supabaseClient.from('skipped_classes').select('group_name,class_date').gte('class_date', FLOOR),
+          supabaseClient.from('groups').select('group_name,schedule')
+        ]);
 
-        const { data: records } = await supabaseClient
-          .from('payment_records')
-          .select('student_id, date')
-          .in('student_id', candidates.map(s => s.id))
-          .in('status', ['paid', 'excused'])
-          .gte('date', floor);
-
-        const paidMap = new Map();
-        (records || []).forEach(r => {
+        // paid dates per student
+        const paidMap = {};
+        (prRes.data || []).forEach(r => {
           const k = String(r.student_id);
-          paidMap.set(k, (paidMap.get(k) || 0) + 1);
+          if (!paidMap[k]) paidMap[k] = new Set();
+          const d = (r.date || '').split('T')[0];
+          if (d) paidMap[k].add(d);
         });
 
-        const debtors = candidates
-          .map(s => {
-            const startMs = Math.max(new Date(s.start_date || floor).getTime(), floorMs);
-            const weeksElapsed = Math.max(0, (todayMs - startMs) / (7 * 24 * 60 * 60 * 1000));
-            const cpw = groupScheduleMap[s.groupCode] || 1;
-            const expected = Math.floor(weeksElapsed * cpw);
-            const paid = paidMap.get(String(s.id)) || 0;
-            const debt = Math.max(0, expected - paid) * (parseFloat(s.price_per_class) || 0);
-            return { name: s.name, debt };
-          })
-          .filter(d => d.debt > 200)
-          .sort((a, b) => b.debt - a.debt);
+        // skipped dates per group
+        const skipMap = {};
+        (skipRes.data || []).forEach(r => {
+          const g = r.group_name;
+          if (!skipMap[g]) skipMap[g] = new Set();
+          const d = (r.class_date || '').split('T')[0];
+          if (d) skipMap[g].add(d);
+        });
+
+        // schedule day indices per group
+        const schedMap = {};
+        (grpRes.data || []).forEach(g => {
+          const code = canonicalizeGroupCode(g.group_name || '');
+          if (!code) return;
+          schedMap[code] = (g.schedule || '').split(',').map(p => DAY_IDX[p.trim().split(/\s/)[0].toLowerCase()]).filter(n => n !== undefined && n >= 0);
+        });
+
+        const todayDate = new Date(today + 'T00:00:00');
+        const debtors = [];
+
+        payingStudents.forEach(s => {
+          const days = schedMap[s.groupCode];
+          if (!days || !days.length) return;
+          const price = parseFloat(s.price_per_class);
+          const floorStr = (s.start_date && s.start_date > FLOOR) ? s.start_date : FLOOR;
+          const cur = new Date(floorStr + 'T00:00:00');
+          const paid = paidMap[String(s.id)] || new Set();
+          const skipped = skipMap[s.groupCode] || new Set();
+          let unpaid = 0;
+          while (cur <= todayDate) {
+            const ds = cur.toISOString().split('T')[0];
+            if (days.includes(cur.getDay()) && !skipped.has(ds) && !paid.has(ds)) unpaid++;
+            cur.setDate(cur.getDate() + 1);
+          }
+          const debt = unpaid * price;
+          if (debt > 200) debtors.push({ name: s.name, debt });
+        });
 
         if (!debtors.length) return;
+        debtors.sort((a, b) => b.debt - a.debt);
+
+        const grid = DOMCache.studentsGrid || document.getElementById('studentsGrid');
+        if (!grid || !grid.querySelector('.revenue-summary')) return;
 
         const el = document.createElement('div');
-        el.className = 'debt-alert-list';
-        el.innerHTML = `<div class="debt-alert-title">⚠ Outstanding Debt ($200+)</div>` +
-          debtors.map(d =>
-            `<div class="debt-alert-row">
-              <span class="debt-alert-name">${d.name}</span>
-              <span class="debt-alert-amount">$${Math.round(d.debt).toLocaleString('en-US')}</span>
-            </div>`
-          ).join('');
-        grid.querySelector('.revenue-summary')?.after(el);
+        el.className = 'debt-alert';
+        el.innerHTML = `
+          <div class="debt-alert-header" onclick="this.nextElementSibling.classList.toggle('collapsed');this.querySelector('.debt-alert-chevron').classList.toggle('open')">
+            <span class="debt-alert-title">Outstanding Debt</span>
+            <span class="debt-alert-count">${debtors.length} student${debtors.length !== 1 ? 's' : ''}</span>
+            <span class="debt-alert-chevron">&#9660;</span>
+          </div>
+          <div class="debt-alert-list collapsed">
+            ${debtors.map(d => `<div class="debt-alert-row"><span class="debt-alert-name">${d.name}</span><span class="debt-alert-amount">$${d.debt.toLocaleString('en-US')}</span></div>`).join('')}
+          </div>`;
+        grid.querySelector('.revenue-summary').after(el);
       }
 
       function openGroupStack(groupCode) {
