@@ -543,18 +543,27 @@
       }
 
       .revenue-summary {
+        width: min(560px, 100%);
         display: flex;
-        gap: 16px;
+        gap: 26px;
         justify-content: center;
         flex-wrap: wrap;
-        margin-top: 300px;
-        padding: 18px 24px;
+        margin-top: 0;
+        padding: 22px 30px;
         background: rgba(74,222,128,0.05);
         border: 1px solid rgba(74,222,128,0.18);
         border-radius: 16px;
         position: relative;
         z-index: 10;
+      }
+      .stacks-footer {
         grid-column: 1 / -1;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        margin-top: 18px;
       }
       .revenue-summary-item {
         display: flex;
@@ -563,14 +572,14 @@
         gap: 4px;
       }
       .revenue-summary-label {
-        font-size: 10px;
+        font-size: 12px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.12em;
         color: rgba(74,222,128,0.6);
       }
       .revenue-summary-value {
-        font-size: 22px;
+        font-size: 24px;
         font-weight: 800;
         color: #4ade80;
         letter-spacing: -0.01em;
@@ -582,29 +591,30 @@
         background: rgba(74,222,128,0.18);
       }
       .debt-alert {
-        margin-top: 10px;
-        padding: 14px 20px;
-        background: rgba(239,68,68,0.06);
-        border: 1px solid rgba(239,68,68,0.22);
-        border-radius: 14px;
+        width: min(560px, 100%);
+        padding: 6px 2px;
+        background: transparent;
+        border-top: 1px solid rgba(239,68,68,0.22);
+        border-bottom: 1px solid rgba(239,68,68,0.22);
         position: relative;
         z-index: 10;
-        grid-column: 1 / -1;
       }
-      .debt-alert--collapsed {
-        padding: 6px 16px;
-        border-radius: 8px;
+      .debt-alert.expanded {
+        padding: 12px 16px;
+        border: 1px solid rgba(239,68,68,0.22);
+        border-radius: 12px;
+        background: rgba(239,68,68,0.06);
       }
-      .debt-alert--collapsed .debt-alert-list { display: none; }
       .debt-alert-header {
         display: flex;
         align-items: center;
+        justify-content: center;
         cursor: pointer;
         user-select: none;
-        gap: 10px;
+        gap: 8px;
       }
       .debt-alert-title {
-        font-size: 10px;
+        font-size: 12px;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.12em;
@@ -617,20 +627,21 @@
         background: rgba(239,68,68,0.1);
         border-radius: 20px;
         padding: 2px 8px;
-        margin-left: auto;
       }
       .debt-alert-chevron {
         font-size: 11px;
         color: rgba(239,68,68,0.5);
         transition: transform 0.2s;
       }
-      .debt-alert--collapsed .debt-alert-chevron { transform: rotate(-90deg); }
+      .debt-alert.expanded .debt-alert-chevron { transform: rotate(90deg); }
+      .debt-alert.collapsed .debt-alert-count { display: none; }
       .debt-alert-list {
+        display: none;
         margin-top: 12px;
-        display: flex;
         flex-direction: column;
         gap: 6px;
       }
+      .debt-alert.expanded .debt-alert-list { display: flex; }
       .debt-alert-row {
         display: flex;
         justify-content: space-between;
@@ -3653,6 +3664,7 @@
                 status: s.status || 'active',
                 showInCalendar: s.show_in_grid !== false,
                 start_date: s.start_date ? s.start_date.split('T')[0] : null,
+                created_at: s.created_at ? s.created_at.split('T')[0] : null,
                 portalBlocked: s.portal_blocked === true
               };
 
@@ -4069,122 +4081,391 @@
           const totalMonthly = totalWeekly * 4;
           const fmtK = v => `$${Math.round(v).toLocaleString('en-US')}`;
           html += `
-            <div class="revenue-summary">
-              <div class="revenue-summary-item">
-                <div class="revenue-summary-label">Per Week</div>
-                <div class="revenue-summary-value">${fmtK(totalWeekly)}</div>
+            <div class="stacks-footer">
+              <div class="revenue-summary">
+                <div class="revenue-summary-item">
+                  <div class="revenue-summary-label">Per Week</div>
+                  <div class="revenue-summary-value">${fmtK(totalWeekly)}</div>
+                </div>
+                <div class="revenue-summary-divider"></div>
+                <div class="revenue-summary-item">
+                  <div class="revenue-summary-label">Per Month</div>
+                  <div class="revenue-summary-value">${fmtK(totalMonthly)}</div>
+                </div>
               </div>
-              <div class="revenue-summary-divider"></div>
-              <div class="revenue-summary-item">
-                <div class="revenue-summary-label">Per Month</div>
-                <div class="revenue-summary-value">${fmtK(totalMonthly)}</div>
-              </div>
+              <div id="debtAlertMount"></div>
             </div>`;
         }
 
         grid.innerHTML = html;
-        // Async: calculate real debt per student and append alert section
+        // Async: build debt list under the summary using Calendar-NEW data sources.
         buildDebtAlertSection(sourceStudents);
       }
 
       async function buildDebtAlertSection(sourceStudents) {
         const FLOOR = '2026-05-01';
-        const today = new Date().toISOString().split('T')[0];
-        const DAY_IDX = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
+        const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const fullDayMap = { Mon: 'Monday', Tue: 'Tuesday', Wed: 'Wednesday', Thu: 'Thursday', Fri: 'Friday', Sat: 'Saturday', Sun: 'Sunday' };
 
-        const paying = sourceStudents.filter(s => !s.isFree && s.showInCalendar && parseFloat(s.price_per_class) > 0);
-        if (!paying.length) return;
-        const ids = paying.map(s => s.id);
-        const idList = ids.join(',');
+        const mount = document.getElementById('debtAlertMount');
+        if (!mount) return;
+        mount.innerHTML = '';
 
-        const [prRes, zelleRes, creditRes, skipRes, grpRes] = await Promise.all([
-          supabaseClient.from('payment_records').select('student_id,date').in('student_id', ids).in('status', ['paid','excused','ignored']),
-          supabaseClient.from('payments').select('student_id,linked_student_id,for_class,for_class_dates,email_date').or(`student_id.in.(${idList}),linked_student_id.in.(${idList})`),
-          supabaseClient.from('credit_payments').select('student_id,applied_class_date').in('student_id', ids),
-          supabaseClient.from('skipped_classes').select('group_name,class_date').gte('class_date', FLOOR),
-          supabaseClient.from('groups').select('group_name,schedule')
+        const toLADateStr = (input) => {
+          const dateObj = input instanceof Date ? input : new Date(input);
+          if (Number.isNaN(dateObj.getTime())) return '';
+          const parts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Los_Angeles',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          }).formatToParts(dateObj);
+          const get = type => (parts.find(p => p.type === type) || {}).value || '';
+          return `${get('year')}-${get('month')}-${get('day')}`;
+        };
+
+        const normalizeDate = (value) => {
+          if (!value) return '';
+          const raw = String(value).trim();
+          if (!raw) return '';
+          if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+          if (/^\d{4}-\d{2}-\d{2}T/.test(raw)) return raw.split('T')[0];
+          if (/^\d{10,}$/.test(raw)) {
+            const numeric = Number(raw);
+            if (Number.isFinite(numeric)) {
+              const millis = raw.length >= 13 ? numeric : numeric * 1000;
+              return toLADateStr(new Date(millis));
+            }
+          }
+          return toLADateStr(raw);
+        };
+
+        const extractForClassDates = (record, fallbackDate) => {
+          if (!record) return [];
+          let rawDates = record.for_class_dates != null ? record.for_class_dates
+            : record.for_class != null ? record.for_class
+            : [];
+
+          if (typeof rawDates === 'string') {
+            const trimmed = rawDates.trim();
+            if (!trimmed || trimmed === '[]' || trimmed === '{}' || trimmed === 'null') {
+              rawDates = [];
+            } else if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+              rawDates = trimmed.slice(1, -1).split(',').map(d => d.trim()).filter(Boolean);
+            } else {
+              try { rawDates = JSON.parse(trimmed); }
+              catch (_) { rawDates = trimmed.split(',').map(d => d.trim()); }
+            }
+          }
+
+          if (rawDates && !Array.isArray(rawDates) && typeof rawDates === 'object') {
+            rawDates = Object.values(rawDates);
+          }
+          if (!Array.isArray(rawDates)) rawDates = rawDates ? [rawDates] : [];
+
+          const normalized = rawDates
+            .map(entry => {
+              if (!entry || entry === 'null' || entry === 'NULL') return '';
+              if (typeof entry === 'object') {
+                return entry.class_date || entry.date || entry.for_class || entry.classDate || entry.value || '';
+              }
+              return String(entry).trim();
+            })
+            .map(normalizeDate)
+            .filter(Boolean);
+
+          if (normalized.length === 0 && fallbackDate) {
+            const fallback = normalizeDate(fallbackDate);
+            return fallback ? [fallback] : [];
+          }
+          return Array.from(new Set(normalized));
+        };
+
+        const normalizeName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const ignoredDebtIds = new Set(JSON.parse(localStorage.getItem('arnoma-forecast-ignored-debts') || '[]').map(String));
+        const todayDateStr = toLADateStr(new Date());
+        const todayDate = new Date(`${todayDateStr}T00:00:00`);
+
+        const payingStudents = sourceStudents.filter(s => !s.isFree && parseFloat(s.price_per_class) > 0);
+        if (!payingStudents.length) return;
+
+        const studentIds = payingStudents.map(s => s.id);
+        const groupCodes = Array.from(new Set(payingStudents.map(s => s.groupCode).filter(Boolean)));
+
+        const [prRes, skipRes, grpRes, paymentsRes, creditsRes, absencesRes, visibilityRes] = await Promise.all([
+          supabaseClient.from('payment_records').select('student_id,date,for_class,for_class_dates,status,payment_method,amount').in('student_id', studentIds),
+          groupCodes.length
+            ? supabaseClient.from('skipped_classes').select('group_name,class_date').in('group_name', groupCodes).gte('class_date', FLOOR)
+            : Promise.resolve({ data: [], error: null }),
+          groupCodes.length
+            ? supabaseClient.from('groups').select('group_name,schedule,one_time_schedules').in('group_name', groupCodes)
+            : Promise.resolve({ data: [], error: null }),
+          supabaseClient.from('payments').select('for_class,for_class_dates,email_date,payer_name,resolved_student_name,student_id,linked_student_id'),
+          supabaseClient.from('credit_payments').select('student_id,class_date,applied_class_date').in('student_id', studentIds),
+          supabaseClient.from('student_absences').select('student_id,class_date').in('student_id', studentIds),
+          supabaseClient.from('student_visibility_history').select('student_id,visible,effective_date').in('student_id', studentIds).order('effective_date', { ascending: true })
         ]);
 
-        // Extract YYYY-MM-DD dates from a Zelle payments row
-        const zDates = p => {
-          let out = [], fcd = p.for_class_dates;
-          if (fcd) {
-            if (typeof fcd === 'string') {
-              const t = fcd.trim();
-              try { fcd = t.startsWith('{') ? t.slice(1,-1).split(',').map(x=>x.trim()) : JSON.parse(t); } catch(_) { fcd = t.split(',').map(x=>x.trim()); }
+        const paymentRecords = prRes.data || [];
+        const payments = paymentsRes.data || [];
+        const credits = creditsRes.data || [];
+        const absences = absencesRes.data || [];
+        const visibilityRows = visibilityRes.data || [];
+
+        const schedulesByGroup = new Map();
+        (grpRes.data || []).forEach(g => {
+          const code = canonicalizeGroupCode(g.group_name || '');
+          if (code) schedulesByGroup.set(code, g);
+        });
+
+        const skippedByGroup = new Map();
+        (skipRes.data || []).forEach(s => {
+          const code = canonicalizeGroupCode(s.group_name || '');
+          if (!code) return;
+          if (!skippedByGroup.has(code)) skippedByGroup.set(code, new Set());
+          const d = normalizeDate(s.class_date);
+          if (d) skippedByGroup.get(code).add(d);
+        });
+
+        const absencesByStudent = new Map();
+        absences.forEach(a => {
+          const sid = String(a.student_id || '');
+          if (!sid) return;
+          if (!absencesByStudent.has(sid)) absencesByStudent.set(sid, new Set());
+          const d = normalizeDate(a.class_date);
+          if (d) absencesByStudent.get(sid).add(d);
+        });
+
+        const visibilityByStudent = new Map();
+        visibilityRows.forEach(v => {
+          const sid = String(v.student_id || '');
+          if (!sid) return;
+          if (!visibilityByStudent.has(sid)) visibilityByStudent.set(sid, []);
+          const d = normalizeDate(v.effective_date);
+          if (!d) return;
+          visibilityByStudent.get(sid).push({
+            date: d,
+            visible: v.visible === true || String(v.visible).toLowerCase() === 'true'
+          });
+        });
+
+        const paidByStudent = new Map();
+        const ignoredByStudent = new Map();
+        const manualEnrollByStudent = new Map();
+        payingStudents.forEach(s => {
+          const sid = String(s.id);
+          paidByStudent.set(sid, new Set());
+          ignoredByStudent.set(sid, new Set());
+          manualEnrollByStudent.set(sid, new Set());
+        });
+
+        paymentRecords.forEach(pr => {
+          const sid = String(pr.student_id || '');
+          if (!paidByStudent.has(sid)) return;
+
+          const status = String(pr.status || '').toLowerCase();
+          const method = String(pr.payment_method || '').toLowerCase();
+          const amount = Number(pr.amount || 0);
+          const dates = extractForClassDates(pr, (pr.date || '').split('T')[0]);
+
+          const isManualEnroll = method === 'manual_enrollment'
+            || method === 'manual-enrollment'
+            || method === 'manual enrollment'
+            || (status === 'unpaid' && amount === 0 && (!method || method === 'manual'));
+          if (isManualEnroll) {
+            dates.forEach(d => manualEnrollByStudent.get(sid).add(d));
+          }
+
+          if (status === 'absent') return;
+
+          const isIgnored = status === 'ignored' || method === 'ignored';
+          if (isIgnored) {
+            dates.forEach(d => ignoredByStudent.get(sid).add(d));
+            return;
+          }
+
+          if (status === 'paid' || status === 'excused') {
+            dates.forEach(d => paidByStudent.get(sid).add(d));
+          }
+        });
+
+        const idsByName = new Map();
+        payingStudents.forEach(s => {
+          const sid = String(s.id);
+          const aliases = Array.isArray(s.aliases) ? s.aliases : [];
+          [s.name, ...aliases]
+            .map(normalizeName)
+            .filter(Boolean)
+            .forEach(nameKey => {
+              if (!idsByName.has(nameKey)) idsByName.set(nameKey, new Set());
+              idsByName.get(nameKey).add(sid);
+            });
+        });
+
+        payments.forEach(p => {
+          const dates = extractForClassDates(p, null);
+          if (!dates.length) return;
+
+          const matchedIds = new Set();
+          [p.student_id, p.linked_student_id]
+            .map(v => String(v || ''))
+            .filter(Boolean)
+            .forEach(id => { if (paidByStudent.has(id)) matchedIds.add(id); });
+
+          if (matchedIds.size === 0) {
+            [p.payer_name, p.resolved_student_name]
+              .map(normalizeName)
+              .filter(Boolean)
+              .forEach(nameKey => {
+                const ids = idsByName.get(nameKey);
+                if (!ids) return;
+                ids.forEach(id => matchedIds.add(id));
+              });
+          }
+
+          matchedIds.forEach(id => {
+            dates.forEach(d => paidByStudent.get(id).add(d));
+          });
+        });
+
+        credits.forEach(cp => {
+          const sid = String(cp.student_id || '');
+          if (!paidByStudent.has(sid)) return;
+          const d = normalizeDate(cp.applied_class_date || cp.class_date);
+          if (d) paidByStudent.get(sid).add(d);
+        });
+
+        const isStudentActiveOnDate = (student, dateStr, history) => {
+          if (history && history.length > 0) {
+            let lastEvent = null;
+            for (const event of history) {
+              if (event.date <= dateStr) lastEvent = event;
+              else break;
             }
-            if (Array.isArray(fcd)) fcd.forEach(d => { const s=String(d).split('T')[0]; if(/^\d{4}-\d{2}-\d{2}$/.test(s)) out.push(s); });
+            if (lastEvent !== null) return lastEvent.visible === true;
+
+            const status = String(student.status || '').toLowerCase();
+            return status !== 'graduated';
           }
-          if (!out.length && p.for_class) { const s=String(p.for_class).split('T')[0]; if(/^\d{4}-\d{2}-\d{2}$/.test(s)) out.push(s); }
-          if (!out.length && p.email_date) { const s=String(p.email_date).split('T')[0]; if(/^\d{4}-\d{2}-\d{2}$/.test(s)) out.push(s); }
-          return out;
+
+          const status = String(student.status || '').toLowerCase();
+          const currentlyOff = status === 'paused' || status === 'graduated' || student.showInCalendar === false;
+          return !currentlyOff;
         };
 
-        const paidMap = {};
-        const addPaid = (sid, date) => {
-          const k = String(sid), d = (date||'').split('T')[0];
-          if (!k || !d) return;
-          if (!paidMap[k]) paidMap[k] = new Set();
-          paidMap[k].add(d);
-        };
-        (prRes.data||[]).forEach(r => addPaid(r.student_id, r.date));
-        (zelleRes.data||[]).forEach(p => {
-          const sid = p.student_id || p.linked_student_id;
-          if (sid) zDates(p).forEach(d => addPaid(sid, d));
-        });
-        (creditRes.data||[]).forEach(r => { if (r.applied_class_date) addPaid(r.student_id, r.applied_class_date); });
-
-        const skipMap = {};
-        (skipRes.data||[]).forEach(r => {
-          if (!skipMap[r.group_name]) skipMap[r.group_name] = new Set();
-          const d = (r.class_date||'').split('T')[0]; if (d) skipMap[r.group_name].add(d);
-        });
-
-        const schedMap = {};
-        (grpRes.data||[]).forEach(g => {
-          const code = canonicalizeGroupCode(g.group_name||''); if (!code) return;
-          schedMap[code] = (g.schedule||'').split(',').map(p => DAY_IDX[p.trim().split(/\s/)[0].toLowerCase()]).filter(n => n !== undefined && n >= 0);
-        });
-
-        const todayDate = new Date(today + 'T00:00:00');
         const debtors = [];
+        payingStudents.forEach(student => {
+          const sid = String(student.id);
+          if (ignoredDebtIds.has(sid)) return;
 
-        paying.forEach(s => {
-          const days = schedMap[s.groupCode];
-          if (!days||!days.length) return;
-          const price = parseFloat(s.price_per_class);
-          const floorStr = (s.start_date && s.start_date > FLOOR) ? s.start_date : FLOOR;
-          const cur = new Date(floorStr + 'T00:00:00');
-          const paid = paidMap[String(s.id)] || new Set();
-          const skipped = skipMap[s.groupCode] || new Set();
-          let unpaid = 0;
-          while (cur <= todayDate) {
-            const ds = cur.toISOString().split('T')[0];
-            if (days.includes(cur.getDay()) && !skipped.has(ds) && !paid.has(ds)) unpaid++;
-            cur.setDate(cur.getDate() + 1);
+          const pricePerClass = parseFloat(student.price_per_class) || 0;
+          if (pricePerClass <= 0) return;
+
+          const groupCode = student.groupCode || canonicalizeGroupCode(student.group || '');
+          const groupData = schedulesByGroup.get(groupCode) || {};
+          const scheduleStr = String(groupData.schedule || '');
+          const oneTimeSchedules = Array.isArray(groupData.one_time_schedules) ? groupData.one_time_schedules : [];
+
+          const scheduleActiveDays = [];
+          ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday','Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(name => {
+            if (scheduleStr.includes(name)) {
+              const full = fullDayMap[name] || name;
+              if (!scheduleActiveDays.includes(full)) scheduleActiveDays.push(full);
+            }
+          });
+
+          const manualEnrollDates = manualEnrollByStudent.get(sid) || new Set();
+          if (scheduleActiveDays.length === 0 && oneTimeSchedules.length === 0 && manualEnrollDates.size === 0) return;
+
+          let studentStartStr = student.start_date ? String(student.start_date).split('T')[0] : null;
+          if (!studentStartStr && student.created_at) {
+            studentStartStr = String(student.created_at).split('T')[0];
           }
-          const debt = unpaid * price;
-          if (debt > 200) debtors.push({ name: s.name, debt });
+          if (!studentStartStr || studentStartStr < FLOOR) studentStartStr = FLOOR;
+
+          const skippedDates = skippedByGroup.get(groupCode) || new Set();
+          const paidDates = paidByStudent.get(sid) || new Set();
+          const absentDates = absencesByStudent.get(sid) || new Set();
+          const ignoredDates = ignoredByStudent.get(sid) || new Set();
+          const visibilityHistory = visibilityByStudent.get(sid) || [];
+
+          const scheduledDates = [];
+          for (let d = new Date(`${FLOOR}T00:00:00`); d <= todayDate; d.setDate(d.getDate() + 1)) {
+            const dateStr = normalizeDate(d);
+            if (studentStartStr && dateStr < studentStartStr && !manualEnrollDates.has(dateStr)) continue;
+            if (!isStudentActiveOnDate(student, dateStr, visibilityHistory)) continue;
+            if (!scheduleActiveDays.includes(daysOfWeek[d.getDay()])) continue;
+            if (skippedDates.has(dateStr)) continue;
+            scheduledDates.push(dateStr);
+          }
+
+          if (oneTimeSchedules.length > 0) {
+            oneTimeSchedules.forEach(ot => {
+              const otDate = ot && ot.date ? String(ot.date).substring(0, 10) : null;
+              if (!otDate) return;
+              if (studentStartStr && otDate < studentStartStr && !manualEnrollDates.has(otDate)) return;
+              if (!isStudentActiveOnDate(student, otDate, visibilityHistory)) return;
+              if (otDate > todayDateStr) return;
+              if (skippedDates.has(otDate) || scheduledDates.includes(otDate)) return;
+              scheduledDates.push(otDate);
+            });
+          }
+
+          if (!scheduledDates.includes(todayDateStr)) {
+            const isRecurringToday = scheduleActiveDays.includes(daysOfWeek[todayDate.getDay()]);
+            const hasOneTimeToday = oneTimeSchedules.some(ot => (ot && ot.date ? String(ot.date).substring(0, 10) : '') === todayDateStr);
+            const isEligibleToday = (!studentStartStr || todayDateStr >= studentStartStr) && !skippedDates.has(todayDateStr);
+            if (isEligibleToday && (isRecurringToday || hasOneTimeToday)) {
+              scheduledDates.push(todayDateStr);
+            }
+          }
+
+          manualEnrollDates.forEach(d => {
+            if (!isStudentActiveOnDate(student, d, visibilityHistory)) return;
+            if (!scheduledDates.includes(d) && d <= todayDateStr && d >= FLOOR) {
+              scheduledDates.push(d);
+            }
+          });
+
+          paidDates.forEach(pd => {
+            if (ignoredDates.has(pd)) return;
+            if (pd < studentStartStr && !scheduledDates.includes(pd)) {
+              scheduledDates.push(pd);
+            }
+          });
+
+          scheduledDates.sort();
+
+          let unpaidCount = 0;
+          scheduledDates.forEach(dateStr => {
+            if (dateStr < FLOOR) return;
+            if (ignoredDates.has(dateStr)) return;
+            if (absentDates.has(dateStr)) return;
+            if (paidDates.has(dateStr)) return;
+            unpaidCount++;
+          });
+
+          const debt = unpaidCount * pricePerClass;
+          if (debt > 200) {
+            debtors.push({ name: student.name, debt });
+          }
         });
 
         if (!debtors.length) return;
         debtors.sort((a, b) => b.debt - a.debt);
 
-        const grid = DOMCache.studentsGrid || document.getElementById('studentsGrid');
-        if (!grid || !grid.querySelector('.revenue-summary')) return;
-
         const el = document.createElement('div');
-        el.className = 'debt-alert debt-alert--collapsed';
+        el.className = 'debt-alert collapsed';
         el.innerHTML = `
-          <div class="debt-alert-header" onclick="this.closest('.debt-alert').classList.toggle('debt-alert--collapsed')">
-            <span class="debt-alert-title">Outstanding Debt</span>
+          <div class="debt-alert-header" onclick="this.parentElement.classList.toggle('expanded');this.parentElement.classList.toggle('collapsed')">
+            <span class="debt-alert-title">Outstanding Debts</span>
             <span class="debt-alert-count">${debtors.length} student${debtors.length !== 1 ? 's' : ''}</span>
-            <span class="debt-alert-chevron">&#9660;</span>
+            <span class="debt-alert-chevron">&#9656;</span>
           </div>
           <div class="debt-alert-list">
             ${debtors.map(d => `<div class="debt-alert-row"><span class="debt-alert-name">${d.name}</span><span class="debt-alert-amount">$${d.debt.toLocaleString('en-US')}</span></div>`).join('')}
           </div>`;
-        grid.querySelector('.revenue-summary').after(el);
+        mount.appendChild(el);
       }
 
       function openGroupStack(groupCode) {
