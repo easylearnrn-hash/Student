@@ -546,6 +546,7 @@
       /* ── CONFIG ── */
       const STRIPE_PK = 'pk_live_51HKvyeKHAwZsjk64kBQ6PrmVb409AuCXdDmCPQX3z5y3j4sRc9CZDomsG8TXrBDa6xapO2jtWlpOl8pTR92FlNYX00vCScBYzF';
       const SUPABASE_URL = 'https://zlvnxvrzotamhpezqedr.supabase.co';
+      const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsdm54dnJ6b3RhbWhwZXpxZWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI4MTEzMTcsImV4cCI6MjA3ODM4NzMxN30.-IoSqKhDrA9NuG4j3GufIbfmodWqCoppEklE1nTmw38';
       const CREATE_PI_ENDPOINT = `${SUPABASE_URL}/functions/v1/create-payment-intent`;
 
       /* ── Parse URL params (set by student-portal.html) ── */
@@ -916,6 +917,30 @@
             date           : today,
           }, '*');
         } catch(_){}
+
+        // Gate mode: postMessage has no parent to receive it — write payment_records directly.
+        if (IS_GATE && INVOICE.studentId) {
+          try {
+            const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            const { subtotal } = getAmountBreakdown();
+            const dates = forClassDatesArr.length ? forClassDatesArr : [today];
+            const perClass = dates.length > 1 ? +(subtotal / dates.length).toFixed(2) : subtotal;
+            const { data: existing } = await _sb
+              .from('payment_records').select('date')
+              .eq('student_id', INVOICE.studentId).eq('payment_method', 'stripe').in('date', dates);
+            const alreadyPaid = new Set((existing || []).map(r => r.date));
+            const toInsert = dates
+              .filter(d => !alreadyPaid.has(d))
+              .map(d => ({ student_id: INVOICE.studentId, date: d, amount: perClass, status: 'paid', payment_method: 'stripe' }));
+            if (toInsert.length) {
+              const { error: dbErr } = await _sb.from('payment_records').insert(toInsert);
+              if (dbErr) console.error('[ARNOMA] Gate payment_records insert failed:', dbErr.message);
+              else console.log('[ARNOMA] ✅ Gate payment_records written:', toInsert);
+            }
+          } catch (writeErr) {
+            console.error('[ARNOMA] Gate payment_records write error:', writeErr);
+          }
+        }
 
         // Auto-close / redirect after 3 s
         setTimeout(() => {
