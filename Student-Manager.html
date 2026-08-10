@@ -554,6 +554,7 @@
         border-radius: 16px;
         position: relative;
         z-index: 10;
+        grid-column: 1 / -1;
       }
       .revenue-summary-item {
         display: flex;
@@ -588,11 +589,16 @@
         border-radius: 14px;
         position: relative;
         z-index: 10;
+        grid-column: 1 / -1;
       }
+      .debt-alert--collapsed {
+        padding: 6px 16px;
+        border-radius: 8px;
+      }
+      .debt-alert--collapsed .debt-alert-list { display: none; }
       .debt-alert-header {
         display: flex;
         align-items: center;
-        justify-content: space-between;
         cursor: pointer;
         user-select: none;
         gap: 10px;
@@ -618,15 +624,13 @@
         color: rgba(239,68,68,0.5);
         transition: transform 0.2s;
       }
-      .debt-alert-chevron.open { transform: rotate(180deg); }
+      .debt-alert--collapsed .debt-alert-chevron { transform: rotate(-90deg); }
       .debt-alert-list {
-        display: none;
         margin-top: 12px;
         display: flex;
         flex-direction: column;
         gap: 6px;
       }
-      .debt-alert-list.collapsed { display: none; }
       .debt-alert-row {
         display: flex;
         justify-content: space-between;
@@ -4088,48 +4092,66 @@
         const today = new Date().toISOString().split('T')[0];
         const DAY_IDX = { sunday:0, monday:1, tuesday:2, wednesday:3, thursday:4, friday:5, saturday:6 };
 
-        const payingStudents = sourceStudents.filter(s => !s.isFree && s.showInCalendar && parseFloat(s.price_per_class) > 0);
-        if (!payingStudents.length) return;
-        const ids = payingStudents.map(s => s.id);
+        const paying = sourceStudents.filter(s => !s.isFree && s.showInCalendar && parseFloat(s.price_per_class) > 0);
+        if (!paying.length) return;
+        const ids = paying.map(s => s.id);
+        const idList = ids.join(',');
 
-        const [prRes, skipRes, grpRes] = await Promise.all([
+        const [prRes, zelleRes, creditRes, skipRes, grpRes] = await Promise.all([
           supabaseClient.from('payment_records').select('student_id,date').in('student_id', ids).in('status', ['paid','excused','ignored']),
+          supabaseClient.from('payments').select('student_id,linked_student_id,for_class,for_class_dates,email_date').or(`student_id.in.(${idList}),linked_student_id.in.(${idList})`),
+          supabaseClient.from('credit_payments').select('student_id,applied_class_date').in('student_id', ids),
           supabaseClient.from('skipped_classes').select('group_name,class_date').gte('class_date', FLOOR),
           supabaseClient.from('groups').select('group_name,schedule')
         ]);
 
-        // paid dates per student
+        // Extract YYYY-MM-DD dates from a Zelle payments row
+        const zDates = p => {
+          let out = [], fcd = p.for_class_dates;
+          if (fcd) {
+            if (typeof fcd === 'string') {
+              const t = fcd.trim();
+              try { fcd = t.startsWith('{') ? t.slice(1,-1).split(',').map(x=>x.trim()) : JSON.parse(t); } catch(_) { fcd = t.split(',').map(x=>x.trim()); }
+            }
+            if (Array.isArray(fcd)) fcd.forEach(d => { const s=String(d).split('T')[0]; if(/^\d{4}-\d{2}-\d{2}$/.test(s)) out.push(s); });
+          }
+          if (!out.length && p.for_class) { const s=String(p.for_class).split('T')[0]; if(/^\d{4}-\d{2}-\d{2}$/.test(s)) out.push(s); }
+          if (!out.length && p.email_date) { const s=String(p.email_date).split('T')[0]; if(/^\d{4}-\d{2}-\d{2}$/.test(s)) out.push(s); }
+          return out;
+        };
+
         const paidMap = {};
-        (prRes.data || []).forEach(r => {
-          const k = String(r.student_id);
+        const addPaid = (sid, date) => {
+          const k = String(sid), d = (date||'').split('T')[0];
+          if (!k || !d) return;
           if (!paidMap[k]) paidMap[k] = new Set();
-          const d = (r.date || '').split('T')[0];
-          if (d) paidMap[k].add(d);
+          paidMap[k].add(d);
+        };
+        (prRes.data||[]).forEach(r => addPaid(r.student_id, r.date));
+        (zelleRes.data||[]).forEach(p => {
+          const sid = p.student_id || p.linked_student_id;
+          if (sid) zDates(p).forEach(d => addPaid(sid, d));
         });
+        (creditRes.data||[]).forEach(r => { if (r.applied_class_date) addPaid(r.student_id, r.applied_class_date); });
 
-        // skipped dates per group
         const skipMap = {};
-        (skipRes.data || []).forEach(r => {
-          const g = r.group_name;
-          if (!skipMap[g]) skipMap[g] = new Set();
-          const d = (r.class_date || '').split('T')[0];
-          if (d) skipMap[g].add(d);
+        (skipRes.data||[]).forEach(r => {
+          if (!skipMap[r.group_name]) skipMap[r.group_name] = new Set();
+          const d = (r.class_date||'').split('T')[0]; if (d) skipMap[r.group_name].add(d);
         });
 
-        // schedule day indices per group
         const schedMap = {};
-        (grpRes.data || []).forEach(g => {
-          const code = canonicalizeGroupCode(g.group_name || '');
-          if (!code) return;
-          schedMap[code] = (g.schedule || '').split(',').map(p => DAY_IDX[p.trim().split(/\s/)[0].toLowerCase()]).filter(n => n !== undefined && n >= 0);
+        (grpRes.data||[]).forEach(g => {
+          const code = canonicalizeGroupCode(g.group_name||''); if (!code) return;
+          schedMap[code] = (g.schedule||'').split(',').map(p => DAY_IDX[p.trim().split(/\s/)[0].toLowerCase()]).filter(n => n !== undefined && n >= 0);
         });
 
         const todayDate = new Date(today + 'T00:00:00');
         const debtors = [];
 
-        payingStudents.forEach(s => {
+        paying.forEach(s => {
           const days = schedMap[s.groupCode];
-          if (!days || !days.length) return;
+          if (!days||!days.length) return;
           const price = parseFloat(s.price_per_class);
           const floorStr = (s.start_date && s.start_date > FLOOR) ? s.start_date : FLOOR;
           const cur = new Date(floorStr + 'T00:00:00');
@@ -4152,14 +4174,14 @@
         if (!grid || !grid.querySelector('.revenue-summary')) return;
 
         const el = document.createElement('div');
-        el.className = 'debt-alert';
+        el.className = 'debt-alert debt-alert--collapsed';
         el.innerHTML = `
-          <div class="debt-alert-header" onclick="this.nextElementSibling.classList.toggle('collapsed');this.querySelector('.debt-alert-chevron').classList.toggle('open')">
+          <div class="debt-alert-header" onclick="this.closest('.debt-alert').classList.toggle('debt-alert--collapsed')">
             <span class="debt-alert-title">Outstanding Debt</span>
             <span class="debt-alert-count">${debtors.length} student${debtors.length !== 1 ? 's' : ''}</span>
             <span class="debt-alert-chevron">&#9660;</span>
           </div>
-          <div class="debt-alert-list collapsed">
+          <div class="debt-alert-list">
             ${debtors.map(d => `<div class="debt-alert-row"><span class="debt-alert-name">${d.name}</span><span class="debt-alert-amount">$${d.debt.toLocaleString('en-US')}</span></div>`).join('')}
           </div>`;
         grid.querySelector('.revenue-summary').after(el);
