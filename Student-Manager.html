@@ -580,6 +580,32 @@
         align-self: stretch;
         background: rgba(74,222,128,0.18);
       }
+      .debt-alert-list {
+        margin-top: 10px;
+        padding: 14px 20px;
+        background: rgba(239,68,68,0.06);
+        border: 1px solid rgba(239,68,68,0.2);
+        border-radius: 14px;
+      }
+      .debt-alert-title {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: rgba(239,68,68,0.65);
+        margin-bottom: 10px;
+      }
+      .debt-alert-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 5px 0;
+        border-bottom: 1px solid rgba(239,68,68,0.08);
+        font-size: 12px;
+      }
+      .debt-alert-row:last-child { border-bottom: none; }
+      .debt-alert-name { color: rgba(245,240,232,0.85); font-weight: 500; }
+      .debt-alert-amount { color: #f87171; font-weight: 700; font-size: 11px; }
       #groupViewHeader {
         display: none;
         max-width: 1400px;
@@ -4021,6 +4047,60 @@
         }
 
         grid.innerHTML = html;
+        updateDebtAlertList();
+      }
+
+      async function updateDebtAlertList() {
+        const grid = document.getElementById('studentsGrid');
+        if (!grid) return;
+        const existing = grid.querySelector('.debt-alert-list');
+        if (existing) existing.remove();
+
+        const floor = '2026-05-01';
+        const todayMs = Date.now();
+        const floorMs = new Date(floor).getTime();
+
+        const candidates = students.filter(s => !s.isFree && s.id);
+        if (!candidates.length) return;
+
+        const { data: records } = await supabaseClient
+          .from('payment_records')
+          .select('student_id, date')
+          .in('student_id', candidates.map(s => s.id))
+          .in('status', ['paid', 'excused'])
+          .gte('date', floor);
+
+        const paidMap = new Map();
+        (records || []).forEach(r => {
+          const k = String(r.student_id);
+          paidMap.set(k, (paidMap.get(k) || 0) + 1);
+        });
+
+        const debtors = candidates
+          .map(s => {
+            const startMs = Math.max(new Date(s.start_date || floor).getTime(), floorMs);
+            const weeksElapsed = Math.max(0, (todayMs - startMs) / (7 * 24 * 60 * 60 * 1000));
+            const cpw = groupScheduleMap[s.groupCode] || 1;
+            const expected = Math.floor(weeksElapsed * cpw);
+            const paid = paidMap.get(String(s.id)) || 0;
+            const debt = Math.max(0, expected - paid) * (parseFloat(s.price_per_class) || 0);
+            return { name: s.name, debt };
+          })
+          .filter(d => d.debt > 200)
+          .sort((a, b) => b.debt - a.debt);
+
+        if (!debtors.length) return;
+
+        const el = document.createElement('div');
+        el.className = 'debt-alert-list';
+        el.innerHTML = `<div class="debt-alert-title">⚠ Outstanding Debt ($200+)</div>` +
+          debtors.map(d =>
+            `<div class="debt-alert-row">
+              <span class="debt-alert-name">${d.name}</span>
+              <span class="debt-alert-amount">$${Math.round(d.debt).toLocaleString('en-US')}</span>
+            </div>`
+          ).join('');
+        grid.querySelector('.revenue-summary')?.after(el);
       }
 
       function openGroupStack(groupCode) {
