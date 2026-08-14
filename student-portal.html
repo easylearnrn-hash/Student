@@ -16607,9 +16607,32 @@ function payReminderRequestLater() {
   var url  = _payReminderJoinUrl;
   var room = _payReminderRoomCode;
 
+  // Open the blank window NOW while still inside the click handler (avoids popup blocker)
+  var win = url ? window.open('about:blank', '_blank') : null;
+
   setTimeout(function() {
     closePaymentReminder();
-    _doJoinClass(url, room);
+    if (win && url) {
+      var studentName = (window.currentStudent && window.currentStudent.name) ? window.currentStudent.name : '';
+      var joinUrl = studentName ? url + '#userInfo.displayName=' + encodeURIComponent('"' + studentName + '"') : url;
+      win.location.href = joinUrl;
+    }
+    // Broadcast join event separately
+    if (room && window.currentStudent && window.currentStudent.id) {
+      try {
+        var ch = supabaseClient.channel('class-' + room);
+        ch.subscribe(function(status) {
+          if (status === 'SUBSCRIBED') {
+            ch.send({
+              type: 'broadcast',
+              event: 'student-join',
+              payload: { student_id: currentStudent.id, name: currentStudent.name, joined_at: new Date().toISOString() },
+            });
+            setTimeout(function(){ supabaseClient.removeChannel(ch); }, 1500);
+          }
+        });
+      } catch(e) { /* ignore */ }
+    }
   }, 1400);
 }
 
