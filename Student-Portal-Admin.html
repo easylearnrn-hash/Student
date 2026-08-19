@@ -6670,7 +6670,7 @@
         const todayStr = new Date().toISOString().split('T')[0];
 
         // Load all necessary data in parallel
-        const [groupRes, prRes, zelleRes, absRes, skippedRes] = await Promise.all([
+        const [groupRes, prRes, zelleRes, absRes, skippedRes, creditRes] = await Promise.all([
           supabaseClient.from('groups').select('schedule, one_time_schedules').eq('group_name', groupName).single(),
           studentIds.length > 0
             ? supabaseClient.from('payment_records').select('student_id, date, status')
@@ -6687,6 +6687,10 @@
             : Promise.resolve({ data: [] }),
           supabaseClient.from('skipped_classes').select('class_date')
             .eq('group_name', groupName).gte('class_date', DEBT_FLOOR),
+          studentIds.length > 0
+            ? supabaseClient.from('credit_payments').select('student_id, applied_class_date')
+                .in('student_id', studentIds).gte('applied_class_date', DEBT_FLOOR)
+            : Promise.resolve({ data: [] }),
         ]);
 
         const groupData = groupRes.data || {};
@@ -6708,8 +6712,14 @@
             coveredByStudent[sid].add(d);
           }
         });
-
-        // Build absence set per student
+        // Credit payments cover the applied class date
+        (creditRes.data || []).forEach(c => {
+          const d = (c.applied_class_date || '').split('T')[0];
+          if (c.student_id && d) {
+            if (!coveredByStudent[c.student_id]) coveredByStudent[c.student_id] = new Set();
+            coveredByStudent[c.student_id].add(d);
+          }
+        });
         const absentByStudent = {};
         (absRes.data || []).forEach(a => {
           const d = (a.class_date || '').split('T')[0];
