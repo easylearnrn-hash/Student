@@ -3097,8 +3097,10 @@
           const group = groupsData.find(g => g.group_name === student.group_name);
           if (!group) return;
           
+          const isManuallyEnrolled = manualEnrollments.has(`${student.id}-${dateStr}`);
+
           // Check if this group has class on this date
-          if (isScheduledClassDate(dateStr, group)) {
+          if (isScheduledClassDate(dateStr, group) || isManuallyEnrolled) {
             // IMPORTANT: Only show classes after student's creation date
             // (unless admin manually enrolled them via "Add Student to Class")
             if (student.created_at) {
@@ -3112,7 +3114,11 @@
             // Check payment status
             const paymentInfo = hasPaymentCached(student.id, dateStr, student);
             const hasAbsence = isAbsentCached(dateStr, student.id);
-            const isSkipped = isClassSkippedCached(dateStr, group.group_name);
+            // For manually enrolled cross-group students, don't treat their own group's skip as a cancellation
+            const skipGroupName = isManuallyEnrolled && !isScheduledClassDate(dateStr, group)
+              ? null
+              : group.group_name;
+            const isSkipped = skipGroupName ? isClassSkippedCached(dateStr, skipGroupName) : false;
             
             let status = 'upcoming';
             if (isSkipped) {
