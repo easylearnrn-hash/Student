@@ -172,6 +172,19 @@
       '}',
       '.acnhs-print-btn svg, .acnhs-invert-btn svg { flex-shrink: 0; }',
 
+      /* ── DEFAULT (dark) MODE SAFETY NET ──
+         Some notes have custom callout cards with an inline pastel background
+         (e.g. .position-card style="background: linear-gradient(#dbeafe...)")
+         and no matching dark-theme override, leaving light card bg + muted
+         light-gray theme text = illegible. Neutralise to a navy card so the
+         existing --text-secondary/--text-primary rules stay readable.
+         Specificity kept at ~0 via :where(:not(...)) so it NEVER outranks any
+         file's own class-based dark styling (e.g. .tube-card, .tube-card.gtube). */
+      'body:where(:not(.acnhs-color-inverted)) :where([class*="-box"], [class*="-card"], [class*="-section"], [class*="-panel"]) {',
+      '  background: linear-gradient(135deg, #051427, #0b2748) !important;',
+      '  background-image: linear-gradient(135deg, #051427, #0b2748) !important;',
+      '}',
+
       /* ── LIGHT / COLOR-INVERT READING MODE ── */
       'body.acnhs-color-inverted {',
       '  --bg: #ffffff !important; --bg-1: #ffffff !important; --bg-2: #ffffff !important;',
