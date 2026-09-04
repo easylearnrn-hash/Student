@@ -194,9 +194,10 @@
       '  --line: rgba(17,24,39,0.22) !important; --border: rgba(17,24,39,0.22) !important;',
       '  background: #ffffff !important; color: #111111 !important;',
       '}',
-      'body.acnhs-color-inverted, body.acnhs-color-inverted :where(.container, main, article, section, .paper-wrap, .paper, .card, .body, .note-box, .content, .note-body, .page-wrap, .summary-card, .insulin-row, .alert, table, tbody, tr, td) {',
+      'body.acnhs-color-inverted, body.acnhs-color-inverted :where(.container, main, article, section, .paper-wrap, .paper, .card, .body, .note-box, .content, .note-body, .page-wrap, .summary-card, .insulin-row, .alert, .doc-header, table, tbody, tr, td) {',
       '  background-color: #ffffff !important; background-image: none !important; color: #111111 !important; box-shadow: none !important;',
       '}',
+      'body.acnhs-color-inverted :where(.doc-header) { border-bottom-color: rgba(17,24,39,0.15) !important; box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important; }',
       /* Generic fallback for any custom callout class (e.g. .overview, .tip, .focus-box,
          .tube-card, .position-card, .assessment-box, .tips-section) that a note page
          defines locally without its own light-mode override. Matched by class-name
