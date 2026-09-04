@@ -184,6 +184,15 @@
       'body.acnhs-color-inverted, body.acnhs-color-inverted :where(.container, main, article, section, .paper-wrap, .paper, .card, .body, .note-box, .content, .note-body, .page-wrap, .summary-card, .insulin-row, .alert, table, tbody, tr, td) {',
       '  background-color: #ffffff !important; background-image: none !important; color: #111111 !important; box-shadow: none !important;',
       '}',
+      /* Generic fallback for any custom callout class (e.g. .overview, .tip, .focus-box,
+         .tube-card, .position-card, .assessment-box, .tips-section) that a note page
+         defines locally without its own light-mode override. Matched by class-name
+         suffix pattern so future custom boxes are covered automatically. Kept at low
+         (:where) specificity so any file-specific body.acnhs-color-inverted override
+         still wins and renders unchanged. */
+      'body.acnhs-color-inverted :where([class*="-box"], [class*="-card"], [class*="-section"], [class*="-panel"], .overview, .tip, .nclex-tip, .general-care) {',
+      '  background: #ffffff !important; background-image: none !important; box-shadow: none !important;',
+      '}',
       'body.acnhs-color-inverted :where(p, li, span, div, td, th, label, small, h1, h2, h3, h4, h5, h6) { color: #111111 !important; text-shadow: none !important; }',
       'body.acnhs-color-inverted :where(.title-row, .head, .subhead, .note-head, .section-title, .section-heading, thead, th, .table-header) {',
       '  background: #f1f5f9 !important; background-image: none !important; color: #111111 !important; border-color: rgba(17,24,39,0.22) !important;',
@@ -634,6 +643,29 @@
       '.alert.green,  .alert.alert-green  { background: #f3fbf5 !important; border: 1.5px solid #2e8b57 !important; color: #155226 !important; }',
       '.alert.blue,   .alert.alert-blue   { background: #f5f7fc !important; border: 1.5px solid #3a60c0 !important; color: #1a3060 !important; }',
       '.alert strong, .alert b { color: inherit !important; }',
+
+      /* ── Generic callout boxes (ACNHS-DARK-THEME-v1 notes: .overview/.tip/.focus-box/
+         .tube-card/.position-card/.assessment-box/.tips-section/etc). Matched by class
+         suffix pattern so any note-specific box gets a safe light-paper background +
+         readable dark text in print, without needing a per-file print override. */
+      '.overview, .tip, .nclex-tip, .general-care,',
+      '[class*="-box"], [class*="-card"], [class*="-section"], [class*="-panel"] {',
+      '  background: #f8f6f2 !important;',
+      '  background-image: none !important;',
+      '  box-shadow: none !important;',
+      '  -webkit-print-color-adjust: exact !important;',
+      '  print-color-adjust: exact !important;',
+      '}',
+      '.overview p, .overview li, .overview strong, .overview h3, .overview h4,',
+      '.tip p, .tip li, .tip strong, .tip h3, .tip h4,',
+      '.nclex-tip p, .nclex-tip li, .nclex-tip strong,',
+      '.general-care p, .general-care li, .general-care strong,',
+      '[class*="-box"] p, [class*="-box"] li, [class*="-box"] strong, [class*="-box"] h3, [class*="-box"] h4,',
+      '[class*="-card"] p, [class*="-card"] li, [class*="-card"] strong, [class*="-card"] h3, [class*="-card"] h4,',
+      '[class*="-section"] p, [class*="-section"] li, [class*="-section"] strong, [class*="-section"] h3,',
+      '[class*="-panel"] p, [class*="-panel"] li, [class*="-panel"] strong {',
+      '  color: #1a1612 !important;',
+      '}',
 
       /* ── Tables ── */
       /* Apply to both .mini-table and any plain <table> in note content */
