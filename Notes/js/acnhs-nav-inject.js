@@ -600,10 +600,17 @@
       '#acnhs-guard-hide, .page-shield { display: none !important; }',
 
       /* ── Layout containers ── */
+      /* ACNHS-DARK-THEME-v1 notes set `.container { background: var(--navy-800) !important }`
+         directly on the element; the html/body white-bg rule above doesn't cascade
+         through an opaque background layer, so it must be neutralised explicitly. */
       '.container, .note-body {',
       '  max-width: 100% !important;',
       '  padding: 0 !important;',
       '  margin: 0 !important;',
+      '  background: #ffffff !important;',
+      '  background-image: none !important;',
+      '  box-shadow: none !important;',
+      '  border: none !important;',
       '}',
 
       /* ── Section titles ── */
