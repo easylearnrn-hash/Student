@@ -198,6 +198,12 @@
       '  background-color: #ffffff !important; background-image: none !important; color: #111111 !important; box-shadow: none !important;',
       '}',
       'body.acnhs-color-inverted :where(.doc-header) { border-bottom-color: rgba(17,24,39,0.15) !important; box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important; }',
+      /* Most notes define `h1:not(.doc-header h1) { color: var(--gold-200) !important }`
+         whose :not() argument inflates its specificity above the generic :where()
+         invert rule above, so the hero title (.acnhs-hero-title is an <h1>) stays gold
+         on the white invert background. Match the same real (non-:where) selector,
+         scoped under body.acnhs-color-inverted, to out-specificity it. */
+      'body.acnhs-color-inverted h1:not(.doc-header h1) { color: #1e293b !important; }',
       /* Generic fallback for any custom callout class (e.g. .overview, .tip, .focus-box,
          .tube-card, .position-card, .assessment-box, .tips-section) that a note page
          defines locally without its own light-mode override. Matched by class-name
@@ -657,6 +663,12 @@
       '.alert.green,  .alert.alert-green  { background: #f3fbf5 !important; border: 1.5px solid #2e8b57 !important; color: #155226 !important; }',
       '.alert.blue,   .alert.alert-blue   { background: #f5f7fc !important; border: 1.5px solid #3a60c0 !important; color: #1a3060 !important; }',
       '.alert strong, .alert b { color: inherit !important; }',
+      /* Bare .alert (no color modifier class) is the ACNHS-DARK-THEME-v1 notes'
+         danger/red callout — give it the same red print treatment as .alert.red,
+         placed after the "color: inherit" rule above so it wins the tie. */
+      '.alert { background: #fff5f5 !important; border: 1.5px solid #e05c5c !important; color: #7a1a1a !important; }',
+      '.alert p, .alert li { color: #7a1a1a !important; }',
+      '.alert strong, .alert b { color: #b91c1c !important; }',
 
       /* ── Generic callout boxes (ACNHS-DARK-THEME-v1 notes: .overview/.tip/.focus-box/
          .tube-card/.position-card/.assessment-box/.tips-section/etc). Matched by class
@@ -766,7 +778,11 @@
       '.insulin-row .i-name { color: #2a1a00 !important; font-weight: 800 !important; font-size: 12px !important; margin-bottom: 5px !important; }',
 
       /* ── General typography ── */
-      'h1 { font-size: 18px !important; color: #1a1612 !important; font-weight: 800 !important; margin: 16px 0 7px !important; }',
+      /* h1:not(.doc-header h1) is added by most notes' own dark-theme block with the
+         same specificity as a bare h1 here would lose to; matching the selector ties
+         the specificity, and this override style tag is appended after the page's own
+         styles in the print doc, so the tie resolves in favor of this rule. */
+      'h1, h1:not(.doc-header h1) { font-size: 18px !important; color: #1a1612 !important; font-weight: 800 !important; margin: 16px 0 7px !important; }',
       'h2 { font-size: 15px !important; color: #2a1a00 !important; font-weight: 700 !important; margin: 14px 0 6px !important; }',
       'h3 { font-size: 12.5px !important; color: #1a1612 !important; font-weight: 700 !important; margin: 11px 0 5px !important; }',
       'h4, h5, h6 { font-size: 11px !important; color: #1a1612 !important; font-weight: 700 !important; margin: 9px 0 4px !important; }',
