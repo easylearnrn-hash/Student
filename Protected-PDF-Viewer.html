@@ -223,7 +223,7 @@
       const s = new Set();
       (manual || []).forEach(p => extractDates(p, p.date).forEach(d => s.add(d)));
       (auto   || []).forEach(p => extractDates(p, p.date).forEach(d => s.add(d)));
-      (credit || []).forEach(p => { if (p.class_date) { const d = normalizeDate(p.class_date); if (d) s.add(d); } });
+      (credit || []).forEach(p => { const d = normalizeDate(p.applied_class_date || p.class_date); if (d) s.add(d); });
       return s;
     }
 
@@ -294,20 +294,65 @@
       if (!currentStudent?.id) return true;
       const sid = currentStudent.id;
       const studentGroup = getStudentGroup();
-      const groupCandidates = studentGroup ? [studentGroup, `Group ${studentGroup}`] : [];
+      const normalizeGroupForAccess = value => (value || '').toString().trim().toUpperCase().replace(/^GROUP\s*/i,'').charAt(0);
+      const { data: allManualRows, error: manualRowsError } = await supabaseClient
+        .from('payment_records')
+        .select('date,for_class_dates,for_class,status,payment_method,notes,class_group')
+        .eq('student_id', sid);
+      if (manualRowsError) console.error('payment_records access check failed:', manualRowsError);
+
+      const paidOneTimeGroupDates = new Map();
+      (allManualRows || [])
+        .filter(row => String(row.payment_method || '').trim().toLowerCase() === 'manual_enrollment' && row.notes)
+        .map(row => ({ date: normalizeDate(row.date), group: normalizeGroupForAccess(row.notes) }))
+        .filter(row => row.date && row.group && row.group !== studentGroup)
+        .forEach(enrollment => {
+          const hasGroupPayment = (allManualRows || []).some(row => {
+            const rowDates = extractDates(row, row.date);
+            const rowGroup = normalizeGroupForAccess(row.class_group);
+            const rowStatus = String(row.status || '').trim().toLowerCase();
+            const rowMethod = String(row.payment_method || '').trim().toLowerCase();
+            return rowDates.includes(enrollment.date)
+              && rowGroup === enrollment.group
+              && rowStatus === 'paid'
+              && rowMethod !== 'manual_enrollment';
+          });
+          if (!hasGroupPayment) return;
+          if (!paidOneTimeGroupDates.has(enrollment.group)) paidOneTimeGroupDates.set(enrollment.group, new Set());
+          paidOneTimeGroupDates.get(enrollment.group).add(enrollment.date);
+        });
+
+      const oneTimeGroupCandidates = Array.from(paidOneTimeGroupDates.keys());
+      const groupCandidates = [...new Set([
+        ...(studentGroup ? [studentGroup, `Group ${studentGroup}`] : []),
+        ...oneTimeGroupCandidates.flatMap(group => [group, `Group ${group}`])
+      ])];
+      const groupFreeCandidates = [...new Set([
+        ...(studentGroup ? [studentGroup] : []),
+        ...oneTimeGroupCandidates
+      ])];
       let hasPermissionAccess = false;
+      let effectiveCheckDate = checkDate;
 
       if (currentNoteId) {
-        const [freeRes, individualPermRes, groupPermRes] = await Promise.all([
+        const [freeRes, groupFreeRes, individualPermRes, groupPermRes] = await Promise.all([
           supabaseClient
             .from('note_free_access')
             .select('id')
             .eq('note_id', currentNoteId)
             .eq('student_id', sid)
             .maybeSingle(),
+          groupFreeCandidates.length > 0
+            ? supabaseClient
+                .from('note_free_access')
+                .select('id, class_date, group_letter')
+                .eq('note_id', currentNoteId)
+                .eq('access_type', 'group')
+                .in('group_letter', groupFreeCandidates)
+            : Promise.resolve({ data: [], error: null }),
           supabaseClient
             .from('student_note_permissions')
-            .select('id')
+            .select('id, class_date, group_name')
             .eq('note_id', currentNoteId)
             .eq('student_id', sid)
             .eq('is_accessible', true)
@@ -315,7 +360,7 @@
           groupCandidates.length > 0
             ? supabaseClient
                 .from('student_note_permissions')
-                .select('id')
+                .select('id, class_date, group_name')
                 .eq('note_id', currentNoteId)
                 .is('student_id', null)
                 .eq('is_accessible', true)
@@ -324,18 +369,39 @@
             : Promise.resolve({ data: [], error: null })
         ]);
 
-        hasPermissionAccess = !!(individualPermRes.data || (groupPermRes.data && groupPermRes.data.length > 0));
+        const matchingGroupPerms = (groupPermRes.data || []).filter(permission => {
+          const code = normalizeGroupForAccess(permission.group_name);
+          if (!code) return false;
+          if (studentGroup && code === studentGroup) return true;
+          const postDate = normalizeDate(permission.class_date);
+          return !!postDate && paidOneTimeGroupDates.get(code)?.has(postDate);
+        });
+        const matchingGroupFree = (groupFreeRes.data || []).filter(grant => {
+          const code = normalizeGroupForAccess(grant.group_letter);
+          if (!code) return false;
+          if (studentGroup && code === studentGroup) return true;
+          const postDate = normalizeDate(grant.class_date);
+          return !!postDate && paidOneTimeGroupDates.get(code)?.has(postDate);
+        });
 
-        // Individual free/permission grants bypass payment lock.
-        if (freeRes.data || individualPermRes.data) {
+        const permissionDate = normalizeDate(individualPermRes.data?.class_date)
+          || normalizeDate(matchingGroupPerms[0]?.class_date)
+          || normalizeDate(matchingGroupFree[0]?.class_date);
+        if (permissionDate) effectiveCheckDate = permissionDate;
+
+        hasPermissionAccess = !!(individualPermRes.data || matchingGroupPerms.length > 0);
+
+        // Individual free/permission grants bypass payment lock; group free grants
+        // bypass only when they belong to the home group or paid one-time class date.
+        if (freeRes.data || individualPermRes.data || matchingGroupFree.length > 0) {
           return true;
         }
       }
 
       const [mr, ar, cr] = await Promise.all([
-        supabaseClient.from('payment_records').select('date,for_class_dates,for_class,status').eq('student_id', sid).eq('status','paid'),
+        Promise.resolve({ data: (allManualRows || []).filter(row => String(row.status || '').trim().toLowerCase() === 'paid'), error: null }),
         supabaseClient.from('payments').select('email_date,for_class_dates,for_class,student_id,linked_student_id').or(`student_id.eq.${sid},linked_student_id.eq.${sid}`),
-        supabaseClient.from('credit_payments').select('class_date').eq('student_id', sid)
+        supabaseClient.from('credit_payments').select('class_date,applied_class_date').eq('student_id', sid)
       ]);
 
       if (mr?.error) console.error('payment_records check failed:', mr.error);
@@ -344,11 +410,11 @@
 
       const paid = buildPaidDates(mr?.data || [], ar?.data || [], cr?.data || []);
       // Exact date match required — green dot = paid, no dot = locked
-      if (checkDate && paid.has(checkDate)) return true;
+      if (effectiveCheckDate && paid.has(effectiveCheckDate)) return true;
 
       // Match student-portal pre-floor behavior for older posted notes.
       const PAYMENT_FLOOR = '2026-03-30';
-      if (checkDate && checkDate < PAYMENT_FLOOR && hasPermissionAccess) return true;
+      if (effectiveCheckDate && effectiveCheckDate < PAYMENT_FLOOR && hasPermissionAccess) return true;
 
       // No exact match → locked (red dot or no dot)
       return false;

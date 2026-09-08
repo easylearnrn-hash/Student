@@ -12540,12 +12540,62 @@
           console.error('❌ CRITICAL: Student has no group assigned!');
         }
 
+        const normalizeGroupForAccess = (value) => canonicalizeGroupCode(value) || String(value || '').replace(/Group\s*/i, '').trim().toUpperCase();
+
+        const { data: oneTimeRows, error: oneTimeRowsError } = await supabaseClient
+          .from('payment_records')
+          .select('date,for_class_dates,for_class,status,amount,payment_method,notes,class_group')
+          .eq('student_id', studentId);
+
+        if (oneTimeRowsError) {
+          console.error('❌ Error loading one-time class note access rows:', oneTimeRowsError);
+        }
+
+        const allOneTimeRows = oneTimeRows || [];
+        const oneTimeEnrollmentRows = allOneTimeRows
+          .filter(row => String(row.payment_method || '').trim().toLowerCase() === 'manual_enrollment' && row.notes)
+          .map(row => ({
+            date: normalizeDateString(row.date),
+            group: normalizeGroupForAccess(row.notes)
+          }))
+          .filter(row => row.date && row.group && row.group !== studentGroup);
+
+        const paidOneTimeGroupDates = new Map();
+        oneTimeEnrollmentRows.forEach(enrollment => {
+          const hasGroupPayment = allOneTimeRows.some(row => {
+            const rowDates = extractForClassDates(row, row.date);
+            const rowGroup = normalizeGroupForAccess(row.class_group);
+            const rowStatus = String(row.status || '').trim().toLowerCase();
+            const rowMethod = String(row.payment_method || '').trim().toLowerCase();
+            return rowDates.includes(enrollment.date)
+              && rowGroup === enrollment.group
+              && rowStatus === 'paid'
+              && rowMethod !== 'manual_enrollment';
+          });
+          if (!hasGroupPayment) return;
+          if (!paidOneTimeGroupDates.has(enrollment.group)) paidOneTimeGroupDates.set(enrollment.group, new Set());
+          paidOneTimeGroupDates.get(enrollment.group).add(enrollment.date);
+        });
+
+        const oneTimeGroupCandidates = Array.from(paidOneTimeGroupDates.keys());
+        const groupFreeAccessCandidates = [...new Set([
+          ...(normalizedGroupLetter ? [normalizedGroupLetter] : []),
+          ...oneTimeGroupCandidates
+        ])];
+
         // ─────────────────────────────────────────────────────────────────────
         // 🚀 SINGLE PARALLEL ROUND: run ALL note-access queries + payment data
         //    fetch in one Promise.all instead of 3 sequential rounds.
         //    Before: round1(payments 6q) → round2(perms 2q) → round3(free 2q)
         //    After:  round1(all 4 note-access + payments in parallel)
         // ─────────────────────────────────────────────────────────────────────
+        const groupNameCandidates = [...new Set([
+          ...(studentGroup ? [studentGroup, `Group ${studentGroup}`] : []),
+          ...oneTimeGroupCandidates.flatMap(group => [group, `Group ${group}`])
+        ])];
+
+        if (DEBUG_MODE) debugLog('🔍 Querying student_note_permissions with:', { studentId, studentGroup, groupNameCandidates, paidOneTimeGroupDates: Object.fromEntries(Array.from(paidOneTimeGroupDates.entries()).map(([group, dates]) => [group, Array.from(dates)])) });
+
         const [studentPermRes, groupPermRes, freeIndividualRes, freeGroupRes, paymentDataResult, noteVideoResult] = await Promise.all([
           // 1. Student-specific permissions (accessible + blocked)
           supabaseClient
@@ -12554,7 +12604,7 @@
             .eq('student_id', studentId),
 
           // 2. Group-level permissions — filtered by group_name at the DB level to cut payload
-          studentGroup && groupNameCandidates.length > 0
+          groupNameCandidates.length > 0
             ? supabaseClient
                 .from('student_note_permissions')
                 .select('id, note_id, is_accessible, class_date, group_name, student_id')
@@ -12570,12 +12620,12 @@
             .eq('student_id', studentId),
 
           // 4. Group free-access grants
-          normalizedGroupLetter
+          groupFreeAccessCandidates.length > 0
             ? supabaseClient
                 .from('note_free_access')
                 .select('note_id, access_type, group_letter, student_id, class_date')
                 .eq('access_type', 'group')
-                .eq('group_letter', normalizedGroupLetter)
+                .in('group_letter', groupFreeAccessCandidates)
             : Promise.resolve({ data: [], error: null }),
 
           // 5. Payment data — fetched in parallel, not before
@@ -12626,7 +12676,10 @@
         );
         const filteredGroupPermissions = (groupPermRes.data || []).filter(p => {
           const code = canonicalizeGroupCode(p.group_name);
-          return !!studentGroup && code === studentGroup && !blockedNoteIds.has(p.note_id);
+          if (!code || blockedNoteIds.has(p.note_id)) return false;
+          if (studentGroup && code === studentGroup) return true;
+          const postDate = normalizeDateString(p.class_date);
+          return !!postDate && paidOneTimeGroupDates.get(code)?.has(postDate);
         });
         const permissions = [
           ...(studentPermRes.data || []).filter(p => p.is_accessible),
@@ -12644,7 +12697,14 @@
         // Group grants still respect blockedNoteIds to honor notes unposted from the group.
         const freeAccessGrants = [
           ...(freeIndividualRes.data || []),  // Individual: always show regardless of blocked state
-          ...(freeGroupRes.data || []).filter(g => !blockedNoteIds.has(g.note_id))
+          ...(freeGroupRes.data || []).filter(g => {
+            if (blockedNoteIds.has(g.note_id)) return false;
+            const code = canonicalizeGroupCode(g.group_letter);
+            if (!code) return false;
+            if (normalizedGroupLetter && code === normalizedGroupLetter) return true;
+            const postDate = normalizeDateString(g.class_date);
+            return !!postDate && paidOneTimeGroupDates.get(code)?.has(postDate);
+          })
         ];
         // Compute effective start: 14 days before account creation, to allow notes
         // from the class week prior (e.g. account created Apr 14, class was Apr 13).
