@@ -4117,6 +4117,37 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           }
         }
 
+        // Also tie this note to each student currently in the group individually,
+        // so access follows them if their group changes later.
+        const bareLetter = String(currentGroup || '').replace(/^Group\s*/i, '').trim();
+        const { data: groupStudentsForGrant } = await supabaseClient
+          .from('students')
+          .select('id')
+          .eq('group_name', bareLetter);
+        const grantStudentIds = (groupStudentsForGrant || []).map(s => s.id);
+        if (grantStudentIds.length > 0) {
+          const { data: individualRows, error: individualError } = await supabaseClient
+            .from('student_note_permissions')
+            .upsert(
+              grantStudentIds.map(studentId => ({
+                note_id: noteId,
+                student_id: studentId,
+                group_name: currentGroup,
+                is_accessible: true
+              })),
+              { onConflict: 'note_id,student_id,group_name', ignoreDuplicates: false }
+            )
+            .select();
+          if (individualError) {
+            console.warn('⚠️ Error tying note to individual students:', individualError);
+          } else if (individualRows) {
+            individualRows.forEach(row => {
+              const idx = permissions.findIndex(p => p.id === row.id);
+              if (idx >= 0) permissions[idx] = row; else permissions.push(row);
+            });
+          }
+        }
+
         // ✅ CREATE NOTIFICATION
         await createNotification(
           'note_access_granted',
@@ -4162,6 +4193,33 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
         // Update local state
         permission.is_accessible = false;
+
+        // Also revoke the individually-tied rows for students CURRENTLY in this
+        // group (a student who has since moved to a different group keeps their
+        // carried-over access untouched).
+        const bareLetter = String(currentGroup || '').replace(/^Group\s*/i, '').trim();
+        const { data: groupStudentsForRevoke } = await supabaseClient
+          .from('students')
+          .select('id')
+          .eq('group_name', bareLetter);
+        const revokeStudentIds = (groupStudentsForRevoke || []).map(s => s.id);
+        if (revokeStudentIds.length > 0) {
+          const { error: revokeError } = await supabaseClient
+            .from('student_note_permissions')
+            .update({ is_accessible: false })
+            .eq('note_id', noteId)
+            .eq('group_name', currentGroup)
+            .in('student_id', revokeStudentIds);
+          if (revokeError) {
+            console.warn('⚠️ Error revoking individual student access:', revokeError);
+          } else {
+            permissions.forEach(p => {
+              if (p.note_id === noteId && p.group_name === currentGroup && revokeStudentIds.includes(p.student_id)) {
+                p.is_accessible = false;
+              }
+            });
+          }
+        }
 
         // ✅ CREATE NOTIFICATION
         await createNotification(
@@ -7524,6 +7582,29 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
         if (error) throw error;
 
+        // Also tie this note to each student currently in the group individually,
+        // so access follows them if their group changes later.
+        const bareLetter = String(currentGroup || '').replace(/^Group\s*/i, '').trim();
+        const { data: groupStudentsForPost } = await supabaseClient
+          .from('students')
+          .select('id')
+          .eq('group_name', bareLetter);
+        const postStudentIds = (groupStudentsForPost || []).map(s => s.id);
+        if (postStudentIds.length > 0) {
+          const { error: individualError } = await supabaseClient
+            .from('student_note_permissions')
+            .insert(postStudentIds.map(studentId => ({
+              note_id: noteId,
+              student_id: studentId,
+              group_name: currentGroup,
+              is_accessible: true,
+              granted_by: adminEmail
+            })));
+          if (individualError) {
+            console.warn('⚠️ Error tying note to individual students:', individualError);
+          }
+        }
+
         // Refresh data first (updates badges), then reopen modal with fresh data
         await loadData(); // This updates the badge counts and allNotes array
         await openFilteredNotesModal(currentFilterType, currentSystemName);
@@ -7544,9 +7625,31 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           .from('student_note_permissions')
           .delete()
           .eq('note_id', noteId)
-          .eq('group_name', currentGroup);
+          .eq('group_name', currentGroup)
+          .is('student_id', null);
 
         if (error) throw error;
+
+        // Also remove the individually-tied rows for students CURRENTLY in this
+        // group (a student who has since moved to a different group keeps their
+        // carried-over access untouched).
+        const bareLetter = String(currentGroup || '').replace(/^Group\s*/i, '').trim();
+        const { data: groupStudentsForHide } = await supabaseClient
+          .from('students')
+          .select('id')
+          .eq('group_name', bareLetter);
+        const hideStudentIds = (groupStudentsForHide || []).map(s => s.id);
+        if (hideStudentIds.length > 0) {
+          const { error: hideError } = await supabaseClient
+            .from('student_note_permissions')
+            .delete()
+            .eq('note_id', noteId)
+            .eq('group_name', currentGroup)
+            .in('student_id', hideStudentIds);
+          if (hideError) {
+            console.warn('⚠️ Error removing individual student access:', hideError);
+          }
+        }
 
         // Refresh data first (updates badges), then reopen modal with fresh data
         await loadData(); // This updates the badge counts and allNotes array
@@ -7772,19 +7875,39 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
         const noteIdsArray = Array.from(selectedFilteredNotes);
 
-        // Delete existing permissions for these notes+group first (reset date)
-        const { error: deleteError } = await supabaseClient
+        // Students currently in this group — each gets their OWN permission row
+        // (student_id set) in addition to the group-wide row, so access stays
+        // tied to them individually and survives a future group change.
+        const bareGroupLetter = String(currentGroup || '').replace(/^Group\s*/i, '').trim();
+        const { data: groupStudentsData, error: groupStudentsError } = await supabaseClient
+          .from('students')
+          .select('id')
+          .eq('group_name', bareGroupLetter);
+        if (groupStudentsError) {
+          console.warn('⚠️ Error loading students in group for individual note permissions:', groupStudentsError);
+        }
+        const groupStudentIds = (groupStudentsData || []).map(s => s.id);
+
+        // Delete existing permissions for these notes+group first (reset date).
+        // Only reset the group-wide row and rows for students CURRENTLY in this
+        // group — a student who has since moved to a different group keeps
+        // their individually-tied permission from a prior posting untouched.
+        let deleteQuery = supabaseClient
           .from('student_note_permissions')
           .delete()
           .in('note_id', noteIdsArray)
           .eq('group_name', currentGroup);
+        deleteQuery = groupStudentIds.length > 0
+          ? deleteQuery.or(`student_id.is.null,student_id.in.(${groupStudentIds.join(',')})`)
+          : deleteQuery.is('student_id', null);
+        const { error: deleteError } = await deleteQuery;
 
         if (deleteError) {
           console.warn('⚠️ Error deleting old permissions:', deleteError);
         } else {
           // Remove from local permissions array
           permissions = permissions.filter(p =>
-            !(noteIdsArray.includes(p.note_id) && p.group_name === currentGroup && !p.student_id)
+            !(noteIdsArray.includes(p.note_id) && p.group_name === currentGroup && (!p.student_id || groupStudentIds.includes(p.student_id)))
           );
         }
 
@@ -7798,7 +7921,10 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           console.error('Error updating class_date:', updateError);
         }
 
-        // Insert new permissions into student_note_permissions (PAID access)
+        // Insert new permissions into student_note_permissions (PAID access).
+        // One group-wide row per note (so students who join the group LATER
+        // still get access) plus one row per (note, student) for everyone
+        // currently in the group (so access follows them individually).
         const records = noteIdsArray.map(noteId => ({
           note_id: noteId,
           group_name: currentGroup,
@@ -7806,6 +7932,18 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           class_date: postDate,
           granted_by: adminEmail
         }));
+        groupStudentIds.forEach(studentId => {
+          noteIdsArray.forEach(noteId => {
+            records.push({
+              note_id: noteId,
+              student_id: studentId,
+              group_name: currentGroup,
+              is_accessible: true,
+              class_date: postDate,
+              granted_by: adminEmail
+            });
+          });
+        });
 
         const { data: insertedData, error } = await supabaseClient
           .from('student_note_permissions')

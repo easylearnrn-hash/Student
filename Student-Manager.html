@@ -3781,6 +3781,67 @@
       }
 
       // ============================================================
+      // CARRY FORWARD NOTE PERMISSIONS ON GROUP CHANGE
+      // ============================================================
+      // Group-wide note permissions (student_note_permissions rows with
+      // student_id = null) only apply while a student is actually in that
+      // group. Before moving a student to a new group, snapshot any
+      // currently-accessible notes from their OLD group into individual
+      // (student_id-tied) rows so they keep seeing those notes afterward —
+      // their paid/unpaid (blurred) status is date-based and unaffected either way.
+      async function carryForwardGroupNotePermissions(studentId, oldGroupCode) {
+        try {
+          const oldGroupCandidates = [oldGroupCode, `Group ${oldGroupCode}`];
+
+          const { data: groupPerms, error } = await supabaseClient
+            .from('student_note_permissions')
+            .select('note_id, group_name, is_accessible, class_date, granted_by')
+            .is('student_id', null)
+            .in('group_name', oldGroupCandidates)
+            .eq('is_accessible', true);
+
+          if (error) {
+            console.warn('⚠️ Error loading old-group note permissions:', error);
+            return;
+          }
+          if (!groupPerms || groupPerms.length === 0) return;
+
+          // Skip notes this student already has an individual row for.
+          const { data: existingIndividual } = await supabaseClient
+            .from('student_note_permissions')
+            .select('note_id, group_name')
+            .eq('student_id', studentId)
+            .in('group_name', oldGroupCandidates);
+          const existingKeys = new Set((existingIndividual || []).map(p => `${p.note_id}::${p.group_name}`));
+
+          const records = groupPerms
+            .filter(p => !existingKeys.has(`${p.note_id}::${p.group_name}`))
+            .map(p => ({
+              note_id: p.note_id,
+              student_id: studentId,
+              group_name: p.group_name,
+              is_accessible: true,
+              class_date: p.class_date || null,
+              granted_by: p.granted_by || null
+            }));
+
+          if (records.length === 0) return;
+
+          const { error: insertError } = await supabaseClient
+            .from('student_note_permissions')
+            .insert(records);
+
+          if (insertError) {
+            console.warn('⚠️ Error carrying forward note permissions on group change:', insertError);
+          } else {
+            debugLog(`📚 Carried forward ${records.length} note permission(s) for student ${studentId} from ${oldGroupCode} to new group`);
+          }
+        } catch (e) {
+          console.warn('⚠️ carryForwardGroupNotePermissions failed:', e);
+        }
+      }
+
+      // ============================================================
       // SAVE STUDENT TO SUPABASE
       // ============================================================
       async function saveStudent(student) {
@@ -3802,6 +3863,21 @@
           // ✅ AUTO-CREATE GROUP: Ensure group exists in groups table when assigning to student
           if (resolvedGroupCode && resolvedGroupCode.trim() !== '') {
             await ensureGroupExists(resolvedGroupCode);
+          }
+
+          // 📌 GROUP CHANGE: snapshot the student's currently-accessible notes from
+          // their OLD group into individual permission rows BEFORE the group_name
+          // changes, so they don't lose visibility of notes they already had access to.
+          if (student.id) {
+            const { data: existingStudentRow } = await supabaseClient
+              .from('students')
+              .select('group_name')
+              .eq('id', student.id)
+              .maybeSingle();
+            const oldGroupCode = existingStudentRow?.group_name || null;
+            if (oldGroupCode && resolvedGroupCode && oldGroupCode !== resolvedGroupCode) {
+              await carryForwardGroupNotePermissions(student.id, oldGroupCode);
+            }
           }
           
           const normalizedEmailList = normalizeEmailList(student.email);
