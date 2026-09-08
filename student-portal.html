@@ -8991,22 +8991,31 @@
 
       // ── Cross-group one-time classes — tracked independently of the home-group
       // schedule above (their own group_name, own paid/unpaid status via class_group). ──
+      const crossGroupClasses = [];
       crossGroupManualEnrollments.forEach(({ date, group }) => {
         if (date < PORTAL_HISTORY_FLOOR_STR || date > todayDateStr) return;
         if (!isStudentActiveOnDate(date)) return;
-        const isGroupPaid = prRecords.some(pr => {
+        const groupPaymentRecord = prRecords.find(pr => {
           if (pr.class_group !== group) return false;
           if ((pr.date || '').split('T')[0] !== date) return false;
           const method = String(pr.payment_method || '').toLowerCase();
           const status = String(pr.status || '').toLowerCase();
           return status !== 'absent' && status !== 'ignored' && method !== 'ignored';
         });
+        const isGroupPaid = !!groupPaymentRecord;
+        crossGroupClasses.push({
+          date,
+          group,
+          amount: pricePerClass,
+          paid: isGroupPaid,
+          paymentMethod: groupPaymentRecord ? String(groupPaymentRecord.payment_method || '').toLowerCase() : ''
+        });
         if (isGroupPaid) {
           debugLog(`🟢 ${date}: PAID (Group ${group}, one-time)`);
-          return;
+        } else {
+          unpaidClasses.push({ date, amount: pricePerClass, group });
+          debugLog(`🔴 ${date}: UNPAID (Group ${group}, one-time)`);
         }
-        unpaidClasses.push({ date, amount: pricePerClass, group });
-        debugLog(`🔴 ${date}: UNPAID (Group ${group}, one-time)`);
       });
 
       const unpaidAmount = unpaidClasses.length * pricePerClass;
@@ -9015,6 +9024,7 @@
         unpaidAmount,
         unpaidClasses,
         absentClasses,
+        crossGroupClasses,
         paidDates,
         absentDates,
         ignoredDates,
@@ -9036,6 +9046,7 @@
   let ignoredDatesSet = new Set();
   let scheduledDatesForUI = [];
   let prRecordsForUI = [];
+  let crossGroupClassesForUI = []; // One-time classes in a group other than the student's home group
       
       // Cache frequently accessed DOM elements
       let lastPaidEl = getCachedDOM('lastPaid') || document.getElementById('lastPaid');
@@ -9133,6 +9144,7 @@
   ignoredDatesSet      = result.ignoredDates  || new Set();
   scheduledDatesForUI  = result.scheduledDates || [];
   prRecordsForUI       = result.prRecords     || [];
+  crossGroupClassesForUI = result.crossGroupClasses || [];
         
         creditBalance = parseFloat(student.balance) || 0;
         
@@ -9470,7 +9482,21 @@
         }
       });
       
-      // 🔁 FINAL SAFETY: Deduplicate by date + status to prevent duplicates from any source
+      // One-time classes in a DIFFERENT group than the student's home group — shown
+      // as their own row, tagged with which group they were for.
+      (crossGroupClassesForUI || []).forEach(cg => {
+        if (!cg || !cg.date) return;
+        const parts = cg.date.split('-');
+        const classDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+        if (cg.paid) {
+          allEntries.push({ date: classDate, type: 'paid', amount: cg.amount, statusText: 'Paid', statusClass: 'paid', paymentMethod: cg.paymentMethod || '', group: cg.group });
+        } else {
+          allEntries.push({ date: classDate, type: 'unpaid', amount: cg.amount, statusText: 'Unpaid', statusClass: 'unpaid', group: cg.group });
+        }
+      });
+      
+      // 🔁 FINAL SAFETY: Deduplicate by date + status (+ group, so a cross-group
+      // one-time row never collides with the home-group row for the same date).
       const uniqueEntryMap = new Map();
       const toDateKey = (dateObj) => {
         if (!(dateObj instanceof Date) || isNaN(dateObj)) return 'invalid-date';
@@ -9479,7 +9505,7 @@
       allEntries.forEach(entry => {
         const dateKey = toDateKey(entry.date);
         const statusKey = entry.statusClass || entry.statusText || entry.type || 'unknown';
-        const dedupeKey = `${dateKey}__${statusKey.toLowerCase()}`;
+        const dedupeKey = `${dateKey}__${statusKey.toLowerCase()}__${entry.group || ''}`;
         if (!uniqueEntryMap.has(dedupeKey)) {
           uniqueEntryMap.set(dedupeKey, entry);
         } else {
@@ -9534,7 +9560,9 @@
           methodBadge = `<span style="font-size:9px;font-weight:700;letter-spacing:0.07em;text-transform:uppercase;padding:2px 7px;border-radius:10px;background:${found.color};color:#fff;margin-left:7px;vertical-align:middle;">${found.label}</span>`;
         }
         let oneTimeClassLabel = '';
-        if (entry.isOneTimeClass) {
+        if (entry.group) {
+          oneTimeClassLabel = `<div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">(Group ${entry.group} — one time class)</div>`;
+        } else if (entry.isOneTimeClass) {
           oneTimeClassLabel = '<div style="font-size: 11px; opacity: 0.8; margin-top: 2px;">(One time class)</div>';
         }
         
