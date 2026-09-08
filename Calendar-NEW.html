@@ -5029,27 +5029,12 @@
       }
 
       async function addStudentToClass(dateStr) {
-        // Determine which students are already tracked on this date
-        const enrolledSet = new Set();
-        studentsData.forEach(student => {
-          if (!student.show_in_grid || student.show_in_grid === 'false' ||
-              student.status === 'paused' || student.status === 'graduated' ||
-              !student.group_name) return;
-          const group = groupsData.find(g => g.group_name === student.group_name);
-          if (!group) return;
-          if (isScheduledClassDate(dateStr, group)) {
-            const startStr = student.start_date
-              ? student.start_date.split('T')[0]
-              : (student.created_at ? new Date(student.created_at).toISOString().split('T')[0] : null);
-            if (!startStr || dateStr >= startStr || manualEnrollments.has(`${student.id}-${dateStr}`)) {
-              enrolledSet.add(student.id);
-            }
-          }
-        });
-
+        // Any active, visible student can be added to this date — even if their own
+        // group already has a scheduled class the same day. Only exclude students
+        // already manually enrolled for this exact date (true duplicate prevention).
         const available = studentsData
           .filter(s =>
-            !enrolledSet.has(s.id) &&
+            !manualEnrollments.has(`${s.id}-${dateStr}`) &&
             s.status !== 'graduated' &&
             s.show_in_grid !== false &&
             s.show_in_grid !== 'false'
