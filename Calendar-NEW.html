@@ -2003,6 +2003,11 @@
             
             if (studentIdStr) {
               studentIds.add(studentIdStr);
+              // Group-specific key so a cross-group one-time class's payment
+              // status can be checked independently of the student's home group.
+              if (pr.class_group) {
+                studentIds.add(`${studentIdStr}::${pr.class_group}`);
+              }
             }
             
             // ⚡ OPTIMIZED: Use name lookup instead of scanning all students
@@ -2032,6 +2037,9 @@
           }
           if (cp.student_id) {
             paymentIndex.get(normalizedDate).add(String(cp.student_id));
+            if (cp.class_group) {
+              paymentIndex.get(normalizedDate).add(`${cp.student_id}::${cp.class_group}`);
+            }
           }
         });
 
@@ -2160,9 +2168,14 @@
         return !isCurrentlyOff;
       }
 
-      function hasPaymentCached(studentId, dateStr, student) {
-        const cacheKey = `${studentId}-${dateStr}`;
-        
+      function hasPaymentCached(studentId, dateStr, student, groupContext) {
+        // Cross-group mode: this occurrence is a one-time class for a group
+        // that differs from the student's home group, so its payment status
+        // must be looked up strictly by that group (not the student's home
+        // group payment, which would otherwise incorrectly bleed over).
+        const isCrossGroup = !!(groupContext && student && groupContext !== student.group_name);
+        const cacheKey = isCrossGroup ? `${studentId}-${dateStr}-${groupContext}` : `${studentId}-${dateStr}`;
+
         if (paymentCache.has(cacheKey)) {
           return paymentCache.get(cacheKey);
         }
@@ -2174,10 +2187,12 @@
           paymentCache.set(cacheKey, result);
           return result;
         }
-        
+
+        const lookupKey = isCrossGroup ? `${studentId}::${groupContext}` : String(studentId);
+
         // ⚡ OPTIMIZED: Use payment index for O(1) lookup instead of O(n) scan
-        const hasPayment = paymentIndex.has(normalizedDateStr) && 
-                          paymentIndex.get(normalizedDateStr).has(String(studentId));
+        const hasPayment = paymentIndex.has(normalizedDateStr) &&
+                          paymentIndex.get(normalizedDateStr).has(lookupKey);
         
         // Check if payment is manual (from payment_records table with payment_method='cash')
         let isManual = false;
@@ -2186,14 +2201,16 @@
           const manualPayment = paymentRecordsData.find(pr => 
             String(pr.student_id) === String(studentId) && 
             normalizeDateString(pr.date) === normalizedDateStr &&
-            pr.payment_method === 'cash'
+            pr.payment_method === 'cash' &&
+            (!isCrossGroup || pr.class_group === groupContext)
           );
           isManual = !!manualPayment;
 
           if (!isManual) {
             const creditPayment = creditPaymentsData.find(cp =>
               String(cp.student_id) === String(studentId) &&
-              normalizeDateString(cp.applied_class_date || cp.class_date) === normalizedDateStr
+              normalizeDateString(cp.applied_class_date || cp.class_date) === normalizedDateStr &&
+              (!isCrossGroup || cp.class_group === groupContext)
             );
             isCredit = !!creditPayment;
           }
@@ -2507,6 +2524,17 @@
         return student.group_name;
       }
 
+      // A student can have an occurrence in a given group on a given date either
+      // because it's their home group, OR because they were manually added
+      // ("Add Student") to that group's class that day — these are NOT mutually
+      // exclusive (e.g. a student attends their own group's class AND is added
+      // to a different group's one-time class on the same day).
+      function studentHasOccurrenceInGroup(student, dateStr, group) {
+        if (student.group_name === group.group_name) return true;
+        const key = `${student.id}-${dateStr}`;
+        return manualEnrollments.has(key) && manualEnrollmentGroup.get(key) === group.group_name;
+      }
+
       // Check if a class is skipped/canceled
       function isClassSkipped(dateStr, groupName) {
         return skippedClassesData.some(skip => {
@@ -2748,7 +2776,7 @@
           groupsData.forEach(group => {
             if (isScheduledClassDate(dateStr, group) && !isClassSkippedCached(dateStr, group.group_name)) {
               studentsData.forEach(student => {
-                if (getEffectiveGroupName(student, dateStr) === group.group_name && isStudentActiveOnDate(student, dateStr)) {
+                if (studentHasOccurrenceInGroup(student, dateStr, group) && isStudentActiveOnDate(student, dateStr)) {
                   // IMPORTANT: Only count classes after student's creation date
                   let studentStartStr = null;
                   if (student.start_date) {
@@ -2760,7 +2788,7 @@
                     return; // Skip this student for dates before creation
                   }
                   
-                  const paymentInfo = hasPaymentCached(student.id, dateStr, student);
+                  const paymentInfo = hasPaymentCached(student.id, dateStr, student, group.group_name);
                   const isAbsent = isAbsentCached(dateStr, student.id);
                   const pricePerClass = getStudentClassPrice(student);
                   
@@ -2871,7 +2899,7 @@
               }
 
               // Check payment status using cached function
-              const paymentInfo = hasPaymentCached(student.id, dateStr, student);
+              const paymentInfo = hasPaymentCached(student.id, dateStr, student, group.group_name);
 
               // Check absence/excused using indexed lookup
               const isAbsent = isAbsentCached(dateStr, student.id);
@@ -3043,7 +3071,7 @@
           groupsData.forEach(group => {
             if (isScheduledClassDate(dateStr, group) && !isClassSkippedCached(dateStr, group.group_name)) {
               studentsData.forEach(student => {
-                if (getEffectiveGroupName(student, dateStr) === group.group_name && isStudentActiveOnDate(student, dateStr)) {
+                if (studentHasOccurrenceInGroup(student, dateStr, group) && isStudentActiveOnDate(student, dateStr)) {
                   // IMPORTANT: Only count classes after student's creation date
                   let studentStartStr = null;
                   if (student.start_date) {
@@ -3055,7 +3083,7 @@
                     return; // Skip this student for dates before creation
                   }
                   
-                  const paymentInfo = hasPaymentCached(student.id, dateStr, student);
+                  const paymentInfo = hasPaymentCached(student.id, dateStr, student, group.group_name);
                   
                   if (paymentInfo.hasPayment) {
                     paidTotal += getStudentClassPrice(student);
@@ -3125,32 +3153,42 @@
         studentsData.forEach(student => {
           if (!student.show_in_grid || student.show_in_grid === 'false' || (student.status === 'paused' || student.status === 'graduated') || !student.group_name) return;
 
-          const isManuallyEnrolled = manualEnrollments.has(`${student.id}-${dateStr}`);
-          // If this student was manually added to a SPECIFIC group's date (possibly
-          // different from their own profile group), show them under that group.
-          const overrideGroupName = isManuallyEnrolled ? manualEnrollmentGroup.get(`${student.id}-${dateStr}`) : null;
-          const group = overrideGroupName
-            ? (groupsData.find(g => g.group_name === overrideGroupName) || groupsData.find(g => g.group_name === student.group_name))
-            : groupsData.find(g => g.group_name === student.group_name);
-          if (!group) return;
+          const enrollKey = `${student.id}-${dateStr}`;
+          const isManuallyEnrolled = manualEnrollments.has(enrollKey);
+          const overrideGroupName = isManuallyEnrolled ? manualEnrollmentGroup.get(enrollKey) : null;
+          const isCrossGroupEnrollment = !!(overrideGroupName && overrideGroupName !== student.group_name);
+          const homeGroup = groupsData.find(g => g.group_name === student.group_name);
 
-          // Check if this group has class on this date
-          if (isScheduledClassDate(dateStr, group) || isManuallyEnrolled) {
+          // A student can have TWO separate occurrences on the same date: their
+          // own home-group scheduled class, AND a different group's one-time
+          // manual add — these are independent and both should be shown.
+          const occurrences = [];
+          if (homeGroup && (isScheduledClassDate(dateStr, homeGroup) || (isManuallyEnrolled && !isCrossGroupEnrollment))) {
+            occurrences.push({ group: homeGroup, isManualHere: isManuallyEnrolled && !isCrossGroupEnrollment });
+          }
+          if (isCrossGroupEnrollment) {
+            const overrideGroup = groupsData.find(g => g.group_name === overrideGroupName);
+            if (overrideGroup) {
+              occurrences.push({ group: overrideGroup, isManualHere: true });
+            }
+          }
+
+          occurrences.forEach(({ group, isManualHere }) => {
             // IMPORTANT: Only show classes after student's creation date
             // (unless admin manually enrolled them via "Add Student to Class")
             if (student.created_at) {
               const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
-              if (dateStr < studentCreatedDate && !manualEnrollments.has(`${student.id}-${dateStr}`)) {
+              if (dateStr < studentCreatedDate && !isManualHere) {
                 // Don't show this student for classes before they were created
                 return;
               }
             }
             
             // Check payment status
-            const paymentInfo = hasPaymentCached(student.id, dateStr, student);
+            const paymentInfo = hasPaymentCached(student.id, dateStr, student, group.group_name);
             const hasAbsence = isAbsentCached(dateStr, student.id);
             // For manually enrolled cross-group students, don't treat their own group's skip as a cancellation
-            const skipGroupName = isManuallyEnrolled && !isScheduledClassDate(dateStr, group)
+            const skipGroupName = isManualHere && !isScheduledClassDate(dateStr, group)
               ? null
               : group.group_name;
             const isSkipped = skipGroupName ? isClassSkippedCached(dateStr, skipGroupName) : false;
@@ -3181,7 +3219,7 @@
               isSkipped: isSkipped,
               isIgnored: isIgnoredCached(dateStr, student.id)
             });
-          }
+          });
         });
 
         // Group students by their group_name
@@ -3236,19 +3274,19 @@
                 </button>
                 <button class="action-icon-btn mark-paid"
                         data-tooltip="Cash Payment"
-                        onclick="event.stopPropagation(); markPaidManually(${student.id}, '${dateStr}', ${pricePerClass}, '${safeName}')">
+                        onclick="event.stopPropagation(); markPaidManually(${student.id}, '${dateStr}', ${pricePerClass}, '${safeName}', '${student.groupName}')">
                   <span class="btn-icon">💵</span>
                 </button>
                 ${studentBalance >= pricePerClass && pricePerClass > 0 ? `
                   <button class="action-icon-btn credit"
                           data-tooltip="Use Credit"
-                          onclick="event.stopPropagation(); applyFromCredit(${student.id}, '${dateStr}', ${pricePerClass})">
+                          onclick="event.stopPropagation(); applyFromCredit(${student.id}, '${dateStr}', ${pricePerClass}, '${student.groupName}')">
                     <span class="btn-icon">💳</span>
                   </button>
                 ` : ''}
                 <button class="action-icon-btn excused"
                         data-tooltip="Excuse Payment"
-                        onclick="event.stopPropagation(); markExcused(${student.id}, '${dateStr}')">
+                        onclick="event.stopPropagation(); markExcused(${student.id}, '${dateStr}', '${student.groupName}')">
                   <span class="btn-icon">✅</span>
                 </button>
                 <button class="action-icon-btn absent"
@@ -3379,19 +3417,19 @@
                   </button>
                   <button class="action-icon-btn mark-paid"
                           data-tooltip="Cash Payment"
-                          onclick="event.stopPropagation(); markPaidManually(${student.id}, '${dateStr}', ${pricePerClass}, '${safeName}')">
+                          onclick="event.stopPropagation(); markPaidManually(${student.id}, '${dateStr}', ${pricePerClass}, '${safeName}', '${student.groupName}')">
                     <span class="btn-icon">💵</span>
                   </button>
                   ${studentBalance >= pricePerClass && pricePerClass > 0 ? `
                     <button class="action-icon-btn credit"
                             data-tooltip="Use Credit"
-                            onclick="event.stopPropagation(); applyFromCredit(${student.id}, '${dateStr}', ${pricePerClass})">
+                            onclick="event.stopPropagation(); applyFromCredit(${student.id}, '${dateStr}', ${pricePerClass}, '${student.groupName}')">
                       <span class="btn-icon">💳</span>
                     </button>
                   ` : ''}
                   <button class="action-icon-btn excused"
                           data-tooltip="Excuse Payment"
-                          onclick="event.stopPropagation(); markExcused(${student.id}, '${dateStr}')">
+                          onclick="event.stopPropagation(); markExcused(${student.id}, '${dateStr}', '${student.groupName}')">
                     <span class="btn-icon">✅</span>
                   </button>
                   <button class="action-icon-btn ignore"
@@ -3412,7 +3450,7 @@
                 <div class="student-actions">
                   <button class="action-icon-btn unmark"
                           data-tooltip="Unpay (remove cash payment)"
-                          onclick="event.stopPropagation(); unpayManually(${student.id}, '${dateStr}', '${safeName}')">
+                          onclick="event.stopPropagation(); unpayManually(${student.id}, '${dateStr}', '${safeName}', '${student.groupName}')">
                     <span class="btn-icon">↩️</span>
                   </button>
                 </div>
@@ -3423,7 +3461,7 @@
                 <div class="student-actions">
                   <button class="action-icon-btn unmark"
                           data-tooltip="Undo credit payment"
-                          onclick="event.stopPropagation(); undoCreditPayment(${student.id}, '${dateStr}', '${safeName}', ${getStudentClassPrice(student)})">
+                          onclick="event.stopPropagation(); undoCreditPayment(${student.id}, '${dateStr}', '${safeName}', ${getStudentClassPrice(student)}, '${student.groupName}')">
                     <span class="btn-icon">↩️</span>
                   </button>
                 </div>
@@ -4337,13 +4375,16 @@
         }
       }
 
-      async function markExcused(studentId, dateStr) {
+      async function markExcused(studentId, dateStr, groupName) {
         try {
           const student = studentsData.find(s => s.id === studentId);
           if (!student) {
             showCalToast('❌ Student not found', 'error');
             return;
           }
+          // Only a genuine cross-group one-time class needs its own class_group tag;
+          // a student's normal home-group class stays untagged (null) as before.
+          const isCrossGroup = !!(groupName && groupName !== student.group_name);
 
           const confirmed = await showConfirmDialog(
             'Excuse Payment?',
@@ -4359,13 +4400,14 @@
           );
           if (!confirmed) return;
 
-          const { data: existing } = await supabaseClient
+          let existingQuery = supabaseClient
             .from('payment_records')
             .select('id')
             .eq('student_id', studentId)
             .eq('date', dateStr)
-            .eq('payment_method', 'excused')
-            .maybeSingle();
+            .eq('payment_method', 'excused');
+          existingQuery = isCrossGroup ? existingQuery.eq('class_group', groupName) : existingQuery.is('class_group', null);
+          const { data: existing } = await existingQuery.maybeSingle();
 
           if (existing) {
             showCalToast('⚠️ This class is already paid.', 'warning');
@@ -4380,7 +4422,8 @@
               amount: 0,
               status: 'paid',
               payment_method: 'excused',
-              notes: 'Excused payment (Calendar)'
+              notes: 'Excused payment (Calendar)',
+              class_group: isCrossGroup ? groupName : null
             }])
             .select();
 
@@ -5082,7 +5125,9 @@
 
         // Insert manual enrollment record. `notes` stores the target group so the
         // student shows up under that group's tab in the day modal, even when it
-        // differs from their own profile group_name.
+        // differs from their own profile group_name. `class_group` tags this row
+        // so any later payment action on it stays scoped to this group.
+        const isCrossGroup = !!(groupName && groupName !== student.group_name);
         const { error } = await supabaseClient
           .from('payment_records')
           .insert([{
@@ -5091,7 +5136,8 @@
             amount: 0,
             status: 'unpaid',
             payment_method: 'manual_enrollment',
-            notes: groupName || null
+            notes: groupName || null,
+            class_group: isCrossGroup ? groupName : null
           }]);
 
         if (error) {
@@ -5113,7 +5159,7 @@
         openDayModal(dateStr, true);
       }
 
-      async function markPaidManually(studentId, dateStr, pricePerClass, studentName) {
+      async function markPaidManually(studentId, dateStr, pricePerClass, studentName, groupName) {
         try {
           const student = studentsData.find(s => s.id === studentId);
           if (!student) {
@@ -5121,6 +5167,9 @@
             showCalToast('❌ Student not found', 'error');
             return;
           }
+          // Only a genuine cross-group one-time class needs its own class_group tag;
+          // a student's normal home-group class stays untagged (null) as before.
+          const isCrossGroup = !!(groupName && groupName !== student.group_name);
 
           // Show custom input dialog
           const amount = await showInputDialog(
@@ -5155,7 +5204,8 @@
               date: dateStr,
               amount: paymentAmount,
               status: 'paid',
-              payment_method: 'cash'
+              payment_method: 'cash',
+              class_group: isCrossGroup ? groupName : null
             }])
             .select();
 
@@ -5177,7 +5227,11 @@
           if (!paymentIndex.has(normalizedDate)) {
             paymentIndex.set(normalizedDate, new Set());
           }
-          paymentIndex.get(normalizedDate).add(String(studentId));
+          if (isCrossGroup) {
+            paymentIndex.get(normalizedDate).add(`${studentId}::${groupName}`);
+          } else {
+            paymentIndex.get(normalizedDate).add(String(studentId));
+          }
           
           // Clear payment cache to force recalculation
           clearPaymentCache();
@@ -5209,7 +5263,7 @@
         }
       }
 
-      async function unpayManually(studentId, dateStr, studentName) {
+      async function unpayManually(studentId, dateStr, studentName, groupName) {
         try {
           const confirmed = await showConfirmDialog(
             'Remove Cash Payment',
@@ -5218,12 +5272,16 @@
           if (!confirmed) return;
 
           const normalizedDate = normalizeDateString(dateStr);
+          const student = studentsData.find(s => s.id === studentId);
+          const isCrossGroup = !!(groupName && student && groupName !== student.group_name);
 
-          // Find the cash payment record to delete
+          // Find the cash payment record to delete (scoped to this group when
+          // the class is a cross-group one-time occurrence)
           const record = paymentRecordsData.find(pr =>
             String(pr.student_id) === String(studentId) &&
             normalizeDateString(pr.date) === normalizedDate &&
-            pr.payment_method === 'cash'
+            pr.payment_method === 'cash' &&
+            (!isCrossGroup || pr.class_group === groupName)
           );
 
           if (!record) {
@@ -5243,7 +5301,11 @@
 
           // Update payment index
           if (paymentIndex.has(normalizedDate)) {
-            paymentIndex.get(normalizedDate).delete(String(studentId));
+            if (record.class_group) {
+              paymentIndex.get(normalizedDate).delete(`${studentId}::${record.class_group}`);
+            } else {
+              paymentIndex.get(normalizedDate).delete(String(studentId));
+            }
           }
 
           // Clear payment cache to force recalculation
@@ -5265,11 +5327,12 @@
         }
       }
 
-      async function undoCreditPayment(studentId, dateStr, studentName, pricePerClass) {
+      async function undoCreditPayment(studentId, dateStr, studentName, pricePerClass, groupName) {
         try {
           const normalizedDate = normalizeDateString(dateStr);
           const student = studentsData.find(s => s.id === studentId);
           if (!student) return;
+          const isCrossGroup = !!(groupName && groupName !== student.group_name);
 
           const confirmed = await showConfirmDialog(
             'Undo Credit Payment',
@@ -5277,10 +5340,12 @@
           );
           if (!confirmed) return;
 
-          // Find the credit payment record
+          // Find the credit payment record (scoped to this group when the
+          // class is a cross-group one-time occurrence)
           const record = creditPaymentsData.find(cp =>
             String(cp.student_id) === String(studentId) &&
-            normalizeDateString(cp.applied_class_date || cp.class_date) === normalizedDate
+            normalizeDateString(cp.applied_class_date || cp.class_date) === normalizedDate &&
+            (!isCrossGroup || cp.class_group === groupName)
           );
 
           if (!record) {
@@ -5311,7 +5376,11 @@
 
           // Remove from payment index
           if (paymentIndex.has(normalizedDate)) {
-            paymentIndex.get(normalizedDate).delete(String(studentId));
+            if (record.class_group) {
+              paymentIndex.get(normalizedDate).delete(`${studentId}::${record.class_group}`);
+            } else {
+              paymentIndex.get(normalizedDate).delete(String(studentId));
+            }
           }
 
           clearPaymentCache();
@@ -5329,7 +5398,7 @@
         }
       }
 
-      async function applyFromCredit(studentId, dateStr, pricePerClass) {
+      async function applyFromCredit(studentId, dateStr, pricePerClass, groupName) {
         try {
           const student = studentsData.find(s => s.id === studentId);
           if (!student) {
@@ -5337,6 +5406,9 @@
             showCalToast('❌ Student not found', 'error');
             return;
           }
+          // Only a genuine cross-group one-time class needs its own class_group tag;
+          // a student's normal home-group class stays untagged (null) as before.
+          const isCrossGroup = !!(groupName && groupName !== student.group_name);
 
           const currentBalance = parseFloat(student.balance || 0);
           
@@ -5385,7 +5457,8 @@
               student_id: studentId,
               class_date: dateStr,
               amount: pricePerClass,
-              applied_class_date: dateStr
+              applied_class_date: dateStr,
+              class_group: isCrossGroup ? groupName : null
             }]);
 
           if (creditError) {
