@@ -1594,6 +1594,7 @@
       { name: 'Cancer', icon: '🎗️' },
       { name: 'Musculoskeletal Disorders', icon: '🦴' },
       { name: 'Psycho-Social Aspects', icon: '🤝' },
+      { name: 'NCLEX Prep', icon: '🎯' },
       { name: 'Nursing Skills and Fundamentals', icon: '📋' },
       { name: 'Pharmacology', icon: '💉' },
       { name: 'Procedures', icon: '🛏️' }
@@ -1950,8 +1951,8 @@
       // ── Medical Terminology ────────────────────────────────────────────────
       { system: 'Medical Terminology', title: 'Medical Terminology' },
       // ── NCLEX Prep ───────────────────────────────────────────────────────────
-      { system: 'Nursing Skills and Fundamentals', title: 'NCLEX-RN Master Cheat Sheet' },
-      { system: 'Nursing Skills and Fundamentals', title: 'NCLEX-RN Strategy' },
+      { system: 'Nursing Skills and Fundamentals', displaySystem: 'NCLEX Prep', title: 'NCLEX-RN Master Cheat Sheet' },
+      { system: 'Nursing Skills and Fundamentals', displaySystem: 'NCLEX Prep', title: 'NCLEX-RN Strategy' },
       // ── Procedures ─────────────────────────────────────────────────────────
       { system: 'Procedures', title: 'Amniocentesis' },
       { system: 'Procedures', title: 'Cardiac Ablation' },
@@ -2083,12 +2084,20 @@
     // Group Notes shows ONLY notes whose title matches ADMIN_HTML_NOTES_CATALOG.
     // When the same title has multiple DB records (old PDF + new HTML), the HTML
     // record (pdf_url === '') is kept and the PDF record is dropped.
+    function normalizeCatalogTitle(title) {
+      return (title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    }
+
+    function getNoteDisplaySystem(note) {
+      const catalogItem = ADMIN_HTML_NOTES_CATALOG.find(n => normalizeCatalogTitle(n.title) === normalizeCatalogTitle(note?.title));
+      return catalogItem?.displaySystem || note?.system || note?.system_category || note?.category || 'Unknown';
+    }
+
     function filterToHtmlCatalog(notes) {
-      const normalize = s => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const catalogSet = new Set(ADMIN_HTML_NOTES_CATALOG.map(n => normalize(n.title)));
+      const catalogSet = new Set(ADMIN_HTML_NOTES_CATALOG.map(n => normalizeCatalogTitle(n.title)));
       const seenTitles = new Map();
       (notes || []).forEach(note => {
-        const key = normalize(note.title);
+        const key = normalizeCatalogTitle(note.title);
         if (!catalogSet.has(key)) return; // not in catalog — hide it
         const existing = seenTitles.get(key);
         // Prefer HTML note (pdf_url === '') over old PDF; otherwise keep first seen
@@ -3328,7 +3337,7 @@ Kind regards,
       const systemsHTML = sortedSystems.map(system => {
         // Flexible column detection - check multiple possible column names
         let systemNotes = allNotes.filter(note => {
-          const noteSystem = note.system || note.system_category || note.category;
+          const noteSystem = getNoteDisplaySystem(note);
           return noteSystem === system.name;
         });
         
@@ -3997,7 +4006,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       
       // PERFORMANCE: Filter notes efficiently
       let systemNotes = allNotes.filter(note => {
-        const noteSystem = note.system || note.system_category || note.category;
+        const noteSystem = getNoteDisplaySystem(note);
         return noteSystem === system.name;
       });
       
@@ -4625,7 +4634,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       globalCheckedNoteIds.forEach(noteId => {
         const note = allNotes.find(n => n.id === parseInt(noteId, 10));
         if (note) {
-          const noteSystem = note.system || note.system_category || note.category;
+          const noteSystem = getNoteDisplaySystem(note);
           if (noteSystem) systemsWithSelections.add(noteSystem);
         }
       });
@@ -7216,7 +7225,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         // Use the SAME logic as renderSystems() to find notes for this system
         // Check multiple possible column names for system categorization
         const systemNotes = allNotes.filter(note => {
-          const noteSystem = note.system || note.system_category || note.category;
+          const noteSystem = getNoteDisplaySystem(note);
           return noteSystem === systemName;
         });
 
