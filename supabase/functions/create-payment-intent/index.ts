@@ -115,6 +115,7 @@ serve(async (req: Request) => {
     group_name      ?: string;
     for_class       ?: string;
     for_class_dates ?: string;
+    class_group     ?: string;
   };
 
   try {
@@ -128,7 +129,7 @@ serve(async (req: Request) => {
 
   const {
     amount_cents, currency, student_id, student_name, student_email,
-    invoice_ref, group_name, for_class, for_class_dates,
+    invoice_ref, group_name, for_class, for_class_dates, class_group,
   } = body;
 
   if (!amount_cents || amount_cents < 50) {
@@ -179,6 +180,9 @@ serve(async (req: Request) => {
     'metadata[for_class]'             : for_class        || '',
     'metadata[for_class_dates]'       : classDatesArr.join(','),
     'metadata[class_count]'           : String(classDatesArr.length || 1),
+    // Only set when this payment is for a one-time class in a DIFFERENT group
+    // than the student's own home group (Calendar-NEW cross-group add).
+    'metadata[class_group]'           : class_group      || '',
   });
 
   if (stripeCustomerId) {

@@ -94,11 +94,11 @@ serve(async (req: Request) => {
       id         : string;
       amount     : number;
       currency   : string;
-      metadata   : { student_id?: string; invoice_ref?: string; student_name?: string; for_class?: string; for_class_dates?: string };
+      metadata   : { student_id?: string; invoice_ref?: string; student_name?: string; for_class?: string; for_class_dates?: string; class_group?: string };
       receipt_email: string | null;
     };
 
-    const { student_id, invoice_ref, for_class, for_class_dates } = pi.metadata ?? {};
+    const { student_id, invoice_ref, for_class, for_class_dates, class_group } = pi.metadata ?? {};
     const amountDollars = pi.amount / 100;
 
     console.log(`✅ PaymentIntent succeeded: ${pi.id} | student: ${student_id} | $${amountDollars} | for_class: ${for_class} | for_class_dates: ${for_class_dates}`);
@@ -137,6 +137,10 @@ serve(async (req: Request) => {
           payment_method : 'Stripe',
           date           : primaryClassDate,
           notes          : invoice_ref ? `Stripe PI: ${pi.id} | Ref: ${invoice_ref}` : `Stripe PI: ${pi.id}`,
+          // Only set for a one-time class in a different group than the
+          // student's home group (Calendar-NEW cross-group add) — null for
+          // ordinary home-group payments, matching existing rows.
+          class_group    : class_group || null,
         })
         .select()
         .single();

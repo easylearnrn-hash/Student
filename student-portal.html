@@ -8720,8 +8720,9 @@
         ).catch(() => ({ data: [], error: null })),
         // Manual enrollments — dates bypassing created_at filter, mirrors Calendar-NEW.
         // Keep this broad so older rows that missed payment_method still count.
+        // `notes` carries the target group for cross-group one-time adds (Calendar-NEW convention).
         Promise.resolve(
-          supabaseClient.from('payment_records').select('date, payment_method, status, amount').eq('student_id', student.id)
+          supabaseClient.from('payment_records').select('date, payment_method, status, amount, notes').eq('student_id', student.id)
         ).catch(() => ({ data: [], error: null }))
       ]);
 
@@ -8746,6 +8747,15 @@
           .map(r => (r.date || '').split('T')[0])
           .filter(Boolean)
       );
+
+      // Cross-group one-time adds: a manual_enrollment row whose `notes` (target
+      // group) differs from the student's own home group — mirrors Calendar-NEW's
+      // manualEnrollmentGroup override. These accrue a SEPARATE debt, independent
+      // of the student's home-group class on the same date.
+      const crossGroupManualEnrollments = manualEnrollRows
+        .filter(r => String(r.payment_method || '').trim().toLowerCase() === 'manual_enrollment' && r.notes && String(r.notes) !== String(studentGroup))
+        .map(r => ({ date: (r.date || '').split('T')[0], group: String(r.notes) }))
+        .filter(e => !!e.date);
 
       // Mirror Calendar-NEW visibility gating so paused windows do not accrue debt.
       const visibilityHistory = visibilityRows
@@ -8979,6 +8989,26 @@
         }
       }
 
+      // ── Cross-group one-time classes — tracked independently of the home-group
+      // schedule above (their own group_name, own paid/unpaid status via class_group). ──
+      crossGroupManualEnrollments.forEach(({ date, group }) => {
+        if (date < PORTAL_HISTORY_FLOOR_STR || date > todayDateStr) return;
+        if (!isStudentActiveOnDate(date)) return;
+        const isGroupPaid = prRecords.some(pr => {
+          if (pr.class_group !== group) return false;
+          if ((pr.date || '').split('T')[0] !== date) return false;
+          const method = String(pr.payment_method || '').toLowerCase();
+          const status = String(pr.status || '').toLowerCase();
+          return status !== 'absent' && status !== 'ignored' && method !== 'ignored';
+        });
+        if (isGroupPaid) {
+          debugLog(`🟢 ${date}: PAID (Group ${group}, one-time)`);
+          return;
+        }
+        unpaidClasses.push({ date, amount: pricePerClass, group });
+        debugLog(`🔴 ${date}: UNPAID (Group ${group}, one-time)`);
+      });
+
       const unpaidAmount = unpaidClasses.length * pricePerClass;
       debugLog(`💰 FINAL: $${unpaidAmount} (${unpaidClasses.length} unpaid × $${pricePerClass})`);
       return {
@@ -9125,6 +9155,10 @@
       currentTotalUnpaid = displayUnpaidAmount;
       window.currentTotalUnpaid = displayUnpaidAmount;
       window.currentUnpaidClasses = unpaidClasses.map(c => c.date);
+      // Map of date -> target group, only populated for cross-group one-time classes
+      // (home-group classes have no entry, so lookups fall back to null/home group).
+      window.currentUnpaidClassGroups = {};
+      unpaidClasses.forEach(c => { if (c.group) window.currentUnpaidClassGroups[c.date] = c.group; });
       // Store full schedule so openPaymentModal can refresh unpaid dates if page is stale.
       window.currentScheduledClasses = scheduledDatesForUI ? [...scheduledDatesForUI] : [];
       
@@ -9258,6 +9292,7 @@
       if (student?.portal_blocked) {
         debugLog('🔒 PORTAL BLOCK: admin has manually blocked this student — redirecting to payment gate');
         const _blockUnpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
+        const _blockGroups = window.currentUnpaidClassGroups || {};
         const _blockParams = new URLSearchParams({
           student_name    : student?.name    || '',
           student_id      : String(student?.id || ''),
@@ -9268,6 +9303,7 @@
           invoice_ref     : `block-${student?.id || 'unknown'}`,
           for_class       : _blockUnpaidDates.join(','),
           for_class_dates : JSON.stringify(_blockUnpaidDates),
+          class_group     : _blockGroups[_blockUnpaidDates[0]] || '',
           gate            : '1',
           block_reason    : 'manual',
           is_admin        : _isAdminViewingForGate ? '1' : '0',
@@ -9281,6 +9317,7 @@
       if (displayUnpaidAmount > 300) {
         debugLog('🔒 DEBT LOCK: balance $' + displayUnpaidAmount.toFixed(0) + ' > $300 — redirecting to payment gate');
         const _unpaidDatesList = normalizeClassDateList(window.currentUnpaidClasses || []);
+        const _gateGroups = window.currentUnpaidClassGroups || {};
         const _gateParams = new URLSearchParams({
           student_name    : student?.name    || '',
           student_id      : String(student?.id || ''),
@@ -9291,6 +9328,7 @@
           invoice_ref     : `balance-${student?.id || 'unknown'}`,
           for_class       : _unpaidDatesList.join(','),
           for_class_dates : JSON.stringify(_unpaidDatesList),
+          class_group     : _gateGroups[_unpaidDatesList[0]] || '',
           gate            : '1',
           is_admin        : _isAdminViewingForGate ? '1' : '0',
         });
@@ -16178,6 +16216,7 @@
       // Re-fetch using the same debt engine as the portal UI so the amount passed to
       // payment.html stays identical to what the student sees on the portal cards.
       let unpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
+      let unpaidGroups = window.currentUnpaidClassGroups || {};
       let freshAmount = amount; // will be recalculated if unpaid list changes
       try {
         let scheduleData = currentGroupScheduleData;
@@ -16191,9 +16230,12 @@
 
         const freshResult = await calculateUnpaidFromSchedule(student, [], scheduleData || {});
         unpaidDates = normalizeClassDateList((freshResult.unpaidClasses || []).map(c => c.date)).sort();
+        unpaidGroups = {};
+        (freshResult.unpaidClasses || []).forEach(c => { if (c.group) unpaidGroups[c.date] = c.group; });
         const scheduledDates = normalizeClassDateList(freshResult.scheduledDates || []);
 
         window.currentUnpaidClasses = unpaidDates;
+        window.currentUnpaidClassGroups = unpaidGroups;
         window.currentScheduledClasses = scheduledDates;
         freshAmount = Number(freshResult.unpaidAmount || 0);
         window.currentTotalUnpaid = freshAmount;
@@ -16219,6 +16261,7 @@
         invoice_ref     : `balance-${student?.id || 'unknown'}`,
         for_class       : unpaidDates.join(','),
         for_class_dates : JSON.stringify(unpaidDates),
+        class_group     : unpaidGroups[unpaidDates[0]] || '',
       });
 
       const src = `payment.html?v=20260414-2&${params.toString()}`;
