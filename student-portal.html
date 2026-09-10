@@ -12887,7 +12887,15 @@
         const individualAccessNoteIds = (studentPermRes.data || [])
           .filter(p => p.is_accessible && p.student_id != null && String(p.student_id) === String(studentId) && p.group_name == null)
           .map(p => p.note_id);
-        
+
+        // Any explicit per-student permission row (including ones carried forward by
+        // carryForwardGroupNotePermissions() when the admin changes a student's group) —
+        // used only to exempt already-granted notes from the new-student retroactive filter
+        // below. Unlike individualAccessNoteIds, this does NOT bypass payment checks.
+        const explicitStudentPermissionNoteIds = (studentPermRes.data || [])
+          .filter(p => p.is_accessible && p.student_id != null && String(p.student_id) === String(studentId))
+          .map(p => p.note_id);
+
         const freeNoteIds = new Set([...(freeAccessNoteIds || []), ...individualAccessNoteIds]);
         
         if (DEBUG_MODE && individualAccessNoteIds.length > 0) debugLog('✅ Individual Access grants (unconditional free):', individualAccessNoteIds);
@@ -13073,10 +13081,13 @@
         if (effectiveStartStr) {
           const beforeFilter = allSystemNotes.length;
           allSystemNotes = allSystemNotes.filter(note => {
-            // Only bypass date filter for true individual admin grants (admin explicitly unlocked
-            // for this student). Group-level postings must still be filtered by effectiveStartStr
-            // so restarted students don't see notes from before their new start date.
+            // Bypass for true individual admin grants (admin explicitly unlocked for this
+            // student) AND for any note this student already has an explicit per-student
+            // permission row for — e.g. carried forward from a prior group on a group change
+            // (carryForwardGroupNotePermissions). Only anonymous group-wide postings (no
+            // per-student row) are filtered by effectiveStartStr.
             if (individualAccessNoteIds.includes(note.id)) return true;
+            if (explicitStudentPermissionNoteIds.includes(note.id)) return true;
 
             // Use posting date (when this note was assigned to this group for a class).
             // Fall back to the note's own class_date only if no posting record exists.
