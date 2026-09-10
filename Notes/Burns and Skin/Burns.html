@@ -53,6 +53,21 @@
     .alert.green  .alert-title { color: var(--green); }
     .alert p { margin-bottom: 0; font-size: 13px; color: var(--text-muted); }
     .divider { height: 1px; background: var(--border); margin: 28px 0; }
+    .calc-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 4px; }
+    @media (max-width: 560px) { .calc-grid { grid-template-columns: 1fr; } }
+    .calc-field label { display: block; font-size: 10px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 6px; }
+    .calc-field input, .calc-field select {
+      width: 100%; background: var(--surface2); border: 1px solid rgba(96,165,250,0.3); border-radius: 8px;
+      color: #fff; font-size: 14px; font-family: inherit; padding: 9px 10px;
+    }
+    .calc-field input:focus, .calc-field select:focus { outline: none; border-color: var(--blue); }
+    .calc-result { background: var(--surface2); border: 1px solid rgba(96,165,250,0.25); border-radius: 10px; padding: 14px 16px; margin-top: 14px; font-size: 13px; color: var(--text-muted); }
+    .calc-result.calc-result--filled { color: var(--text); }
+    .calc-result .calc-total { font-size: 20px; font-weight: 800; color: #fff; }
+    .calc-result .calc-row { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .calc-result .calc-row:last-child { border-bottom: none; }
+    .calc-result .calc-row-label { color: var(--text-muted); }
+    .calc-result .calc-row-value { font-weight: 700; color: var(--blue); }
   </style>
   <script src="../js/no-copy.js"></script>
   <link rel="stylesheet" href="../css/med-abbr-tooltip.css">
@@ -142,6 +157,29 @@
     <li>Give <strong>½ in the first 8 hours</strong>, then ½ over the next 16 hours</li>
     <li>Use <strong>Lactated Ringer's</strong> — replaces fluids/electrolytes; only under supervision</li>
   </ul>
+</div>
+
+<div class="card blue" id="parklandCalc">
+  <div class="card-label">🧮 Parkland Formula Calculator</div>
+  <div class="calc-grid">
+    <div class="calc-field">
+      <label for="pfTbsa">TBSA Burned (%)</label>
+      <input type="number" id="pfTbsa" inputmode="decimal" min="0" max="100" step="0.1" placeholder="e.g. 30">
+    </div>
+    <div class="calc-field">
+      <label for="pfWeight">Weight (kg)</label>
+      <input type="number" id="pfWeight" inputmode="decimal" min="0" step="0.1" placeholder="e.g. 70">
+    </div>
+    <div class="calc-field">
+      <label for="pfPatientType">Patient</label>
+      <select id="pfPatientType">
+        <option value="4">Adult (4 mL/kg/%TBSA)</option>
+        <option value="3">Child (3 mL/kg/%TBSA)</option>
+      </select>
+    </div>
+  </div>
+  <div id="pfResult" class="calc-result">Enter TBSA % and weight to calculate.</div>
+  <p style="font-size:12px;color:var(--text-muted);margin-top:8px;margin-bottom:0;">Timed from the moment of injury, not time of arrival. This is a clinical estimate only — actual fluids are titrated to urine output (0.5–1 mL/kg/hr) and ordered by the provider.</p>
 </div>
 
 <div class="divider"></div>
@@ -264,6 +302,53 @@
     <p>TBSA = Rule of Nines (adult/child). Fluids = Parkland Formula with LR. Airway = soot, singed hair, hoarseness → intubate. Pain = IV opioids ONLY. Electrolytes = ↑K⁺ early, ↓K⁺ later. Infection = fever, ↑WBC, pus, odor. Psychosocial = PTSD, anxiety, body image.</p>
   </div>
 </div>
+
+<script>
+  (function () {
+    const tbsaEl = document.getElementById('pfTbsa');
+    const weightEl = document.getElementById('pfWeight');
+    const typeEl = document.getElementById('pfPatientType');
+    const resultEl = document.getElementById('pfResult');
+    if (!tbsaEl || !weightEl || !typeEl || !resultEl) return;
+
+    function fmt(n) {
+      // Show as many decimals as needed (up to 2) without trailing zeros, e.g. 525 not 525.00.
+      return Number(n.toFixed(2)).toString();
+    }
+
+    function calculate() {
+      const tbsa = parseFloat(tbsaEl.value);
+      const weight = parseFloat(weightEl.value);
+      const mlPerKg = parseFloat(typeEl.value);
+
+      if (!Number.isFinite(tbsa) || !Number.isFinite(weight) || tbsa <= 0 || weight <= 0) {
+        resultEl.classList.remove('calc-result--filled');
+        resultEl.textContent = 'Enter TBSA % and weight to calculate.';
+        return;
+      }
+      if (tbsa > 100) {
+        resultEl.classList.remove('calc-result--filled');
+        resultEl.textContent = 'TBSA cannot exceed 100%.';
+        return;
+      }
+
+      const totalMl = mlPerKg * tbsa * weight;
+      const halfMl = totalMl / 2;
+      const first8Rate = halfMl / 8;
+      const next16Rate = halfMl / 16;
+
+      resultEl.classList.add('calc-result--filled');
+      resultEl.innerHTML = `
+        <div class="calc-total">${fmt(totalMl)} mL Lactated Ringer's / 24 hr</div>
+        <div class="calc-row"><span class="calc-row-label">First 8 hours (½ total)</span><span class="calc-row-value">${fmt(halfMl)} mL → ${fmt(first8Rate)} mL/hr</span></div>
+        <div class="calc-row"><span class="calc-row-label">Next 16 hours (remaining ½)</span><span class="calc-row-value">${fmt(halfMl)} mL → ${fmt(next16Rate)} mL/hr</span></div>
+      `;
+    }
+
+    [tbsaEl, weightEl, typeEl].forEach(el => el.addEventListener('input', calculate));
+    typeEl.addEventListener('change', calculate);
+  })();
+</script>
 
 <script src="../js/content-protection.js"></script>
 <script src="../js/note-guard.js"></script>
