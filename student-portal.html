@@ -8621,6 +8621,15 @@
       }
     }
     
+    // A price_per_class of 0 is a legitimate "free class" value, not a missing one —
+    // do NOT use `parseFloat(x) || fallback` (0 is falsy and would be clobbered).
+    function getStudentClassPrice(student, fallback = 50) {
+      const raw = student && student.price_per_class;
+      if (raw === null || raw === undefined || raw === '') return fallback;
+      const num = parseFloat(raw);
+      return Number.isFinite(num) ? num : fallback;
+    }
+
     /**
      * 🔴 Calculate unpaid classes based on student's schedule
      * This matches the Calendar's red dot logic - counts PAST classes without payment
@@ -8642,7 +8651,7 @@
     async function calculateUnpaidFromSchedule(student, payments, groupScheduleData) {
       const studentGroup = student.group_name || student.group_letter || student.group;
 
-      const pricePerClass = parseFloat(student.price_per_class) || 50;
+      const pricePerClass = getStudentClassPrice(student);
       const nowParts = getTodayLAParts();
       if (!nowParts) return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
 
@@ -9091,7 +9100,7 @@
         );
       })();
 
-      const pricePerClassValue = student ? (parseFloat(student.price_per_class) || 50) : 50;
+      const pricePerClassValue = student ? getStudentClassPrice(student) : 50;
       const freeStudent = isFreeStudent(student);
 
       if (freeStudent) {
@@ -9571,7 +9580,7 @@
         if (entry.type === 'absent' && entry.isoDate) {
           item.style.cursor = 'pointer';
           const _iso = entry.isoDate;
-          const _price = entry.amount || (window.currentStudent ? (parseFloat(window.currentStudent.price_per_class) || 50) : 50);
+          const _price = entry.amount || (window.currentStudent ? getStudentClassPrice(window.currentStudent) : 50);
           item.addEventListener('click', () => openAbsenceInfoModal(_iso, _price));
         }
         
@@ -15153,7 +15162,7 @@
         item.addEventListener('click', (e) => {
           e.stopPropagation();
           const isoDate = note.date.toISOString().split('T')[0];
-          const price = window.currentStudent ? (parseFloat(window.currentStudent.price_per_class) || 50) : 50;
+          const price = window.currentStudent ? getStudentClassPrice(window.currentStudent) : 50;
           openAbsenceInfoModal(isoDate, price, true);
         });
       } else if (!note.isPaid && !note.isTemplateMissing) {
@@ -15162,7 +15171,7 @@
         item.addEventListener('click', (e) => {
           e.stopPropagation();
           const isoDate = note.date.toISOString().split('T')[0];
-          const price = window.currentStudent ? (parseFloat(window.currentStudent.price_per_class) || 50) : 50;
+          const price = window.currentStudent ? getStudentClassPrice(window.currentStudent) : 50;
           openAbsenceInfoModal(isoDate, price, false);
         });
       } else if (note.isPaid && !note.isAbsent && (note.attachments?.length > 0 || note.isTemplateMissing)) {
@@ -15974,7 +15983,7 @@
 
     function openAbsenceInfoModal(isoDate, price, isAbsent = true) {
       _absenceInfoDate = isoDate;
-      _absenceInfoPrice = price || (window.currentStudent ? (parseFloat(window.currentStudent.price_per_class) || 50) : 50);
+      _absenceInfoPrice = price || (window.currentStudent ? getStudentClassPrice(window.currentStudent) : 50);
       const modal = document.getElementById('absenceInfoModal');
       if (!modal) return;
       // Format date for display line
@@ -16017,7 +16026,7 @@
       const student = window.currentStudent;
       if (!student || !isoDate) { openPaymentModal(); return; }
 
-      const amount = price > 0 ? price : (parseFloat(student.price_per_class) || 50);
+      const amount = price > 0 ? price : getStudentClassPrice(student);
 
       // Look up notes posted for this group on this class date, then open payment with titles
       const openPaymentWithNotes = (noteTitles) => {
@@ -16197,7 +16206,7 @@
         return;
       }
 
-      const classPrice = parseFloat(student.price_per_class) || 50;
+      const classPrice = getStudentClassPrice(student);
       if (classPrice <= 0) {
         showCustomAlert('Invalid class price. Please contact admin.', 'error');
         return;
@@ -16395,6 +16404,17 @@
       if (!e.data || typeof e.data !== 'object') return;
 
       if (e.data.type === 'ARNOMA_PAYMENT_SUCCESS') {
+        // Guard against the same success message firing twice in rapid succession
+        // (e.g. duplicate listener registration) before the DB idempotency check below
+        // has a chance to see the first insert — in-memory dedupe closes that race window.
+        const successKey = `${e.data.studentId}|${e.data.amount}|${(e.data.forClassDates || []).join(',')}|${e.data.date}`;
+        window._processedStripeSuccessKeys = window._processedStripeSuccessKeys || new Set();
+        if (window._processedStripeSuccessKeys.has(successKey)) {
+          console.log('[ARNOMA] Duplicate ARNOMA_PAYMENT_SUCCESS message ignored:', successKey);
+          return;
+        }
+        window._processedStripeSuccessKeys.add(successKey);
+
         // Write one payment_records row per class date covered by this Stripe payment.
         // payment_records has no for_class/for_class_dates columns — the row's own `date`
         // field IS the class date (Calendar-NEW falls back to pr.date in extractForClassDates).

@@ -4688,6 +4688,9 @@
           const isManuallyEnrolled = manualEnrollments.has(`${student.id}-${dateStr}`);
           if (!isWeeklyClass && !isOneTimeClass && !isManuallyEnrolled) continue;
           if (isClassSkippedCached(dateStr, group.group_name)) continue;
+          // Dates while the student was paused/hidden (per student_visibility_history)
+          // are not expected to be paid — matches student-portal's calculateUnpaidFromSchedule.
+          if (!isStudentActiveOnDate(student, dateStr)) continue;
 
           const paymentInfo = hasPaymentCached(student.id, dateStr, student);
           const hasAbsence = isAbsentCached(dateStr, student.id);
@@ -6197,7 +6200,7 @@
         const { student, cleanEmail } = await getStudentEmailInfo(studentId);
 
         const balance = Number(student.balance) || 0;
-        const pricePerClass = Number(student.price_per_class) || 15;
+        const pricePerClass = getStudentClassPrice(student);
 
         const unpaidClassDetails = [];
         let unpaidAmountFromCalendar = 0;
