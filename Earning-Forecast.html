@@ -246,6 +246,47 @@
       margin-bottom: 20px;
     }
 
+    .actual-earnings-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .actual-month-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .actual-month-nav-btn {
+      width: 26px;
+      height: 26px;
+      border-radius: 8px;
+      border: 1px solid var(--status-attn-border);
+      background: rgba(245, 240, 232, 0.06);
+      color: var(--gold-light);
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      transition: background 0.15s ease, opacity 0.15s ease;
+    }
+
+    .actual-month-nav-btn:hover:not(:disabled) {
+      background: rgba(245, 240, 232, 0.12);
+    }
+
+    .actual-month-nav-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
     .actual-breakdown {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -565,7 +606,13 @@
 
           <!-- Actual Earnings -->
           <div class="actual-earnings">
-            <div class="section-title">💵 Actual Received (This Month)</div>
+            <div class="actual-earnings-header">
+              <div class="section-title" id="actualEarningsTitle" style="margin-bottom: 0;">💵 Actual Received (This Month)</div>
+              <div class="actual-month-nav">
+                <button class="actual-month-nav-btn" id="actualMonthPrev" onclick="navigateForecastMonth(-1)" title="Previous month">‹</button>
+                <button class="actual-month-nav-btn" id="actualMonthNext" onclick="navigateForecastMonth(1)" title="Next month" disabled>›</button>
+              </div>
+            </div>
             <div class="stat-value" id="forecastActual">--</div>
             <div class="actual-breakdown">
               <div class="actual-breakdown-item">
@@ -996,10 +1043,10 @@
     }
 
     // Load payments from Supabase (current month only)
-    async function loadPayments() {
+    async function loadPayments(monthKey = null) {
       try {
         const now = new Date();
-        const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const currentMonthKey = monthKey || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
         const [{ data: ignoredData }, paymentsResult, recordsResult] = await Promise.all([
           supabaseClient.from('ignored_fuchsia_payments').select('payment_id'),
@@ -1646,6 +1693,44 @@
       return total;
     }
 
+    // ── Actual Received month navigation ──────────────────────────────────
+    let forecastMonthOffset = 0; // 0 = current month, -1 = last month, etc.
+
+    function getForecastMonthInfo(offset) {
+      const d = new Date();
+      d.setDate(1);
+      d.setMonth(d.getMonth() + offset);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+      return { key, label, daysInMonth, isCurrent: offset === 0 };
+    }
+
+    async function renderActualEarnings() {
+      const { key, label, daysInMonth, isCurrent } = getForecastMonthInfo(forecastMonthOffset);
+      await loadPayments(key);
+
+      const actualEarnings = calculateActualMonthlyEarnings();
+      // Completed months use the full month; the current month uses days elapsed so far.
+      const daysElapsed = isCurrent ? Math.max(1, new Date().getDate()) : daysInMonth;
+      const weeksElapsed = Math.max(daysElapsed / 7, 1 / 7);
+      const actualDailyAvg = actualEarnings / daysElapsed;
+      const actualWeeklyAvg = actualEarnings / weeksElapsed;
+
+      document.getElementById('actualEarningsTitle').textContent = `\ud83d\udcb5 Actual Received (${isCurrent ? 'This Month' : label})`;
+      document.getElementById('forecastActual').textContent = formatCurrency(actualEarnings, '$');
+      document.getElementById('forecastActualWeekly').textContent = formatCurrency(actualWeeklyAvg, '$');
+      document.getElementById('forecastActualDaily').textContent = formatCurrency(actualDailyAvg, '$');
+      document.getElementById('actualMonthNext').disabled = isCurrent;
+    }
+
+    async function navigateForecastMonth(delta) {
+      const newOffset = forecastMonthOffset + delta;
+      if (newOffset > 0) return; // never go past the current month
+      forecastMonthOffset = newOffset;
+      await renderActualEarnings();
+    }
+
     // Update forecast data
     function updateForecastData() {
       // Filter ONLY active students (not paused or graduated)
@@ -1673,22 +1758,12 @@
       });
 
       const totalMonthly = totalWeekly * 4;
-      const actualEarnings = calculateActualMonthlyEarnings();
-
-      // Days/weeks elapsed so far in the current calendar month (at least 1, to avoid /0)
-      const now = new Date();
-      const daysElapsed = Math.max(1, now.getDate());
-      const weeksElapsed = Math.max(daysElapsed / 7, 1 / 7);
-      const actualDailyAvg = actualEarnings / daysElapsed;
-      const actualWeeklyAvg = actualEarnings / weeksElapsed;
 
       // Update UI
       document.getElementById('forecastActiveCount').textContent = activeCount;
       document.getElementById('forecastWeekly').textContent = formatCurrency(totalWeekly, '$');
       document.getElementById('forecastMonthly').textContent = formatCurrency(totalMonthly, '$');
-      document.getElementById('forecastActual').textContent = formatCurrency(actualEarnings, '$');
-      document.getElementById('forecastActualWeekly').textContent = formatCurrency(actualWeeklyAvg, '$');
-      document.getElementById('forecastActualDaily').textContent = formatCurrency(actualDailyAvg, '$');
+      renderActualEarnings();
     }
 
     // Show breakdown
@@ -1898,10 +1973,11 @@
       console.log('💰 Loading Earning Forecast...');
 
       // Fast-first paint: load only what the top summary needs.
+      // (loadPayments for the current month happens inside renderActualEarnings,
+      // called by updateForecastData() below.)
       await Promise.all([
         loadStudents(),
-        loadGroups(),
-        loadPayments()
+        loadGroups()
       ]);
 
       updateForecastData();
