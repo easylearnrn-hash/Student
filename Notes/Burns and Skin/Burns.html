@@ -68,6 +68,10 @@
     .calc-result .calc-row:last-child { border-bottom: none; }
     .calc-result .calc-row-label { color: var(--text-muted); }
     .calc-result .calc-row-value { font-weight: 700; color: var(--blue); }
+    .calc-steps { margin-top: 12px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,0.1); }
+    .calc-steps-title { font-size: 10px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; }
+    .calc-step { font-size: 12.5px; color: var(--text-muted); margin-bottom: 5px; }
+    .calc-step strong { color: #fff; }
   </style>
   <script src="../js/no-copy.js"></script>
   <link rel="stylesheet" href="../css/med-abbr-tooltip.css">
@@ -180,6 +184,7 @@
   </div>
   <div id="pfResult" class="calc-result">Enter TBSA % and weight to calculate.</div>
   <p style="font-size:12px;color:var(--text-muted);margin-top:8px;margin-bottom:0;">Timed from the moment of injury, not time of arrival. This is a clinical estimate only — actual fluids are titrated to urine output (0.5–1 mL/kg/hr) and ordered by the provider.</p>
+  <div class="alert gold" style="margin-top:12px;margin-bottom:0;"><div class="alert-icon">⚖️</div><div class="alert-body"><div class="alert-title">Weight Must Be in KG</div><p>The Parkland formula only works in <strong>kilograms</strong>. If an NCLEX question gives weight in pounds (lb), convert first: <strong>kg = lb ÷ 2.2</strong>. Never plug pounds directly into the formula.</p></div></div>
 </div>
 
 <div class="divider"></div>
@@ -312,8 +317,8 @@
     if (!tbsaEl || !weightEl || !typeEl || !resultEl) return;
 
     function fmt(n) {
-      // Show as many decimals as needed (up to 2) without trailing zeros, e.g. 525 not 525.00.
-      return Number(n.toFixed(2)).toString();
+      // Comma-separated, up to 2 decimals, no trailing zeros — e.g. 8,400 or 262.5.
+      return Number(n.toFixed(2)).toLocaleString('en-US', { maximumFractionDigits: 2 });
     }
 
     function calculate() {
@@ -336,12 +341,20 @@
       const halfMl = totalMl / 2;
       const first8Rate = halfMl / 8;
       const next16Rate = halfMl / 16;
+      const patientLabel = mlPerKg === 3 ? 'Child' : 'Adult';
 
       resultEl.classList.add('calc-result--filled');
       resultEl.innerHTML = `
         <div class="calc-total">${fmt(totalMl)} mL Lactated Ringer's / 24 hr</div>
         <div class="calc-row"><span class="calc-row-label">First 8 hours (½ total)</span><span class="calc-row-value">${fmt(halfMl)} mL → ${fmt(first8Rate)} mL/hr</span></div>
         <div class="calc-row"><span class="calc-row-label">Next 16 hours (remaining ½)</span><span class="calc-row-value">${fmt(halfMl)} mL → ${fmt(next16Rate)} mL/hr</span></div>
+        <div class="calc-steps">
+          <div class="calc-steps-title">How this was calculated (${patientLabel} formula)</div>
+          <div class="calc-step">1. Total 24 hr fluid = ${mlPerKg} mL × ${fmt(tbsa)}% TBSA × ${fmt(weight)} kg = <strong>${fmt(totalMl)} mL</strong></div>
+          <div class="calc-step">2. Half the total is given in the first 8 hours = ${fmt(totalMl)} mL ÷ 2 = <strong>${fmt(halfMl)} mL</strong></div>
+          <div class="calc-step">3. First-8-hour rate = ${fmt(halfMl)} mL ÷ 8 hr = <strong>${fmt(first8Rate)} mL/hr</strong></div>
+          <div class="calc-step">4. Remaining half is given over the next 16 hours = ${fmt(halfMl)} mL ÷ 16 hr = <strong>${fmt(next16Rate)} mL/hr</strong></div>
+        </div>
       `;
     }
 
