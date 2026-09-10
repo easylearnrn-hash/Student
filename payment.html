@@ -581,12 +581,16 @@
         invoiceRef   : params.get('invoice')          || params.get('invoice_ref') || '',
         forClass     : params.get('for_class')        || '',
         forClassDates: params.get('for_class_dates')  || '',
+        forClassGroups: params.get('for_class_groups') || '',
         classGroup   : params.get('class_group')      || '',
       };
 
       // Persist class-date payload for redirect/3DS returns where URL params may be altered.
       if (INVOICE.forClassDates) {
         sessionStorage.setItem('arnoma:lastForClassDates', INVOICE.forClassDates);
+      }
+      if (INVOICE.forClassGroups) {
+        sessionStorage.setItem('arnoma:lastForClassGroups', INVOICE.forClassGroups);
       }
       if (INVOICE.forClass) {
         sessionStorage.setItem('arnoma:lastForClass', INVOICE.forClass);
@@ -623,12 +627,17 @@
         return { subtotal, tax, total };
       }
 
+      // NOTE: intentionally NOT deduplicated — a single payment can cover two
+      // different classes that fall on the SAME calendar date (e.g. a student's
+      // home-group class + a one-time cross-group class). Order/length here must
+      // stay aligned 1:1 with resolveForClassGroups() so each date keeps its own
+      // class_group tag; true duplicate (date+group) collapsing happens upstream
+      // in student-portal.html when the billing units are first built.
       function normalizeDateList(values) {
         if (!Array.isArray(values)) return [];
-        const out = values
+        return values
           .map(v => String(v || '').split('T')[0].trim())
           .filter(v => /^\d{4}-\d{2}-\d{2}$/.test(v));
-        return Array.from(new Set(out));
       }
 
       function resolveForClassDates() {
@@ -652,6 +661,30 @@
           dates = fromCsv(sessionStorage.getItem('arnoma:lastForClass'));
         }
         return dates;
+      }
+
+      // Parallel array to resolveForClassDates() — classGroups[i] is the class_group
+      // for classDates[i] ('' means the student's home group). Falls back to the
+      // single legacy `class_group` param/INVOICE.classGroup repeated for every date
+      // when the caller didn't send a per-date groups array (older links, single-date
+      // absence payments, etc.) so existing flows are unaffected.
+      function resolveForClassGroups(dateCount) {
+        const fromJson = raw => {
+          if (!raw) return null;
+          try {
+            const arr = JSON.parse(raw);
+            return Array.isArray(arr) ? arr.map(g => String(g || '')) : null;
+          } catch (_) { return null; }
+        };
+        let groups = fromJson(INVOICE.forClassGroups);
+        if (!groups) {
+          groups = fromJson(sessionStorage.getItem('arnoma:lastForClassGroups'));
+        }
+        if (!groups) {
+          groups = [];
+        }
+        while (groups.length < dateCount) groups.push(INVOICE.classGroup || '');
+        return groups.slice(0, dateCount);
       }
 
       /* ── Helpers ── */
@@ -901,6 +934,7 @@
         `;
 
         const forClassDatesArr = resolveForClassDates();
+        const forClassGroupsArr = resolveForClassGroups(forClassDatesArr.length);
         const today = new Date().toISOString().split('T')[0];
 
         // Notify parent window (student-portal.html modal) — parent writes payment_records
@@ -916,6 +950,7 @@
             taxRate        : STRIPE_TAX_RATE,
             forClass       : forClassDatesArr.length ? forClassDatesArr[0] : today,
             forClassDates  : forClassDatesArr.length ? forClassDatesArr : [today],
+            forClassGroups : forClassDatesArr.length ? forClassGroupsArr : [INVOICE.classGroup || ''],
             date           : today,
           }, '*');
         } catch(_){}
@@ -926,14 +961,20 @@
             const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             const { subtotal } = getAmountBreakdown();
             const dates = forClassDatesArr.length ? forClassDatesArr : [today];
+            const groups = forClassDatesArr.length ? forClassGroupsArr : [INVOICE.classGroup || ''];
             const perClass = dates.length > 1 ? +(subtotal / dates.length).toFixed(2) : subtotal;
+            // Idempotency keyed on (date, class_group) — a cross-group one-time class
+            // sharing a date with the home-group class must not be skipped just because
+            // the home-group class on that date was already paid separately.
             const { data: existing } = await _sb
-              .from('payment_records').select('date')
+              .from('payment_records').select('date, class_group')
               .eq('student_id', INVOICE.studentId).eq('payment_method', 'stripe').in('date', dates);
-            const alreadyPaid = new Set((existing || []).map(r => r.date));
+            const unitKey = (d, g) => `${d}::${g || ''}`;
+            const alreadyPaid = new Set((existing || []).map(r => unitKey(r.date, r.class_group)));
             const toInsert = dates
-              .filter(d => !alreadyPaid.has(d))
-              .map(d => ({ student_id: INVOICE.studentId, date: d, amount: perClass, status: 'paid', payment_method: 'stripe' }));
+              .map((d, i) => ({ date: d, group: groups[i] || '' }))
+              .filter(u => !alreadyPaid.has(unitKey(u.date, u.group)))
+              .map(u => ({ student_id: INVOICE.studentId, date: u.date, amount: perClass, status: 'paid', payment_method: 'stripe', class_group: u.group || null }));
             if (toInsert.length) {
               const { error: dbErr } = await _sb.from('payment_records').insert(toInsert);
               if (dbErr) console.error('[ARNOMA] Gate payment_records insert failed:', dbErr.message);

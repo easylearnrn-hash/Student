@@ -9195,6 +9195,10 @@
       // (home-group classes have no entry, so lookups fall back to null/home group).
       window.currentUnpaidClassGroups = {};
       unpaidClasses.forEach(c => { if (c.group) window.currentUnpaidClassGroups[c.date] = c.group; });
+      // Parallel array (same order/length as currentUnpaidClasses, NOT deduped by date) —
+      // needed because two classes can share a date (home-group + cross-group one-time),
+      // and the date-keyed map above can only remember one group per date.
+      window.currentUnpaidClassGroupList = unpaidClasses.map(c => c.group || '');
       // Store full schedule so openPaymentModal can refresh unpaid dates if page is stale.
       window.currentScheduledClasses = scheduledDatesForUI ? [...scheduledDatesForUI] : [];
       
@@ -9327,8 +9331,9 @@
                                      localStorage.getItem('is_admin_viewing') === 'true';
       if (student?.portal_blocked) {
         debugLog('🔒 PORTAL BLOCK: admin has manually blocked this student — redirecting to payment gate');
-        const _blockUnpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
-        const _blockGroups = window.currentUnpaidClassGroups || {};
+        const _blockUnits = buildPaymentBillingUnits();
+        const _blockUnpaidDates = _blockUnits.map(u => u.date);
+        const _blockGroupsArr = _blockUnits.map(u => u.group);
         const _blockParams = new URLSearchParams({
           student_name    : student?.name    || '',
           student_id      : String(student?.id || ''),
@@ -9339,7 +9344,8 @@
           invoice_ref     : `block-${student?.id || 'unknown'}`,
           for_class       : _blockUnpaidDates.join(','),
           for_class_dates : JSON.stringify(_blockUnpaidDates),
-          class_group     : _blockGroups[_blockUnpaidDates[0]] || '',
+          for_class_groups: JSON.stringify(_blockGroupsArr),
+          class_group     : _blockGroupsArr[0] || '',
           gate            : '1',
           block_reason    : 'manual',
           is_admin        : _isAdminViewingForGate ? '1' : '0',
@@ -9352,8 +9358,9 @@
       // Applies to real students AND admin impersonation (so admin sees the same view as student).
       if (displayUnpaidAmount > 300) {
         debugLog('🔒 DEBT LOCK: balance $' + displayUnpaidAmount.toFixed(0) + ' > $300 — redirecting to payment gate');
-        const _unpaidDatesList = normalizeClassDateList(window.currentUnpaidClasses || []);
-        const _gateGroups = window.currentUnpaidClassGroups || {};
+        const _gateUnits = buildPaymentBillingUnits();
+        const _unpaidDatesList = _gateUnits.map(u => u.date);
+        const _gateGroupsArr = _gateUnits.map(u => u.group);
         const _gateParams = new URLSearchParams({
           student_name    : student?.name    || '',
           student_id      : String(student?.id || ''),
@@ -9364,7 +9371,8 @@
           invoice_ref     : `balance-${student?.id || 'unknown'}`,
           for_class       : _unpaidDatesList.join(','),
           for_class_dates : JSON.stringify(_unpaidDatesList),
-          class_group     : _gateGroups[_unpaidDatesList[0]] || '',
+          for_class_groups: JSON.stringify(_gateGroupsArr),
+          class_group     : _gateGroupsArr[0] || '',
           gate            : '1',
           is_admin        : _isAdminViewingForGate ? '1' : '0',
         });
@@ -16111,6 +16119,29 @@
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    // Builds the list of distinct BILLING UNITS (date + class_group pairs) currently
+    // owed, from window.currentUnpaidClasses/currentUnpaidClassGroupList. A "unit" is
+    // deduped by (date, group) — NOT by date alone — so a home-group class and a
+    // cross-group one-time class that happen to fall on the same calendar date both
+    // survive as separate payable items instead of collapsing into one.
+    function buildPaymentBillingUnits() {
+      const dates = Array.isArray(window.currentUnpaidClasses) ? window.currentUnpaidClasses : [];
+      const groupList = Array.isArray(window.currentUnpaidClassGroupList) ? window.currentUnpaidClassGroupList : [];
+      const seen = new Set();
+      const units = [];
+      dates.forEach((rawDate, i) => {
+        const date = String(rawDate || '').split('T')[0].trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+        const group = groupList[i] || '';
+        const key = `${date}::${group}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        units.push({ date, group });
+      });
+      units.sort((a, b) => a.date.localeCompare(b.date));
+      return units;
+    }
+
     async function openPaymentModal() {
       const student = window.currentStudent;
       const amount  = window.currentTotalUnpaid || 0;
@@ -16131,8 +16162,8 @@
 
       // Re-fetch using the same debt engine as the portal UI so the amount passed to
       // payment.html stays identical to what the student sees on the portal cards.
-      let unpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
-      let unpaidGroups = window.currentUnpaidClassGroups || {};
+      let unpaidDates = buildPaymentBillingUnits().map(u => u.date);
+      let unpaidGroupsArr = buildPaymentBillingUnits().map(u => u.group);
       let freshAmount = amount; // will be recalculated if unpaid list changes
       try {
         let scheduleData = currentGroupScheduleData;
@@ -16145,13 +16176,16 @@
         }
 
         const freshResult = await calculateUnpaidFromSchedule(student, [], scheduleData || {});
-        unpaidDates = normalizeClassDateList((freshResult.unpaidClasses || []).map(c => c.date)).sort();
-        unpaidGroups = {};
-        (freshResult.unpaidClasses || []).forEach(c => { if (c.group) unpaidGroups[c.date] = c.group; });
+        const rawUnpaidClasses = freshResult.unpaidClasses || [];
+        window.currentUnpaidClasses = rawUnpaidClasses.map(c => c.date);
+        window.currentUnpaidClassGroupList = rawUnpaidClasses.map(c => c.group || '');
+        window.currentUnpaidClassGroups = {};
+        rawUnpaidClasses.forEach(c => { if (c.group) window.currentUnpaidClassGroups[c.date] = c.group; });
         const scheduledDates = normalizeClassDateList(freshResult.scheduledDates || []);
 
-        window.currentUnpaidClasses = unpaidDates;
-        window.currentUnpaidClassGroups = unpaidGroups;
+        const freshUnits = buildPaymentBillingUnits();
+        unpaidDates = freshUnits.map(u => u.date);
+        unpaidGroupsArr = freshUnits.map(u => u.group);
         window.currentScheduledClasses = scheduledDates;
         freshAmount = Number(freshResult.unpaidAmount || 0);
         window.currentTotalUnpaid = freshAmount;
@@ -16167,6 +16201,7 @@
       // Keep a local snapshot so success mapping still works even if iframe message
       // misses forClassDates after a redirect/auth step.
       window._lastStripeClassDates = unpaidDates;
+      window._lastStripeClassGroups = unpaidGroupsArr;
       const params = new URLSearchParams({
         student_name    : student?.name    || '',
         student_id      : String(student?.id || ''),
@@ -16177,7 +16212,8 @@
         invoice_ref     : `balance-${student?.id || 'unknown'}`,
         for_class       : unpaidDates.join(','),
         for_class_dates : JSON.stringify(unpaidDates),
-        class_group     : unpaidGroups[unpaidDates[0]] || '',
+        for_class_groups: JSON.stringify(unpaidGroupsArr),
+        class_group     : unpaidGroupsArr[0] || '',
       });
 
       const src = `payment.html?v=20260414-2&${params.toString()}`;
@@ -16415,53 +16451,74 @@
         }
         window._processedStripeSuccessKeys.add(successKey);
 
-        // Write one payment_records row per class date covered by this Stripe payment.
+        // Write one payment_records row per class BILLING UNIT (date + class_group)
+        // covered by this Stripe payment. A date is NOT a unique key on its own — a
+        // student's home-group class and a one-time cross-group class can share the
+        // same calendar date, so class_group distinguishes them ('' / null = home group).
         // payment_records has no for_class/for_class_dates columns — the row's own `date`
         // field IS the class date (Calendar-NEW falls back to pr.date in extractForClassDates).
         try {
           const today = e.data.date || new Date().toISOString().split('T')[0];
-          const messageDates = normalizeClassDateList(e.data.forClassDates || []);
+          const validDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v);
+          const toDateList = raw => (Array.isArray(raw) ? raw : []).map(v => String(v || '').split('T')[0].trim()).filter(validDate);
+          const toGroupList = raw => Array.isArray(raw) ? raw.map(g => String(g || '')) : [];
+
+          const messageDates = toDateList(e.data.forClassDates);
+          const messageGroups = toGroupList(e.data.forClassGroups);
           const messageSingleDate = String(e.data.forClass || '').split('T')[0].trim();
-          const modalSnapshotDates = normalizeClassDateList(window._lastStripeClassDates || []);
-          const currentUnpaidDates = normalizeClassDateList(window.currentUnpaidClasses || []);
+          const modalSnapshotDates = toDateList(window._lastStripeClassDates);
+          const modalSnapshotGroups = toGroupList(window._lastStripeClassGroups);
+          const currentUnpaidDates = toDateList(window.currentUnpaidClasses);
+          const currentUnpaidGroups = toGroupList(window.currentUnpaidClassGroupList);
 
           let classDates = messageDates;
-          if (classDates.length === 0 && /^\d{4}-\d{2}-\d{2}$/.test(messageSingleDate)) {
+          let classGroups = messageGroups;
+          if (classDates.length === 0 && validDate(messageSingleDate)) {
             classDates = [messageSingleDate];
+            classGroups = [String(e.data.classGroup || '')];
           }
           if (classDates.length === 0 && modalSnapshotDates.length > 0) {
             classDates = modalSnapshotDates;
+            classGroups = modalSnapshotGroups;
           }
           if (classDates.length === 0 && currentUnpaidDates.length > 0) {
             classDates = currentUnpaidDates;
+            classGroups = currentUnpaidGroups;
           }
           if (classDates.length === 0) {
             console.warn('[ARNOMA] ⚠️ Stripe: no class dates found from event, snapshot, or unpaid list — falling back to today (' + today + '). Payment may be recorded on wrong date. Check window._lastStripeClassDates and window.currentUnpaidClasses.');
             classDates = [today];
+            classGroups = [''];
           }
+          // Groups must line up 1:1 with dates — pad with '' (home group) if shorter/missing,
+          // which is exactly the old behavior for plain single-group payments.
+          while (classGroups.length < classDates.length) classGroups.push('');
 
           const studentId = e.data.studentId || (window.currentStudent && window.currentStudent.id) || null;
           const amount    = e.data.amount || 0;
           const perClass  = classDates.length > 1 ? +(amount / classDates.length).toFixed(2) : amount;
 
-          const rows = classDates.map(d => ({
+          const rows = classDates.map((d, i) => ({
             student_id    : studentId,
             date          : d,
             amount        : perClass,
             status        : 'paid',
             payment_method: 'stripe',
+            class_group   : classGroups[i] || null,
           }));
 
-          // Idempotency guard: skip any dates that already have a stripe payment_record
-          // so that retries, 3DS redirects, or double-taps never create duplicate rows.
+          // Idempotency guard keyed on (date, class_group) — NOT date alone — so a
+          // cross-group one-time class is never skipped just because the student's
+          // home-group class on that same date was already paid separately.
           const { data: existingStripe } = await supabaseClient
             .from('payment_records')
-            .select('date')
+            .select('date, class_group')
             .eq('student_id', studentId)
             .eq('payment_method', 'stripe')
             .in('date', classDates);
-          const alreadyPaidDates = new Set((existingStripe || []).map(r => r.date));
-          const rowsToInsert = rows.filter(r => !alreadyPaidDates.has(r.date));
+          const unitKey = (date, group) => `${date}::${group || ''}`;
+          const alreadyPaidUnits = new Set((existingStripe || []).map(r => unitKey(r.date, r.class_group)));
+          const rowsToInsert = rows.filter(r => !alreadyPaidUnits.has(unitKey(r.date, r.class_group)));
 
           if (rowsToInsert.length === 0) {
             console.log('[ARNOMA] All Stripe payment_records already exist, skipping insert');
