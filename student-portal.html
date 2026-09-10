@@ -8698,7 +8698,7 @@
           supabaseClient.from('payment_records').select('*').eq('student_id', student.id).in('status', ['paid', 'excused', 'ignored', 'absent'])
         ).catch(() => ({ data: null, error: true })),
         Promise.resolve(
-          supabaseClient.from('credit_payments').select('class_date, applied_class_date').eq('student_id', student.id)
+          supabaseClient.from('credit_payments').select('class_date, applied_class_date, amount').eq('student_id', student.id)
         ).catch(() => ({ data: null, error: true })),
         groupNameForQuery
           ? Promise.resolve(
@@ -8836,10 +8836,20 @@
         resolved.forEach(d => { if (d) paidDates.add(d); });
       });
 
-      // From credit_payments
+      // From credit_payments — a row only fully covers the class (added to paidDates) when
+      // its amount is at least the full class price. A row with a SMALLER amount is a
+      // partial credit application: it reduces (not eliminates) what's still owed for that
+      // date, and the remainder must still be paid (e.g. via card).
+      const partialCreditByDate = new Map();
       credits.forEach(cp => {
         const d = ((cp.applied_class_date || cp.class_date) || '').split('T')[0];
-        if (d) paidDates.add(d);
+        if (!d) return;
+        const amt = (cp.amount === null || cp.amount === undefined) ? pricePerClass : (parseFloat(cp.amount) || 0);
+        if (amt >= pricePerClass) {
+          paidDates.add(d);
+        } else if (amt > 0) {
+          partialCreditByDate.set(d, (partialCreditByDate.get(d) || 0) + amt);
+        }
       });
 
       // 4. Skipped class dates
@@ -8982,8 +8992,10 @@
         if (isAbsent) {
           absentClasses.push({ date: dateStr, amount: 0, status: 'absent' });
         } else if (!hasPaid) {
-          unpaidClasses.push({ date: dateStr, amount: pricePerClass });
-          debugLog(`🔴 ${dateStr}: UNPAID${isManuallyEnrolled ? ' (manual enrollment)' : ''}`);
+          const creditApplied = partialCreditByDate.get(dateStr) || 0;
+          const remainingAmount = Math.max(0, +(pricePerClass - creditApplied).toFixed(2));
+          unpaidClasses.push({ date: dateStr, amount: remainingAmount, creditApplied: creditApplied || undefined });
+          debugLog(`🔴 ${dateStr}: UNPAID${isManuallyEnrolled ? ' (manual enrollment)' : ''}${creditApplied ? ` ($${creditApplied} credit applied, $${remainingAmount} remaining)` : ''}`);
         } else {
           debugLog(`🟢 ${dateStr}: PAID`);
         }
@@ -9018,11 +9030,12 @@
         }
       });
 
-      const unpaidAmount = unpaidClasses.length * pricePerClass;
-      debugLog(`💰 FINAL: $${unpaidAmount} (${unpaidClasses.length} unpaid × $${pricePerClass})`);
+      const unpaidAmount = unpaidClasses.reduce((sum, c) => sum + (c.amount || 0), 0);
+      debugLog(`💰 FINAL: $${unpaidAmount} (${unpaidClasses.length} unpaid classes)`);
       return {
         unpaidAmount,
         unpaidClasses,
+        partialCreditByDate,
         absentClasses,
         crossGroupClasses,
         paidDates,
@@ -9047,6 +9060,7 @@
   let scheduledDatesForUI = [];
   let prRecordsForUI = [];
   let crossGroupClassesForUI = []; // One-time classes in a group other than the student's home group
+  let partialCreditByDateForUI = new Map(); // date -> credit amount already applied toward that class
       
       // Cache frequently accessed DOM elements
       let lastPaidEl = getCachedDOM('lastPaid') || document.getElementById('lastPaid');
@@ -9145,6 +9159,7 @@
   scheduledDatesForUI  = result.scheduledDates || [];
   prRecordsForUI       = result.prRecords     || [];
   crossGroupClassesForUI = result.crossGroupClasses || [];
+  partialCreditByDateForUI = result.partialCreditByDate || new Map();
         
         creditBalance = parseFloat(student.balance) || 0;
         
@@ -9478,7 +9493,17 @@
           const method = dateToPaymentMethod.get(dateStr) || '';
           allEntries.push({ date: classDate, type: 'paid', amount: pricePerClassValue, statusText: 'Paid', statusClass: 'paid', paymentMethod: method });
         } else {
-          allEntries.push({ date: classDate, type: 'unpaid',  amount: pricePerClassValue, statusText: 'Unpaid',  statusClass: 'unpaid'  });
+          const creditApplied = partialCreditByDateForUI.get(dateStr) || 0;
+          const remainingAmount = creditApplied > 0 ? Math.max(0, +(pricePerClassValue - creditApplied).toFixed(2)) : pricePerClassValue;
+          allEntries.push({
+            date: classDate,
+            isoDate: dateStr,
+            type: 'unpaid',
+            amount: remainingAmount,
+            statusText: 'Unpaid',
+            statusClass: 'unpaid',
+            breakdownNote: creditApplied > 0 ? `$${creditApplied.toFixed(2)} credit applied — $${remainingAmount.toFixed(2)} remaining` : ''
+          });
         }
       });
       
@@ -16459,9 +16484,76 @@
 
       const currentBalance = parseFloat(latestStudent?.balance) || 0;
 
+      if (currentBalance <= 0) {
+        showCustomAlert('You have no credit available to apply.', 'error');
+        return;
+      }
+
+      // Credit doesn't cover a full class — apply it as a PARTIAL payment toward the
+      // earliest unpaid date instead of blocking. The remainder still needs to be paid
+      // (e.g. via card) — the portal will show the reduced remaining balance for that date.
       if (Math.floor(currentBalance / classPrice) <= 0) {
-        const needAmount = classPrice - currentBalance;
-        showCustomAlert(`You need $${needAmount.toFixed(2)} more credit to pay for 1 class.`, 'error');
+        const earliestDate = unpaidDates[0];
+
+        const { data: existingPartialCredit, error: existingPartialErr } = await supabaseClient
+          .from('credit_payments')
+          .select('class_date')
+          .eq('student_id', student.id)
+          .eq('class_date', earliestDate);
+
+        if (existingPartialErr) {
+          showCustomAlert(`Could not verify existing credit payments: ${existingPartialErr.message}`, 'error');
+          return;
+        }
+        if (existingPartialCredit && existingPartialCredit.length > 0) {
+          showCustomAlert('Credit has already been applied to this class. Refreshing data now.', 'info');
+          window.location.reload();
+          return;
+        }
+
+        const remainingAfterCredit = +(classPrice - currentBalance).toFixed(2);
+        const confirmed = await customConfirm(
+          'Apply Partial Credit?',
+          `Your $${currentBalance.toFixed(2)} credit will be applied toward your ${earliestDate} class. You'll still owe $${remainingAfterCredit.toFixed(2)} for that class, payable by card.`
+        );
+        if (!confirmed) return;
+
+        const { error: partialInsertErr } = await supabaseClient
+          .from('credit_payments')
+          .insert([{
+            student_id: student.id,
+            class_date: earliestDate,
+            applied_class_date: earliestDate,
+            amount: currentBalance,
+            balance_after: 0,
+          }]);
+
+        if (partialInsertErr) {
+          showCustomAlert(`Failed to apply credit payment: ${partialInsertErr.message}`, 'error');
+          return;
+        }
+
+        const { error: partialUpdateErr } = await supabaseClient
+          .from('students')
+          .update({ balance: 0 })
+          .eq('id', student.id);
+
+        if (partialUpdateErr) {
+          await supabaseClient
+            .from('credit_payments')
+            .delete()
+            .eq('student_id', student.id)
+            .eq('class_date', earliestDate);
+          showCustomAlert(`Failed to update credit balance: ${partialUpdateErr.message}`, 'error');
+          return;
+        }
+
+        window.currentStudent.balance = 0;
+        await showCustomAlert(
+          `$${currentBalance.toFixed(2)} was applied from credit toward ${earliestDate}. Remaining balance for that class: $${remainingAfterCredit.toFixed(2)}.`,
+          'success'
+        );
+        window.location.reload();
         return;
       }
 
