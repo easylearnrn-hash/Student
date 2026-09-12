@@ -8748,10 +8748,16 @@
             const method = String(r.payment_method || '').trim().toLowerCase();
             const status = String(r.status || '').trim().toLowerCase();
             const amount = Number(r.amount || 0);
-            return method === 'manual_enrollment'
+            const isManualMethod = method === 'manual_enrollment'
               || method === 'manual-enrollment'
               || method === 'manual enrollment'
               || (status === 'unpaid' && amount === 0 && (!method || method === 'manual'));
+            if (!isManualMethod) return false;
+            // Cross-group one-time adds (notes = a DIFFERENT group) must NOT also force a
+            // phantom home-group class onto this date — they're tracked separately below
+            // via crossGroupManualEnrollments/crossGroupClasses.
+            if (r.notes && String(r.notes) !== String(studentGroup)) return false;
+            return true;
           })
           .map(r => (r.date || '').split('T')[0])
           .filter(Boolean)
@@ -8826,6 +8832,10 @@
 
       prRecords.forEach(pr => {
         if (pr.status === 'absent') return;
+        // Cross-group-tagged rows belong to a DIFFERENT group's one-time class — they must
+        // NOT also mark the student's own home-group class as paid on a coincidental same date.
+        // (Mirrors crossGroupClasses below, which looks these up separately by class_group.)
+        if (pr.class_group && String(pr.class_group) !== String(studentGroup)) return;
         const fallback = (pr.date || '').split('T')[0];
         const resolved = extractForClassDates(pr, fallback);
         const isIgnoredRecord = String(pr.status || '').toLowerCase() === 'ignored' || String(pr.payment_method || '').toLowerCase() === 'ignored';
@@ -8898,7 +8908,7 @@
         }
       });
 
-      if (scheduleActiveDays.length === 0 && oneTimeSchedules.length === 0 && manualEnrollDates.size === 0) {
+      if (scheduleActiveDays.length === 0 && oneTimeSchedules.length === 0 && manualEnrollDates.size === 0 && crossGroupManualEnrollments.length === 0) {
         return { unpaidAmount: 0, unpaidClasses: [], absentClasses: [], hasSchedule: false };
       }
 
