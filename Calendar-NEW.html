@@ -1759,9 +1759,6 @@
       // ============================================================
       
   const LA_TIMEZONE = 'America/Los_Angeles';
-  window.CALENDAR_DEBUG = false; // Set to true in console to debug specific students
-  const DEBUG_STUDENT_NAME = 'sona husikyan';
-  const DEBUG_TARGET_DATE = '2026-01-29'; // Focus on problematic date
       const laDateFormatter = new Intl.DateTimeFormat('en-CA', {
         timeZone: LA_TIMEZONE,
         year: 'numeric',
@@ -2105,10 +2102,6 @@
       function isAbsentCached(dateStr, studentId) {
         const key = `${dateStr}-${studentId}`;
         return absencesByDateStudent.has(key);
-      }
-
-      function isExcusedCached() {
-        return false;
       }
 
       function isIgnoredCached(dateStr, studentId) {
@@ -2513,18 +2506,6 @@
         return sessions.some(session => session.day === dayName);
       }
 
-      // A student's "effective" group for a given date: normally their own profile
-      // group, unless they were manually added ("Add Student") to a different
-      // group's class occurrence on this exact date, in which case that target
-      // group takes precedence for counting/grouping on this date only.
-      function getEffectiveGroupName(student, dateStr) {
-        if (manualEnrollments.has(`${student.id}-${dateStr}`)) {
-          const overrideGroup = manualEnrollmentGroup.get(`${student.id}-${dateStr}`);
-          if (overrideGroup) return overrideGroup;
-        }
-        return student.group_name;
-      }
-
       // A student can have an occurrence in a given group on a given date either
       // because it's their home group, OR because they were manually added
       // ("Add Student") to that group's class that day — these are NOT mutually
@@ -2534,14 +2515,6 @@
         if (student.group_name === group.group_name) return true;
         const key = `${student.id}-${dateStr}`;
         return manualEnrollments.has(key) && manualEnrollmentGroup.get(key) === group.group_name;
-      }
-
-      // Check if a class is skipped/canceled
-      function isClassSkipped(dateStr, groupName) {
-        return skippedClassesData.some(skip => {
-          const skipDate = skip.class_date?.split('T')[0] || skip.class_date;
-          return skipDate === dateStr && skip.group_name === groupName;
-        });
       }
 
       function normalizeDateString(value) {
@@ -2612,35 +2585,6 @@
           .replace(/[.,'"()]/g, ' ')
           .replace(/\s+/g, ' ')
           .trim();
-      }
-
-      function namesMatch(nameA, nameB) {
-        const normalizedA = normalizeName(nameA);
-        const normalizedB = normalizeName(nameB);
-
-        if (!normalizedA || !normalizedB) return false;
-        if (normalizedA === normalizedB) return true;
-
-        const tokensA = normalizedA.match(/[a-z0-9]+/g) || [];
-        const tokensB = normalizedB.match(/[a-z0-9]+/g) || [];
-
-        if (tokensA.length === 0 || tokensB.length === 0) return false;
-
-        const [shorter, longer] = tokensA.length <= tokensB.length
-          ? [tokensA, tokensB]
-          : [tokensB, tokensA];
-
-        return shorter.every(token => longer.includes(token));
-      }
-
-      function isDebugStudent(studentName) {
-        return normalizeName(studentName) === DEBUG_STUDENT_NAME;
-      }
-
-      function shouldDebugStudent(studentName, dateStr) {
-        if (!window.CALENDAR_DEBUG || !isDebugStudent(studentName)) return false;
-        if (!DEBUG_TARGET_DATE) return true;
-        return normalizeDateString(dateStr) === DEBUG_TARGET_DATE;
       }
 
       function extractForClassDates(record, fallbackDate) {
@@ -3651,6 +3595,14 @@
       // 🏷️ NOTE TAGS FUNCTIONS
       // ============================================================
 
+      // Registry of active tag-search input/results pairs, keyed by searchInputId.
+      // A single delegated document click listener (bound once below) reads this
+      // map, instead of each initializeTagSearch() call registering its own
+      // permanent document listener — which previously leaked one listener per
+      // group tab every time the day modal opened.
+      const _tagSearchRegistry = new Map();
+      let _tagSearchOutsideClickBound = false;
+
       function initializeTagSearch(groupName, dateStr, searchInputId, resultsId, tagsContainerId) {
         const searchInput = document.getElementById(searchInputId);
         const resultsContainer = document.getElementById(resultsId);
@@ -3659,6 +3611,19 @@
         if (!searchInput || !resultsContainer || !tagsContainer) {
           console.error('❌ Tag elements not found:', { searchInputId, resultsId, tagsContainerId });
           return;
+        }
+
+        _tagSearchRegistry.set(searchInputId, { searchInput, resultsContainer });
+        if (!_tagSearchOutsideClickBound) {
+          _tagSearchOutsideClickBound = true;
+          document.addEventListener('click', (e) => {
+            _tagSearchRegistry.forEach(({ searchInput, resultsContainer }) => {
+              if (!document.body.contains(searchInput)) return; // stale entry from a closed modal
+              if (!searchInput.contains(e.target) && !resultsContainer.contains(e.target)) {
+                resultsContainer.style.display = 'none';
+              }
+            });
+          });
         }
         
         // Load existing tags
@@ -3700,13 +3665,6 @@
           });
           
           resultsContainer.style.display = 'flex';
-        });
-        
-        // Close results when clicking outside
-        document.addEventListener('click', (e) => {
-          if (!searchInput.contains(e.target) && !resultsContainer.contains(e.target)) {
-            resultsContainer.style.display = 'none';
-          }
         });
       }
       
@@ -7407,7 +7365,7 @@
               </div>
               <!-- iframe preview -->
               <div style="flex:1;min-height:0;overflow:hidden;background:#fff;">
-                <iframe id="emailPreviewFrame" style="width:100%;height:100%;border:none;display:block;" srcdoc=""></iframe>
+                <iframe id="bulkEmailPreviewFrame" style="width:100%;height:100%;border:none;display:block;" srcdoc=""></iframe>
               </div>
               <!-- Footer -->
               <div style="padding:12px 20px 16px;border-top:1px solid rgba(196,164,95,0.12);display:flex;gap:12px;flex-shrink:0;">
@@ -7430,7 +7388,7 @@
 
           document.body.appendChild(overlay);
 
-          const frame    = overlay.querySelector('#emailPreviewFrame');
+          const frame    = overlay.querySelector('#bulkEmailPreviewFrame');
           const counter  = overlay.querySelector('#epCounter');
           const subtitle = overlay.querySelector('#epSubtitle');
           const prevBtn  = overlay.querySelector('#epPrev');
