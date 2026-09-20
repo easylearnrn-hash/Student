@@ -2258,8 +2258,9 @@
         try {
           const { data, error } = await supabaseClient
             .from('student_visibility_history')
-            .select('student_id, visible, effective_date')
-            .order('effective_date', { ascending: true });
+            .select('id, student_id, visible, effective_date')
+            .order('effective_date', { ascending: true })
+            .order('id', { ascending: true });
 
           if (error) throw error;
           visibilityHistory.clear();
@@ -3222,6 +3223,23 @@
           });
         });
 
+        // Cache a nav-friendly copy so the student modal's Prev/Next matches
+        // exactly what this day modal shows — the calendar dots (createDots)
+        // apply a stricter active-date filter and can disagree with this list
+        // (e.g. a just-reactivated/cross-group student can appear here but not
+        // get a dot), which previously made openStudentModal fall back to
+        // showing the wrong student.
+        dayModalNavDate = dateStr;
+        dayModalNavList = studentsOnDate.map(student => ({
+          studentId: student.id,
+          studentName: student.name,
+          groupName: student.groupName,
+          classDate: dateStr,
+          price: getStudentClassPrice(student),
+          balance: student.balance || 0,
+          status: student.status
+        }));
+
         // Group students by their group_name
         const groupedStudents = {};
         studentsOnDate.forEach(student => {
@@ -4058,21 +4076,31 @@
       let currentStudentData = null;
       let allStudentsOnDate = [];
       let currentStudentIndex = 0;
+      let dayModalNavDate = null;
+      let dayModalNavList = [];
 
       function openStudentModal(studentData) {
         // Find all students on this date
         const dateStr = studentData.classDate;
-        allStudentsOnDate = [];
-        
-        // Collect all student data for this date from the dots
-        const dayCell = document.querySelector(`[data-date="${dateStr}"]`);
-        if (dayCell) {
-          const dots = dayCell.querySelectorAll('.indicator-dot');
-          dots.forEach(dot => {
-            if (dot.dataset.studentData) {
-              allStudentsOnDate.push(JSON.parse(dot.dataset.studentData));
-            }
-          });
+
+        if (dayModalNavDate === dateStr && dayModalNavList.length > 0) {
+          // Reuse the day modal's already-computed list (source of truth for
+          // what's actually displayed) instead of re-deriving from calendar
+          // dots, which use a stricter active-date filter and can disagree.
+          allStudentsOnDate = dayModalNavList;
+        } else {
+          allStudentsOnDate = [];
+
+          // Collect all student data for this date from the dots
+          const dayCell = document.querySelector(`[data-date="${dateStr}"]`);
+          if (dayCell) {
+            const dots = dayCell.querySelectorAll('.indicator-dot');
+            dots.forEach(dot => {
+              if (dot.dataset.studentData) {
+                allStudentsOnDate.push(JSON.parse(dot.dataset.studentData));
+              }
+            });
+          }
         }
         
         // Find current student index
