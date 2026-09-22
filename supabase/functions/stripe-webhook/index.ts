@@ -124,40 +124,64 @@ serve(async (req: Request) => {
       // Use today's date only as last resort — so Calendar always has an explicit for_class
       const todayDate = new Date().toISOString().split('T')[0];
       const primaryClassDate = forClassArray.length > 0 ? forClassArray[0] : todayDate;
+      const datesToInsert = forClassArray.length > 0 ? forClassArray : [primaryClassDate];
 
-      // Insert a paid record in payment_records.
-      // CRITICAL: date = primaryClassDate (the actual class date, NOT the receipt date).
-      // Calendar-NEW matches green dots by payment_records.date === class_date.
-      const { data: insertedRows, error } = await supabaseAdmin
+      // Split the charged amount evenly across every class date this payment covers.
+      // Previously this always wrote a SINGLE row for primaryClassDate with the FULL
+      // amount, so a charge covering multiple classes silently left every date after
+      // the first one unpaid — exactly the "payment not allocated" symptom.
+      const perClassAmount = datesToInsert.length > 1
+        ? Math.round((amountDollars / datesToInsert.length) * 100) / 100
+        : amountDollars;
+
+      // Idempotency: Stripe can redeliver the same webhook event more than once —
+      // skip if this PaymentIntent was already recorded for this student.
+      const { data: existingForPi } = await supabaseAdmin
         .from('payment_records')
-        .insert({
+        .select('id')
+        .eq('student_id', student_id)
+        .like('notes', `%${pi.id}%`)
+        .limit(1);
+
+      if (existingForPi && existingForPi.length > 0) {
+        console.log(`ℹ️ PaymentIntent ${pi.id} already recorded for student ${student_id} — skipping duplicate webhook delivery.`);
+      } else {
+        // Insert one paid record per class date.
+        // CRITICAL: date = the actual class date (NOT the receipt date).
+        // Calendar-NEW matches green dots by payment_records.date === class_date.
+        const rows = datesToInsert.map((d) => ({
           student_id     : student_id,
-          amount         : amountDollars,
+          amount         : perClassAmount,
           status         : 'paid',
           payment_method : 'Stripe',
-          date           : primaryClassDate,
+          date           : d,
           notes          : invoice_ref ? `Stripe PI: ${pi.id} | Ref: ${invoice_ref}` : `Stripe PI: ${pi.id}`,
           // Only set for a one-time class in a different group than the
           // student's home group (Calendar-NEW cross-group add) — null for
           // ordinary home-group payments, matching existing rows.
           class_group    : class_group || null,
-        })
-        .select()
-        .single();
+        }));
 
-      if (error) {
-        console.error('❌ Supabase insert error:', error);
-      } else {
-        console.log(`✅ payment_records inserted for student ${student_id} covering classes: ${forClassArray.join(', ') || primaryClassDate}`);
+        const { data: insertedRows, error } = await supabaseAdmin
+          .from('payment_records')
+          .insert(rows)
+          .select();
 
-        // ── Send payment receipt email (non-blocking) ──────────────────────
-        sendStripeReceipt(supabaseAdmin, {
-          studentId:       student_id,
-          paymentRecordId: insertedRows?.id ?? null,
-          amount:          amountDollars,
-          classDate:       primaryClassDate,
-          piId:            pi.id,
-        }).catch((err: Error) => console.warn('⚠️ Receipt send failed (non-fatal):', err.message));
+        if (error) {
+          console.error('❌ Supabase insert error:', error);
+        } else {
+          console.log(`✅ payment_records inserted for student ${student_id} covering classes: ${datesToInsert.join(', ')}`);
+
+          // ── Send payment receipt email (non-blocking) ──────────────────────
+          sendStripeReceipt(supabaseAdmin, {
+            studentId:       student_id,
+            paymentRecordId: insertedRows?.[0]?.id ?? null,
+            amount:          amountDollars,
+            classDate:       primaryClassDate,
+            piId:            pi.id,
+          }).catch((err: Error) => console.warn('⚠️ Receipt send failed (non-fatal):', err.message));
+        }
+      }
       }
     }
   }

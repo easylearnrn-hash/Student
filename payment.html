@@ -977,15 +977,27 @@
               .map(u => ({ student_id: INVOICE.studentId, date: u.date, amount: perClass, status: 'paid', payment_method: 'stripe', class_group: u.group || null }));
             if (toInsert.length) {
               const { error: dbErr } = await _sb.from('payment_records').insert(toInsert);
-              if (dbErr) console.error('[ARNOMA] Gate payment_records insert failed:', dbErr.message);
-              else console.log('[ARNOMA] ✅ Gate payment_records written:', toInsert);
+              if (dbErr) {
+                console.error('[ARNOMA] Gate payment_records insert failed:', dbErr.message);
+                // The card WAS charged by Stripe even though the DB write failed (e.g. an
+                // expired/anon session tripping the RLS ownership check) — never let the
+                // student see "Payment Successful" while the debt is still unrecorded, and
+                // make sure an admin finds out instead of this failing silently forever.
+                showRecordingFailedWarning(dbErr.message, toInsert);
+              } else {
+                console.log('[ARNOMA] ✅ Gate payment_records written:', toInsert);
+              }
             }
           } catch (writeErr) {
             console.error('[ARNOMA] Gate payment_records write error:', writeErr);
+            showRecordingFailedWarning(writeErr.message, null);
           }
         }
 
-        // Auto-close / redirect after 3 s
+        // Auto-close / redirect after 3 s — skipped if the DB write failed above,
+        // so the student isn't silently bounced back into the same debt-lock gate
+        // without ever seeing the warning.
+        if (_recordingFailed) return;
         setTimeout(() => {
           if (IS_GATE) {
             // Full-page gate: return to student portal
@@ -994,6 +1006,32 @@
             try { window.parent.postMessage({ type:'ARNOMA_CLOSE_PAYMENT' }, '*'); } catch(_){}
           }
         }, 3000);
+      }
+
+      // Set when the post-charge payment_records write fails so the card was
+      // charged but the debt isn't marked paid — must never look like a normal
+      // success to the student, and must surface to an admin.
+      let _recordingFailed = false;
+
+      function showRecordingFailedWarning(errMessage, pendingRows) {
+        _recordingFailed = true;
+        setMsg('error', 'Your card WAS charged, but we could not record the payment on your account. Please contact the administrator with a screenshot of this message so your balance can be corrected manually. Do not pay again.');
+        try {
+          const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+          _sb.from('notifications').insert([{
+            type: 'payment_recording_failed',
+            category: 'payment',
+            title: 'Stripe payment NOT recorded',
+            description: `${INVOICE.studentName} (student_id ${INVOICE.studentId}) was charged $${INVOICE.amountDollars} but the payment_records write failed: ${errMessage}`,
+            student_name: INVOICE.studentName,
+            metadata: { student_id: INVOICE.studentId, error: errMessage, pendingRows },
+            timestamp: new Date().toISOString(),
+            read: false,
+            created_at: new Date().toISOString()
+          }]).then(({ error }) => {
+            if (error) console.error('[ARNOMA] Failed to log payment_recording_failed notification:', error.message);
+          });
+        } catch (_) { /* never let the alert logging itself break the page */ }
       }
 
       /* ── Boot ── */
