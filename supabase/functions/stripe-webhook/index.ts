@@ -182,7 +182,6 @@ serve(async (req: Request) => {
           }).catch((err: Error) => console.warn('⚠️ Receipt send failed (non-fatal):', err.message));
         }
       }
-      }
     }
   }
 
