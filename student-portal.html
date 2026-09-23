@@ -13686,7 +13686,15 @@
         resultsEl.innerHTML = '<div class="notes-search-modal-empty">Type at least 2 characters to search across all your notes.</div>';
         return;
       }
-      if (!_fullTextNoteIndex) return; // still indexing — handled by openNotesSearchModal()
+      if (!_fullTextNoteIndex) {
+        // Self-heal: if nothing kicked off indexing yet (e.g. the student typed
+        // before notes finished loading), start it now instead of silently
+        // leaving the last stale message on screen forever.
+        if (!_fullTextIndexBuilding) {
+          waitForNotesThenBuildIndex(resultsEl, document.getElementById('notesSearchModalInput'));
+        }
+        return;
+      }
 
       const matches = _fullTextNoteIndex
         .map(entry => ({ entry, count: countNotesSearchOccurrences(entry.text, trimmed) }))
@@ -13744,10 +13752,34 @@
         return; // progress UI is already being updated by the in-flight build
       }
 
-      const candidates = getAvailableHtmlNotesForSearch();
+      await waitForNotesThenBuildIndex(resultsEl, input);
+    }
+
+    // Notes can still be loading in the background when the student opens search
+    // (materialsLoaded hasn't finished yet) — poll instead of giving up immediately,
+    // so search starts working on its own a moment later instead of requiring the
+    // student to manually close and reopen the modal.
+    async function waitForNotesThenBuildIndex(resultsEl, input) {
+      let candidates = getAvailableHtmlNotesForSearch();
       if (candidates.length === 0) {
-        resultsEl.innerHTML = '<div class="notes-search-modal-empty">Your notes are still loading — please wait a moment and reopen search.</div>';
-        return;
+        _fullTextIndexBuilding = true;
+        resultsEl.innerHTML = '<div class="notes-search-modal-empty" id="notesSearchModalProgress">Loading your notes…</div>';
+        const maxWaitMs = 20000;
+        const pollMs = 400;
+        let waited = 0;
+        while (candidates.length === 0 && waited < maxWaitMs) {
+          await new Promise(r => setTimeout(r, pollMs));
+          waited += pollMs;
+          // Bail out quietly if the modal was closed while we were waiting.
+          const modal = document.getElementById('notesSearchModal');
+          if (!modal || !modal.classList.contains('active')) { _fullTextIndexBuilding = false; return; }
+          candidates = getAvailableHtmlNotesForSearch();
+        }
+        if (candidates.length === 0) {
+          _fullTextIndexBuilding = false;
+          resultsEl.innerHTML = '<div class="notes-search-modal-empty">No notes are available to search yet. Please try again in a moment.</div>';
+          return;
+        }
       }
 
       _fullTextIndexBuilding = true;
