@@ -720,6 +720,109 @@
       display: flex;
     }
 
+    /* Full-text Notes Search modal (reuses .forum-modal/.forum-container shell) */
+    .notes-search-modal-input {
+      width: 100%;
+      padding: 13px 16px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--glass-border);
+      color: var(--text-body);
+      font-size: 14px;
+      font-family: var(--font-sans);
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    .notes-search-modal-input:focus {
+      background: rgba(196,164,95,0.04);
+      border-color: rgba(196,164,95,0.38);
+    }
+    .notes-search-modal-results {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 26px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .notes-search-modal-empty {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13.5px;
+      padding: 30px 10px;
+    }
+    .notes-search-result-card {
+      background: rgba(255,255,255,0.025);
+      border: 1px solid var(--glass-border);
+      border-left: 3px solid rgba(196,164,95,0.4);
+      border-radius: 10px;
+      padding: 14px 16px;
+      cursor: pointer;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+    .notes-search-result-card:hover {
+      border-color: rgba(196,164,95,0.3);
+      background: rgba(196,164,95,0.03);
+    }
+    .notes-search-result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .notes-search-result-title {
+      font-weight: 600;
+      color: var(--text-strong);
+      font-size: 14px;
+    }
+    .notes-search-result-system {
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: rgba(196,164,95,0.75);
+      font-weight: 700;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .notes-search-result-snippet {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+    .notes-search-result-snippet mark.note-search-highlight {
+      background: rgba(196,164,95,0.35);
+      color: #f5f0e8;
+      padding: 1px 3px;
+      border-radius: 3px;
+      font-weight: 600;
+    }
+    .notes-search-result-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+    }
+    .notes-search-result-count {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .notes-search-result-open-btn {
+      padding: 7px 14px;
+      border-radius: 8px;
+      background: rgba(196,164,95,0.12);
+      border: 1px solid rgba(196,164,95,0.3);
+      color: var(--accent-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .notes-search-result-open-btn:hover {
+      background: rgba(196,164,95,0.2);
+      border-color: rgba(196,164,95,0.5);
+    }
+
     .forum-container {
       background: linear-gradient(160deg, rgba(14, 18, 30, 0.98) 0%, rgba(10, 13, 22, 0.99) 100%);
       backdrop-filter: blur(20px);
@@ -5084,6 +5187,10 @@
             <span class="live-indicator-dot"></span>
             <span>Class is Live — Join</span>
           </button>
+          <button class="forum-btn" id="notesSearchBtn" onclick="openNotesSearchModal()">
+            <span>🔍</span>
+            <span>Search in Notes</span>
+          </button>
           <div class="account-dropdown">
             <button class="account-btn" onclick="toggleAccountDropdown()">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;opacity:0.75"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="2"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -5446,6 +5553,29 @@
     </div>
   </div>
   
+  <!-- Full-Text Notes Search Modal -->
+  <div class="forum-modal" id="notesSearchModal" onclick="if(event.target===this) closeNotesSearchModal();">
+    <div class="forum-container" style="max-width:720px;">
+      <div class="forum-header">
+        <h2>🔍 Search in Notes</h2>
+        <button class="close-forum-btn" onclick="closeNotesSearchModal()">×</button>
+      </div>
+      <div style="padding:18px 26px 0;">
+        <input
+          type="text"
+          id="notesSearchModalInput"
+          class="notes-search-modal-input"
+          placeholder="Search medications, diseases, procedures, lab tests, terms…"
+          oninput="handleNotesSearchModalInput(this.value)"
+          onkeydown="if(event.key==='Escape') closeNotesSearchModal();"
+        />
+      </div>
+      <div class="notes-search-modal-results" id="notesSearchModalResults">
+        <div class="notes-search-modal-empty">Type at least 2 characters to search across all your notes.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Forum Modal -->
   <div class="forum-modal" id="forumModal">
     <div class="forum-container">
@@ -13448,7 +13578,214 @@
         clearBtn.style.display = 'none';
       }
     }
-    
+
+    // ============================================================
+    // 🔍 FULL-TEXT SEARCH IN NOTES
+    // Searches the complete HTML content of every note the student can
+    // currently access (unlocked, non-absent), not just titles/categories.
+    // ============================================================
+    let _fullTextNoteIndex = null;   // null = not built yet; array once built
+    let _fullTextIndexBuilding = false;
+
+    // Only notes the student can actually open right now are searchable —
+    // mirrors the same "locked" condition used by createNoteCard().
+    function getAvailableHtmlNotesForSearch() {
+      return (allSystemNotes || []).filter(note =>
+        note.isPaid && !note.isAbsent &&
+        Array.isArray(note.attachments) && note.attachments[0] && note.attachments[0].type === 'html'
+      );
+    }
+
+    async function buildFullTextNoteIndex(onProgress) {
+      const candidates = getAvailableHtmlNotesForSearch();
+      const total = candidates.length;
+      const index = [];
+      let done = 0;
+      await Promise.all(candidates.map(async (note) => {
+        const attachment = note.attachments[0];
+        try {
+          const resp = await fetch(attachment.url);
+          const html = await resp.text();
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+          doc.querySelectorAll('script, style').forEach(el => el.remove());
+          const text = (doc.body && (doc.body.innerText || doc.body.textContent)) || '';
+          index.push({
+            noteId: note.id,
+            title: note.title,
+            system: getSystemNameFromNote(note),
+            url: attachment.url,
+            videoUrl: attachment.videoUrl || '',
+            text,
+          });
+        } catch (e) {
+          console.warn('Notes search index: failed to fetch', attachment.url, e);
+        } finally {
+          done++;
+          if (onProgress) onProgress(done, total);
+        }
+      }));
+      return index;
+    }
+
+    function escapeHtmlForNotesSearch(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function countNotesSearchOccurrences(text, query) {
+      if (!query) return 0;
+      const lowerText = text.toLowerCase();
+      const lowerQuery = query.toLowerCase();
+      let count = 0, pos = 0;
+      while ((pos = lowerText.indexOf(lowerQuery, pos)) !== -1) {
+        count++;
+        pos += lowerQuery.length;
+      }
+      return count;
+    }
+
+    // Extracts a short preview around the first match, with the term wrapped
+    // in <mark> for highlighting. Returns null if the query isn't found.
+    function highlightNotesSearchSnippet(text, query) {
+      const lowerText = text.toLowerCase();
+      const lowerQuery = query.toLowerCase();
+      const idx = lowerText.indexOf(lowerQuery);
+      if (idx === -1) return null;
+
+      const contextBefore = 50;
+      const contextAfter = 120;
+      const start = Math.max(0, idx - contextBefore);
+      const end = Math.min(text.length, idx + query.length + contextAfter);
+      const snippet = text.slice(start, end).replace(/\s+/g, ' ').trim();
+
+      const matchPos = snippet.toLowerCase().indexOf(lowerQuery);
+      let highlighted;
+      if (matchPos === -1) {
+        highlighted = escapeHtmlForNotesSearch(snippet);
+      } else {
+        const before = escapeHtmlForNotesSearch(snippet.slice(0, matchPos));
+        const match = escapeHtmlForNotesSearch(snippet.slice(matchPos, matchPos + query.length));
+        const after = escapeHtmlForNotesSearch(snippet.slice(matchPos + query.length));
+        highlighted = `${before}<mark class="note-search-highlight">${match}</mark>${after}`;
+      }
+      return (start > 0 ? '…' : '') + highlighted + (end < text.length ? '…' : '');
+    }
+
+    function performNotesFullTextSearch(query) {
+      const resultsEl = document.getElementById('notesSearchModalResults');
+      if (!resultsEl) return;
+      const trimmed = (query || '').trim();
+
+      if (trimmed.length < 2) {
+        resultsEl.innerHTML = '<div class="notes-search-modal-empty">Type at least 2 characters to search across all your notes.</div>';
+        return;
+      }
+      if (!_fullTextNoteIndex) return; // still indexing — handled by openNotesSearchModal()
+
+      const matches = _fullTextNoteIndex
+        .map(entry => ({ entry, count: countNotesSearchOccurrences(entry.text, trimmed) }))
+        .filter(m => m.count > 0)
+        .sort((a, b) => b.count - a.count || a.entry.title.localeCompare(b.entry.title));
+
+      if (matches.length === 0) {
+        resultsEl.innerHTML = `<div class="notes-search-modal-empty">No notes found containing "${escapeHtmlForNotesSearch(trimmed)}".</div>`;
+        return;
+      }
+
+      resultsEl.innerHTML = matches.map(({ entry, count }) => {
+        const snippet = highlightNotesSearchSnippet(entry.text, trimmed) || '';
+        const safeUrl = entry.url.replace(/'/g, "\\'");
+        const safeVideoUrl = (entry.videoUrl || '').replace(/'/g, "\\'");
+        return `
+          <div class="notes-search-result-card" onclick="openHtmlNoteFromSearch(${entry.noteId}, '${safeUrl}', '${safeVideoUrl}')">
+            <div class="notes-search-result-header">
+              <div class="notes-search-result-title">${escapeHtmlForNotesSearch(entry.title)}</div>
+              <div class="notes-search-result-system">${escapeHtmlForNotesSearch(entry.system || 'General')}</div>
+            </div>
+            <div class="notes-search-result-snippet">${snippet}</div>
+            <div class="notes-search-result-footer">
+              <span class="notes-search-result-count">${count} match${count === 1 ? '' : 'es'}</span>
+              <button class="notes-search-result-open-btn" onclick="event.stopPropagation(); openHtmlNoteFromSearch(${entry.noteId}, '${safeUrl}', '${safeVideoUrl}')">Open Note →</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    const debouncedNotesFullTextSearch = debounce((q) => performNotesFullTextSearch(q), 250);
+    function handleNotesSearchModalInput(value) {
+      debouncedNotesFullTextSearch(value);
+    }
+
+    async function openNotesSearchModal() {
+      const modal = document.getElementById('notesSearchModal');
+      const resultsEl = document.getElementById('notesSearchModalResults');
+      const input = document.getElementById('notesSearchModalInput');
+      if (!modal || !resultsEl) return;
+
+      modal.classList.add('active');
+      document.body.style.overflow = 'hidden';
+      if (input) {
+        input.value = '';
+        setTimeout(() => input.focus(), 50);
+      }
+
+      if (_fullTextNoteIndex) {
+        resultsEl.innerHTML = '<div class="notes-search-modal-empty">Type at least 2 characters to search across all your notes.</div>';
+        return;
+      }
+      if (_fullTextIndexBuilding) {
+        return; // progress UI is already being updated by the in-flight build
+      }
+
+      const candidates = getAvailableHtmlNotesForSearch();
+      if (candidates.length === 0) {
+        resultsEl.innerHTML = '<div class="notes-search-modal-empty">Your notes are still loading — please wait a moment and reopen search.</div>';
+        return;
+      }
+
+      _fullTextIndexBuilding = true;
+      resultsEl.innerHTML = `<div class="notes-search-modal-empty" id="notesSearchModalProgress">Indexing your notes… (0/${candidates.length})</div>`;
+      _fullTextNoteIndex = await buildFullTextNoteIndex((done, total) => {
+        const progressEl = document.getElementById('notesSearchModalProgress');
+        if (progressEl) progressEl.textContent = `Indexing your notes… (${done}/${total})`;
+      });
+      _fullTextIndexBuilding = false;
+
+      // Only replace the "indexing" placeholder if the student hasn't already started typing.
+      if (input && !input.value.trim()) {
+        resultsEl.innerHTML = '<div class="notes-search-modal-empty">Type at least 2 characters to search across all your notes.</div>';
+      } else if (input) {
+        performNotesFullTextSearch(input.value);
+      }
+    }
+
+    function closeNotesSearchModal() {
+      const modal = document.getElementById('notesSearchModal');
+      if (modal) modal.classList.remove('active');
+      document.body.style.overflow = '';
+    }
+
+    // Mirrors the exact "open note" behavior used by note cards (createNoteCard):
+    // mark opened, persist studentRecordId for the note viewer, append studentName/videoUrl.
+    function openHtmlNoteFromSearch(noteId, url, videoUrl) {
+      markNoteAsOpened(noteId);
+      if (window.currentStudent && window.currentStudent.id) {
+        sessionStorage.setItem('studentRecordId', window.currentStudent.id);
+        localStorage.setItem('studentRecordId', window.currentStudent.id);
+      }
+      let u = url;
+      if (window.currentStudent && window.currentStudent.name) {
+        u += (u.indexOf('?') >= 0 ? '&' : '?') + 'studentName=' + encodeURIComponent(window.currentStudent.name);
+      }
+      if (videoUrl) {
+        u += (u.indexOf('?') >= 0 ? '&' : '?') + 'videoUrl=' + encodeURIComponent(videoUrl);
+      }
+      window.open(u, '_blank');
+    }
+
         function updateNotesHeader(systemName) {
       const titleElement = document.getElementById('notesCardTitle');
       if (!titleElement) return;
