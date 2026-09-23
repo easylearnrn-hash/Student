@@ -5733,7 +5733,7 @@
     // 🔥 VERSION CHECK — force cache-bypass reload when a new version is detected.
     // Update PORTAL_VERSION on every deployment so stale cached pages self-heal.
     (function() {
-      const PORTAL_VERSION = 'portal-20260923-2'; // ← bump this with every deploy
+      const PORTAL_VERSION = 'portal-20260923-3'; // ← bump this with every deploy
       const KEY = 'arnoma:portal:v';
       const prev = localStorage.getItem(KEY);
       localStorage.setItem(KEY, PORTAL_VERSION);
@@ -13596,6 +13596,16 @@
     // ============================================================
     let _fullTextNoteIndex = null;   // null = not built yet; array once built
     let _fullTextIndexBuilding = false;
+    const NOTES_SEARCH_STRONG_MATCH_COUNT = 3; // 3+ occurrences = "discussed in detail"
+
+    // Relevance tier: 1 = exact note title match, 2 = header/section title match,
+    // 3 = strong/repetitive content match, 4 = general (mentioned somewhere) match.
+    function getNotesSearchRelevanceTier(entry, lowerQuery, count) {
+      if (entry.title && entry.title.toLowerCase().includes(lowerQuery)) return 1;
+      if (entry.headingsText && entry.headingsText.toLowerCase().includes(lowerQuery)) return 2;
+      if (count >= NOTES_SEARCH_STRONG_MATCH_COUNT) return 3;
+      return 4;
+    }
 
     // Only notes the student can actually open right now are searchable —
     // mirrors the same "locked" condition used by createNoteCard().
@@ -13619,6 +13629,9 @@
           const doc = new DOMParser().parseFromString(html, 'text/html');
           doc.querySelectorAll('script, style').forEach(el => el.remove());
           const text = (doc.body && (doc.body.innerText || doc.body.textContent)) || '';
+          const headingsText = Array.from(doc.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+            .map(h => h.textContent || '')
+            .join(' \n ');
           index.push({
             noteId: note.id,
             title: note.title,
@@ -13626,6 +13639,7 @@
             url: attachment.url,
             videoUrl: attachment.videoUrl || '',
             text,
+            headingsText,
           });
         } catch (e) {
           console.warn('Notes search index: failed to fetch', attachment.url, e);
@@ -13702,10 +13716,14 @@
         return;
       }
 
+      const lowerQuery = trimmed.toLowerCase();
       const matches = _fullTextNoteIndex
-        .map(entry => ({ entry, count: countNotesSearchOccurrences(entry.text, trimmed) }))
+        .map(entry => {
+          const count = countNotesSearchOccurrences(entry.text, trimmed);
+          return { entry, count, tier: getNotesSearchRelevanceTier(entry, lowerQuery, count) };
+        })
         .filter(m => m.count > 0)
-        .sort((a, b) => b.count - a.count || a.entry.title.localeCompare(b.entry.title));
+        .sort((a, b) => a.tier - b.tier || b.count - a.count || a.entry.title.localeCompare(b.entry.title));
 
       if (matches.length === 0) {
         resultsEl.innerHTML = `<div class="notes-search-modal-empty">No notes found containing "${escapeHtmlForNotesSearch(trimmed)}".</div>`;
