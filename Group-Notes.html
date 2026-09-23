@@ -5120,13 +5120,17 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
     // Resolves the effective set of notes a student currently has access to,
     // combining group-level and individually-tied permissions/free-access grants.
+    // Note: an individual student_note_permissions row with is_accessible=false acts as
+    // an explicit BLOCK that overrides group-level permission AND group-level free access
+    // (but NOT individual free-access grants, which are always unconditional) — this
+    // mirrors the exact precedence logic used by student-portal.html to resolve access.
     async function getStudentAccessibleNoteIds(student) {
       const rawGroup = student.group_name || '';
       const bareLetter = rawGroup.replace(/Group\s*/i, '').trim().toUpperCase();
       const groupNameVariants = Array.from(new Set([rawGroup, bareLetter, `Group ${bareLetter}`].filter(Boolean)));
 
       const [individualPerms, groupPerms, individualFree, groupFree] = await Promise.all([
-        supabaseClient.from('student_note_permissions').select('note_id').eq('student_id', student.id).eq('is_accessible', true),
+        supabaseClient.from('student_note_permissions').select('note_id, is_accessible').eq('student_id', student.id),
         groupNameVariants.length
           ? supabaseClient.from('student_note_permissions').select('note_id').is('student_id', null).eq('is_accessible', true).in('group_name', groupNameVariants)
           : Promise.resolve({ data: [] }),
@@ -5136,16 +5140,16 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           : Promise.resolve({ data: [] })
       ]);
 
-      const permittedIds = new Set([
-        ...(individualPerms.data || []).map(r => r.note_id),
-        ...(groupPerms.data || []).map(r => r.note_id)
-      ]);
-      const freeIds = new Set([
-        ...(individualFree.data || []).map(r => r.note_id),
-        ...(groupFree.data || []).map(r => r.note_id)
-      ]);
+      const blockedIds = new Set((individualPerms.data || []).filter(r => !r.is_accessible).map(r => r.note_id));
+      const individualPermIds = new Set((individualPerms.data || []).filter(r => r.is_accessible).map(r => r.note_id));
+      const groupPermIds = new Set((groupPerms.data || []).map(r => r.note_id).filter(id => !blockedIds.has(id)));
+      const individualFreeIds = new Set((individualFree.data || []).map(r => r.note_id)); // unconditional, never blocked
+      const groupFreeIds = new Set((groupFree.data || []).map(r => r.note_id).filter(id => !blockedIds.has(id)));
+
+      const permittedIds = new Set([...individualPermIds, ...groupPermIds]);
+      const freeIds = new Set([...individualFreeIds, ...groupFreeIds]);
       const allAccessibleIds = new Set([...permittedIds, ...freeIds]);
-      return { permittedIds, freeIds, allAccessibleIds };
+      return { permittedIds, freeIds, individualFreeIds, allAccessibleIds };
     }
 
     async function confirmSyncStudents() {
@@ -5172,7 +5176,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
       const confirmed = await customConfirm(
         'Confirm One-Time Sync',
-        `You are about to copy ${studentA.name}'s current note access to ${studentB.name}. This is a one-time sync. Future notes or access changes for ${studentA.name} will NOT automatically apply to ${studentB.name}. Continue?`
+        `You are about to copy ${studentA.name}'s current note access to ${studentB.name}. ${studentB.name}'s access will become an exact copy of ${studentA.name}'s — this may ADD notes ${studentB.name} doesn't have yet AND REMOVE any extra notes ${studentB.name} currently has that ${studentA.name} doesn't. This is a one-time sync. Future notes or access changes for ${studentA.name} will NOT automatically apply to ${studentB.name}. Continue?`
       );
       if (!confirmed) return;
 
@@ -5181,10 +5185,19 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       confirmBtn.textContent = 'Syncing…';
 
       try {
-        const { permittedIds, freeIds, allAccessibleIds } = await getStudentAccessibleNoteIds(studentA);
+        const [
+          { permittedIds: permittedA, freeIds: freeA, allAccessibleIds: allA },
+          { individualFreeIds: individualFreeB, allAccessibleIds: allB }
+        ] = await Promise.all([
+          getStudentAccessibleNoteIds(studentA),
+          getStudentAccessibleNoteIds(studentB)
+        ]);
 
-        if (allAccessibleIds.size === 0) {
-          await customAlert('Nothing to Sync', `${studentA.name} does not currently have access to any notes.`);
+        const notesToAdd = new Set([...allA].filter(id => !allB.has(id)));
+        const notesToRemove = new Set([...allB].filter(id => !allA.has(id)));
+
+        if (notesToAdd.size === 0 && notesToRemove.size === 0) {
+          await customAlert('Already Synced', `${studentB.name} already has the exact same note access as ${studentA.name}.`);
           return;
         }
 
@@ -5193,14 +5206,20 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         const laNow = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
         const todayLa = new Date(laNow).toISOString().split('T')[0];
 
-        const permissionPayloads = Array.from(permittedIds).map(noteId => ({
+        // Grant B only the notes she's actually missing (not the full set A has — most of
+        // A's access is usually already covered for B via her own group, so re-granting
+        // everything would create hundreds of redundant individual override rows).
+        const notesToAddViaPermission = Array.from(notesToAdd).filter(id => permittedA.has(id));
+        const notesToAddViaFree = Array.from(notesToAdd).filter(id => freeA.has(id) && !permittedA.has(id));
+
+        const permissionPayloads = notesToAddViaPermission.map(noteId => ({
           note_id: noteId,
           student_id: studentB.id,
           group_name: bGroupName,
           is_accessible: true,
           class_date: todayLa
         }));
-        const freeAccessPayloads = Array.from(freeIds).map(noteId => ({
+        const freeAccessPayloads = notesToAddViaFree.map(noteId => ({
           note_id: noteId,
           access_type: 'individual',
           student_id: studentB.id,
@@ -5208,10 +5227,24 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           created_by: 'admin (sync)'
         }));
 
-        if (permissionPayloads.length > 0) {
+        // Revoke B's extra access so the result is an EXACT mirror, not just additive:
+        // - Insert/flip an explicit is_accessible=false block for every removed note, which
+        //   overrides B's own individual grant, group-posted access, and group free-access.
+        // - Individual free-access grants are unconditional and ignore that block, so any of
+        //   B's own individual free grants for a removed note must be deleted outright.
+        const revokePayloads = Array.from(notesToRemove).map(noteId => ({
+          note_id: noteId,
+          student_id: studentB.id,
+          group_name: bGroupName,
+          is_accessible: false,
+          class_date: todayLa
+        }));
+        const individualFreeIdsToDelete = Array.from(notesToRemove).filter(id => individualFreeB.has(id));
+
+        if (permissionPayloads.length > 0 || revokePayloads.length > 0) {
           const { error } = await supabaseClient
             .from('student_note_permissions')
-            .upsert(permissionPayloads, { onConflict: 'note_id,student_id,group_name', ignoreDuplicates: false });
+            .upsert([...permissionPayloads, ...revokePayloads], { onConflict: 'note_id,student_id,group_name', ignoreDuplicates: false });
           if (error) throw error;
         }
         if (freeAccessPayloads.length > 0) {
@@ -5220,10 +5253,19 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             .upsert(freeAccessPayloads, { onConflict: 'note_id,student_id', ignoreDuplicates: false });
           if (error) throw error;
         }
+        if (individualFreeIdsToDelete.length > 0) {
+          const { error } = await supabaseClient
+            .from('note_free_access')
+            .delete()
+            .eq('student_id', studentB.id)
+            .eq('access_type', 'individual')
+            .in('note_id', individualFreeIdsToDelete);
+          if (error) throw error;
+        }
 
-        // Figure out how many distinct systems those notes span, for the success message.
+        // Figure out how many distinct systems A's final access spans, for the success message.
         const systemsTouched = new Set();
-        allAccessibleIds.forEach(noteId => {
+        allA.forEach(noteId => {
           const note = allNotes.find(n => n.id === noteId);
           if (note) systemsTouched.add(getNoteDisplaySystem(note));
         });
@@ -5237,7 +5279,8 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
         await customAlert(
           '✅ Sync Complete',
-          `Synced ${allAccessibleIds.size} note(s) across ${systemsTouched.size} system${systemsTouched.size !== 1 ? 's' : ''} from ${studentA.name} to ${studentB.name}.`
+          `${studentB.name} now has the exact same ${allA.size} note(s) across ${systemsTouched.size} system${systemsTouched.size !== 1 ? 's' : ''} as ${studentA.name} ` +
+          `(added ${notesToAdd.size}, removed ${notesToRemove.size}).`
         );
       } catch (error) {
         console.error('Sync students error:', error);
