@@ -3946,7 +3946,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
                 type="checkbox" 
                 class="note-checkbox" 
                 data-note-id="${note.id}"
-                onchange="updateSelectedCount()"
+                onchange="handleNoteCheckboxChange(${note.id}, this.checked)"
                 ${isChecked ? 'checked' : ''}
                 style="width: 18px; height: 18px; margin-top: 2px; cursor: pointer; flex-shrink: 0;"
               >
@@ -4618,6 +4618,20 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
     // ===== MULTI-SELECT FUNCTIONALITY =====
     let selectedNoteIds = new Set();
 
+    // Checkbox changes fire here directly (clicking the checkbox itself, as opposed to
+    // clicking the note card body which goes through toggleNoteSelection). This MUST
+    // keep globalCheckedNoteIds in sync — it is the single source of truth that every
+    // bulk action (Post/Unpost/Free/Share/Delete) reads from, across every system.
+    function handleNoteCheckboxChange(noteId, isChecked) {
+      const noteIdStr = String(noteId);
+      if (isChecked) {
+        globalCheckedNoteIds.add(noteIdStr);
+      } else {
+        globalCheckedNoteIds.delete(noteIdStr);
+      }
+      updateSelectedCount();
+    }
+
     function toggleNoteSelection(noteId, event) {
       // Don't toggle if clicking on the checkbox label
       if (event.target.closest('label')) {
@@ -5008,6 +5022,12 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       
       // Clear all system select-all checkboxes
       document.querySelectorAll('.system-select-all-checkbox').forEach(cb => cb.checked = false);
+      
+      // CRITICAL: Actually clear the underlying selection state, not just the visible
+      // checkboxes — otherwise bulk actions would silently keep acting on the stale,
+      // previously-selected notes (including ones from collapsed/other systems).
+      globalCheckedNoteIds.clear();
+      selectedNoteIds = new Set();
       
       updateSelectedCount();
     }
