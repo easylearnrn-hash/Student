@@ -1086,20 +1086,28 @@
 
   <!-- Sync Students Modal -->
   <div id="syncStudentsModal" style="display: none; position: fixed; inset: 0; background: rgba(8,10,20,0.82); backdrop-filter: blur(10px); z-index: 10000; align-items: center; justify-content: center; overflow: hidden;">
-    <div class="modal-panel" style="max-width: 560px;">
+    <div class="modal-panel" style="max-width: 600px; max-height: 88vh; display: flex; flex-direction: column;">
       <h3 class="modal-title">🔄 Sync Students</h3>
       <p class="modal-description">
-        Copy one student's current note/system access onto another student, as a one-time snapshot. This does <strong>not</strong> permanently link the two students — future access changes for Student A will not affect Student B.
+        Copy one student's current note/system access onto one or more other students, as a one-time snapshot. This does <strong>not</strong> permanently link the students — future access changes for Student A will not affect the students synced to them.
       </p>
 
       <div style="margin-bottom: 18px;">
-        <span class="modal-field-label">Student A — Copy access FROM this student</span>
-        <select id="syncStudentASelect" class="modal-select" onchange="updateSyncStudentsOptions()"></select>
+        <span class="modal-field-label">Student A — Source Student (copy access FROM)</span>
+        <select id="syncStudentASelect" class="modal-select" onchange="onSyncStudentAChanged()"></select>
       </div>
 
-      <div style="margin-bottom: 18px;">
-        <span class="modal-field-label">Student B — Sync access TO this student</span>
-        <select id="syncStudentBSelect" class="modal-select" onchange="updateSyncStudentsOptions()"></select>
+      <div style="margin-bottom: 10px;">
+        <span class="modal-field-label">Students to Sync — Destination Students (copy access TO)</span>
+        <input type="text" id="syncDestinationSearch" class="modal-input" placeholder="🔍  Search students…" oninput="filterSyncDestinationList()" style="margin-bottom: 10px;" />
+        <div style="display: flex; gap: 8px; margin-bottom: 10px; align-items: center;">
+          <button onclick="selectAllSyncDestinationStudents()" class="pill-btn green" style="font-size: 12px; padding: 6px 14px;">✓ Select All</button>
+          <button onclick="clearSyncDestinationSelection()" class="pill-btn ghost" style="font-size: 12px; padding: 6px 14px;">Clear</button>
+          <span id="syncDestinationCount" style="margin-left: auto; color: var(--text-muted); font-size: 13px; font-weight: 600;">0 selected</span>
+        </div>
+        <div id="syncDestinationList" class="modal-list-container" style="max-height: 260px; overflow-y: auto;">
+          <div style="padding: 36px; text-align: center; color: var(--text-muted);">Loading students…</div>
+        </div>
       </div>
 
       <div id="syncStudentsError" style="display: none; color: #fca5a5; font-size: 13px; margin-bottom: 12px; padding: 10px 12px; background: rgba(239,68,68,0.10); border: 1px solid rgba(239,68,68,0.30); border-radius: 8px;"></div>
@@ -5064,11 +5072,13 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
     // ===== SYNC STUDENTS (one-time snapshot copy of note access) =====
     let syncStudentsAllList = [];
+    let syncDestinationSelectedIds = new Set();
 
     async function openSyncStudentsModal() {
       const errorEl = document.getElementById('syncStudentsError');
       errorEl.style.display = 'none';
       errorEl.textContent = '';
+      syncDestinationSelectedIds = new Set();
 
       if (allStudents.length === 0) {
         const { data, error } = await supabaseClient.from('students').select('*');
@@ -5083,14 +5093,12 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         .filter(s => s.status === 'active')
         .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-      const buildOptions = () => syncStudentsAllList.map(s =>
+      const selectA = document.getElementById('syncStudentASelect');
+      selectA.innerHTML = `<option value="">Choose a student…</option>` + syncStudentsAllList.map(s =>
         `<option value="${s.id}">${escapeSyncHtml(s.name || 'Unnamed')} (${escapeSyncHtml(s.group_name || 'No Group')})</option>`
       ).join('');
 
-      const selectA = document.getElementById('syncStudentASelect');
-      const selectB = document.getElementById('syncStudentBSelect');
-      selectA.innerHTML = `<option value="">Choose a student…</option>` + buildOptions();
-      selectB.innerHTML = `<option value="">Choose a student…</option>` + buildOptions();
+      renderSyncDestinationList();
 
       document.getElementById('syncStudentsModal').style.display = 'flex';
       document.body.style.overflow = 'hidden';
@@ -5101,17 +5109,74 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       document.body.style.overflow = '';
     }
 
-    // Disables whichever student is currently picked in one dropdown from being
-    // selectable in the other, so the same student can never be chosen twice.
-    function updateSyncStudentsOptions() {
-      const selectA = document.getElementById('syncStudentASelect');
-      const selectB = document.getElementById('syncStudentBSelect');
+    // Student A can never also be picked as a destination — re-render the destination
+    // list to exclude her, dropping her from the selection if she was already checked.
+    function onSyncStudentAChanged() {
+      const idA = document.getElementById('syncStudentASelect').value;
+      if (idA) syncDestinationSelectedIds.delete(parseInt(idA, 10));
+      renderSyncDestinationList();
       const errorEl = document.getElementById('syncStudentsError');
-
-      Array.from(selectA.options).forEach(opt => { opt.disabled = opt.value !== '' && opt.value === selectB.value; });
-      Array.from(selectB.options).forEach(opt => { opt.disabled = opt.value !== '' && opt.value === selectA.value; });
-
       if (errorEl) errorEl.style.display = 'none';
+    }
+
+    function renderSyncDestinationList() {
+      const container = document.getElementById('syncDestinationList');
+      const idA = document.getElementById('syncStudentASelect').value;
+      const candidates = syncStudentsAllList.filter(s => String(s.id) !== idA);
+
+      if (candidates.length === 0) {
+        container.innerHTML = '<div style="padding: 36px; text-align: center; color: var(--text-muted);">No other students available</div>';
+        updateSyncDestinationCount();
+        return;
+      }
+
+      container.innerHTML = candidates.map(s => `
+        <div class="free-student-item" data-student-id="${s.id}" data-student-name="${escapeSyncHtml((s.name || '').toLowerCase())}" onclick="toggleSyncDestinationStudent(${s.id})" style="padding: 12px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
+          <input type="checkbox" id="syncDest${s.id}" ${syncDestinationSelectedIds.has(s.id) ? 'checked' : ''} style="width: 16px; height: 16px; cursor: pointer;" onclick="event.stopPropagation()">
+          <div style="flex: 1;">
+            <div style="font-weight: 600; color: white; font-size: 14px;">${escapeSyncHtml(s.name || 'Unnamed')}</div>
+            <div style="font-size: 12px; color: rgba(255, 255, 255, 0.5);">Group ${escapeSyncHtml(s.group_name || 'N/A')}</div>
+          </div>
+        </div>
+      `).join('');
+
+      updateSyncDestinationCount();
+    }
+
+    function toggleSyncDestinationStudent(studentId) {
+      const checkbox = document.getElementById(`syncDest${studentId}`);
+      checkbox.checked = !checkbox.checked;
+      if (checkbox.checked) syncDestinationSelectedIds.add(studentId);
+      else syncDestinationSelectedIds.delete(studentId);
+      updateSyncDestinationCount();
+    }
+
+    function selectAllSyncDestinationStudents() {
+      document.querySelectorAll('#syncDestinationList [id^="syncDest"]').forEach(cb => {
+        if (cb.closest('.free-student-item').style.display !== 'none') {
+          cb.checked = true;
+          syncDestinationSelectedIds.add(parseInt(cb.id.replace('syncDest', ''), 10));
+        }
+      });
+      updateSyncDestinationCount();
+    }
+
+    function clearSyncDestinationSelection() {
+      document.querySelectorAll('#syncDestinationList [id^="syncDest"]').forEach(cb => cb.checked = false);
+      syncDestinationSelectedIds.clear();
+      updateSyncDestinationCount();
+    }
+
+    function updateSyncDestinationCount() {
+      const el = document.getElementById('syncDestinationCount');
+      if (el) el.textContent = `${syncDestinationSelectedIds.size} selected`;
+    }
+
+    function filterSyncDestinationList() {
+      const search = document.getElementById('syncDestinationSearch').value.toLowerCase();
+      document.querySelectorAll('#syncDestinationList .free-student-item').forEach(item => {
+        item.style.display = item.dataset.studentName.includes(search) ? 'flex' : 'none';
+      });
     }
 
     function escapeSyncHtml(str) {
@@ -5130,7 +5195,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       const groupNameVariants = Array.from(new Set([rawGroup, bareLetter, `Group ${bareLetter}`].filter(Boolean)));
 
       const [individualPerms, groupPerms, individualFree, groupFree] = await Promise.all([
-        supabaseClient.from('student_note_permissions').select('note_id, is_accessible').eq('student_id', student.id),
+        supabaseClient.from('student_note_permissions').select('note_id, is_accessible, group_name').eq('student_id', student.id),
         groupNameVariants.length
           ? supabaseClient.from('student_note_permissions').select('note_id').is('student_id', null).eq('is_accessible', true).in('group_name', groupNameVariants)
           : Promise.resolve({ data: [] }),
@@ -5146,10 +5211,102 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       const individualFreeIds = new Set((individualFree.data || []).map(r => r.note_id)); // unconditional, never blocked
       const groupFreeIds = new Set((groupFree.data || []).map(r => r.note_id).filter(id => !blockedIds.has(id)));
 
+      // Historical individual rows were written with inconsistent group_name formats
+      // ("G" vs "Group G"). Track each note's ACTUAL existing group_name so a later
+      // upsert updates that same row instead of inserting a conflicting duplicate.
+      const individualPermGroupNameByNote = new Map();
+      (individualPerms.data || []).forEach(r => {
+        if (!individualPermGroupNameByNote.has(r.note_id)) individualPermGroupNameByNote.set(r.note_id, r.group_name);
+      });
+
       const permittedIds = new Set([...individualPermIds, ...groupPermIds]);
       const freeIds = new Set([...individualFreeIds, ...groupFreeIds]);
       const allAccessibleIds = new Set([...permittedIds, ...freeIds]);
-      return { permittedIds, freeIds, individualFreeIds, allAccessibleIds };
+      return { permittedIds, freeIds, individualFreeIds, allAccessibleIds, individualPermGroupNameByNote };
+    }
+
+    // Mirrors studentA's current access onto a single destination student (exact copy —
+    // adds what's missing AND removes whatever extra access the destination has).
+    // aData = the source student's already-fetched getStudentAccessibleNoteIds() result,
+    // reused across every destination in a batch so Student A is only queried once.
+    async function syncAccessForOnePair(studentA, aData, studentB) {
+      const { permittedIds: permittedA, freeIds: freeA, allAccessibleIds: allA } = aData;
+      const { individualFreeIds: individualFreeB, allAccessibleIds: allB, individualPermGroupNameByNote: bExistingGroupNameByNote } = await getStudentAccessibleNoteIds(studentB);
+
+      const notesToAdd = new Set([...allA].filter(id => !allB.has(id)));
+      const notesToRemove = new Set([...allB].filter(id => !allA.has(id)));
+
+      if (notesToAdd.size === 0 && notesToRemove.size === 0) {
+        return { added: 0, removed: 0, alreadyMatched: true };
+      }
+
+      const bBareLetter = (studentB.group_name || '').replace(/Group\s*/i, '').trim().toUpperCase();
+      const bDefaultGroupName = bBareLetter ? `Group ${bBareLetter}` : (studentB.group_name || '');
+      // Reuse B's own existing individual row's group_name for a note when one already
+      // exists, so the upsert updates that row rather than inserting a duplicate under
+      // a differently-formatted group_name (which would silently fail to revoke access).
+      const groupNameForNote = noteId => bExistingGroupNameByNote.get(noteId) || bDefaultGroupName;
+      const laNow = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
+      const todayLa = new Date(laNow).toISOString().split('T')[0];
+
+      // Grant B only the notes she's actually missing (not the full set A has — most of
+      // A's access is usually already covered for B via her own group, so re-granting
+      // everything would create hundreds of redundant individual override rows).
+      const notesToAddViaPermission = Array.from(notesToAdd).filter(id => permittedA.has(id));
+      const notesToAddViaFree = Array.from(notesToAdd).filter(id => freeA.has(id) && !permittedA.has(id));
+
+      const permissionPayloads = notesToAddViaPermission.map(noteId => ({
+        note_id: noteId,
+        student_id: studentB.id,
+        group_name: groupNameForNote(noteId),
+        is_accessible: true,
+        class_date: todayLa
+      }));
+      const freeAccessPayloads = notesToAddViaFree.map(noteId => ({
+        note_id: noteId,
+        access_type: 'individual',
+        student_id: studentB.id,
+        class_date: todayLa,
+        created_by: 'admin (sync)'
+      }));
+
+      // Revoke B's extra access so the result is an EXACT mirror, not just additive:
+      // - Insert/flip an explicit is_accessible=false block for every removed note, which
+      //   overrides B's own individual grant, group-posted access, and group free-access.
+      // - Individual free-access grants are unconditional and ignore that block, so any of
+      //   B's own individual free grants for a removed note must be deleted outright.
+      const revokePayloads = Array.from(notesToRemove).map(noteId => ({
+        note_id: noteId,
+        student_id: studentB.id,
+        group_name: groupNameForNote(noteId),
+        is_accessible: false,
+        class_date: todayLa
+      }));
+      const individualFreeIdsToDelete = Array.from(notesToRemove).filter(id => individualFreeB.has(id));
+
+      if (permissionPayloads.length > 0 || revokePayloads.length > 0) {
+        const { error } = await supabaseClient
+          .from('student_note_permissions')
+          .upsert([...permissionPayloads, ...revokePayloads], { onConflict: 'note_id,student_id,group_name', ignoreDuplicates: false });
+        if (error) throw error;
+      }
+      if (freeAccessPayloads.length > 0) {
+        const { error } = await supabaseClient
+          .from('note_free_access')
+          .upsert(freeAccessPayloads, { onConflict: 'note_id,student_id', ignoreDuplicates: false });
+        if (error) throw error;
+      }
+      if (individualFreeIdsToDelete.length > 0) {
+        const { error } = await supabaseClient
+          .from('note_free_access')
+          .delete()
+          .eq('student_id', studentB.id)
+          .eq('access_type', 'individual')
+          .in('note_id', individualFreeIdsToDelete);
+        if (error) throw error;
+      }
+
+      return { added: notesToAdd.size, removed: notesToRemove.size, alreadyMatched: false };
     }
 
     async function confirmSyncStudents() {
@@ -5157,131 +5314,79 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       errorEl.style.display = 'none';
 
       const idA = document.getElementById('syncStudentASelect').value;
-      const idB = document.getElementById('syncStudentBSelect').value;
+      const destinationIds = Array.from(syncDestinationSelectedIds);
 
-      if (!idA || !idB) {
-        errorEl.textContent = 'Please select both Student A and Student B.';
+      if (!idA) {
+        errorEl.textContent = 'Please select Student A (the source student).';
         errorEl.style.display = 'block';
         return;
       }
-      if (idA === idB) {
-        errorEl.textContent = 'Student A and Student B must be different students.';
+      if (destinationIds.length === 0) {
+        errorEl.textContent = 'Please select at least one destination student to sync.';
         errorEl.style.display = 'block';
         return;
       }
 
       const studentA = syncStudentsAllList.find(s => String(s.id) === idA);
-      const studentB = syncStudentsAllList.find(s => String(s.id) === idB);
-      if (!studentA || !studentB) return;
+      const destinationStudents = destinationIds
+        .map(id => syncStudentsAllList.find(s => s.id === id))
+        .filter(Boolean);
+      if (!studentA || destinationStudents.length === 0) return;
 
+      const nameList = destinationStudents.map(s => s.name).join(', ');
       const confirmed = await customConfirm(
         'Confirm One-Time Sync',
-        `You are about to copy ${studentA.name}'s current note access to ${studentB.name}. ${studentB.name}'s access will become an exact copy of ${studentA.name}'s — this may ADD notes ${studentB.name} doesn't have yet AND REMOVE any extra notes ${studentB.name} currently has that ${studentA.name} doesn't. This is a one-time sync. Future notes or access changes for ${studentA.name} will NOT automatically apply to ${studentB.name}. Continue?`
+        `You are about to copy ${studentA.name}'s current note access to ${destinationStudents.length} student${destinationStudents.length !== 1 ? 's' : ''}: ${nameList}. ` +
+        `Each of their access will become an exact copy of ${studentA.name}'s — this may ADD notes they don't have yet AND REMOVE any extra notes they currently have that ${studentA.name} doesn't. ` +
+        `This is a one-time sync. Future notes or access changes for ${studentA.name} will NOT automatically apply to them. Continue?`
       );
       if (!confirmed) return;
 
       const confirmBtn = document.getElementById('syncStudentsConfirmBtn');
       confirmBtn.disabled = true;
-      confirmBtn.textContent = 'Syncing…';
 
       try {
-        const [
-          { permittedIds: permittedA, freeIds: freeA, allAccessibleIds: allA },
-          { individualFreeIds: individualFreeB, allAccessibleIds: allB }
-        ] = await Promise.all([
-          getStudentAccessibleNoteIds(studentA),
-          getStudentAccessibleNoteIds(studentB)
-        ]);
+        const aData = await getStudentAccessibleNoteIds(studentA);
 
-        const notesToAdd = new Set([...allA].filter(id => !allB.has(id)));
-        const notesToRemove = new Set([...allB].filter(id => !allA.has(id)));
-
-        if (notesToAdd.size === 0 && notesToRemove.size === 0) {
-          await customAlert('Already Synced', `${studentB.name} already has the exact same note access as ${studentA.name}.`);
-          return;
-        }
-
-        const bBareLetter = (studentB.group_name || '').replace(/Group\s*/i, '').trim().toUpperCase();
-        const bGroupName = bBareLetter ? `Group ${bBareLetter}` : (studentB.group_name || '');
-        const laNow = new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' });
-        const todayLa = new Date(laNow).toISOString().split('T')[0];
-
-        // Grant B only the notes she's actually missing (not the full set A has — most of
-        // A's access is usually already covered for B via her own group, so re-granting
-        // everything would create hundreds of redundant individual override rows).
-        const notesToAddViaPermission = Array.from(notesToAdd).filter(id => permittedA.has(id));
-        const notesToAddViaFree = Array.from(notesToAdd).filter(id => freeA.has(id) && !permittedA.has(id));
-
-        const permissionPayloads = notesToAddViaPermission.map(noteId => ({
-          note_id: noteId,
-          student_id: studentB.id,
-          group_name: bGroupName,
-          is_accessible: true,
-          class_date: todayLa
-        }));
-        const freeAccessPayloads = notesToAddViaFree.map(noteId => ({
-          note_id: noteId,
-          access_type: 'individual',
-          student_id: studentB.id,
-          class_date: todayLa,
-          created_by: 'admin (sync)'
-        }));
-
-        // Revoke B's extra access so the result is an EXACT mirror, not just additive:
-        // - Insert/flip an explicit is_accessible=false block for every removed note, which
-        //   overrides B's own individual grant, group-posted access, and group free-access.
-        // - Individual free-access grants are unconditional and ignore that block, so any of
-        //   B's own individual free grants for a removed note must be deleted outright.
-        const revokePayloads = Array.from(notesToRemove).map(noteId => ({
-          note_id: noteId,
-          student_id: studentB.id,
-          group_name: bGroupName,
-          is_accessible: false,
-          class_date: todayLa
-        }));
-        const individualFreeIdsToDelete = Array.from(notesToRemove).filter(id => individualFreeB.has(id));
-
-        if (permissionPayloads.length > 0 || revokePayloads.length > 0) {
-          const { error } = await supabaseClient
-            .from('student_note_permissions')
-            .upsert([...permissionPayloads, ...revokePayloads], { onConflict: 'note_id,student_id,group_name', ignoreDuplicates: false });
-          if (error) throw error;
-        }
-        if (freeAccessPayloads.length > 0) {
-          const { error } = await supabaseClient
-            .from('note_free_access')
-            .upsert(freeAccessPayloads, { onConflict: 'note_id,student_id', ignoreDuplicates: false });
-          if (error) throw error;
-        }
-        if (individualFreeIdsToDelete.length > 0) {
-          const { error } = await supabaseClient
-            .from('note_free_access')
-            .delete()
-            .eq('student_id', studentB.id)
-            .eq('access_type', 'individual')
-            .in('note_id', individualFreeIdsToDelete);
-          if (error) throw error;
-        }
-
-        // Figure out how many distinct systems A's final access spans, for the success message.
         const systemsTouched = new Set();
-        allA.forEach(noteId => {
+        aData.allAccessibleIds.forEach(noteId => {
           const note = allNotes.find(n => n.id === noteId);
           if (note) systemsTouched.add(getNoteDisplaySystem(note));
         });
 
+        let successCount = 0;
+        let alreadyMatchedCount = 0;
+        const failures = [];
+
+        for (let i = 0; i < destinationStudents.length; i++) {
+          const studentB = destinationStudents[i];
+          confirmBtn.textContent = `Syncing… (${i + 1}/${destinationStudents.length})`;
+          try {
+            const result = await syncAccessForOnePair(studentA, aData, studentB);
+            if (result.alreadyMatched) alreadyMatchedCount++;
+            successCount++;
+          } catch (err) {
+            console.error(`Sync failed for ${studentB.name}:`, err);
+            failures.push(studentB.name);
+          }
+        }
+
         closeSyncStudentsModal();
 
-        // Refresh cached permissions/free-access if Student B is in the currently viewed group.
         clearCache('permissions');
         clearCache('freeAccess');
         await loadData(true);
 
-        await customAlert(
-          '✅ Sync Complete',
-          `${studentB.name} now has the exact same ${allA.size} note(s) across ${systemsTouched.size} system${systemsTouched.size !== 1 ? 's' : ''} as ${studentA.name} ` +
-          `(added ${notesToAdd.size}, removed ${notesToRemove.size}).`
-        );
+        let summary = `${successCount} student${successCount !== 1 ? 's' : ''} successfully synced to ${studentA.name}'s current access ` +
+          `(${aData.allAccessibleIds.size} note(s) across ${systemsTouched.size} system${systemsTouched.size !== 1 ? 's' : ''}).`;
+        if (alreadyMatchedCount > 0) {
+          summary += ` ${alreadyMatchedCount} already matched and needed no changes.`;
+        }
+        if (failures.length > 0) {
+          summary += ` ⚠️ Failed for: ${failures.join(', ')}.`;
+        }
+
+        await customAlert(failures.length > 0 ? 'Sync Completed With Errors' : '✅ Sync Complete', summary);
       } catch (error) {
         console.error('Sync students error:', error);
         await customAlert('Error', 'Failed to sync students: ' + error.message);
