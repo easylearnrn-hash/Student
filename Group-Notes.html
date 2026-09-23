@@ -1119,6 +1119,18 @@
     </div>
   </div>
 
+  <!-- Bulk Action Progress Modal — shared by Post/Repost/Unpost/Free/Un-Free/Share/Delete/Sync -->
+  <div id="bulkProgressModal" style="display: none; position: fixed; inset: 0; background: rgba(8,10,20,0.88); backdrop-filter: blur(10px); z-index: 20000; align-items: center; justify-content: center;">
+    <div class="modal-panel" style="max-width: 440px; text-align: center;">
+      <div id="bulkProgressIcon" style="font-size: 38px; margin-bottom: 12px;">⏳</div>
+      <div id="bulkProgressTitle" style="font-size: 16px; font-weight: 700; color: var(--text-strong, #f5f0e8); margin-bottom: 8px;">Working…</div>
+      <div id="bulkProgressLabel" style="font-size: 14px; color: rgba(245,240,232,0.7); margin-bottom: 16px; font-variant-numeric: tabular-nums;">0 / 0</div>
+      <div style="width: 100%; height: 10px; background: rgba(255,255,255,0.08); border-radius: 6px; overflow: hidden; border: 1px solid rgba(196,164,95,0.22);">
+        <div id="bulkProgressBarFill" style="height: 100%; width: 0%; background: linear-gradient(90deg,#c4a45f,#e0c080); transition: width 0.15s ease;"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Filtered Notes Modal -->
   <div id="filteredNotesModal" onclick="closeFilteredNotesModalOnOutsideClick(event)" style="display: none; position: fixed; inset: 0; background: rgba(8,10,20,0.82); backdrop-filter: blur(10px); z-index: 10000; align-items: center; justify-content: center; overflow: hidden;">
     <div id="filteredNotesModalContent" class="modal-panel" style="max-width: 860px; width: 92%; height: 86vh; display: flex; flex-direction: column; padding: 32px;">
@@ -4919,24 +4931,17 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         );
         
         if (!confirmed) return;
-        
-        let successCount = 0;
-        let notFoundCount = 0;
-        
-        for (const noteId of selectedNoteIds) {
+
+        const result = await runBulkWithProgress(Array.from(selectedNoteIds), 'Removing FREE access', async (noteId) => {
           const { error } = await supabaseClient
             .from('note_free_access')
             .delete()
             .eq('note_id', noteId)
             .eq('group_letter', groupLetter)
             .eq('access_type', 'group');
-          
-          if (error) {
-            console.error(`❌ Error revoking access for note ${noteId}:`, error);
-            throw error;
-          }
-          successCount++;
-        }
+
+          if (error) throw error;
+        });
         
         // Refresh free access grants
   const { data: updatedGrants } = await supabaseClient
@@ -4950,7 +4955,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         // PERFORMANCE FIX: Reload fresh data immediately to update FREE tags
         await loadData(true); // Force refresh - background reload
         
-        await customAlert('Success', `✅ FREE access revoked from Group ${groupLetter} for ${successCount} note(s)`);
+        await customAlert('Un-Free Complete', formatBulkResultSummary(result, 'note') + ` Revoked from Group ${groupLetter}.`);
         
       } catch (error) {
         console.error('Error revoking free access:', error);
@@ -5068,6 +5073,84 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       selectedNoteIds = new Set();
       
       updateSelectedCount();
+    }
+
+    // ===== BULK ACTION PROGRESS (shared by Post/Repost/Unpost/Free/Un-Free/Share/Delete/Sync) =====
+    // Tracks which toolbar/modal buttons were disabled for the current run, so they can
+    // be precisely re-enabled afterward instead of guessing which ones were touched.
+    let _bulkProgressDisabledButtons = [];
+
+    function showBulkProgress(title, disableSelectors) {
+      document.getElementById('bulkProgressTitle').textContent = title;
+      document.getElementById('bulkProgressLabel').textContent = '0 / 0';
+      document.getElementById('bulkProgressBarFill').style.width = '0%';
+      document.getElementById('bulkProgressModal').style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+
+      // Disable the relevant action buttons to prevent duplicate/overlapping requests.
+      const selectors = disableSelectors && disableSelectors.length
+        ? disableSelectors
+        : ['#batchActionBar button'];
+      _bulkProgressDisabledButtons = [];
+      selectors.forEach(sel => {
+        document.querySelectorAll(sel).forEach(btn => {
+          if (!btn.disabled) {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+            _bulkProgressDisabledButtons.push(btn);
+          }
+        });
+      });
+    }
+
+    function updateBulkProgress(done, total, verb) {
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      document.getElementById('bulkProgressLabel').textContent = `${verb ? verb + ': ' : ''}${done} / ${total}`;
+      document.getElementById('bulkProgressBarFill').style.width = pct + '%';
+    }
+
+    function hideBulkProgress() {
+      document.getElementById('bulkProgressModal').style.display = 'none';
+      document.body.style.overflow = '';
+      _bulkProgressDisabledButtons.forEach(btn => {
+        btn.disabled = false;
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+      });
+      _bulkProgressDisabledButtons = [];
+    }
+
+    // Runs workerFn(item, index) sequentially over items, showing real-time "N / total"
+    // progress (both as text and a filling bar) that reflects items ACTUALLY completed —
+    // not a fake timer. One item failing doesn't stop the rest of the batch.
+    async function runBulkWithProgress(items, verb, workerFn, disableSelectors) {
+      const total = items.length;
+      showBulkProgress(`${verb}…`, disableSelectors);
+      updateBulkProgress(0, total, verb);
+
+      let succeeded = 0;
+      const failedItems = [];
+      for (let i = 0; i < total; i++) {
+        try {
+          await workerFn(items[i], i);
+          succeeded++;
+        } catch (err) {
+          console.error(`${verb} failed for item`, items[i], err);
+          failedItems.push(items[i]);
+        }
+        updateBulkProgress(i + 1, total, verb);
+      }
+
+      hideBulkProgress();
+      return { succeeded, failed: failedItems.length, failedItems, total };
+    }
+
+    // Builds the standard "198 of 200 completed successfully. 2 failed." summary line.
+    function formatBulkResultSummary(result, noun) {
+      let msg = `${result.succeeded} of ${result.total} ${noun}${result.total !== 1 ? 's' : ''} completed successfully.`;
+      if (result.failed > 0) msg += ` ${result.failed} failed.`;
+      return msg;
     }
 
     // ===== SYNC STUDENTS (one-time snapshot copy of note access) =====
@@ -5343,7 +5426,6 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       if (!confirmed) return;
 
       const confirmBtn = document.getElementById('syncStudentsConfirmBtn');
-      confirmBtn.disabled = true;
 
       try {
         const aData = await getStudentAccessibleNoteIds(studentA);
@@ -5354,22 +5436,16 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           if (note) systemsTouched.add(getNoteDisplaySystem(note));
         });
 
-        let successCount = 0;
         let alreadyMatchedCount = 0;
         const failures = [];
 
-        for (let i = 0; i < destinationStudents.length; i++) {
-          const studentB = destinationStudents[i];
-          confirmBtn.textContent = `Syncing… (${i + 1}/${destinationStudents.length})`;
-          try {
-            const result = await syncAccessForOnePair(studentA, aData, studentB);
-            if (result.alreadyMatched) alreadyMatchedCount++;
-            successCount++;
-          } catch (err) {
-            console.error(`Sync failed for ${studentB.name}:`, err);
-            failures.push(studentB.name);
-          }
-        }
+        const result = await runBulkWithProgress(destinationStudents, 'Syncing students', async (studentB) => {
+          const syncResult = await syncAccessForOnePair(studentA, aData, studentB);
+          if (syncResult.alreadyMatched) alreadyMatchedCount++;
+        }, ['#syncStudentsConfirmBtn', '#syncStudentsModal .btn-cancel']);
+        // runBulkWithProgress swallows per-item errors internally to keep the batch going;
+        // recover which destination names failed for the summary message.
+        result.failedItems.forEach(studentB => failures.push(studentB.name));
 
         closeSyncStudentsModal();
 
@@ -5377,13 +5453,13 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         clearCache('freeAccess');
         await loadData(true);
 
-        let summary = `${successCount} student${successCount !== 1 ? 's' : ''} successfully synced to ${studentA.name}'s current access ` +
+        let summary = `${result.succeeded} of ${result.total} student${result.total !== 1 ? 's' : ''} successfully synced to ${studentA.name}'s current access ` +
           `(${aData.allAccessibleIds.size} note(s) across ${systemsTouched.size} system${systemsTouched.size !== 1 ? 's' : ''}).`;
         if (alreadyMatchedCount > 0) {
           summary += ` ${alreadyMatchedCount} already matched and needed no changes.`;
         }
         if (failures.length > 0) {
-          summary += ` ⚠️ Failed for: ${failures.join(', ')}.`;
+          summary += ` ${failures.length} failed: ${failures.join(', ')}.`;
         }
 
         await customAlert(failures.length > 0 ? 'Sync Completed With Errors' : '✅ Sync Complete', summary);
@@ -5391,8 +5467,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         console.error('Sync students error:', error);
         await customAlert('Error', 'Failed to sync students: ' + error.message);
       } finally {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = 'Sync Access';
+        if (confirmBtn) confirmBtn.textContent = 'Sync Access';
       }
     }
 
@@ -5487,42 +5562,11 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       );
       if (!confirmed) return;
 
-      // Loading overlay
-      const loadingDiv = document.createElement('div');
-      loadingDiv.id = 'repost-loading';
-      loadingDiv.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 99999; display: flex; align-items: center; justify-content: center;';
-      loadingDiv.innerHTML = `<div style="background: rgba(14,19,34,0.96); padding: 40px; border-radius: 20px; text-align: center; border: 1px solid rgba(196,164,95,0.22);">
-        <div style="font-size: 48px; margin-bottom: 20px;">📅</div>
-        <div style="color: #f5f0e8; font-size: 18px; font-weight: 600;">Updating Dates...</div>
-        <div style="color: rgba(245,240,232,0.55); font-size: 14px; margin-top: 10px;">Reposting ${noteIds.length} note(s) to ${newDate}</div>
-      </div>`;
-      document.body.appendChild(loadingDiv);
-
       try {
         const groupName = groupLetter;
         const legacyGroupName = `Group ${groupLetter}`;
         const groupNames = [groupName, legacyGroupName];
 
-        // Update class_date on student_note_permissions for these notes in this group
-        const { error: permErr } = await supabaseClient
-          .from('student_note_permissions')
-          .update({ class_date: newDate })
-          .in('note_id', noteIds)
-          .in('group_name', groupNames)
-          .is('student_id', null);
-        if (permErr) throw permErr;
-
-        // Also update note_free_access rows for this group
-        const { error: freeErr } = await supabaseClient
-          .from('note_free_access')
-          .update({ class_date: newDate })
-          .in('note_id', noteIds)
-          .eq('access_type', 'group')
-          .eq('group_letter', groupLetter);
-        if (freeErr) throw freeErr;
-
-        // Repost should also refresh explicit per-student rows for this group.
-        // This guarantees visibility for students if group-level rows are not readable.
         const normalizeGroupCode = (value) => String(value || '').replace(/^group\s*/i, '').trim().toUpperCase();
         const targetGroupCode = normalizeGroupCode(groupLetter);
         const { data: groupStudents, error: groupStudentsErr } = await supabaseClient
@@ -5535,48 +5579,62 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           .map(s => s.id)
           .filter(Boolean);
 
-        if (groupStudentIds.length > 0) {
-          const individualRecords = [];
-          for (const noteId of noteIds) {
-            for (const sid of groupStudentIds) {
-              individualRecords.push({
-                note_id: noteId,
-                student_id: sid,
-                group_name: groupName,
-                is_accessible: true,
-                class_date: newDate
-              });
-            }
-          }
-
-          const { data: individualRows, error: individualErr } = await supabaseClient
+        const result = await runBulkWithProgress(noteIds, 'Reposting notes', async (noteId) => {
+          // Update class_date on student_note_permissions for this note in this group
+          const { error: permErr } = await supabaseClient
             .from('student_note_permissions')
-            .upsert(individualRecords, { onConflict: 'note_id,student_id,group_name' })
-            .select();
-          if (individualErr) throw individualErr;
-          if (individualRows) individualRows.forEach(r => permissions.push(r));
-        }
+            .update({ class_date: newDate })
+            .eq('note_id', noteId)
+            .in('group_name', groupNames)
+            .is('student_id', null);
+          if (permErr) throw permErr;
 
-        // Update local cache
-        permissions.forEach(p => {
-          if (noteIds.includes(p.note_id) && groupNames.includes(String(p.group_name || '').trim()) && !p.student_id) {
-            p.class_date = newDate;
+          // Also update note_free_access rows for this group
+          const { error: freeErr } = await supabaseClient
+            .from('note_free_access')
+            .update({ class_date: newDate })
+            .eq('note_id', noteId)
+            .eq('access_type', 'group')
+            .eq('group_letter', groupLetter);
+          if (freeErr) throw freeErr;
+
+          // Refresh explicit per-student rows for this group/note so visibility is
+          // guaranteed even if group-level rows aren't readable for some reason.
+          if (groupStudentIds.length > 0) {
+            const individualRecords = groupStudentIds.map(sid => ({
+              note_id: noteId,
+              student_id: sid,
+              group_name: groupName,
+              is_accessible: true,
+              class_date: newDate
+            }));
+            const { data: individualRows, error: individualErr } = await supabaseClient
+              .from('student_note_permissions')
+              .upsert(individualRecords, { onConflict: 'note_id,student_id,group_name' })
+              .select();
+            if (individualErr) throw individualErr;
+            if (individualRows) individualRows.forEach(r => permissions.push(r));
           }
-        });
-        freeAccessGrants.forEach(g => {
-          if (noteIds.includes(g.note_id) && g.access_type === 'group' && g.group_letter === groupLetter) {
-            g.class_date = newDate;
-          }
+
+          // Update local cache
+          permissions.forEach(p => {
+            if (p.note_id === noteId && groupNames.includes(String(p.group_name || '').trim()) && !p.student_id) {
+              p.class_date = newDate;
+            }
+          });
+          freeAccessGrants.forEach(g => {
+            if (g.note_id === noteId && g.access_type === 'group' && g.group_letter === groupLetter) {
+              g.class_date = newDate;
+            }
+          });
         });
 
-        showToast(`✅ Reposted ${noteIds.length} note(s) to ${newDate}`);
+        await customAlert('Repost Complete', formatBulkResultSummary(result, 'note'));
         clearSelection();
         await loadData(true);
       } catch (err) {
         console.error('❌ Repost failed:', err);
         await customAlert('Error', `Repost failed: ${err.message}`);
-      } finally {
-        document.getElementById('repost-loading')?.remove();
       }
     }
 
@@ -5746,18 +5804,6 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
       closePostModal();
 
-      // Loading overlay
-      const loadingDiv = document.createElement('div');
-      loadingDiv.id = 'post-loading';
-      loadingDiv.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 99999; display: flex; align-items: center; justify-content: center;';
-      loadingDiv.innerHTML = `<div style="background: rgba(14,19,34,0.96); padding: 40px; border-radius: 20px; text-align: center; border: 1px solid rgba(196,164,95,0.22);">
-        <div style="font-size: 48px; margin-bottom: 20px; animation: spin 1s linear infinite;">⚙️</div>
-        <div style="color: #f5f0e8; font-size: 18px; font-weight: 600;">Posting Notes...</div>
-        <div style="color: rgba(245,240,232,0.55); font-size: 14px; margin-top: 10px;">Updating ${selectedNoteIds.size} note(s)</div>
-        <style>@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}</style>
-      </div>`;
-      document.body.appendChild(loadingDiv);
-
       try {
         const { data: { session } } = await supabaseClient.auth.getSession();
         const adminEmail = session?.user?.email;
@@ -5767,35 +5813,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           const groupName = groupLetter; // store bare letter in DB for student portal/RLS parity
           const legacyGroupName = `Group ${groupLetter}`;
           const currentGroupNames = [groupName, legacyGroupName].filter(Boolean);
-          // Delete existing permissions for these notes+group first
-          await supabaseClient.from('student_note_permissions').delete()
-            .in('note_id', noteIds).in('group_name', currentGroupNames).is('student_id', null);
-          permissions = permissions.filter(p => !(noteIds.includes(p.note_id) && currentGroupNames.includes(String(p.group_name || '').trim()) && !p.student_id));
 
-          const records = [];
-          noteIds.forEach(noteId => {
-            records.push({
-              note_id: noteId,
-              group_name: groupName,
-              is_accessible: true,
-              class_date: classDate,
-              granted_by: adminEmail
-            });
-            records.push({
-              note_id: noteId,
-              group_name: legacyGroupName,
-              is_accessible: true,
-              class_date: classDate,
-              granted_by: adminEmail
-            });
-          });
-          const { data: inserted, error } = await supabaseClient.from('student_note_permissions').insert(records).select();
-          if (error) throw error;
-          if (inserted) inserted.forEach(r => permissions.push(r));
-
-          // Also keep explicit per-student rows in sync for this group.
-          // This ensures students can still see assigned notes even if group-level
-          // rows are filtered by stricter RLS policies.
           const normalizeGroupCode = (value) => String(value || '').replace(/^group\s*/i, '').trim().toUpperCase();
           const targetGroupCode = normalizeGroupCode(groupLetter);
           const { data: groupStudents, error: groupStudentsErr } = await supabaseClient
@@ -5808,55 +5826,68 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             .map(s => s.id)
             .filter(Boolean);
 
-          if (groupStudentIds.length > 0) {
-            const individualRecords = [];
-            for (const noteId of noteIds) {
-              for (const sid of groupStudentIds) {
-                individualRecords.push({
-                  note_id: noteId,
-                  student_id: sid,
-                  group_name: groupName,
-                  is_accessible: true,
-                  class_date: classDate,
-                  granted_by: adminEmail
-                });
-              }
+          const result = await runBulkWithProgress(noteIds, 'Posting notes', async (noteId) => {
+            // Delete existing permissions for this note+group first
+            await supabaseClient.from('student_note_permissions').delete()
+              .eq('note_id', noteId).in('group_name', currentGroupNames).is('student_id', null);
+            permissions = permissions.filter(p => !(p.note_id === noteId && currentGroupNames.includes(String(p.group_name || '').trim()) && !p.student_id));
+
+            const records = [
+              { note_id: noteId, group_name: groupName, is_accessible: true, class_date: classDate, granted_by: adminEmail },
+              { note_id: noteId, group_name: legacyGroupName, is_accessible: true, class_date: classDate, granted_by: adminEmail }
+            ];
+            const { data: inserted, error } = await supabaseClient.from('student_note_permissions').insert(records).select();
+            if (error) throw error;
+            if (inserted) inserted.forEach(r => permissions.push(r));
+
+            // Also keep explicit per-student rows in sync for this group/note.
+            // This ensures students can still see assigned notes even if group-level
+            // rows are filtered by stricter RLS policies.
+            if (groupStudentIds.length > 0) {
+              const individualRecords = groupStudentIds.map(sid => ({
+                note_id: noteId,
+                student_id: sid,
+                group_name: groupName,
+                is_accessible: true,
+                class_date: classDate,
+                granted_by: adminEmail
+              }));
+
+              const { data: individualRows, error: individualErr } = await supabaseClient
+                .from('student_note_permissions')
+                .upsert(individualRecords, { onConflict: 'note_id,student_id,group_name' })
+                .select();
+              if (individualErr) throw individualErr;
+              if (individualRows) individualRows.forEach(r => permissions.push(r));
             }
+          });
 
-            const { data: individualRows, error: individualErr } = await supabaseClient
-              .from('student_note_permissions')
-              .upsert(individualRecords, { onConflict: 'note_id,student_id,group_name' })
-              .select();
-            if (individualErr) throw individualErr;
-            if (individualRows) individualRows.forEach(r => permissions.push(r));
-          }
-
-          // Email students in this group
+          // Email students in this group (once, after all notes are posted)
           try {
             await sendNotePostedEmail(groupLetter, `${noteIds.length} new note(s)`, 'Various');
           } catch (e) { /* non-fatal */ }
 
-          await customAlert('✅ Posted!', `${noteIds.length} note(s) posted to Group ${groupLetter} for ${classDate}`);
+          await customAlert('Post Complete', formatBulkResultSummary(result, 'note') + ` Posted to Group ${groupLetter} for ${classDate}.`);
 
         } else {
           // Individual students
           const studentIds = snapshotStudentIds;
-          // Delete existing per-student permissions
-          await supabaseClient.from('student_note_permissions').delete()
-            .in('note_id', noteIds).in('student_id', studentIds);
-          permissions = permissions.filter(p => !(noteIds.includes(p.note_id) && studentIds.includes(p.student_id)));
 
-          const records = [];
-          for (const noteId of noteIds) {
-            for (const studentId of studentIds) {
-              records.push({ note_id: noteId, student_id: studentId, group_name: currentGroup, is_accessible: true, class_date: classDate, granted_by: adminEmail });
-            }
-          }
-          const { data: inserted, error } = await supabaseClient.from('student_note_permissions').insert(records).select();
-          if (error) throw error;
-          if (inserted) inserted.forEach(r => permissions.push(r));
+          const result = await runBulkWithProgress(noteIds, 'Posting notes', async (noteId) => {
+            // Delete existing per-student permissions for this note
+            await supabaseClient.from('student_note_permissions').delete()
+              .eq('note_id', noteId).in('student_id', studentIds);
+            permissions = permissions.filter(p => !(p.note_id === noteId && studentIds.includes(p.student_id)));
 
-          await customAlert('✅ Posted!', `${noteIds.length} note(s) posted to ${studentIds.length} student(s) for ${classDate}`);
+            const records = studentIds.map(studentId => ({
+              note_id: noteId, student_id: studentId, group_name: currentGroup, is_accessible: true, class_date: classDate, granted_by: adminEmail
+            }));
+            const { data: inserted, error } = await supabaseClient.from('student_note_permissions').insert(records).select();
+            if (error) throw error;
+            if (inserted) inserted.forEach(r => permissions.push(r));
+          });
+
+          await customAlert('Post Complete', formatBulkResultSummary(result, 'note') + ` Posted to ${studentIds.length} student(s) for ${classDate}.`);
         }
 
         clearSelection();
@@ -5864,9 +5895,6 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       } catch (err) {
         console.error('Post error:', err);
         await customAlert('Error', 'Failed to post notes: ' + err.message);
-      } finally {
-        const el = document.getElementById('post-loading');
-        if (el) el.remove();
       }
     }
 
@@ -6139,42 +6167,35 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         if (!confirmed) return;
 
         try {
-          // Delete any existing individual access records for this student+notes
-          const { error } = await supabaseClient
-            .from('student_note_permissions')
-            .delete()
-            .in('note_id', noteIds)
-            .eq('student_id', student.id);
-          if (error) throw error;
+          const result = await runBulkWithProgress(noteIds, 'Unposting notes', async (noteId) => {
+            // Delete any existing individual access records for this student+note
+            const { error } = await supabaseClient
+              .from('student_note_permissions')
+              .delete()
+              .eq('note_id', noteId)
+              .eq('student_id', student.id);
+            if (error) throw error;
 
-          await supabaseClient
-            .from('note_free_access')
-            .delete()
-            .in('note_id', noteIds)
-            .eq('student_id', student.id);
+            await supabaseClient
+              .from('note_free_access')
+              .delete()
+              .eq('note_id', noteId)
+              .eq('student_id', student.id);
 
-          // Insert block records (is_accessible=false) so group-level posts are
-          // hidden for this specific student in the student portal.
-          const blockRows = noteIds.map(nId => ({
-            note_id: nId,
-            student_id: student.id,
-            is_accessible: false
-          }));
-          const { error: blockError } = await supabaseClient
-            .from('student_note_permissions')
-            .insert(blockRows);
-          if (blockError) throw blockError;
+            // Insert a block record (is_accessible=false) so group-level posts are
+            // hidden for this specific student in the student portal.
+            const { error: blockError } = await supabaseClient
+              .from('student_note_permissions')
+              .insert({ note_id: noteId, student_id: student.id, is_accessible: false });
+            if (blockError) throw blockError;
 
-          permissions = permissions.filter(p =>
-            !(noteIds.includes(p.note_id) && p.student_id === student.id)
-          );
-          freeAccessGrants = freeAccessGrants.filter(g =>
-            !(noteIds.includes(g.note_id) && g.student_id === student.id)
-          );
+            permissions = permissions.filter(p => !(p.note_id === noteId && p.student_id === student.id));
+            freeAccessGrants = freeAccessGrants.filter(g => !(g.note_id === noteId && g.student_id === student.id));
+          });
 
           clearSelection();
           await renderSystems();
-          await customAlert('Success', `Removed ${noteIds.length} note(s) for ${student.name}`);
+          await customAlert('Unpost Complete', formatBulkResultSummary(result, 'note') + ` Removed for ${student.name}.`);
         } catch (err) {
           console.error('Batch unpost student error:', err);
           await customAlert('Error', 'Failed to unpost: ' + err.message);
@@ -6189,20 +6210,20 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         if (!confirmed) return;
 
         try {
-          const { error } = await supabaseClient
-            .from('student_note_permissions')
-            .delete()
-            .in('note_id', noteIds)
-            .eq('group_name', currentGroup);
-          if (error) throw error;
+          const result = await runBulkWithProgress(noteIds, 'Unposting notes', async (noteId) => {
+            const { error } = await supabaseClient
+              .from('student_note_permissions')
+              .delete()
+              .eq('note_id', noteId)
+              .eq('group_name', currentGroup);
+            if (error) throw error;
 
-          permissions = permissions.filter(p =>
-            !(noteIds.includes(p.note_id) && p.group_name === currentGroup)
-          );
+            permissions = permissions.filter(p => !(p.note_id === noteId && p.group_name === currentGroup));
+          });
 
           clearSelection();
           await renderSystems();
-          await customAlert('Success', `Removed ${noteIds.length} note(s) from ${currentGroup}`);
+          await customAlert('Unpost Complete', formatBulkResultSummary(result, 'note') + ` Removed from ${currentGroup}.`);
         } catch (err) {
           console.error('Batch unpost group error:', err);
           await customAlert('Error', 'Failed to unpost: ' + err.message);
@@ -6247,49 +6268,40 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       }
 
       try {
-        let successCount = 0;
-        let errorCount = 0;
+        const noteIds = Array.from(selectedNoteIds);
+        const result = await runBulkWithProgress(noteIds, 'Deleting notes', async (noteId) => {
+          const note = allNotes.find(n => n.id === noteId);
+          if (!note) return;
 
-        for (const noteId of selectedNoteIds) {
-          try {
-            const note = allNotes.find(n => n.id === noteId);
-            if (!note) continue;
+          // Delete from storage if file exists
+          if (note.file_name) {
+            const { error: storageError } = await supabaseClient.storage
+              .from(BUCKET_NAME)
+              .remove([note.file_name]);
 
-            // Delete from storage if file exists
-            if (note.file_name) {
-              const { error: storageError } = await supabaseClient.storage
-                .from(BUCKET_NAME)
-                .remove([note.file_name]);
-              
-              if (storageError) console.warn('Storage deletion warning:', storageError);
-            }
-
-            // Delete permissions
-            await supabaseClient
-              .from('student_note_permissions')
-              .delete()
-              .eq('note_id', noteId);
-
-            // Delete note record
-            const { error: deleteError } = await supabaseClient
-              .from('student_notes')
-              .delete()
-              .eq('id', noteId);
-
-            if (deleteError) throw deleteError;
-
-            // Remove from local arrays
-            allNotes = allNotes.filter(n => n.id !== noteId);
-            permissions = permissions.filter(p => p.note_id !== noteId);
-            
-            successCount++;
-          } catch (error) {
-            console.error(`Error deleting note ${noteId}:`, error);
-            errorCount++;
+            if (storageError) console.warn('Storage deletion warning:', storageError);
           }
-        }
 
-        await customAlert(`✓ ${successCount} note(s) deleted${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
+          // Delete permissions
+          await supabaseClient
+            .from('student_note_permissions')
+            .delete()
+            .eq('note_id', noteId);
+
+          // Delete note record
+          const { error: deleteError } = await supabaseClient
+            .from('student_notes')
+            .delete()
+            .eq('id', noteId);
+
+          if (deleteError) throw deleteError;
+
+          // Remove from local arrays
+          allNotes = allNotes.filter(n => n.id !== noteId);
+          permissions = permissions.filter(p => p.note_id !== noteId);
+        });
+
+        await customAlert('Delete Complete', formatBulkResultSummary(result, 'note'));
         clearSelection();
         await renderSystems();
       } catch (error) {
@@ -6357,64 +6369,51 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         if (!confirmed) return;
 
         try {
-          // Remove explicit individual free grants first.
-          const { error } = await supabaseClient
-            .from('note_free_access')
-            .delete()
-            .in('note_id', noteIds)
-            .eq('student_id', student.id);
-          if (error) throw error;
+          const result = await runBulkWithProgress(noteIds, 'Removing FREE access', async (noteId) => {
+            // Remove explicit individual free grant first.
+            const { error } = await supabaseClient
+              .from('note_free_access')
+              .delete()
+              .eq('note_id', noteId)
+              .eq('student_id', student.id);
+            if (error) throw error;
 
-          // Reset student-specific permission overrides for these notes.
-          const { error: deletePermError } = await supabaseClient
-            .from('student_note_permissions')
-            .delete()
-            .in('note_id', noteIds)
-            .eq('student_id', student.id);
-          if (deletePermError) throw deletePermError;
+            // Reset student-specific permission overrides for this note.
+            const { error: deletePermError } = await supabaseClient
+              .from('student_note_permissions')
+              .delete()
+              .eq('note_id', noteId)
+              .eq('student_id', student.id);
+            if (deletePermError) throw deletePermError;
 
-          // Keep notes visible for this student as paid notes (not free), then add
-          // a block row so group-level free grants are suppressed for this student only.
-          const paidAccessRows = noteIds.map(nId => ({
-            note_id: nId,
-            student_id: student.id,
-            group_name: currentGroup,
-            is_accessible: true
-          }));
+            // Keep the note visible for this student as paid (not free), then add
+            // a block row so group-level free grants are suppressed for this student only.
+            const paidAccessRow = { note_id: noteId, student_id: student.id, group_name: currentGroup, is_accessible: true };
+            const blockRow = { note_id: noteId, student_id: student.id, is_accessible: false };
 
-          const blockRows = noteIds.map(nId => ({
-            note_id: nId,
-            student_id: student.id,
-            is_accessible: false
-          }));
+            const { error: paidAccessError } = await supabaseClient
+              .from('student_note_permissions')
+              .insert(paidAccessRow);
+            if (paidAccessError) throw paidAccessError;
 
-          const { error: paidAccessError } = await supabaseClient
-            .from('student_note_permissions')
-            .insert(paidAccessRows);
-          if (paidAccessError) throw paidAccessError;
+            const { error: blockError } = await supabaseClient
+              .from('student_note_permissions')
+              .insert(blockRow);
+            if (blockError) throw blockError;
 
-          const { error: blockError } = await supabaseClient
-            .from('student_note_permissions')
-            .insert(blockRows);
-          if (blockError) throw blockError;
+            freeAccessGrants = freeAccessGrants.filter(grant => !(grant.note_id === noteId && grant.student_id === student.id));
+            permissions = permissions.filter(p => !(p.note_id === noteId && p.student_id === student.id));
+            permissions.push(paidAccessRow, blockRow);
+          });
 
-          // Update local array
-          freeAccessGrants = freeAccessGrants.filter(grant =>
-            !(noteIds.includes(grant.note_id) && grant.student_id === student.id)
-          );
-          permissions = permissions.filter(p =>
-            !(noteIds.includes(p.note_id) && p.student_id === student.id)
-          );
-          permissions.push(...paidAccessRows, ...blockRows);
-
-          await customAlert(`✓ Removed FREE access for ${student.name} from ${noteIds.length} note(s)\n\nNotes remain posted but now require payment.`);
+          await customAlert('Un-Free Complete', formatBulkResultSummary(result, 'note') + ` for ${student.name}. Notes remain posted but now require payment.`);
 
           await createNotification(
             'batch_unfree_student',
             'Unfree Access (Student)',
-            `Removed FREE access for ${student.name} from ${noteIds.length} notes in ${currentGroup}`,
+            `Removed FREE access for ${student.name} from ${result.succeeded} notes in ${currentGroup}`,
             'notes',
-            { note_count: noteIds.length, group: currentGroup, student: student.name }
+            { note_count: result.succeeded, group: currentGroup, student: student.name }
           );
 
           clearSelection();
@@ -6434,43 +6433,33 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       if (!confirmed) return;
 
       try {
-        let successCount = 0;
-        let errorCount = 0;
+        const result = await runBulkWithProgress(noteIds, 'Removing FREE access', async (noteId) => {
+          // Delete free access grant for this note and group
+          const { error } = await supabaseClient
+            .from('note_free_access')
+            .delete()
+            .eq('note_id', noteId)
+            .eq('group_letter', groupLetter)
+            .eq('access_type', 'group');
 
-        for (const noteId of noteIds) {
-          try {
-            // Delete free access grants for this note and group
-            const { error } = await supabaseClient
-              .from('note_free_access')
-              .delete()
-              .eq('note_id', noteId)
-              .eq('group_letter', groupLetter)
-              .eq('access_type', 'group');
+          if (error) throw error;
 
-            if (error) throw error;
+          // Remove from local array
+          freeAccessGrants = freeAccessGrants.filter(grant =>
+            !(grant.note_id === noteId && grant.group_letter === groupLetter && grant.access_type === 'group')
+          );
+        });
 
-            // Remove from local array
-            freeAccessGrants = freeAccessGrants.filter(grant => 
-              !(grant.note_id === noteId && grant.group_letter === groupLetter && grant.access_type === 'group')
-            );
+        await customAlert('Un-Free Complete', formatBulkResultSummary(result, 'note'));
 
-            successCount++;
-          } catch (error) {
-            console.error(`Error removing free access for note ${noteId}:`, error);
-            errorCount++;
-          }
-        }
-
-        await customAlert(`✓ Removed FREE access from ${successCount} note(s)${errorCount > 0 ? `, ${errorCount} failed` : ''}`);
-        
         // Create notification
         await createNotification(
           'batch_unfree',
           'Batch Unfree Access',
-          `Removed FREE access from ${successCount} notes for ${currentGroup}`,
+          `Removed FREE access from ${result.succeeded} notes for ${currentGroup}`,
           'notes',
           { 
-            note_count: successCount,
+            note_count: result.succeeded,
             group: currentGroup
           }
         );
@@ -6894,37 +6883,31 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
       if (!confirmed) return;
 
       try {
-        // Create permissions for all combinations of notes and students
-        const permissions = [];
-        for (const noteId of noteIds) {
+        // Create permissions for all combinations of notes and students, one note at a time
+        // so progress reflects notes actually processed.
+        const result = await runBulkWithProgress(noteIds, 'Sharing notes', async (noteId) => {
           // Include the note's class_date so the portal can use the correct date for payment checks.
           // Without class_date, the portal falls back to granted_at (today), causing wrong payment date lookup.
           const note = allNotes.find(n => n.id === noteId);
           const noteClassDate = note?.class_date ? note.class_date.split('T')[0] : null;
-          for (const studentId of selectedStudentIds) {
-            permissions.push({
-              note_id: noteId,
-              student_id: studentId,
-              group_name: null, // Individual access, not group-based
-              is_accessible: true,
-              class_date: noteClassDate
+          const notePermissions = Array.from(selectedStudentIds).map(studentId => ({
+            note_id: noteId,
+            student_id: studentId,
+            group_name: null, // Individual access, not group-based
+            is_accessible: true,
+            class_date: noteClassDate
+          }));
+
+          // Upsert permissions (insert or update if exists)
+          const { error } = await supabaseClient
+            .from('student_note_permissions')
+            .upsert(notePermissions, {
+              onConflict: 'note_id,student_id,group_name',
+              ignoreDuplicates: false
             });
-          }
-        }
+          if (error) throw error;
 
-        // Upsert permissions (insert or update if exists)
-  const { error } = await supabaseClient
-          .from('student_note_permissions')
-          .upsert(permissions, {
-            onConflict: 'note_id,student_id,group_name',
-            ignoreDuplicates: false
-          });
-
-        if (error) throw error;
-
-        // ✅ CREATE NOTIFICATION for individual access
-        for (const noteId of noteIds) {
-          const note = allNotes.find(n => n.id === noteId);
+          // ✅ CREATE NOTIFICATION for individual access
           const noteTitle = note?.title || 'Unknown Note';
           const studentNames = Array.from(selectedStudentIds).map(sid => {
             const student = allStudents.find(s => s.id === sid);
@@ -6947,7 +6930,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
               action: 'grant_individual_access'
             }
           );
-        }
+        });
 
         // Send email notifications to selected students
         let emailSummary = '';
@@ -6978,7 +6961,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           emailSummary = emailSummary || `\n⚠️ Email notifications failed to send`;
         }
 
-        await customAlert('Success', `✓ Access granted to ${studentCount} student(s) for ${noteCount} note(s)${emailSummary}`);
+        await customAlert('Share Complete', formatBulkResultSummary(result, 'note') + ` Shared with ${studentCount} student(s).${emailSummary}`);
         closeStudentModal();
         
         // PERFORMANCE FIX: Reload fresh data immediately to update tags
@@ -7233,23 +7216,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           // Get admin email for created_by
           const { data: { session } } = await supabaseClient.auth.getSession();
           const adminEmail = session?.user?.email;
-          
-          // 🎬 SHOW LOADING ANIMATION
-          const loadingDiv = document.createElement('div');
-          loadingDiv.id = 'free-access-loading';
-          loadingDiv.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 99999; display: flex; align-items: center; justify-content: center; flex-direction: column;';
-          loadingDiv.innerHTML = `
-            <div style="background: rgba(14,19,34,0.96); padding: 40px; border-radius: 20px; text-align: center; border: 1px solid rgba(196,164,95,0.22);">
-              <div style="font-size: 48px; margin-bottom: 20px; animation: spin 1s linear infinite;">⚙️</div>
-              <div style="color: #f5f0e8; font-size: 18px; font-weight: 600;">Granting FREE Access...</div>
-              <div style="color: rgba(245,240,232,0.55); font-size: 14px; margin-top: 10px;">Updating ${selectedNoteIds.size} note(s)</div>
-            </div>
-            <style>
-              @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            </style>
-          `;
-          document.body.appendChild(loadingDiv);
-          
+
           // 🔥 FIRST: Delete old free access records for these notes+group (to remove old date associations)
           const { error: deleteError } = await supabaseClient
             .from('note_free_access')
@@ -7270,10 +7237,9 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           }
 
           // ✅ CREATE FREE ACCESS with class_date PER-GROUP (not global!)
-          let successCount = 0;
           let duplicateCount = 0;
-          
-          for (const noteId of selectedNoteIds) {
+
+          const grantResult = await runBulkWithProgress(Array.from(selectedNoteIds), 'Granting FREE access', async (noteId) => {
             const { data, error } = await supabaseClient
               .from('note_free_access')
               .insert({
@@ -7289,19 +7255,18 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
               // Ignore duplicate errors (PostgreSQL error code 23505 or HTTP 409)
               if (error.code === '23505' || error.message?.includes('duplicate') || error.status === 409) {
                 duplicateCount++;
-                continue;
+                return;
               }
               console.error(`   ❌ Error for note ${noteId}:`, error);
               throw error;
             }
-            
+
             // ✅ UPDATE LOCAL CACHE (like OPEN/POST does!)
             if (data && data.length > 0) {
               freeAccessGrants.push(data[0]);
             }
-            
-            successCount++;
-          }
+          });
+          const successCount = grantResult.succeeded;
 
           // Send email notifications to students in this group
           let emailSummary = '';
@@ -7336,7 +7301,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
 
           const message = duplicateCount > 0 
             ? `✅ FREE access granted to Group ${groupLetter}!\n${successCount} new grants, ${duplicateCount} already existed${emailSummary}`
-            : `✅ FREE access granted to Group ${groupLetter} for ${selectedNoteIds.size} note(s)${emailSummary}`;
+            : formatBulkResultSummary(grantResult, 'note') + ` Granted to Group ${groupLetter}.${emailSummary}`;
           
           // ✅ CREATE NOTIFICATION for group free access
           const noteTitles = Array.from(selectedNoteIds).map(noteId => {
@@ -7368,7 +7333,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           const loadingElement = document.getElementById('free-access-loading');
           if (loadingElement) loadingElement.remove();
           
-          await customAlert('Success', message);
+          await customAlert('FREE Access Complete', message);
           
           // Close the free access modal
           closeFreeAccessModal();
@@ -7394,23 +7359,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           // Get admin email for created_by
           const { data: { session } } = await supabaseClient.auth.getSession();
           const adminEmail = session?.user?.email;
-          
-          // 🎬 SHOW LOADING ANIMATION
-          const loadingDiv2 = document.createElement('div');
-          loadingDiv2.id = 'individual-free-access-loading';
-          loadingDiv2.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 99999; display: flex; align-items: center; justify-content: center; flex-direction: column;';
-          loadingDiv2.innerHTML = `
-            <div style="background: rgba(14,19,34,0.96); padding: 40px; border-radius: 20px; text-align: center; border: 1px solid rgba(196,164,95,0.22);">
-              <div style="font-size: 48px; margin-bottom: 20px; animation: spin 1s linear infinite;">⚙️</div>
-              <div style="color: #f5f0e8; font-size: 18px; font-weight: 600;">Granting FREE Access...</div>
-              <div style="color: rgba(245,240,232,0.55); font-size: 14px; margin-top: 10px;">Updating ${selectedNoteIds.size} note(s) for ${freeSelectedStudents.size} student(s)</div>
-            </div>
-            <style>
-              @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            </style>
-          `;
-          document.body.appendChild(loadingDiv2);
-          
+
           // 🔥 FIRST: Delete old free access records for these notes+students (to remove old date associations)
           const { error: deleteError } = await supabaseClient
             .from('note_free_access')
@@ -7425,41 +7374,34 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
           }
 
           // ✅ CREATE FREE ACCESS with class_date PER-STUDENT (not global!)
-          
-          const records = [];
-          for (const noteId of selectedNoteIds) {
-            for (const studentId of freeSelectedStudents) {
-              records.push({
-                note_id: noteId,
-                student_id: studentId,
-                access_type: 'individual',
-                class_date: classDate,  // 🔥 DATE PER-STUDENT!
-                created_by: adminEmail
-              });
-            }
-          }
-
-          let successCount = 0;
+          const studentIdsArr = Array.from(freeSelectedStudents);
           let duplicateCount = 0;
 
-          // ⚡ BATCH UPSERT: one network round-trip for all records (vs 338 sequential inserts)
-          // onConflict handles the unique_student_access (note_id, student_id) constraint.
-          const { data: upsertData, error: upsertError } = await supabaseClient
-            .from('note_free_access')
-            .upsert(records, {
-              onConflict: 'note_id,student_id',
-              ignoreDuplicates: false  // Update class_date/created_by on conflict
-            })
-            .select();
+          const grantResult = await runBulkWithProgress(Array.from(selectedNoteIds), 'Granting FREE access', async (noteId) => {
+            const records = studentIdsArr.map(studentId => ({
+              note_id: noteId,
+              student_id: studentId,
+              access_type: 'individual',
+              class_date: classDate,  // 🔥 DATE PER-STUDENT!
+              created_by: adminEmail
+            }));
 
-          if (upsertError) {
-            console.error('   ❌ Batch upsert error:', upsertError);
-            throw upsertError;
-          }
+            const { data: upsertData, error: upsertError } = await supabaseClient
+              .from('note_free_access')
+              .upsert(records, {
+                onConflict: 'note_id,student_id',
+                ignoreDuplicates: false  // Update class_date/created_by on conflict
+              })
+              .select();
 
-          successCount = (upsertData || []).length;
-          // Update local cache with all new/updated grants
-          (upsertData || []).forEach(row => freeAccessGrants.push(row));
+            if (upsertError) {
+              console.error('   ❌ Upsert error for note', noteId, upsertError);
+              throw upsertError;
+            }
+
+            (upsertData || []).forEach(row => freeAccessGrants.push(row));
+          });
+          const successCount = grantResult.succeeded;
 
           // Send email notifications to selected students
           let emailSummary = '';
@@ -7491,7 +7433,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             emailSummary = `\n⚠️ Email notifications failed to send`;
           }
 
-          const message = `✅ FREE access granted to ${freeSelectedStudents.size} student(s) for ${selectedNoteIds.size} note(s)${emailSummary}`;
+          const message = formatBulkResultSummary(grantResult, 'note') + ` Granted FREE access to ${freeSelectedStudents.size} student(s).${emailSummary}`;
 
           // ✅ CREATE NOTIFICATION for individual free access
           const noteTitles = Array.from(selectedNoteIds).map(noteId => {
@@ -7525,15 +7467,11 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             }
           );
 
-          // 🎬 REMOVE LOADING ANIMATION
-          const loadingElement2 = document.getElementById('individual-free-access-loading');
-          if (loadingElement2) loadingElement2.remove();
-          
-          // � CLOSE MODAL
+          // 🚪 CLOSE MODAL
           closeFreeAccessModal();
           
           // ✅ SHOW SUCCESS
-          await customAlert('Success', message);
+          await customAlert('FREE Access Complete', message);
           
           // ✅ RE-RENDER to show updated dates (local cache updated above)
           await renderSystems();
