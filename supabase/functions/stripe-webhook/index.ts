@@ -94,11 +94,14 @@ serve(async (req: Request) => {
       id         : string;
       amount     : number;
       currency   : string;
-      metadata   : { student_id?: string; invoice_ref?: string; student_name?: string; for_class?: string; for_class_dates?: string; class_group?: string };
+      // NOTE: create-payment-intent writes the student id under the
+      // "arnoma_student_id" key (not "student_id") — must match exactly or
+      // this is always undefined and the webhook silently no-ops forever.
+      metadata   : { arnoma_student_id?: string; invoice_ref?: string; student_name?: string; for_class?: string; for_class_dates?: string; class_group?: string };
       receipt_email: string | null;
     };
 
-    const { student_id, invoice_ref, for_class, for_class_dates, class_group } = pi.metadata ?? {};
+    const { arnoma_student_id: student_id, invoice_ref, for_class, for_class_dates, class_group } = pi.metadata ?? {};
     const amountDollars = pi.amount / 100;
 
     console.log(`✅ PaymentIntent succeeded: ${pi.id} | student: ${student_id} | $${amountDollars} | for_class: ${for_class} | for_class_dates: ${for_class_dates}`);
