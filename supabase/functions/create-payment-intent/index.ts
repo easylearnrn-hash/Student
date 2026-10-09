@@ -115,7 +115,11 @@ serve(async (req: Request) => {
     group_name      ?: string;
     for_class       ?: string;
     for_class_dates ?: string;
+    for_class_groups?: string;
     class_group     ?: string;
+    subtotal_dollars?: number;
+    tax_dollars     ?: number;
+    tax_rate        ?: number;
   };
 
   try {
@@ -129,7 +133,8 @@ serve(async (req: Request) => {
 
   const {
     amount_cents, currency, student_id, student_name, student_email,
-    invoice_ref, group_name, for_class, for_class_dates, class_group,
+    invoice_ref, group_name, for_class, for_class_dates, for_class_groups, class_group,
+    subtotal_dollars, tax_dollars, tax_rate,
   } = body;
 
   if (!amount_cents || amount_cents < 50) {
@@ -137,6 +142,20 @@ serve(async (req: Request) => {
       JSON.stringify({ error: 'Amount must be at least $0.50.' }),
       { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } },
     );
+  }
+
+  // Guard against malformed client payloads: when subtotal+tax are provided,
+  // they must reconcile with amount_cents (allow 1-cent rounding drift).
+  const subtotalNumber = Number(subtotal_dollars);
+  const taxNumber = Number(tax_dollars);
+  if (Number.isFinite(subtotalNumber) && Number.isFinite(taxNumber)) {
+    const expectedCents = Math.round((subtotalNumber + taxNumber) * 100);
+    if (Math.abs(expectedCents - Number(amount_cents)) > 1) {
+      return new Response(
+        JSON.stringify({ error: 'Payment amount mismatch. Please refresh and try again.' }),
+        { status: 400, headers: { ...CORS, 'Content-Type': 'application/json' } },
+      );
+    }
   }
 
   // ── Build human-readable description ──────────────────────────────────────
@@ -147,6 +166,27 @@ serve(async (req: Request) => {
   }
   if (classDatesArr.length === 0 && for_class) {
     classDatesArr = for_class.split(',').map((d: string) => d.trim()).filter(Boolean);
+  }
+
+  let classGroupsArr: string[] = [];
+  if (for_class_groups) {
+    try {
+      const parsed = JSON.parse(for_class_groups);
+      if (Array.isArray(parsed)) {
+        classGroupsArr = parsed.map((g: unknown) => String(g || '').trim());
+      }
+    } catch {
+      classGroupsArr = for_class_groups.split(',').map((g: string) => g.trim());
+    }
+  }
+  if (classGroupsArr.length === 0 && class_group) {
+    classGroupsArr = [String(class_group || '').trim()];
+  }
+  while (classGroupsArr.length < classDatesArr.length) {
+    classGroupsArr.push(class_group || '');
+  }
+  if (classGroupsArr.length > classDatesArr.length) {
+    classGroupsArr = classGroupsArr.slice(0, classDatesArr.length);
   }
 
   const groupLabel = group_name ? ` Group ${group_name}` : '';
@@ -179,10 +219,14 @@ serve(async (req: Request) => {
     'metadata[payment_date]'          : paymentDate,
     'metadata[for_class]'             : for_class        || '',
     'metadata[for_class_dates]'       : classDatesArr.join(','),
+    'metadata[for_class_groups]'      : classGroupsArr.join(','),
     'metadata[class_count]'           : String(classDatesArr.length || 1),
+    'metadata[subtotal_dollars]'      : Number.isFinite(subtotal_dollars) ? String(subtotal_dollars) : '',
+    'metadata[tax_dollars]'           : Number.isFinite(tax_dollars) ? String(tax_dollars) : '',
+    'metadata[tax_rate]'              : Number.isFinite(tax_rate) ? String(tax_rate) : '',
     // Only set when this payment is for a one-time class in a DIFFERENT group
     // than the student's own home group (Calendar-NEW cross-group add).
-    'metadata[class_group]'           : class_group      || '',
+    'metadata[class_group]'           : class_group      || classGroupsArr[0] || '',
   });
 
   if (stripeCustomerId) {

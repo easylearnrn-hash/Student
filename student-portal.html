@@ -8394,44 +8394,143 @@
       _doJoinClass(url, room);
     }
 
-    async function checkActiveLiveClass() {
-      try {
-        if (!currentStudent || !currentStudent.group_name) return;
-        const groupName = String(currentStudent.group_name).toUpperCase();
-        const key = 'active_videocall_' + groupName;
-        const { data } = await supabaseClient
-          .from('portal_settings')
-          .select('setting_value')
-          .eq('setting_key', key)
-          .maybeSingle();
-        const btn = document.getElementById('joinLiveClassBtn');
-        const schedBtn = document.getElementById('joinScheduleClassBtn');
-        const isActive = data && data.setting_value && data.setting_value.inviteUrl &&
-          (Date.now() - new Date(data.setting_value.started_at).getTime()) / 3600000 < 2;
+    async function getManualEnrollmentGroupsForToday(student) {
+      if (!student || !student.id || !supabaseClient) return [];
 
-        if (isActive) {
-          const joinUrl = data.setting_value.inviteUrl;
-          const room = data.setting_value.room || '';
-          // Top-nav button
-          if (btn) {
-            btn.dataset.joinUrl = joinUrl;
-            btn.dataset.roomCode = room;
-            const titleSpan = btn.querySelector('span:last-child');
-            if (titleSpan) titleSpan.textContent = (data.setting_value.title || 'Class') + ' — Join Now';
-            btn.style.display = '';
+      const nowParts = getTodayLAParts();
+      if (!nowParts) return [];
+      const todayDateStr = `${nowParts.year}-${nowParts.month.padStart(2, '0')}-${nowParts.day.padStart(2, '0')}`;
+      const fallbackGroup = canonicalizeGroupCode(student.group_name || student.group_letter || student.group || '');
+
+      const { data, error } = await supabaseClient
+        .from('payment_records')
+        .select('date, notes, class_group, payment_method, status, amount')
+        .eq('student_id', student.id)
+        .eq('date', todayDateStr);
+
+      if (error || !Array.isArray(data)) return [];
+
+      const groups = new Set();
+      data.forEach((row) => {
+        const method = String(row.payment_method || '').trim().toLowerCase();
+        const status = String(row.status || '').trim().toLowerCase();
+        const amount = Number(row.amount || 0);
+        const isManualMethod = method === 'manual_enrollment'
+          || method === 'manual-enrollment'
+          || method === 'manual enrollment'
+          || (status === 'unpaid' && amount === 0 && (!method || method === 'manual'));
+
+        if (!isManualMethod) return;
+        if (status === 'ignored' || status === 'absent') return;
+
+        const targetGroup = canonicalizeGroupCode(row.notes || row.class_group || fallbackGroup || '');
+        if (targetGroup) groups.add(targetGroup);
+      });
+
+      return Array.from(groups);
+    }
+
+    async function checkActiveLiveClass() {
+      const btn = document.getElementById('joinLiveClassBtn');
+      const schedBtn = document.getElementById('joinScheduleClassBtn');
+      const hideLiveButtons = () => {
+        if (btn) btn.style.display = 'none';
+        if (schedBtn) schedBtn.style.display = 'none';
+      };
+
+      try {
+        if (!currentStudent || !currentStudent.id || !supabaseClient) {
+          hideLiveButtons();
+          return;
+        }
+
+        const homeGroup = canonicalizeGroupCode(currentStudent.group_name || currentStudent.group_letter || currentStudent.group || '');
+        const manualGroupsToday = await getManualEnrollmentGroupsForToday(currentStudent);
+        const orderedGroups = Array.from(new Set([...manualGroupsToday, homeGroup].filter(Boolean)));
+        if (orderedGroups.length === 0) {
+          hideLiveButtons();
+          return;
+        }
+
+        const keys = orderedGroups.map(group => 'active_videocall_' + String(group).toUpperCase());
+        const { data, error } = await supabaseClient
+          .from('portal_settings')
+          .select('setting_key, setting_value')
+          .in('setting_key', keys);
+
+        if (error || !Array.isArray(data) || data.length === 0) {
+          hideLiveButtons();
+          return;
+        }
+
+        const nowMs = Date.now();
+        const activeByGroup = new Map();
+        data.forEach((row) => {
+          let settingValue = row.setting_value;
+          if (typeof settingValue === 'string') {
+            try { settingValue = JSON.parse(settingValue); } catch (_) { settingValue = null; }
           }
-          // Schedule card button
-          if (schedBtn) {
-            schedBtn.dataset.joinUrl = joinUrl;
-            schedBtn.dataset.roomCode = room;
-            schedBtn.style.display = 'inline-flex';
+
+          if (!settingValue || !settingValue.inviteUrl) return;
+          const startedMs = new Date(settingValue.started_at).getTime();
+          if (!Number.isFinite(startedMs)) return;
+          if ((nowMs - startedMs) / 3600000 >= 2) return;
+
+          const groupFromKey = canonicalizeGroupCode(String(row.setting_key || '').replace(/^active_videocall_/i, ''));
+          if (!groupFromKey) return;
+
+          activeByGroup.set(groupFromKey, {
+            group: groupFromKey,
+            joinUrl: settingValue.inviteUrl,
+            room: settingValue.room || '',
+            title: settingValue.title || 'Class',
+            startedMs,
+          });
+        });
+
+        if (activeByGroup.size === 0) {
+          hideLiveButtons();
+          return;
+        }
+
+        let selected = null;
+        for (const group of orderedGroups) {
+          if (activeByGroup.has(group)) {
+            selected = activeByGroup.get(group);
+            break;
           }
-        } else {
-          if (btn) btn.style.display = 'none';
-          if (schedBtn) schedBtn.style.display = 'none';
+        }
+
+        if (!selected) {
+          selected = Array.from(activeByGroup.values()).sort((a, b) => b.startedMs - a.startedMs)[0] || null;
+        }
+
+        if (!selected) {
+          hideLiveButtons();
+          return;
+        }
+
+        const isManualGroupOverride = selected.group && homeGroup && selected.group !== homeGroup;
+        const joinLabel = isManualGroupOverride
+          ? `${selected.title} — Group ${selected.group} Join Now`
+          : `${selected.title} — Join Now`;
+
+        if (btn) {
+          btn.dataset.joinUrl = selected.joinUrl;
+          btn.dataset.roomCode = selected.room;
+          const titleSpan = btn.querySelector('span:last-child');
+          if (titleSpan) titleSpan.textContent = joinLabel;
+          btn.style.display = '';
+        }
+
+        if (schedBtn) {
+          schedBtn.dataset.joinUrl = selected.joinUrl;
+          schedBtn.dataset.roomCode = selected.room;
+          schedBtn.style.display = 'inline-flex';
         }
       } catch (_) {
         // Silently ignore — portal_settings read failure shouldn't break anything
+        hideLiveButtons();
       }
     }
 
@@ -16614,6 +16713,17 @@
       return units;
     }
 
+    function createPaymentSessionToken() {
+      try {
+        if (window.crypto && window.crypto.getRandomValues) {
+          const bytes = new Uint8Array(16);
+          window.crypto.getRandomValues(bytes);
+          return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+      } catch (_) {}
+      return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    }
+
     async function openPaymentModal() {
       const student = window.currentStudent;
       const amount  = window.currentTotalUnpaid || 0;
@@ -16674,6 +16784,16 @@
       // misses forClassDates after a redirect/auth step.
       window._lastStripeClassDates = unpaidDates;
       window._lastStripeClassGroups = unpaidGroupsArr;
+      const paymentSessionToken = createPaymentSessionToken();
+      const paymentSessionUnits = buildStripeBillingUnits(unpaidDates, unpaidGroupsArr);
+      window._arnomaPaymentSession = {
+        token: paymentSessionToken,
+        studentId: String(student?.id || ''),
+        expectedAmount: Number(freshAmount || 0),
+        expectedUnitKeys: paymentSessionUnits.map(u => stripeUnitKey(u.date, u.group)).sort(),
+        createdAt: Date.now(),
+      };
+
       const params = new URLSearchParams({
         student_name    : student?.name    || '',
         student_id      : String(student?.id || ''),
@@ -16686,9 +16806,10 @@
         for_class_dates : JSON.stringify(unpaidDates),
         for_class_groups: JSON.stringify(unpaidGroupsArr),
         class_group     : unpaidGroupsArr[0] || '',
+        payment_session_token: paymentSessionToken,
       });
 
-      const src = `payment.html?v=20260414-2&${params.toString()}`;
+      const src = `payment.html?v=20261009-1&${params.toString()}`;
       document.getElementById('arnomaPaymentIframe').src = src;
 
       const overlay = document.getElementById('arnomaPaymentModalOverlay');
@@ -16905,17 +17026,158 @@
       overlay.style.display = 'none';
       document.getElementById('arnomaPaymentIframe').src = '';
       document.body.style.overflow = '';
+      window._arnomaPaymentSession = null;
+    }
+
+    function stripeUnitKey(dateStr, group) {
+      return `${String(dateStr || '').split('T')[0].trim()}::${String(group || '').trim()}`;
+    }
+
+    function normalizeStripeDateList(raw) {
+      const validDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v);
+      return (Array.isArray(raw) ? raw : [])
+        .map(v => String(v || '').split('T')[0].trim())
+        .filter(validDate);
+    }
+
+    function normalizeStripeGroupList(raw) {
+      return Array.isArray(raw) ? raw.map(g => String(g || '')) : [];
+    }
+
+    function buildStripeBillingUnits(dates, groups) {
+      const units = [];
+      const seen = new Set();
+      const classDates = Array.isArray(dates) ? dates : [];
+      const classGroups = Array.isArray(groups) ? groups : [];
+      for (let i = 0; i < classDates.length; i += 1) {
+        const date = String(classDates[i] || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+        const group = String(classGroups[i] || '').trim();
+        const key = stripeUnitKey(date, group);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        units.push({ date, group });
+      }
+      return units;
+    }
+
+    function waitMs(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function isValidStripePaymentIntentId(piId) {
+      return /^pi_[A-Za-z0-9]+$/.test(String(piId || '').trim());
+    }
+
+    async function waitForStripeRecordedUnits(studentId, units, paymentIntentId = '', attempts = 14, delayMs = 1200) {
+      if (!studentId || !Array.isArray(units) || units.length === 0) {
+        return { ok: false, reason: 'missing-input' };
+      }
+
+      const dateList = Array.from(new Set(units.map(u => u.date).filter(Boolean)));
+      const requiredKeys = new Set(units.map(u => stripeUnitKey(u.date, u.group)));
+
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        let query = supabaseClient
+          .from('payment_records')
+          .select('date, class_group, status, payment_method, notes')
+          .eq('student_id', studentId)
+          .eq('payment_method', 'stripe')
+          .eq('status', 'paid')
+          .in('date', dateList);
+
+        if (paymentIntentId) {
+          query = query.ilike('notes', `%Stripe PI: ${paymentIntentId}%`);
+        }
+
+        const { data, error } = await query;
+
+        if (!error) {
+          const foundKeys = new Set((data || []).map(r => stripeUnitKey(r.date, r.class_group)));
+          const allFound = Array.from(requiredKeys).every(key => foundKeys.has(key));
+          if (allFound) {
+            return { ok: true, attempt };
+          }
+        } else {
+          console.warn('[ARNOMA] waitForStripeRecordedUnits query error:', error.message);
+        }
+
+        if (attempt < attempts) {
+          await waitMs(delayMs);
+        }
+      }
+
+      return { ok: false, reason: 'timeout' };
+    }
+
+    async function notifyStripeRecordingPending(studentId, paymentIntentId, units, errorMessage) {
+      try {
+        await supabaseClient.from('notifications').insert([{
+          type: 'payment_recording_pending',
+          category: 'payment',
+          title: 'Stripe payment pending reconciliation',
+          description: `Student ${studentId} has a successful Stripe payment still pending payment_records reconciliation.`,
+          student_name: (window.currentStudent && window.currentStudent.name) || '',
+          metadata: {
+            student_id: studentId,
+            payment_intent_id: paymentIntentId || null,
+            expected_units: units,
+            error: errorMessage || null,
+          },
+          timestamp: new Date().toISOString(),
+          read: false,
+          created_at: new Date().toISOString(),
+        }]);
+      } catch (notifyErr) {
+        console.warn('[ARNOMA] Failed to log payment_recording_pending notification:', notifyErr);
+      }
     }
 
     /* Listen for postMessage from payment.html iframe */
     window.addEventListener('message', async function(e) {
       if (!e.data || typeof e.data !== 'object') return;
 
+      const iframeEl = document.getElementById('arnomaPaymentIframe');
+      const iframeWindow = iframeEl && iframeEl.contentWindow ? iframeEl.contentWindow : null;
+      if (!iframeWindow || e.source !== iframeWindow) {
+        return;
+      }
+
       if (e.data.type === 'ARNOMA_PAYMENT_SUCCESS') {
+        const activeSession = window._arnomaPaymentSession;
+        if (!activeSession || !activeSession.token) {
+          console.warn('[ARNOMA] Stripe success message ignored: missing active payment session');
+          return;
+        }
+
+        const incomingSessionToken = String(e.data.paymentSessionToken || '');
+        if (!incomingSessionToken || incomingSessionToken !== activeSession.token) {
+          console.warn('[ARNOMA] Stripe success message ignored: payment session token mismatch');
+          return;
+        }
+
+        const messageStudentId = String(e.data.studentId || (window.currentStudent && window.currentStudent.id) || '');
+        if (!messageStudentId || messageStudentId !== String(activeSession.studentId || '')) {
+          console.warn('[ARNOMA] Stripe success message ignored: student mismatch', {
+            expected: activeSession.studentId,
+            received: messageStudentId,
+          });
+          return;
+        }
+
+        const amount = Number(e.data.amount || 0);
+        if (Math.abs(amount - Number(activeSession.expectedAmount || 0)) > 0.01) {
+          console.warn('[ARNOMA] Stripe success message ignored: amount mismatch', {
+            expected: activeSession.expectedAmount,
+            received: amount,
+          });
+          return;
+        }
+
         // Guard against the same success message firing twice in rapid succession
         // (e.g. duplicate listener registration) before the DB idempotency check below
         // has a chance to see the first insert — in-memory dedupe closes that race window.
-        const successKey = `${e.data.studentId}|${e.data.amount}|${(e.data.forClassDates || []).join(',')}|${e.data.date}`;
+        const successKey = `${e.data.studentId}|${e.data.amount}|${(e.data.forClassDates || []).join(',')}|${e.data.date}|${e.data.paymentIntentId || ''}|${incomingSessionToken}`;
         window._processedStripeSuccessKeys = window._processedStripeSuccessKeys || new Set();
         if (window._processedStripeSuccessKeys.has(successKey)) {
           console.log('[ARNOMA] Duplicate ARNOMA_PAYMENT_SUCCESS message ignored:', successKey);
@@ -16929,87 +17191,87 @@
         // same calendar date, so class_group distinguishes them ('' / null = home group).
         // payment_records has no for_class/for_class_dates columns — the row's own `date`
         // field IS the class date (Calendar-NEW falls back to pr.date in extractForClassDates).
-        try {
-          const today = e.data.date || new Date().toISOString().split('T')[0];
-          const validDate = v => /^\d{4}-\d{2}-\d{2}$/.test(v);
-          const toDateList = raw => (Array.isArray(raw) ? raw : []).map(v => String(v || '').split('T')[0].trim()).filter(validDate);
-          const toGroupList = raw => Array.isArray(raw) ? raw.map(g => String(g || '')) : [];
+        const today = e.data.date || new Date().toISOString().split('T')[0];
+        const messageDates = normalizeStripeDateList(e.data.forClassDates);
+        const messageGroups = normalizeStripeGroupList(e.data.forClassGroups);
+        const messageSingleDate = String(e.data.forClass || '').split('T')[0].trim();
+        const modalSnapshotDates = normalizeStripeDateList(window._lastStripeClassDates);
+        const modalSnapshotGroups = normalizeStripeGroupList(window._lastStripeClassGroups);
+        const currentUnpaidDates = normalizeStripeDateList(window.currentUnpaidClasses);
+        const currentUnpaidGroups = normalizeStripeGroupList(window.currentUnpaidClassGroupList);
 
-          const messageDates = toDateList(e.data.forClassDates);
-          const messageGroups = toGroupList(e.data.forClassGroups);
-          const messageSingleDate = String(e.data.forClass || '').split('T')[0].trim();
-          const modalSnapshotDates = toDateList(window._lastStripeClassDates);
-          const modalSnapshotGroups = toGroupList(window._lastStripeClassGroups);
-          const currentUnpaidDates = toDateList(window.currentUnpaidClasses);
-          const currentUnpaidGroups = toGroupList(window.currentUnpaidClassGroupList);
+        let classDates = messageDates;
+        let classGroups = messageGroups;
+        if (classDates.length === 0 && /^\d{4}-\d{2}-\d{2}$/.test(messageSingleDate)) {
+          classDates = [messageSingleDate];
+          classGroups = [String(e.data.classGroup || '')];
+        }
+        if (classDates.length === 0 && modalSnapshotDates.length > 0) {
+          classDates = modalSnapshotDates;
+          classGroups = modalSnapshotGroups;
+        }
+        if (classDates.length === 0 && currentUnpaidDates.length > 0) {
+          classDates = currentUnpaidDates;
+          classGroups = currentUnpaidGroups;
+        }
+        if (classDates.length === 0) {
+          console.warn('[ARNOMA] ⚠️ Stripe: no class dates found from event, snapshot, or unpaid list — falling back to today (' + today + '). Payment may be recorded on wrong date.');
+          classDates = [today];
+          classGroups = [''];
+        }
+        while (classGroups.length < classDates.length) classGroups.push('');
 
-          let classDates = messageDates;
-          let classGroups = messageGroups;
-          if (classDates.length === 0 && validDate(messageSingleDate)) {
-            classDates = [messageSingleDate];
-            classGroups = [String(e.data.classGroup || '')];
-          }
-          if (classDates.length === 0 && modalSnapshotDates.length > 0) {
-            classDates = modalSnapshotDates;
-            classGroups = modalSnapshotGroups;
-          }
-          if (classDates.length === 0 && currentUnpaidDates.length > 0) {
-            classDates = currentUnpaidDates;
-            classGroups = currentUnpaidGroups;
-          }
-          if (classDates.length === 0) {
-            console.warn('[ARNOMA] ⚠️ Stripe: no class dates found from event, snapshot, or unpaid list — falling back to today (' + today + '). Payment may be recorded on wrong date. Check window._lastStripeClassDates and window.currentUnpaidClasses.');
-            classDates = [today];
-            classGroups = [''];
-          }
-          // Groups must line up 1:1 with dates — pad with '' (home group) if shorter/missing,
-          // which is exactly the old behavior for plain single-group payments.
-          while (classGroups.length < classDates.length) classGroups.push('');
-
-          const studentId = e.data.studentId || (window.currentStudent && window.currentStudent.id) || null;
-          const amount    = e.data.amount || 0;
-          const perClass  = classDates.length > 1 ? +(amount / classDates.length).toFixed(2) : amount;
-
-          const rows = classDates.map((d, i) => ({
-            student_id    : studentId,
-            date          : d,
-            amount        : perClass,
-            status        : 'paid',
-            payment_method: 'stripe',
-            class_group   : classGroups[i] || null,
-          }));
-
-          // Idempotency guard keyed on (date, class_group) — NOT date alone — so a
-          // cross-group one-time class is never skipped just because the student's
-          // home-group class on that same date was already paid separately.
-          const { data: existingStripe } = await supabaseClient
-            .from('payment_records')
-            .select('date, class_group')
-            .eq('student_id', studentId)
-            .eq('payment_method', 'stripe')
-            .in('date', classDates);
-          const unitKey = (date, group) => `${date}::${group || ''}`;
-          const alreadyPaidUnits = new Set((existingStripe || []).map(r => unitKey(r.date, r.class_group)));
-          const rowsToInsert = rows.filter(r => !alreadyPaidUnits.has(unitKey(r.date, r.class_group)));
-
-          if (rowsToInsert.length === 0) {
-            console.log('[ARNOMA] All Stripe payment_records already exist, skipping insert');
-          } else {
-            const { error: dbErr } = await supabaseClient
-              .from('payment_records')
-              .insert(rowsToInsert);
-            if (dbErr) {
-              console.error('[ARNOMA] Stripe payment_records insert failed:', dbErr.message);
-            } else {
-              console.log('[ARNOMA] ✅ Stripe payment recorded — rows:', rowsToInsert);
-            }
-          }
-        } catch (writeErr) {
-          console.error('[ARNOMA] Failed to write Stripe payment_records:', writeErr);
+        const billingUnits = buildStripeBillingUnits(classDates, classGroups);
+        const studentId = messageStudentId || null;
+        const paymentIntentId = String(e.data.paymentIntentId || '').trim();
+        if (!studentId || billingUnits.length === 0) {
+          console.error('[ARNOMA] Missing studentId or billing units in payment success payload:', { studentId, billingUnits });
+          return;
         }
 
-        // Unlock before closing (payment clears the debt)
+        if (!isValidStripePaymentIntentId(paymentIntentId)) {
+          console.error('[ARNOMA] Invalid or missing Stripe paymentIntentId in success payload:', paymentIntentId);
+          await notifyStripeRecordingPending(studentId, paymentIntentId, billingUnits, 'invalid-payment-intent-id');
+          return;
+        }
+
+        const expectedUnitKeys = Array.isArray(activeSession.expectedUnitKeys)
+          ? activeSession.expectedUnitKeys
+          : [];
+        const receivedUnitKeys = billingUnits.map(u => stripeUnitKey(u.date, u.group)).sort();
+        const exactUnitMatch = expectedUnitKeys.length === receivedUnitKeys.length
+          && expectedUnitKeys.every((k, idx) => k === receivedUnitKeys[idx]);
+
+        if (!exactUnitMatch) {
+          console.error('[ARNOMA] Stripe success message ignored: billing unit mismatch', {
+            expected: expectedUnitKeys,
+            received: receivedUnitKeys,
+          });
+          await notifyStripeRecordingPending(studentId, paymentIntentId, billingUnits, 'billing-unit-mismatch');
+          return;
+        }
+
+        // Do not release lock until webhook rows for this exact Stripe PI are present.
+        const verifyResult = await waitForStripeRecordedUnits(studentId, billingUnits, paymentIntentId);
+        if (!verifyResult.ok) {
+          const pendingMessage = 'Your payment succeeded, but account reconciliation is still in progress. Please do not pay again. An admin has been notified and your access will unlock automatically once recording completes.';
+          console.error('[ARNOMA] Stripe payment not yet reconciled after retries', {
+            studentId,
+            paymentIntentId,
+            billingUnits,
+          });
+          await notifyStripeRecordingPending(studentId, paymentIntentId, billingUnits, verifyResult.reason || 'timeout');
+          if (typeof showCustomAlert === 'function') {
+            await showCustomAlert(pendingMessage, 'error');
+          } else {
+            alert(pendingMessage);
+          }
+          return;
+        }
+
+        // Unlock before closing (payment is now confirmed in payment_records)
         releaseDebtLock();
+        window._arnomaPaymentSession = null;
 
         // Refresh payment display after 3 s (payment.html auto-closes itself)
         setTimeout(async () => {
@@ -17021,6 +17283,11 @@
       }
 
       if (e.data.type === 'ARNOMA_CLOSE_PAYMENT') {
+        const activeSession = window._arnomaPaymentSession;
+        const incomingSessionToken = String(e.data.paymentSessionToken || '');
+        if (activeSession && activeSession.token && incomingSessionToken && incomingSessionToken !== activeSession.token) {
+          return;
+        }
         closePaymentModal();
       }
     });

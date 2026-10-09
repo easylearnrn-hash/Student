@@ -61,6 +61,40 @@ async function verifyStripeSignature(
   return v1Expected === v1Received;
 }
 
+function parseMetadataList(raw?: string): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((v) => String(v || '').trim()).filter(Boolean);
+    }
+  } catch {
+    // Fall back to CSV parsing
+  }
+  return raw.split(',').map((v) => String(v || '').trim()).filter(Boolean);
+}
+
+function normalizeClassDate(dateStr: string): string {
+  return String(dateStr || '').split('T')[0].trim();
+}
+
+function paymentUnitKey(dateStr: string, classGroup?: string | null): string {
+  return `${normalizeClassDate(dateStr)}::${String(classGroup || '').trim()}`;
+}
+
+function splitAmountByUnits(totalDollars: number, unitCount: number): number[] {
+  if (unitCount <= 0) return [];
+  const totalCents = Math.max(0, Math.round((Number(totalDollars) || 0) * 100));
+  const baseCents = Math.floor(totalCents / unitCount);
+  let remainder = totalCents % unitCount;
+  const cents = Array.from({ length: unitCount }, () => {
+    const value = baseCents + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) remainder -= 1;
+    return value;
+  });
+  return cents.map((c) => c / 100);
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS });
@@ -97,92 +131,129 @@ serve(async (req: Request) => {
       // NOTE: create-payment-intent writes the student id under the
       // "arnoma_student_id" key (not "student_id") — must match exactly or
       // this is always undefined and the webhook silently no-ops forever.
-      metadata   : { arnoma_student_id?: string; invoice_ref?: string; student_name?: string; for_class?: string; for_class_dates?: string; class_group?: string };
+      metadata   : {
+        arnoma_student_id?: string;
+        invoice_ref?: string;
+        student_name?: string;
+        for_class?: string;
+        for_class_dates?: string;
+        for_class_groups?: string;
+        class_group?: string;
+        subtotal_dollars?: string;
+      };
       receipt_email: string | null;
     };
 
-    const { arnoma_student_id: student_id, invoice_ref, for_class, for_class_dates, class_group } = pi.metadata ?? {};
-    const amountDollars = pi.amount / 100;
+    const {
+      arnoma_student_id: student_id,
+      invoice_ref,
+      for_class,
+      for_class_dates,
+      for_class_groups,
+      class_group,
+      subtotal_dollars,
+    } = pi.metadata ?? {};
+    const subtotalValue = parseFloat(String(subtotal_dollars ?? ''));
+    const amountDollars = Number.isFinite(subtotalValue) && subtotalValue > 0
+      ? subtotalValue
+      : (pi.amount / 100);
 
-    console.log(`✅ PaymentIntent succeeded: ${pi.id} | student: ${student_id} | $${amountDollars} | for_class: ${for_class} | for_class_dates: ${for_class_dates}`);
+    console.log(
+      `✅ PaymentIntent succeeded: ${pi.id} | student: ${student_id} | $${amountDollars} | for_class_dates: ${for_class_dates} | for_class_groups: ${for_class_groups}`,
+    );
 
     if (student_id && SUPABASE_URL && SERVICE_ROLE_KEY) {
       const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
       // Build the array of class dates this payment covers.
       // Prefer for_class_dates (JSON array) over for_class (comma string) — more precise.
-      let forClassArray: string[] = [];
-      if (for_class_dates) {
-        try {
-          const parsed = JSON.parse(for_class_dates);
-          if (Array.isArray(parsed)) forClassArray = parsed.map((d: string) => String(d).trim()).filter(Boolean);
-        } catch {
-          forClassArray = for_class_dates.split(',').map((d: string) => d.trim()).filter(Boolean);
-        }
-      }
+      let forClassArray = parseMetadataList(for_class_dates).map(normalizeClassDate).filter(Boolean);
       if (forClassArray.length === 0 && for_class) {
-        forClassArray = for_class.split(',').map((d: string) => d.trim()).filter(Boolean);
+        forClassArray = parseMetadataList(for_class).map(normalizeClassDate).filter(Boolean);
       }
 
       // Use today's date only as last resort — so Calendar always has an explicit for_class
       const todayDate = new Date().toISOString().split('T')[0];
-      const primaryClassDate = forClassArray.length > 0 ? forClassArray[0] : todayDate;
-      const datesToInsert = forClassArray.length > 0 ? forClassArray : [primaryClassDate];
+      const datesToInsert = forClassArray.length > 0 ? forClassArray : [todayDate];
 
-      // Split the charged amount evenly across every class date this payment covers.
-      // Previously this always wrote a SINGLE row for primaryClassDate with the FULL
-      // amount, so a charge covering multiple classes silently left every date after
-      // the first one unpaid — exactly the "payment not allocated" symptom.
-      const perClassAmount = datesToInsert.length > 1
-        ? Math.round((amountDollars / datesToInsert.length) * 100) / 100
-        : amountDollars;
+      // Resolve per-date class_group tags so webhook fallback can preserve
+      // cross-group one-time class mappings exactly.
+      let classGroupArray = parseMetadataList(for_class_groups).map((g) => String(g || '').trim());
+      if (classGroupArray.length === 0 && class_group) {
+        classGroupArray = [String(class_group || '').trim()];
+      }
+      while (classGroupArray.length < datesToInsert.length) {
+        classGroupArray.push(String(class_group || '').trim());
+      }
+      if (classGroupArray.length > datesToInsert.length) {
+        classGroupArray = classGroupArray.slice(0, datesToInsert.length);
+      }
 
-      // Idempotency: Stripe can redeliver the same webhook event more than once —
-      // skip if this PaymentIntent was already recorded for this student.
-      const { data: existingForPi } = await supabaseAdmin
+      // Deduplicate exact (date, class_group) units to avoid double inserts.
+      const uniqueUnits: Array<{ date: string; group: string }> = [];
+      const seenUnits = new Set<string>();
+      datesToInsert.forEach((dateStr, idx) => {
+        const group = classGroupArray[idx] || '';
+        const key = paymentUnitKey(dateStr, group);
+        if (seenUnits.has(key)) return;
+        seenUnits.add(key);
+        uniqueUnits.push({ date: dateStr, group });
+      });
+
+      const splitAmounts = splitAmountByUnits(amountDollars, uniqueUnits.length);
+      const amountByUnitKey = new Map<string, number>();
+      uniqueUnits.forEach((unit, idx) => {
+        amountByUnitKey.set(paymentUnitKey(unit.date, unit.group), splitAmounts[idx] ?? 0);
+      });
+
+      // Idempotency by class billing unit (date + class_group), not by notes only.
+      const dateFilter = Array.from(new Set(uniqueUnits.map((u) => u.date)));
+      const { data: existingRows, error: existingErr } = await supabaseAdmin
         .from('payment_records')
-        .select('id')
+        .select('date, class_group, status')
         .eq('student_id', student_id)
-        .like('notes', `%${pi.id}%`)
-        .limit(1);
+        .in('status', ['paid', 'excused'])
+        .in('date', dateFilter);
 
-      if (existingForPi && existingForPi.length > 0) {
-        console.log(`ℹ️ PaymentIntent ${pi.id} already recorded for student ${student_id} — skipping duplicate webhook delivery.`);
+      if (existingErr) {
+        console.error('❌ Supabase existing-row lookup error:', existingErr);
       } else {
-        // Insert one paid record per class date.
-        // CRITICAL: date = the actual class date (NOT the receipt date).
-        // Calendar-NEW matches green dots by payment_records.date === class_date.
-        const rows = datesToInsert.map((d) => ({
-          student_id     : student_id,
-          amount         : perClassAmount,
-          status         : 'paid',
-          payment_method : 'Stripe',
-          date           : d,
-          notes          : invoice_ref ? `Stripe PI: ${pi.id} | Ref: ${invoice_ref}` : `Stripe PI: ${pi.id}`,
-          // Only set for a one-time class in a different group than the
-          // student's home group (Calendar-NEW cross-group add) — null for
-          // ordinary home-group payments, matching existing rows.
-          class_group    : class_group || null,
-        }));
+        const existingUnitKeys = new Set((existingRows || []).map((r) => paymentUnitKey(r.date, r.class_group)));
+        const missingUnits = uniqueUnits.filter((unit) => !existingUnitKeys.has(paymentUnitKey(unit.date, unit.group)));
 
-        const { data: insertedRows, error } = await supabaseAdmin
-          .from('payment_records')
-          .insert(rows)
-          .select();
-
-        if (error) {
-          console.error('❌ Supabase insert error:', error);
+        if (missingUnits.length === 0) {
+          console.log(`ℹ️ PaymentIntent ${pi.id} already fully recorded for student ${student_id}.`);
         } else {
-          console.log(`✅ payment_records inserted for student ${student_id} covering classes: ${datesToInsert.join(', ')}`);
+          // Insert one paid record per missing class billing unit.
+          const rows = missingUnits.map((unit) => ({
+            student_id     : student_id,
+            amount         : amountByUnitKey.get(paymentUnitKey(unit.date, unit.group)) ?? 0,
+            status         : 'paid',
+            payment_method : 'stripe',
+            date           : unit.date,
+            notes          : invoice_ref ? `Stripe PI: ${pi.id} | Ref: ${invoice_ref}` : `Stripe PI: ${pi.id}`,
+            class_group    : unit.group || null,
+          }));
 
-          // ── Send payment receipt email (non-blocking) ──────────────────────
-          sendStripeReceipt(supabaseAdmin, {
-            studentId:       student_id,
-            paymentRecordId: insertedRows?.[0]?.id ?? null,
-            amount:          amountDollars,
-            classDate:       primaryClassDate,
-            piId:            pi.id,
-          }).catch((err: Error) => console.warn('⚠️ Receipt send failed (non-fatal):', err.message));
+          const { data: insertedRows, error } = await supabaseAdmin
+            .from('payment_records')
+            .insert(rows)
+            .select();
+
+          if (error) {
+            console.error('❌ Supabase insert error:', error);
+          } else {
+            console.log(`✅ payment_records inserted for student ${student_id}: ${missingUnits.map((u) => paymentUnitKey(u.date, u.group)).join(', ')}`);
+
+            // ── Send payment receipt email (non-blocking) ────────────────────
+            sendStripeReceipt(supabaseAdmin, {
+              studentId:       student_id,
+              paymentRecordId: insertedRows?.[0]?.id ?? null,
+              amount:          amountDollars,
+              classDate:       uniqueUnits[0]?.date ?? todayDate,
+              piId:            pi.id,
+            }).catch((err: Error) => console.warn('⚠️ Receipt send failed (non-fatal):', err.message));
+          }
         }
       }
     }

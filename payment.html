@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ARNOMA – Secure Payment</title>
     <script src="https://js.stripe.com/v3/"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -583,6 +584,7 @@
         forClassDates: params.get('for_class_dates')  || '',
         forClassGroups: params.get('for_class_groups') || '',
         classGroup   : params.get('class_group')      || '',
+        paymentSessionToken: params.get('payment_session_token') || '',
       };
 
       // Persist class-date payload for redirect/3DS returns where URL params may be altered.
@@ -687,6 +689,73 @@
         return groups.slice(0, dateCount);
       }
 
+      function paymentUnitKey(dateStr, group) {
+        return `${String(dateStr || '').trim()}::${String(group || '').trim()}`;
+      }
+
+      function buildPaymentUnits(dates, groups) {
+        const units = [];
+        const seen = new Set();
+        const listDates = Array.isArray(dates) ? dates : [];
+        const listGroups = Array.isArray(groups) ? groups : [];
+        for (let i = 0; i < listDates.length; i += 1) {
+          const dateStr = String(listDates[i] || '').trim();
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) continue;
+          const group = String(listGroups[i] || '').trim();
+          const key = paymentUnitKey(dateStr, group);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          units.push({ date: dateStr, group });
+        }
+        return units;
+      }
+
+      function waitMs(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+      }
+
+      async function waitForPaidUnits(studentId, units, paymentIntentId = '', attempts = 10, delayMs = 1200) {
+        if (!studentId || !Array.isArray(units) || units.length === 0) {
+          return { ok: false, reason: 'missing-input' };
+        }
+
+        const dateList = Array.from(new Set(units.map(u => u.date).filter(Boolean)));
+        const required = new Set(units.map(u => paymentUnitKey(u.date, u.group)));
+        const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        for (let attempt = 1; attempt <= attempts; attempt += 1) {
+          let query = _sb
+            .from('payment_records')
+            .select('date, class_group, status, payment_method, notes')
+            .eq('student_id', studentId)
+            .eq('payment_method', 'stripe')
+            .eq('status', 'paid')
+            .in('date', dateList);
+
+          if (paymentIntentId) {
+            query = query.ilike('notes', `%Stripe PI: ${paymentIntentId}%`);
+          }
+
+          const { data, error } = await query;
+
+          if (!error) {
+            const found = new Set((data || []).map(r => paymentUnitKey(r.date, r.class_group)));
+            const allFound = Array.from(required).every(k => found.has(k));
+            if (allFound) {
+              return { ok: true, attempt };
+            }
+          } else {
+            console.warn('[ARNOMA] waitForPaidUnits query error:', error.message);
+          }
+
+          if (attempt < attempts) {
+            await waitMs(delayMs);
+          }
+        }
+
+        return { ok: false, reason: 'timeout' };
+      }
+
       /* ── Helpers ── */
       function fmt(dollars, currency) {
         return new Intl.NumberFormat('en-US', {
@@ -760,11 +829,29 @@
           $amtInput.value = INVOICE.amountDollars.toFixed(2);
           $amtInput.max   = INVOICE.amountDollars.toFixed(2);
         }
+        // Stripe payment allocation is by class billing unit. To prevent
+        // mis-marking, payment from this screen must match the full shown balance.
+        if (INVOICE.amountDollars > 0) {
+          $amtInput.readOnly = true;
+          $amtInput.setAttribute('aria-readonly', 'true');
+          $amtInput.style.opacity = '0.85';
+        }
         const initialTax = getTaxAmount(INVOICE.amountDollars);
         const initialTotal = roundMoney(INVOICE.amountDollars + initialTax);
-        $amtHint.textContent = `Subtotal due: ${INVOICE.amountDollars > 0 ? fmt(INVOICE.amountDollars, INVOICE.currency) : '—'} • Tax (5%): ${fmt(initialTax, INVOICE.currency)} • Total: ${fmt(initialTotal, INVOICE.currency)}`;
+        if (INVOICE.amountDollars > 0) {
+          if (IS_GATE) {
+            $amtHint.textContent = `Locked accounts require full payment: ${fmt(INVOICE.amountDollars, INVOICE.currency)} + tax ${fmt(initialTax, INVOICE.currency)} = ${fmt(initialTotal, INVOICE.currency)}`;
+          } else {
+            $amtHint.textContent = `Full balance required: ${fmt(INVOICE.amountDollars, INVOICE.currency)} + tax ${fmt(initialTax, INVOICE.currency)} = ${fmt(initialTotal, INVOICE.currency)}`;
+          }
+        } else {
+          $amtHint.textContent = `Subtotal due: ${INVOICE.amountDollars > 0 ? fmt(INVOICE.amountDollars, INVOICE.currency) : '—'} • Tax (5%): ${fmt(initialTax, INVOICE.currency)} • Total: ${fmt(initialTotal, INVOICE.currency)}`;
+        }
         // Validate on change
         $amtInput.addEventListener('input', () => {
+          if (INVOICE.amountDollars > 0) {
+            $amtInput.value = INVOICE.amountDollars.toFixed(2);
+          }
           const v   = getEnteredAmount();
           const max = INVOICE.amountDollars;
           if (v <= 0) {
@@ -813,6 +900,9 @@
         const total = getPayAmount();
         const tax = getTaxAmount(subtotal);
         if (subtotal < 1) throw new Error('Please enter an amount of at least $1.00.');
+        if (INVOICE.amountDollars > 0 && Math.abs(subtotal - INVOICE.amountDollars) > 0.009) {
+          throw new Error('The payment amount must match the full balance shown on this page.');
+        }
         const resp = await fetch(CREATE_PI_ENDPOINT, {
           method:'POST',
           headers:{'Content-Type':'application/json'},
@@ -826,6 +916,7 @@
             invoice_ref     : INVOICE.invoiceRef,
             for_class       : INVOICE.forClass,
             for_class_dates : INVOICE.forClassDates,
+            for_class_groups: INVOICE.forClassGroups,
             class_group     : INVOICE.classGroup,
             subtotal_dollars: subtotal,
             tax_dollars     : tax,
@@ -911,7 +1002,7 @@
         }
 
         if (paymentIntent && paymentIntent.status === 'succeeded') {
-          await showSuccess();
+          await showSuccess(paymentIntent.id || null);
           return;
         }
 
@@ -919,7 +1010,7 @@
       }
 
       /* ── Success state ── */
-      async function showSuccess() {
+      async function showSuccess(paymentIntentId = null) {
         $peSlot.innerHTML = '';
         $payBtn.style.display = 'none';
         document.getElementById('invoiceBanner').style.display = 'none';
@@ -936,6 +1027,9 @@
         const forClassDatesArr = resolveForClassDates();
         const forClassGroupsArr = resolveForClassGroups(forClassDatesArr.length);
         const today = new Date().toISOString().split('T')[0];
+        const classDates = forClassDatesArr.length ? forClassDatesArr : [today];
+        const classGroups = forClassDatesArr.length ? forClassGroupsArr : [INVOICE.classGroup || ''];
+        const expectedUnits = buildPaymentUnits(classDates, classGroups);
 
         // Notify parent window (student-portal.html modal) — parent writes payment_records
         // using its own authenticated Supabase session, avoiding RLS issues with anon key.
@@ -948,49 +1042,29 @@
             taxAmount      : tax,
             totalAmount    : total,
             taxRate        : STRIPE_TAX_RATE,
-            forClass       : forClassDatesArr.length ? forClassDatesArr[0] : today,
-            forClassDates  : forClassDatesArr.length ? forClassDatesArr : [today],
-            forClassGroups : forClassDatesArr.length ? forClassGroupsArr : [INVOICE.classGroup || ''],
+            forClass       : classDates[0],
+            forClassDates  : classDates,
+            forClassGroups : classGroups,
+            paymentIntentId: paymentIntentId || '',
+            paymentSessionToken: INVOICE.paymentSessionToken || '',
             date           : today,
           }, '*');
         } catch(_){}
 
-        // Gate mode: postMessage has no parent to receive it — write payment_records directly.
+        // Gate mode: postMessage has no parent to receive it. Reconcile strictly
+        // from webhook-inserted payment_records before redirecting back.
         if (IS_GATE && INVOICE.studentId) {
           try {
-            const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            const { subtotal } = getAmountBreakdown();
-            const dates = forClassDatesArr.length ? forClassDatesArr : [today];
-            const groups = forClassDatesArr.length ? forClassGroupsArr : [INVOICE.classGroup || ''];
-            const perClass = dates.length > 1 ? +(subtotal / dates.length).toFixed(2) : subtotal;
-            // Idempotency keyed on (date, class_group) — a cross-group one-time class
-            // sharing a date with the home-group class must not be skipped just because
-            // the home-group class on that date was already paid separately.
-            const { data: existing } = await _sb
-              .from('payment_records').select('date, class_group')
-              .eq('student_id', INVOICE.studentId).eq('payment_method', 'stripe').in('date', dates);
-            const unitKey = (d, g) => `${d}::${g || ''}`;
-            const alreadyPaid = new Set((existing || []).map(r => unitKey(r.date, r.class_group)));
-            const toInsert = dates
-              .map((d, i) => ({ date: d, group: groups[i] || '' }))
-              .filter(u => !alreadyPaid.has(unitKey(u.date, u.group)))
-              .map(u => ({ student_id: INVOICE.studentId, date: u.date, amount: perClass, status: 'paid', payment_method: 'stripe', class_group: u.group || null }));
-            if (toInsert.length) {
-              const { error: dbErr } = await _sb.from('payment_records').insert(toInsert);
-              if (dbErr) {
-                console.error('[ARNOMA] Gate payment_records insert failed:', dbErr.message);
-                // The card WAS charged by Stripe even though the DB write failed (e.g. an
-                // expired/anon session tripping the RLS ownership check) — never let the
-                // student see "Payment Successful" while the debt is still unrecorded, and
-                // make sure an admin finds out instead of this failing silently forever.
-                showRecordingFailedWarning(dbErr.message, toInsert);
-              } else {
-                console.log('[ARNOMA] ✅ Gate payment_records written:', toInsert);
-              }
+            const paymentIntentForLookup = String(paymentIntentId || '').trim();
+            const reconciled = await waitForPaidUnits(INVOICE.studentId, expectedUnits, paymentIntentForLookup, 14, 1200);
+            if (!reconciled.ok) {
+              showRecordingPendingWarning(paymentIntentForLookup, reconciled.reason || 'timeout');
+            } else {
+              console.log('[ARNOMA] ✅ Gate payment reconciled by webhook before redirect');
             }
-          } catch (writeErr) {
-            console.error('[ARNOMA] Gate payment_records write error:', writeErr);
-            showRecordingFailedWarning(writeErr.message, null);
+          } catch (verifyErr) {
+            console.error('[ARNOMA] Gate webhook reconciliation check error:', verifyErr);
+            showRecordingPendingWarning(String(paymentIntentId || ''), verifyErr?.message || 'verification-error');
           }
         }
 
@@ -1003,33 +1077,42 @@
             // Full-page gate: return to student portal
             window.location.replace('student-portal.html');
           } else {
-            try { window.parent.postMessage({ type:'ARNOMA_CLOSE_PAYMENT' }, '*'); } catch(_){}
+            try {
+              window.parent.postMessage({
+                type:'ARNOMA_CLOSE_PAYMENT',
+                paymentSessionToken: INVOICE.paymentSessionToken || ''
+              }, '*');
+            } catch(_){}
           }
         }, 3000);
       }
 
-      // Set when the post-charge payment_records write fails so the card was
-      // charged but the debt isn't marked paid — must never look like a normal
-      // success to the student, and must surface to an admin.
+      // Set when Stripe has charged the card but webhook reconciliation has not
+      // yet produced the expected payment_records rows.
       let _recordingFailed = false;
 
-      function showRecordingFailedWarning(errMessage, pendingRows) {
+      function showRecordingPendingWarning(paymentIntentId, errMessage) {
         _recordingFailed = true;
-        setMsg('error', 'Your card WAS charged, but we could not record the payment on your account. Please contact the administrator with a screenshot of this message so your balance can be corrected manually. Do not pay again.');
+        setMsg('error', 'Your payment succeeded, but account reconciliation is still in progress. Please do not pay again. An administrator has been notified and access will unlock automatically after recording completes.');
         try {
           const _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
           _sb.from('notifications').insert([{
-            type: 'payment_recording_failed',
+            type: 'payment_recording_pending',
             category: 'payment',
-            title: 'Stripe payment NOT recorded',
-            description: `${INVOICE.studentName} (student_id ${INVOICE.studentId}) was charged $${INVOICE.amountDollars} but the payment_records write failed: ${errMessage}`,
+            title: 'Stripe payment pending reconciliation',
+            description: `${INVOICE.studentName} (student_id ${INVOICE.studentId}) has a successful Stripe charge pending payment_records reconciliation: ${errMessage}`,
             student_name: INVOICE.studentName,
-            metadata: { student_id: INVOICE.studentId, error: errMessage, pendingRows },
+            metadata: {
+              student_id: INVOICE.studentId,
+              payment_intent_id: paymentIntentId || null,
+              expected_dates: resolveForClassDates(),
+              error: errMessage
+            },
             timestamp: new Date().toISOString(),
             read: false,
             created_at: new Date().toISOString()
           }]).then(({ error }) => {
-            if (error) console.error('[ARNOMA] Failed to log payment_recording_failed notification:', error.message);
+            if (error) console.error('[ARNOMA] Failed to log payment_recording_pending notification:', error.message);
           });
         } catch (_) { /* never let the alert logging itself break the page */ }
       }
@@ -1050,7 +1133,7 @@
             $payBtn.disabled = false;
             $payBtn.addEventListener('click', () => { window.location.search = ''; }, { once: true });
           } else if (paymentIntent.status === 'succeeded') {
-            await showSuccess();
+            await showSuccess(paymentIntent.id || null);
           } else {
             setMsg('error', `Payment status: ${paymentIntent.status}. Please try again.`);
           }
