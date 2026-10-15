@@ -2108,6 +2108,32 @@ body[data-zoom="large"] .question-type-badge {
 }
 .topic-row.selected .topic-row-name { color: #f1f5f9; font-weight: 600; }
 
+/* Study-note link beside a topic, and the empty-topic label */
+.topic-note-link {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--gold-primary);
+  border: 1px solid rgba(201,168,76,0.35);
+  border-radius: 5px;
+  padding: 2px 8px;
+}
+.topic-note-link:hover { background: rgba(201,168,76,0.14); }
+.topic-empty-label {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+.note-study-link { margin-top: 10px; font-size: 13px; }
+.note-study-link a { color: var(--gold-primary); text-decoration: underline; text-underline-offset: 3px; }
+.note-study-link a:hover { color: #e6c870; }
+
 .stats-box {
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.08);
@@ -4285,7 +4311,7 @@ function revealAllAnswers() {
             background:${isCorrect ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'};
             border:2px solid ${isCorrect ? 'var(--success)' : 'rgba(255,255,255,0.15)'};
             color:${isCorrect ? '#86efac' : '#94a3b8'};font-weight:800;font-size:12px;">${letter}</span>
-          <span style="color:${isCorrect ? '#d1fae5' : '#94a3b8'};font-size:14px;line-height:1.6;${isCorrect ? 'font-weight:600;' : ''}">${opt.text}</span>
+          <span style="color:${isCorrect ? '#d1fae5' : '#94a3b8'};font-size:14px;line-height:1.6;${isCorrect ? 'font-weight:600;' : ''}">${escapeHtml(opt.text)}</span>
           ${isCorrect ? '<span style="margin-left:auto;color:var(--success);flex-shrink:0">✓</span>' : ''}
         </div>`;
     }).join('');
@@ -4297,12 +4323,12 @@ function revealAllAnswers() {
           ${q.multi ? '<span style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;font-size:11px;padding:3px 9px;border-radius:12px;">Multi-select</span>' : ''}
           ${useHy ? '<span style="background:rgba(201,168,76,0.10);border:1px solid rgba(201,168,76,0.3);color:#c9a84c;font-size:11px;padding:3px 9px;border-radius:12px;">ՀԱՅ</span>' : ''}
         </div>
-        <div style="color:#f1f5f9;font-size:15px;font-weight:500;line-height:1.65;margin-bottom:16px;">${displayStem}</div>
+        <div style="color:#f1f5f9;font-size:15px;font-weight:500;line-height:1.65;margin-bottom:16px;">${escapeHtml(displayStem)}</div>
         <div style="margin-bottom:14px;">${optionRows}</div>
         ${displayRationale ? `
           <div style="background:rgba(251,191,36,0.08);border-left:4px solid rgba(251,191,36,0.5);border-radius:0 8px 8px 0;padding:14px 16px;margin-top:4px;">
             <div style="color:#fbbf24;font-weight:700;font-size:12px;letter-spacing:0.5px;margin-bottom:6px;">${useHy ? 'ՀԻՄՆԱՎՈՐՈՒՄ' : 'RATIONALE'}</div>
-            <div style="color:#e2e8f0;font-size:13px;line-height:1.7;">${displayRationale}</div>
+            <div style="color:#e2e8f0;font-size:13px;line-height:1.7;">${escapeHtml(displayRationale)}</div>
           </div>` : ''}
         ${q.key_point ? `
           <div style="background:rgba(201,168,76,0.06);border-left:3px solid rgba(201,168,76,0.35);border-radius:0 6px 6px 0;padding:10px 14px;margin-top:10px;">
@@ -4564,6 +4590,22 @@ function withTimeout(promise, ms, timeoutMessage) {
   });
 }
 
+// PostgREST caps every response at its max-rows setting (1000 here) regardless of .limit(),
+// so a single query silently drops every row past that point. Page with .range() instead.
+// buildQuery must return a FRESH query each call and carry a deterministic .order().
+async function fetchAllRows(buildQuery, pageSize = 1000) {
+  const all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    from += data.length; // advance by what was returned, so a lower server cap cannot skip rows
+  }
+  return all;
+}
+
 function isNetworkFailure(error) {
   const msg = String(error?.message || '');
   return msg.includes('Load failed') ||
@@ -4740,6 +4782,7 @@ async function addMoreQuestions(count = 10) {
 
     // 6. Append to session state
     testState.questions.push(...picks);
+    attachNoteLinks(picks);
 
     // 7. Rebuild the bilingual snapshot to include new questions
     testState.snapshot = buildBilingualSnapshot(testState.questions);
@@ -4796,33 +4839,34 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
       throw new Error('No questions found for the selected topics');
     }
 
-    let query = db
-      .from('test_questions')
-      .select('id, test_id, question_stem, question_stem_hy, options, options_hy, correct_answer, is_multiple_choice, rationale, rationale_hy, category, display_order, points, is_active, topic_id')
-      .eq('is_active', true)
-      .order('display_order', { ascending: true });
+    const buildQuery = () => {
+      let query = db
+        .from('test_questions')
+        .select('id, test_id, question_stem, question_stem_hy, options, options_hy, correct_answer, is_multiple_choice, rationale, rationale_hy, category, display_order, points, is_active, topic_id')
+        .eq('is_active', true)
+        .order('display_order', { ascending: true })
+        .order('id', { ascending: true });
 
-    if (useTopicSystem) {
-      // Topic-based: filter by topic_id only (works across all subjects/test_ids)
-      query = query.in('topic_id', topicIds);
-    } else {
-      // Legacy: filter by test_id, optionally by category
-      query = query.eq('test_id', testId);
-      if (categoryFilter) {
-        query = query.eq('category', categoryFilter);
+      if (useTopicSystem) {
+        // Topic-based: filter by topic_id only (works across all subjects/test_ids)
+        query = query.in('topic_id', topicIds);
+      } else {
+        // Legacy: filter by test_id, optionally by category
+        query = query.eq('test_id', testId);
+        if (categoryFilter) {
+          query = query.eq('category', categoryFilter);
+        }
       }
-    }
+      return query;
+    };
 
-    // Raise the page limit so large question banks (300+) are never silently truncated.
-    // PostgREST defaults to 1000; we set 5000 to accommodate all current subjects combined.
-    query = query.limit(5000);
-
-    const { data: questions, error } = await withTimeout(
-      query,
-      12000,
+    // Paged: a single query is capped at 1000 rows by the server, which would silently
+    // drop questions whenever a selection spans more than 1000.
+    const questions = await withTimeout(
+      fetchAllRows(buildQuery),
+      20000,
       'Loading questions timed out'
     );
-    if (error) throw error;
     
     if (!questions || questions.length === 0) {
       throw new Error('No questions found for the selected topics');
@@ -5416,6 +5460,130 @@ function getSubjectIcon(name) {
   return `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTE LINKS — questions and topics are tied to study notes by stable ids
+// (note_catalog.note_id), never by title text. Every helper here fails soft:
+// if the tables are unavailable the picker simply behaves as it did before.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// note_id -> { title, path, system }. Cached for the page session.
+async function loadNoteCatalog() {
+  if (window._cachedNoteCatalog) return window._cachedNoteCatalog;
+  const map = new Map();
+  try {
+    const rows = await fetchAllRows(() => db
+      .from('note_catalog')
+      .select('note_id, title, path, system_name')
+      .eq('is_active', true)
+      .order('path', { ascending: true }));
+    rows.forEach(r => map.set(r.note_id, { title: r.title, path: r.path, system: r.system_name }));
+  } catch (e) {
+    console.warn('[Notes] catalog unavailable — topics shown without note links:', e?.message || e);
+  }
+  window._cachedNoteCatalog = map;
+  return map;
+}
+
+// Notes live at /Notes/... and this page at /Test/, so the stored repo path is made page-relative.
+function buildNoteUrl(notePath, anchorText) {
+  if (!notePath) return null;
+  let url = '../' + String(notePath).split('/').map(encodeURIComponent).join('/');
+  const name = SESSION_ROLE.userName || sessionStorage.getItem('userName') || localStorage.getItem('userName');
+  if (name) url += '?studentName=' + encodeURIComponent(name);
+  if (anchorText) {
+    // Text fragment: lets supporting browsers scroll to and highlight the supporting passage.
+    const words = String(anchorText).replace(/\s+/g, ' ').trim().split(' ').slice(0, 8).join(' ');
+    if (words.length >= 8) url += '#:~:text=' + encodeURIComponent(words).replace(/-/g, '%2D');
+  }
+  return url;
+}
+
+// Collapse topics so students see one row per study note, labelled with the note's exact title.
+// A topic is shown when it has a note OR holds questions (so questions are never hidden), and
+// topics that point at the same note are merged into one row whose pool is all of them.
+function buildTopicRows(allTopics, counts, notes) {
+  if (!notes || notes.size === 0) {
+    return { rows: (allTopics || []).map(t => ({ ...t, _groupIds: [t.id] })), siblings: new Map() };
+  }
+  const groups = new Map();
+  (allTopics || []).forEach(t => {
+    const note = t.note_id ? notes.get(t.note_id) : null;
+    const n = counts[t.id] || 0;
+    if (!note && n === 0) return; // not in the notes and no questions: nothing to practise
+    const key = note ? `${t.subject_id}|${t.note_id}` : `solo|${t.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ topic: t, note, n });
+  });
+  const rows = [];
+  const siblings = new Map();
+  groups.forEach(members => {
+    members.sort((a, b) => (b.n - a.n) || ((a.topic.display_order || 0) - (b.topic.display_order || 0)) || String(a.topic.name).localeCompare(String(b.topic.name)));
+    const lead = members[0];
+    const note = lead.note;
+    const ids = members.map(m => m.topic.id);
+    rows.push({
+      ...lead.topic,
+      name: note ? note.title : lead.topic.name,
+      _origName: lead.topic.name,
+      _aliases: members.map(m => m.topic.name),
+      _notePath: note ? note.path : null,
+      _groupIds: ids
+    });
+    siblings.set(lead.topic.id, ids);
+  });
+  rows.sort((a, b) => (a.display_order || 0) - (b.display_order || 0) || String(a.name).localeCompare(String(b.name)));
+  return { rows, siblings };
+}
+
+// Selected rows -> every topic id whose questions belong to them (empty siblings add nothing).
+function expandSelectedTopicIds(ids) {
+  const sib = window._topicSiblings || new Map();
+  const counts = window._cachedTopicCounts || {};
+  const out = new Set();
+  (ids || []).forEach(id => {
+    out.add(id);
+    (sib.get(id) || []).forEach(s => { if (s === id || (counts[s] || 0) > 0) out.add(s); });
+  });
+  return Array.from(out);
+}
+
+// Look up each question's primary note. Runs in the background; a failure only means no "Study"
+// link is shown, never that the test cannot run. Results live in a side map keyed by question id,
+// NOT on the question objects, because those are broadcast/persisted (teacher sessions, snapshots).
+window._questionNotes = window._questionNotes || new Map();
+async function attachNoteLinks(questions) {
+  try {
+    const notes = await loadNoteCatalog();
+    if (!notes.size || !questions || !questions.length) return;
+    const ids = questions.map(q => q.id).filter(id => Number.isFinite(Number(id)) && !window._questionNotes.has(String(id)));
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += 150) chunks.push(ids.slice(i, i + 150));
+    const results = await Promise.all(chunks.map(c => db
+      .from('v_question_primary_note')
+      .select('question_id, note_id, section_heading, anchor_text')
+      .in('question_id', c)));
+    results.forEach(r => {
+      if (r.error || !r.data) return;
+      r.data.forEach(row => {
+        const note = row.note_id ? notes.get(row.note_id) : null;
+        if (note) window._questionNotes.set(String(row.question_id), { title: note.title, path: note.path, section: row.section_heading || null, anchor: row.anchor_text || null });
+      });
+    });
+  } catch (e) {
+    console.warn('[Notes] could not attach note links:', e?.message || e);
+  }
+}
+
+// "Study this topic" line shown under a rationale. Empty when the question has no note.
+function noteLinkHtml(question) {
+  const n = question && window._questionNotes ? window._questionNotes.get(String(question.id)) : null;
+  if (!n) return '';
+  const href = buildNoteUrl(n.path, n.anchor);
+  if (!href) return '';
+  const where = n.section && n.section !== n.title ? ` &rsaquo; ${escapeHtml(n.section)}` : '';
+  return `<div class="note-study-link"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Study this topic: ${escapeHtml(n.title)}${where}</a></div>`;
+}
+
 async function showSubjectSelection() {
   const btn = document.getElementById('initialStartBtn');
   btn.innerHTML = '<div class="loading" style="width:20px;height:20px"></div> Loading...';
@@ -5476,22 +5644,24 @@ async function showSubjectSelection() {
           throw new Error('rpc_unavailable');
         }
       } catch (rpcFallbackErr) {
-        // Fallback: fetch only topic_id column with limit 5000 (single request, no loop)
+        // Fallback: fetch only topic_id, paged because the server caps one response at 1000 rows.
         if (rpcFallbackErr?.message !== 'rpc_unavailable') {
-          console.warn('[Topic Counts] RPC error, using fallback single query');
+          console.warn('[Topic Counts] RPC error, using fallback paged query');
         }
-        const { data: allRows, error: fallbackError } = await db
-          .from('test_questions')
-          .select('topic_id')
-          .eq('is_active', true)
-          .limit(5000);
-        if (!fallbackError && allRows) {
+        try {
+          const allRows = await fetchAllRows(() => db
+            .from('test_questions')
+            .select('topic_id')
+            .eq('is_active', true)
+            .order('id', { ascending: true }));
           allRows.forEach(row => {
             if (row.topic_id) {
               topicQuestionCounts[row.topic_id] = (topicQuestionCounts[row.topic_id] || 0) + 1;
             }
           });
           console.log(`[Topic Counts] loaded via fallback: ${Object.keys(topicQuestionCounts).length} topics`);
+        } catch (fallbackError) {
+          console.warn('[Topic Counts] fallback query failed:', fallbackError);
         }
       }
       // Cache for this session so reopening the modal is instant
@@ -5501,7 +5671,11 @@ async function showSubjectSelection() {
     }
 
     allSubjects = subjects;
-    availableTopics = allTopicsRaw || [];
+    // One row per study note (exact note title); topics outside the notes are hidden unless they hold questions.
+    const noteCatalog = await loadNoteCatalog();
+    const topicRowData = buildTopicRows(allTopicsRaw || [], topicQuestionCounts, noteCatalog);
+    window._topicSiblings = topicRowData.siblings;
+    availableTopics = topicRowData.rows;
     selectedSubjects.clear();
     selectedTopics.clear();
 
@@ -5515,21 +5689,32 @@ async function showSubjectSelection() {
     const subjectList = document.getElementById('subjectList');
     if (!subjectList) throw new Error('Subject list element not found');
 
-    subjectList.innerHTML = subjects.map((subject, idx) => {
+    // Hide systems that have no note-backed topic and no questions (only when the note catalog loaded).
+    const visibleSubjects = noteCatalog.size
+      ? subjects.filter(s => (topicsBySubject[s.id] || []).length > 0)
+      : subjects;
+
+    subjectList.innerHTML = visibleSubjects.map((subject, idx) => {
       const topics = topicsBySubject[subject.id] || [];
       const hasTopics = topics.length > 0;
       const iconSvg = getSubjectIcon(subject.name);
 
       const topicRows = topics.map(topic => {
-        const qCount = topicQuestionCounts[topic.id] || 0;
+        const qCount = (topic._groupIds || [topic.id]).reduce((sum, id) => sum + (topicQuestionCounts[id] || 0), 0);
+        const noteHref = topic._notePath ? buildNoteUrl(topic._notePath) : null;
+        const safeName = escapeHtml(topic.name);
+        const searchKey = escapeHtml([topic.name, ...(topic._aliases || [])].join(' ').toLowerCase());
         return `
         <div class="topic-row" id="topic-row-${topic.id}"
-             data-topic-name="${topic.name.toLowerCase()}"
+             data-topic-name="${searchKey}"
              onclick="toggleTopicInline('${topic.id}', '${subject.id}')">
           <input type="checkbox" id="topic-cb-${topic.id}"
             onclick="event.stopPropagation();toggleTopicInline('${topic.id}','${subject.id}',this.checked)">
-          <span class="topic-row-name">${topic.name}</span>
-          ${qCount > 0 ? `<span style="margin-left:auto;flex-shrink:0;font-size:10px;font-weight:700;color:#94a3b8;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.10);border-radius:5px;padding:2px 7px;letter-spacing:0.3px">${qCount} Question${qCount !== 1 ? 's' : ''}</span>` : ''}
+          <span class="topic-row-name">${safeName}</span>
+          ${noteHref ? `<a class="topic-note-link" href="${escapeHtml(noteHref)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="Open the study note">Notes</a>` : ''}
+          ${qCount > 0
+            ? `<span style="margin-left:auto;flex-shrink:0;font-size:10px;font-weight:700;color:#94a3b8;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.10);border-radius:5px;padding:2px 7px;letter-spacing:0.3px">${qCount} Question${qCount !== 1 ? 's' : ''}</span>`
+            : `<span class="topic-empty-label">No questions yet</span>`}
         </div>
       `;
       }).join('');
@@ -5537,7 +5722,7 @@ async function showSubjectSelection() {
       return `
         <div class="subject-row" id="subject-row-${subject.id}"
              data-subject-name="${subject.name.toLowerCase()}"
-             data-topic-names="${topics.map(t=>t.name.toLowerCase()).join('|')}">
+             data-topic-names="${escapeHtml(topics.map(t => [t.name, ...(t._aliases || [])].join(' ').toLowerCase()).join('|'))}">
           <div class="subject-header" onclick="toggleSubject('${subject.id}')">
             <svg class="subject-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <polyline points="9 18 15 12 9 6"/>
@@ -5579,6 +5764,7 @@ async function showSubjectSelection() {
     btn.innerHTML = 'Start Test';
     btn.disabled = false;
     updateSubjectStats();
+    applyNoteDeepLink();
 
   } catch (error) {
     console.error('Error loading subjects:', error);
@@ -5586,6 +5772,26 @@ async function showSubjectSelection() {
     btn.disabled = false;
     showToast(error.message || 'Failed to load subjects', 'error');
   }
+}
+
+// ?note=<note_id> (sent by the "Practice" button on a note page): preselect that note's topic, once.
+function applyNoteDeepLink() {
+  const noteId = new URLSearchParams(window.location.search).get('note');
+  if (!noteId || window._noteDeepLinkApplied) return;
+  window._noteDeepLinkApplied = true;
+  const topic = availableTopics.find(t => t.note_id === noteId);
+  if (!topic) {
+    showToast('No practice questions are linked to that note yet.', 'info');
+    return;
+  }
+  const counts = window._cachedTopicCounts || {};
+  const available = (topic._groupIds || [topic.id]).reduce((sum, id) => sum + (counts[id] || 0), 0);
+  const subjectRow = document.getElementById(`subject-row-${topic.subject_id}`);
+  if (subjectRow) subjectRow.classList.add('expanded');
+  toggleTopicInline(topic.id, topic.subject_id, true);
+  const topicRow = document.getElementById(`topic-row-${topic.id}`);
+  if (topicRow && topicRow.scrollIntoView) topicRow.scrollIntoView({ block: 'center' });
+  if (available === 0) showToast(`"${escapeHtml(topic.name)}" has no practice questions yet.`, 'info');
 }
 
 // Toggle the expand/collapse of a subject's topic list.
@@ -5747,7 +5953,7 @@ function updateSubjectStats() {
       db.from('test_questions')
         .select('*', { count: 'exact', head: true })
         .eq('is_active', true)
-        .in('topic_id', Array.from(selectedTopics))
+        .in('topic_id', expandSelectedTopicIds(Array.from(selectedTopics)))
         .then(({ count, error }) => {
           const val = (!error && count != null) ? count : '—';
           document.getElementById('totalQuestionsCount').textContent = val;
@@ -5831,9 +6037,10 @@ async function startFromSubjectModal() {
   TEST_CONFIG.shuffleQuestions = mixQAToggle ? mixQAToggle.checked : true;
   TEST_CONFIG.shuffleOptions   = mixQAToggle ? mixQAToggle.checked : true;
   TEST_CONFIG.questionCount    = limitInput && limitInput.value ? parseInt(limitInput.value) : null;
-  TEST_CONFIG.selectedTopicIds = Array.from(selectedTopics);
+  // A row can stand for several topics that share one study note; load questions from all of them.
+  TEST_CONFIG.selectedTopicIds = expandSelectedTopicIds(Array.from(selectedTopics));
   // Store human-readable names so the header title is correct during the test AND after resume
-  TEST_CONFIG.selectedTopicNames = TEST_CONFIG.selectedTopicIds
+  TEST_CONFIG.selectedTopicNames = Array.from(selectedTopics)
     .map(id => availableTopics.find(t => t.id === id)?.name)
     .filter(Boolean);
 
@@ -5985,7 +6192,7 @@ async function updateTopicStats() {
         .from('test_questions')
         .select('*', { count: 'exact', head: true })
         .eq('is_active', true)
-        .in('topic_id', Array.from(selectedTopics));
+        .in('topic_id', expandSelectedTopicIds(Array.from(selectedTopics)));
       if (!error && qEl) qEl.textContent = count || 0;
     } catch (_) { if (qEl) qEl.textContent = '?'; }
   }
@@ -6196,6 +6403,9 @@ async function initializeNewTest() {
     testState.questions = [buildEnglishDisclaimerQuestion(), ...testState.questions];
   }
 
+  // Background lookup of each question's study note (never blocks or breaks the test)
+  attachNoteLinks(testState.questions);
+
   // ── Build the frozen bilingual snapshot (once, permanent for this session) ──
   testState.snapshot = buildBilingualSnapshot(testState.questions);
   setLoadingStatus('Preparing interface...');
@@ -6268,10 +6478,36 @@ async function resumeTest(saved) {
     }));
   }
 
+  // The pool can change between sessions (retired duplicates, added questions), which would
+  // reshuffle a resumed test under the student. Restore the exact saved order instead; ids that
+  // no longer exist are dropped and questions added since are not injected mid-session.
+  const savedCurrentId = Array.isArray(saved.questionIds) ? saved.questionIds[saved.currentIndex] : null;
+  if (Array.isArray(saved.questionIds) && saved.questionIds.length) {
+    const byId = new Map(testState.questions.map(q => [String(q.id), q]));
+    const ordered = [];
+    saved.questionIds.forEach(id => {
+      const q = byId.get(String(id));
+      if (q) { ordered.push(q); byId.delete(String(id)); }
+    });
+    if (ordered.length) testState.questions = ordered;
+  }
+
   // Re-prepend English disclaimer if not already present (always first)
   if (isEnglishSubject() && (!testState.questions[0] || testState.questions[0].id !== 'english-disclaimer-q0')) {
     testState.questions = [buildEnglishDisclaimerQuestion(), ...testState.questions];
   }
+
+  // Keep the student on the same question, or clamp if it was retired.
+  if (savedCurrentId != null) {
+    const idx = testState.questions.findIndex(q => String(q.id) === String(savedCurrentId));
+    if (idx >= 0) testState.currentIndex = idx;
+  }
+  if (testState.currentIndex >= testState.questions.length) {
+    testState.currentIndex = Math.max(0, testState.questions.length - 1);
+  }
+
+  // Background lookup of each question's study note (never blocks or breaks the test)
+  attachNoteLinks(testState.questions);
 
   // ── Restore bilingual snapshot (preferred from localStorage for speed;
   //    rebuild from freshly loaded questions as fallback) ─────────────────
@@ -6727,7 +6963,8 @@ function renderQuestion() {
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
             <div>
               <div style="font-size:18px;margin-bottom:4px">${testState.language === 'hy' ? 'Ճիշտ է!' : 'Correct!'}</div>
-              ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#166534;margin-top:8px">${rationaleText}</div>` : ''}
+              ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#166534;margin-top:8px">${escapeHtml(rationaleText)}</div>` : ''}
+              ${noteLinkHtml(question)}
             </div>
           </div>
         `;
@@ -6740,7 +6977,8 @@ function renderQuestion() {
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             <div>
               <div style="font-size:18px;margin-bottom:4px">${testState.language === 'hy' ? 'Սխալ է' : 'Incorrect'}</div>
-              ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#7f1d1d;margin-top:8px"><strong>${testState.language === 'hy' ? 'Բացատրություն' : 'Explanation'}:</strong> ${rationaleText}</div>` : ''}
+              ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#7f1d1d;margin-top:8px"><strong>${testState.language === 'hy' ? 'Բացատրություն' : 'Explanation'}:</strong> ${escapeHtml(rationaleText)}</div>` : ''}
+              ${noteLinkHtml(question)}
             </div>
           </div>
         `;
@@ -6910,7 +7148,8 @@ function checkAnswer() {
         </svg>
         <div>
           <div style="font-size:17px;font-weight:800;color:#a7f3d0;margin-bottom:6px">${testState.language === 'hy' ? 'Ճիշտ է!' : 'Correct!'}</div>
-          ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#6ee7b7;line-height:1.65;margin-top:4px">${rationaleText}</div>` : ''}
+          ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#6ee7b7;line-height:1.65;margin-top:4px">${escapeHtml(rationaleText)}</div>` : ''}
+          ${noteLinkHtml(question)}
         </div>
       </div>
     `;
@@ -6925,7 +7164,8 @@ function checkAnswer() {
         </svg>
         <div>
           <div style="font-size:17px;font-weight:800;color:#fca5a5;margin-bottom:6px">${testState.language === 'hy' ? 'Սխալ է' : 'Incorrect'}</div>
-          ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#fda4af;line-height:1.65;margin-top:4px"><strong style="color:#fca5a5">${testState.language === 'hy' ? 'Բացատրություն' : 'Explanation'}:</strong> ${rationaleText}</div>` : ''}
+          ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#fda4af;line-height:1.65;margin-top:4px"><strong style="color:#fca5a5">${testState.language === 'hy' ? 'Բացատրություն' : 'Explanation'}:</strong> ${escapeHtml(rationaleText)}</div>` : ''}
+          ${noteLinkHtml(question)}
         </div>
       </div>
     `;
@@ -8427,7 +8667,7 @@ function showReview() {
         <div class="question-number">Question ${index + 1}</div>
         ${statusBadge}
       </div>
-      <div class="review-stem">${q.stem}</div>
+      <div class="review-stem">${escapeHtml(q.stem)}</div>
     `;
     
     q.options.forEach(opt => {
@@ -8450,12 +8690,13 @@ function showReview() {
         prefix = '✗ ';
       }
       
-      html += `<div class="${className}">${prefix}${opt.text}</div>`;
+      html += `<div class="${className}">${prefix}${escapeHtml(opt.text)}</div>`;
     });
     
     if (q.rationale) {
-      html += `<div class="rationale"><strong>Rationale:</strong> ${q.rationale}</div>`;
+      html += `<div class="rationale"><strong>Rationale:</strong> ${escapeHtml(q.rationale)}</div>`;
     }
+    html += noteLinkHtml(q);
     
     div.innerHTML = html;
     frag.appendChild(div);
@@ -9620,6 +9861,14 @@ document.addEventListener('DOMContentLoaded', () => {
     requestIdleCallback(() => loadSavedSessions(), { timeout: 3000 });
   } else {
     setTimeout(() => loadSavedSessions(), 800);
+  }
+
+  // Deep link from a note page (?note=<note_id>): open the picker with that note's topic preselected.
+  if (new URLSearchParams(window.location.search).get('note')) {
+    setTimeout(() => {
+      const startBtn = document.getElementById('initialStartBtn');
+      if (startBtn && !startBtn.disabled) showSubjectSelection();
+    }, 400);
   }
 });
 </script>
