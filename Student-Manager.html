@@ -3842,6 +3842,109 @@
       }
 
       // ============================================================
+      // CARRY FORWARD OLD-GROUP CANCELLATIONS ON GROUP CHANGE
+      // ============================================================
+      // student-portal and Calendar only apply skipped_classes of the student's CURRENT
+      // group (no group history exists), so past days the OLD group cancelled become
+      // unpaid classes after a move and can trip the $300 portal lock. Mark those days
+      // "ignored" for the student, the same record Calendar's "Ignore This Class Day"
+      // writes. Days that already have a payment, credit, absence or any payment_records
+      // row are left alone, because an ignored day overrides a payment in Calendar.
+      async function carryForwardCancelledClassDays(student, oldGroupCode, newGroupCode) {
+        try {
+          const FLOOR = '2026-05-01'; // debt floor shared with student-portal / Calendar
+          const toDay = value => String(value || '').split('T')[0];
+          const laParts = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit'
+          }).formatToParts(new Date());
+          const laPart = type => (laParts.find(p => p.type === type) || {}).value || '';
+          const todayLA = `${laPart('year')}-${laPart('month')}-${laPart('day')}`;
+          const startDate = toDay(student.start_date);
+          const fromDate = startDate > FLOOR ? startDate : FLOOR;
+
+          const groupNames = code => [code, `Group ${code}`];
+          const { data: cancelledRows, error: cancelledError } = await supabaseClient
+            .from('skipped_classes')
+            .select('group_name, class_date')
+            .in('group_name', [...groupNames(oldGroupCode), ...groupNames(newGroupCode)])
+            .gte('class_date', fromDate)
+            .lt('class_date', todayLA); // today and later belong to the new group
+          if (cancelledError) throw cancelledError;
+
+          const cancelledDates = new Set();
+          const newGroupCancelled = new Set();
+          (cancelledRows || []).forEach(row => {
+            const date = toDay(row.class_date);
+            if (!date) return;
+            (canonicalizeGroupCode(row.group_name) === newGroupCode ? newGroupCancelled : cancelledDates).add(date);
+          });
+          // Days the new group also cancelled are already skipped for this student.
+          newGroupCancelled.forEach(date => cancelledDates.delete(date));
+          if (cancelledDates.size === 0) return;
+
+          // Same payment matching as student-portal: by id, linked id, or name/alias.
+          const dates = Array.from(cancelledDates);
+          const aliases = Array.isArray(student.aliases) ? student.aliases : String(student.aliases || '').split(',');
+          const names = [student.name, ...aliases]
+            .map(n => String(n || '').replace(/[^a-zA-Z0-9 ]/g, '').trim())
+            .filter(Boolean);
+          const nameFilters = names.map(n => `,payer_name.ilike.%${n}%,resolved_student_name.ilike.%${n}%`).join('');
+          const [records, credits, absences, zelle] = await Promise.all([
+            supabaseClient.from('payment_records').select('date').eq('student_id', student.id).in('date', dates),
+            supabaseClient.from('credit_payments').select('class_date, applied_class_date').eq('student_id', student.id),
+            supabaseClient.from('student_absences').select('class_date').eq('student_id', student.id).in('class_date', dates),
+            supabaseClient.from('payments')
+              .select('for_class, for_class_dates, payer_name, resolved_student_name, student_id, linked_student_id')
+              .or(`student_id.eq.${student.id},linked_student_id.eq.${student.id}${nameFilters}`)
+          ]);
+          const failed = [records, credits, absences, zelle].find(r => r.error);
+          if (failed) throw failed.error;
+
+          const normalizeName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+          const ownNames = new Set(names.map(normalizeName).filter(Boolean));
+          const covered = new Set();
+          (records.data || []).forEach(r => covered.add(toDay(r.date)));
+          (absences.data || []).forEach(r => covered.add(toDay(r.class_date)));
+          (credits.data || []).forEach(r => covered.add(toDay(r.applied_class_date || r.class_date)));
+          (zelle.data || []).forEach(p => {
+            const isOwn = String(p.student_id) === String(student.id) || String(p.linked_student_id) === String(student.id) ||
+              [p.payer_name, p.resolved_student_name].some(n => ownNames.has(normalizeName(n)));
+            if (!isOwn) return;
+            let paidFor = p.for_class_dates != null ? p.for_class_dates : (p.for_class != null ? p.for_class : []);
+            if (!Array.isArray(paidFor)) paidFor = [paidFor];
+            paidFor.forEach(entry => covered.add(toDay(entry && typeof entry === 'object' ? (entry.class_date || entry.date) : entry)));
+          });
+
+          const toIgnore = dates.filter(date => !covered.has(date)).sort();
+          if (toIgnore.length === 0) return;
+
+          const { error: insertError } = await supabaseClient
+            .from('payment_records')
+            .insert(toIgnore.map(date => ({
+              student_id: student.id,
+              date,
+              amount: 0,
+              status: 'ignored',
+              payment_method: 'ignored',
+              notes: `Ignored class day (Group ${oldGroupCode} cancelled; moved to Group ${newGroupCode})`
+            })));
+          if (insertError) throw insertError;
+
+          debugLog(`🚫 Ignored ${toIgnore.length} old-group cancelled day(s) for student ${student.id}: ${toIgnore.join(', ')}`);
+          await customAlert(
+            'Cancelled Classes Ignored',
+            `${student.name} moved from Group ${oldGroupCode} to Group ${newGroupCode}. These past days were cancelled by Group ${oldGroupCode}, so they were marked ignored and will not count as unpaid: ${toIgnore.join(', ')}. To undo a day, use Unignore on it in the Calendar.`
+          );
+        } catch (e) {
+          console.warn('⚠️ carryForwardCancelledClassDays failed:', e);
+          await customAlert(
+            'Cancelled Classes Not Carried Over',
+            `${student.name} was moved to Group ${newGroupCode}, but classes that Group ${oldGroupCode} cancelled could not be checked. They may show as unpaid. Check the Calendar and use Ignore This Class Day where needed.`
+          );
+        }
+      }
+
+      // ============================================================
       // SAVE STUDENT TO SUPABASE
       // ============================================================
       async function saveStudent(student) {
@@ -3868,6 +3971,7 @@
           // 📌 GROUP CHANGE: snapshot the student's currently-accessible notes from
           // their OLD group into individual permission rows BEFORE the group_name
           // changes, so they don't lose visibility of notes they already had access to.
+          let movedFromGroupCode = null;
           if (student.id) {
             const { data: existingStudentRow } = await supabaseClient
               .from('students')
@@ -3877,6 +3981,8 @@
             const oldGroupCode = existingStudentRow?.group_name || null;
             if (oldGroupCode && resolvedGroupCode && oldGroupCode !== resolvedGroupCode) {
               await carryForwardGroupNotePermissions(student.id, oldGroupCode);
+              const oldCanonical = canonicalizeGroupCode(oldGroupCode);
+              if (oldCanonical && oldCanonical !== resolvedGroupCode) movedFromGroupCode = oldCanonical;
             }
           }
           
@@ -3983,6 +4089,11 @@
 
           debugLog('✅ Student saved to Supabase:', result.data[0]);
           debugLog(`   show_in_grid saved as:`, result.data[0].show_in_grid);
+
+          // After the move is saved, stop the old group's cancelled days becoming debt.
+          if (movedFromGroupCode) {
+            await carryForwardCancelledClassDays(result.data[0], movedFromGroupCode, resolvedGroupCode);
+          }
           return result.data[0];
         } catch (e) {
           console.error('❌ Error saving student to Supabase:', e);
@@ -4192,6 +4303,18 @@
         buildDebtAlertSection(sourceStudents);
       }
 
+      // PostgREST returns at most 1000 rows per request: read page by page (stable order) so no payment is silently dropped.
+      async function fetchAllRows(makeQuery) {
+        const pageSize = 1000;
+        const rows = [];
+        for (let from = 0; ; from += pageSize) {
+          const { data, error } = await makeQuery().range(from, from + pageSize - 1);
+          if (error) return { data: null, error };
+          rows.push(...(data || []));
+          if (!data || data.length < pageSize) return { data: rows, error: null };
+        }
+      }
+
       async function buildDebtAlertSection(sourceStudents) {
         const FLOOR = '2026-05-01';
         const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -4289,14 +4412,14 @@
         const groupCodes = Array.from(new Set(payingStudents.map(s => s.groupCode).filter(Boolean)));
 
         const [prRes, skipRes, grpRes, paymentsRes, creditsRes, absencesRes, visibilityRes] = await Promise.all([
-          supabaseClient.from('payment_records').select('student_id,date,status,payment_method,amount').in('student_id', studentIds),
+          fetchAllRows(() => supabaseClient.from('payment_records').select('student_id,date,status,payment_method,amount').in('student_id', studentIds).order('id')),
           groupCodes.length
             ? supabaseClient.from('skipped_classes').select('group_name,class_date').in('group_name', groupCodes).gte('class_date', FLOOR)
             : Promise.resolve({ data: [], error: null }),
           groupCodes.length
             ? supabaseClient.from('groups').select('group_name,schedule,one_time_schedules').in('group_name', groupCodes)
             : Promise.resolve({ data: [], error: null }),
-          supabaseClient.from('payments').select('for_class,for_class_dates,email_date,payer_name,resolved_student_name,student_id,linked_student_id'),
+          fetchAllRows(() => supabaseClient.from('payments').select('for_class,for_class_dates,email_date,payer_name,resolved_student_name,student_id,linked_student_id').order('id')),
           supabaseClient.from('credit_payments').select('student_id,class_date,applied_class_date').in('student_id', studentIds),
           supabaseClient.from('student_absences').select('student_id,class_date').in('student_id', studentIds),
           supabaseClient.from('student_visibility_history').select('student_id,visible,effective_date').in('student_id', studentIds).order('effective_date', { ascending: true })
