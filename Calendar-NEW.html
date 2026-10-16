@@ -2161,6 +2161,11 @@
         return !isCurrentlyOff;
       }
 
+      // Free students are never shown on the calendar (grid dots or day list).
+      function isFreeMarkedStudent(student) {
+        return !!(student && typeof student.notes === 'string' && student.notes.includes('[ARNOMA_FREE_STUDENT]'));
+      }
+
       function hasPaymentCached(studentId, dateStr, student, groupContext) {
         // Cross-group mode: this occurrence is a one-time class for a group
         // that differs from the student's home group, so its payment status
@@ -2285,12 +2290,25 @@
         }
       }
 
+      // PostgREST returns at most 1000 rows per request: read page by page (stable order) so no payment is silently dropped.
+      async function fetchAllRows(makeQuery) {
+        const pageSize = 1000;
+        const rows = [];
+        for (let from = 0; ; from += pageSize) {
+          const { data, error } = await makeQuery().range(from, from + pageSize - 1);
+          if (error) return { data: null, error };
+          rows.push(...(data || []));
+          if (!data || data.length < pageSize) return { data: rows, error: null };
+        }
+      }
+
       async function loadPayments() {
         try {
-          const { data, error } = await supabaseClient
+          const { data, error } = await fetchAllRows(() => supabaseClient
             .from('payments')
             .select('*')
-            .order('email_date', { ascending: false });
+            .order('email_date', { ascending: false })
+            .order('id', { ascending: false }));
 
           if (error) throw error;
           paymentsData = data || [];
@@ -2306,11 +2324,12 @@
 
       async function loadPaymentRecords() {
         try {
-          const { data, error } = await supabaseClient
+          const { data, error } = await fetchAllRows(() => supabaseClient
             .from('payment_records')
             .select('*')
             .in('status', ['paid', 'excused', 'ignored'])
-            .order('date', { ascending: false });
+            .order('date', { ascending: false })
+            .order('id', { ascending: false }));
 
           if (error) throw error;
           paymentRecordsData = data || [];
@@ -2820,6 +2839,8 @@
 
             // Add a dot for each active student in the scheduled class
             [...groupStudents, ...crossGroupForThisGroup].forEach(student => {
+              if (isFreeMarkedStudent(student)) return;
+
               // IMPORTANT: Only show classes after student's creation date
               let studentStartStr = null;
               if (student.start_date) {
@@ -2873,6 +2894,8 @@
               } else if (student.notes && student.notes.includes('[ARNOMA_FREE_STUDENT]')) {
                 dotType = 'free';
                 dotLabel += ' (Free)';
+              } else if (getStudentClassPrice(student) <= 0 && !manualEnrollments.has(`${student.id}-${dateStr}`)) {
+                return; // $0 price: nothing can be owed, so no unpaid/scheduled dot
               } else if (dateStr <= getLATodayISO()) {
                 dotType = 'unpaid';
                 dotLabel += ' (Unpaid)';
@@ -3096,7 +3119,9 @@
         const studentsOnDate = [];
         
         studentsData.forEach(student => {
-          if (!student.show_in_grid || student.show_in_grid === 'false' || (student.status === 'paused' || student.status === 'graduated') || !student.group_name) return;
+          // Same date-aware rule as the dots: a student paused later still belongs to earlier days.
+          if (!student.group_name || !isStudentActiveOnDate(student, dateStr)) return;
+          if (isFreeMarkedStudent(student)) return;
 
           const enrollKey = `${student.id}-${dateStr}`;
           const isManuallyEnrolled = manualEnrollments.has(enrollKey);
@@ -3119,14 +3144,13 @@
           }
 
           occurrences.forEach(({ group, isManualHere }) => {
-            // IMPORTANT: Only show classes after student's creation date
+            // IMPORTANT: Only show classes after the student's start (start_date, else creation date), same as the dots
             // (unless admin manually enrolled them via "Add Student to Class")
-            if (student.created_at) {
-              const studentCreatedDate = new Date(student.created_at).toISOString().split('T')[0];
-              if (dateStr < studentCreatedDate && !isManualHere) {
-                // Don't show this student for classes before they were created
-                return;
-              }
+            const studentStartStr = student.start_date
+              ? student.start_date.split('T')[0]
+              : (student.created_at ? new Date(student.created_at).toISOString().split('T')[0] : null);
+            if (studentStartStr && dateStr < studentStartStr && !isManualHere) {
+              return;
             }
             
             // Check payment status
@@ -3149,6 +3173,8 @@
               status = 'paid';
             } else if (student.notes && student.notes.includes('[ARNOMA_FREE_STUDENT]')) {
               status = 'free';
+            } else if (getStudentClassPrice(student) <= 0 && !isManualHere) {
+              return; // $0 price: nothing can be owed, so not listed as unpaid
             } else {
               status = 'unpaid';
             }
