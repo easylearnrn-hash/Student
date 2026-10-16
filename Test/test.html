@@ -2133,6 +2133,10 @@ body[data-zoom="large"] .question-type-badge {
 .note-study-link { margin-top: 10px; font-size: 13px; }
 .note-study-link a { color: var(--gold-primary); text-decoration: underline; text-underline-offset: 3px; }
 .note-study-link a:hover { color: #e6c870; }
+/* Study link locked by the student portal (class not paid) */
+.topic-note-link.is-locked { color: var(--text-muted); border-color: rgba(255,255,255,0.14); cursor: default; }
+.topic-note-link.is-locked:hover { background: transparent; }
+.note-study-link.is-locked { color: var(--text-muted); }
 
 .stats-box {
   background: rgba(255,255,255,0.06);
@@ -5574,12 +5578,66 @@ async function attachNoteLinks(questions) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTE LOCKS — the student portal publishes which study notes this student has locked
+// (class not paid) under NOTE_ACCESS_KEY; their study links show as locked instead.
+// Teachers/admins are never gated. A student with no current list for the signed-in
+// account (portal not opened in the last 24h, or still loading) gets no study links
+// rather than possibly-locked ones. Notes the portal does not list are left as they were.
+// This is a UI-level lock: the note pages themselves are static files.
+// ─────────────────────────────────────────────────────────────────────────────
+const NOTE_ACCESS_KEY = 'arnoma:noteAccess:v1';
+const NOTE_ACCESS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+// Signed-in account id, read from the Supabase session the portal stored (same origin).
+function currentAuthUserId() {
+  try {
+    const ref = new URL(SUPABASE_CONFIG.url).hostname.split('.')[0];
+    const stored = JSON.parse(localStorage.getItem('sb-' + ref + '-auth-token') || 'null');
+    return (stored && stored.user && stored.user.id) || null;
+  } catch (_) { return null; }
+}
+
+// Set of locked note paths for this account, or null when there is no valid, current list.
+function readLockedNotePaths() {
+  try {
+    const data = JSON.parse(localStorage.getItem(NOTE_ACCESS_KEY) || 'null');
+    if (!data || data.v !== 1 || !data.uid || !Array.isArray(data.locked)) return null;
+    if (!(Date.now() - data.ts < NOTE_ACCESS_MAX_AGE_MS)) return null;
+    if (data.uid !== currentAuthUserId()) return null;
+    return new Set(data.locked);
+  } catch (_) { return null; }
+}
+
+// 'open' | 'locked' | 'unknown'. Pass the set from readLockedNotePaths() when checking many notes.
+function noteAccessState(notePath, lockedPaths) {
+  if (SESSION_ROLE.isTeacher) return 'open';
+  const locked = lockedPaths === undefined ? readLockedNotePaths() : lockedPaths;
+  if (!locked) return 'unknown';
+  return locked.has(notePath) ? 'locked' : 'open';
+}
+
+// "Notes" pill beside a topic row: link when open, padlock when locked, nothing when unknown.
+function topicNoteSlotHtml(notePath, lockedPaths) {
+  const href = notePath ? buildNoteUrl(notePath) : null;
+  if (!href) return '';
+  const access = noteAccessState(notePath, lockedPaths);
+  if (access === 'open') return `<a class="topic-note-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="Open the study note">Notes</a>`;
+  if (access === 'locked') return `<span class="topic-note-link is-locked" title="Unlocks once the class this note was taught in is paid">\u{1F512} Notes</span>`;
+  return '';
+}
+
 // "Study this topic" line shown under a rationale. Empty when the question has no note.
 function noteLinkHtml(question) {
   const n = question && window._questionNotes ? window._questionNotes.get(String(question.id)) : null;
   if (!n) return '';
   const href = buildNoteUrl(n.path, n.anchor);
   if (!href) return '';
+  const access = noteAccessState(n.path);
+  if (access === 'unknown') return '';
+  if (access === 'locked') {
+    return `<div class="note-study-link is-locked" title="Unlocks once the class this note was taught in is paid">\u{1F512} ${escapeHtml(n.title)} \u2014 locked until the class is paid</div>`;
+  }
   const where = n.section && n.section !== n.title ? ` &rsaquo; ${escapeHtml(n.section)}` : '';
   return `<div class="note-study-link"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Study this topic: ${escapeHtml(n.title)}${where}</a></div>`;
 }
@@ -5694,6 +5752,9 @@ async function showSubjectSelection() {
       ? subjects.filter(s => (topicsBySubject[s.id] || []).length > 0)
       : subjects;
 
+    // Notes this student has locked in the portal (read once for every row below).
+    const lockedNotePaths = readLockedNotePaths();
+
     subjectList.innerHTML = visibleSubjects.map((subject, idx) => {
       const topics = topicsBySubject[subject.id] || [];
       const hasTopics = topics.length > 0;
@@ -5701,7 +5762,6 @@ async function showSubjectSelection() {
 
       const topicRows = topics.map(topic => {
         const qCount = (topic._groupIds || [topic.id]).reduce((sum, id) => sum + (topicQuestionCounts[id] || 0), 0);
-        const noteHref = topic._notePath ? buildNoteUrl(topic._notePath) : null;
         const safeName = escapeHtml(topic.name);
         const searchKey = escapeHtml([topic.name, ...(topic._aliases || [])].join(' ').toLowerCase());
         return `
@@ -5711,7 +5771,7 @@ async function showSubjectSelection() {
           <input type="checkbox" id="topic-cb-${topic.id}"
             onclick="event.stopPropagation();toggleTopicInline('${topic.id}','${subject.id}',this.checked)">
           <span class="topic-row-name">${safeName}</span>
-          ${noteHref ? `<a class="topic-note-link" href="${escapeHtml(noteHref)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="Open the study note">Notes</a>` : ''}
+          ${topicNoteSlotHtml(topic._notePath, lockedNotePaths)}
           ${qCount > 0
             ? `<span style="margin-left:auto;flex-shrink:0;font-size:10px;font-weight:700;color:#94a3b8;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.10);border-radius:5px;padding:2px 7px;letter-spacing:0.3px">${qCount} Question${qCount !== 1 ? 's' : ''}</span>`
             : `<span class="topic-empty-label">No questions yet</span>`}
