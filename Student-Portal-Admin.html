@@ -6707,7 +6707,12 @@
         // ── Schedule-based unpaid calculation (mirrors Calendar-NEW.html logic) ──
         // Debt = scheduled class dates since start_date with no paid/excused/absent entry.
         const DEBT_FLOOR = '2026-05-01';
-        const todayStr = new Date().toISOString().split('T')[0];
+        // LA calendar day, like the portal, so evening hours don't count tomorrow's class (UTC is a day ahead).
+        const todayStr = (() => {
+          const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+          const v = t => p.find(x => x.type === t).value;
+          return `${v('year')}-${v('month')}-${v('day')}`;
+        })();
 
         // Load all necessary data in parallel
         const [groupRes, prRes, zelleRes, absRes, skippedRes, creditRes] = await Promise.all([
@@ -6735,10 +6740,10 @@
 
         const groupData = groupRes.data || {};
 
-        // Build covered-date sets per student (paid / excused / absent / cancelled = not a debt)
+        // Build covered-date sets per student (paid / excused / absent / cancelled / ignored = not a debt)
         const coveredByStudent = {}; // studentId → Set<'YYYY-MM-DD'>
         (prRes.data || []).forEach(r => {
-          if (['paid','excused','absent','cancelled'].includes(r.status)) {
+          if (['paid','excused','absent','cancelled','ignored'].includes(r.status)) {
             const d = (r.date || '').split('T')[0];
             if (!coveredByStudent[r.student_id]) coveredByStudent[r.student_id] = new Set();
             coveredByStudent[r.student_id].add(d);
