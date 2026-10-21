@@ -2642,6 +2642,58 @@ body[data-zoom="large"] .question-type-badge {
   border-color: rgba(16,185,129,0.4);
   background: rgba(16,185,129,0.05);
 }
+.cc-name-display.absent {
+  border-color: rgba(245,158,11,0.4);
+  background: rgba(245,158,11,0.05);
+}
+.cc-name-display.absent .cc-name-text {
+  color: #94a3b8;
+  text-decoration: line-through;
+  text-decoration-color: rgba(245,158,11,0.55);
+}
+.cc-name-display.absent .cc-absent-label { color: #fbbf24; }
+.cc-absent-note {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 4px;
+}
+.cc-undo-absent {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--gold-primary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cc-undo-absent:hover { color: var(--gold-light); }
+.cc-pending-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cc-pending-row .cc-answered-badge { margin-top: 0; }
+.cc-absent-btn {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(245,158,11,0.3);
+  background: rgba(245,158,11,0.08);
+  color: #fbbf24;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.cc-absent-btn:hover {
+  background: rgba(245,158,11,0.16);
+  border-color: rgba(245,158,11,0.55);
+}
 /* Student standby state — gold instead of green */
 .cc-name-display.standby {
   border-color: rgba(201,168,76,0.35);
@@ -9196,8 +9248,16 @@ const coldCallState = {
   sessionStarted: false,
   // Map: student.id → { name, correct: 0, wrong: 0, questions: [] }
   analytics: new Map(),
-  currentPickAnswered: false  // whether correct/wrong has been pressed for the current pick
+  currentPickAnswered: false,  // whether correct/wrong has been pressed for the current pick
+  // Students marked absent — this session only (in-memory, never persisted)
+  absentKeys: new Set(),
+  lastAbsent: null             // most recent absent student, for Undo
 };
+
+function coldCallStudentKey(s) { return String(s.id || s.name); }
+function coldCallPresentStudents() {
+  return coldCallState.students.filter(s => !coldCallState.absentKeys.has(coldCallStudentKey(s)));
+}
 
 // ─── Initialise (called on DOMContentLoaded) ─────────────────────────────────
 function initColdCallPicker() {
@@ -9261,6 +9321,7 @@ async function onColdCallGroupChange() {
   coldCallState.lastCycleEndIds = [];
   coldCallState.cycleComplete = false;
   coldCallState.currentPickAnswered = false;
+  coldCallState.lastAbsent = null;
   coldCallState.isLoading = !!group;
 
   // Drop the previous group's revealed name so the idle/loading state can render
@@ -9330,12 +9391,19 @@ async function coldCallLoadStudentsForGroup(groupName) {
 // ─── Start a fresh cycle (shuffle the full student list) ─────────────────────
 function coldCallStartNewCycle() {
   if (coldCallState.students.length === 0) return;
+  const present = coldCallPresentStudents();
+  if (present.length === 0) {
+    coldCallState.queue = [];
+    coldCallState.calledThisRound = [];
+    coldCallState.cycleComplete = false;
+    return;
+  }
 
   // Remember the tail of the cycle we're about to replace so we can keep those
   // students away from the START of the new cycle.
   // We save up to min(3, floor(n/2)) IDs so we don't over-constrain small groups.
   const tail = coldCallState.calledThisRound;
-  const guardCount = Math.min(3, Math.floor(coldCallState.students.length / 2));
+  const guardCount = Math.min(3, Math.floor(present.length / 2));
   if (tail.length > 0) {
     // Take the last `guardCount` students who were called (end of the old cycle)
     coldCallState.lastCycleEndIds = tail
@@ -9344,7 +9412,7 @@ function coldCallStartNewCycle() {
   }
 
   // Fisher-Yates shuffle
-  const arr = [...coldCallState.students];
+  const arr = [...present];
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -9401,7 +9469,10 @@ async function coldCallPickStudent() {
   // If queue is empty, start a new cycle
   if (coldCallState.queue.length === 0) {
     coldCallStartNewCycle();
-    // Brief "cycle complete" feedback already shown; now continue picking
+    if (coldCallState.queue.length === 0) {
+      showToast('All students in this group are marked absent', 'warning');
+      return;
+    }
   }
 
   // ── Auto-advance question when the current one is already answered ────────
@@ -9484,6 +9555,9 @@ function coldCallRefreshActiveStudent() {
     resultBadge = `<div class="cc-answered-badge wrong"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Wrong</div>`;
   } else {
     resultBadge = `<div class="cc-answered-badge" style="background:rgba(100,116,139,0.18);border-color:rgba(100,116,139,0.35);color:#94a3b8;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Not answered yet</div>`;
+    if (!coldCallState.currentPickAnswered) {
+      resultBadge = `<div class="cc-pending-row">${resultBadge}<button type="button" class="cc-absent-btn" onclick="coldCallMarkAbsent()" title="Mark absent for this session only">Absent</button></div>`;
+    }
   }
 
   const key = coldCallState.lastPicked.id || coldCallState.lastPicked.name;
@@ -9506,6 +9580,50 @@ function coldCallRefreshActiveStudent() {
 }
 
 
+
+// ─── Absent (this session only — in-memory, never saved) ─────────────────────
+function coldCallMarkAbsent() {
+  const s = coldCallState.lastPicked;
+  if (!s || coldCallState.currentPickAnswered) return;
+  const key = coldCallStudentKey(s);
+
+  coldCallState.absentKeys.add(key);
+  coldCallState.queue = coldCallState.queue.filter(x => coldCallStudentKey(x) !== key);
+  coldCallState.calledThisRound = coldCallState.calledThisRound.filter(x => coldCallStudentKey(x) !== key);
+  coldCallState.lastPicked = null;
+  coldCallState.lastAbsent = s;
+  coldCallState.currentPickAnswered = false;
+
+  const display = document.getElementById('ccNameDisplay');
+  if (display) {
+    display.className = 'cc-name-display absent';
+    display.innerHTML = `
+      <div class="cc-called-label cc-absent-label">Marked absent</div>
+      <div class="cc-name-text">${escapeHtml(s.name)}</div>
+      <div class="cc-absent-note">Skipped for this session ·
+        <button type="button" class="cc-undo-absent" onclick="coldCallUndoAbsent()">Undo</button>
+      </div>`;
+  }
+  coldCallUpdateUI();
+}
+
+function coldCallUndoAbsent() {
+  const s = coldCallState.lastAbsent;
+  if (!s) return;
+  const key = coldCallStudentKey(s);
+
+  coldCallState.absentKeys.delete(key);
+  coldCallState.lastAbsent = null;
+  coldCallState.queue = coldCallState.queue.filter(x => coldCallStudentKey(x) !== key);
+  if (!coldCallState.calledThisRound.some(x => coldCallStudentKey(x) === key)) {
+    coldCallState.calledThisRound.push(s);
+  }
+  coldCallState.lastPicked = s;
+  coldCallState.currentPickAnswered = false;
+
+  coldCallRefreshActiveStudent();
+  coldCallUpdateUI();
+}
 
 function coldCallUpdateBadgeIfPending(isCorrect) {
   // Only act when a student is picked and their result hasn't been recorded yet
@@ -9651,16 +9769,18 @@ function coldCallUpdateUI() {
     coldCallStartNewCycle();
   }
 
-  const total = coldCallState.students.length;
+  const total = coldCallPresentStudents().length;
   const called = coldCallState.calledThisRound.length;
 
   if (!coldCallState.selectedGroup || total === 0) {
     // No group or no students
     if (progressLabel) progressLabel.textContent = coldCallState.isLoading
       ? 'Loading students…'
-      : total === 0 && coldCallState.selectedGroup
-        ? 'No students in this group'
-        : 'No group selected';
+      : coldCallState.students.length > 0 && total === 0
+        ? 'All students marked absent'
+        : total === 0 && coldCallState.selectedGroup
+          ? 'No students in this group'
+          : 'No group selected';
     if (progressFrac) progressFrac.textContent = '—';
     if (progressFill) progressFill.style.width = '0%';
     if (pickBtn) pickBtn.disabled = true;
@@ -9684,7 +9804,7 @@ function coldCallUpdateUI() {
   if (pickBtn && !coldCallState.isRolling) pickBtn.disabled = false;
 
   // If no one has been picked yet, set the idle state on the display
-  if (!coldCallState.lastPicked && display && !display.classList.contains('rolling') && !display.classList.contains('revealed')) {
+  if (!coldCallState.lastPicked && display && !display.classList.contains('rolling') && !display.classList.contains('revealed') && !display.classList.contains('absent')) {
     display.className = 'cc-name-display';
     display.innerHTML = `<div class="cc-idle-text">Press "Pick a Student" to begin</div>`;
   }
@@ -9812,6 +9932,8 @@ function coldCallStartNewSession() {
   coldCallState.sessionStarted = false;
   coldCallState.analytics = new Map();
   coldCallState.currentPickAnswered = false;
+  coldCallState.absentKeys = new Set();
+  coldCallState.lastAbsent = null;
   const endRow = document.getElementById('ccEndSessionRow');
   if (endRow) endRow.style.display = 'none';
   coldCallStartNewCycle();
