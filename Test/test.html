@@ -1232,6 +1232,7 @@ body[data-zoom="large"] .question-type-badge {
 .right-actions {
   display: flex;
   gap: 10px;
+  margin-left: auto;
 }
 
 /* MODAL */
@@ -3619,16 +3620,15 @@ body[data-zoom="large"] .question-type-badge {
       </div><!-- /.question-panel-scrollable -->
       
       <div class="question-actions">
-        <button class="btn-secondary" id="backBtn" onclick="previousQuestion()" disabled>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;margin-right:6px">
-            <polyline points="15 18 9 12 15 6"/>
-          </svg>
-          Back
-        </button>
         <div class="right-actions">
-          <button class="btn-secondary" onclick="clearAnswer()">Clear Answer</button>
           <!-- checkAnswerBtn is now rendered inline on the selected option row; keep in DOM for JS refs -->
           <button class="btn btn-primary" id="checkAnswerBtn" onclick="checkAnswer()" style="display:none!important;position:absolute;pointer-events:none;visibility:hidden;" aria-hidden="true" tabindex="-1"></button>
+          <button class="btn-secondary" id="backBtn" onclick="previousQuestion()" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;margin-right:6px">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            Back
+          </button>
           <button class="btn-secondary" id="nextBtn" onclick="nextQuestion()">
             Next
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;margin-left:6px">
@@ -7393,6 +7393,13 @@ function renderQuestion() {
       if (e.target.closest('.option-check-btn')) return;
       // Ignore clicks directly on the input (browser already handled it)
       if (e.target === input) return;
+      // Clicking the already-selected answer (before it's checked) deselects it.
+      // Radios don't fire `change` when re-clicked, so handle it explicitly.
+      if (input.type === 'radio' && input.checked && !input.disabled) {
+        input.checked = false;
+        handleAnswerChange(question.id, question.multi);
+        return;
+      }
       input.click();
     });
   });
@@ -7766,28 +7773,6 @@ function toggleFlag() {
   }
   saveToLocalStorage();
   renderQuestion();
-}
-
-function clearAnswer() {
-  const currentQ = testState.questions[testState.currentIndex];
-  if (!currentQ) return;
-  delete testState.answers[currentQ.id];
-  delete testState.answerStatus[currentQ.id];
-  
-  // Clear feedback
-  document.getElementById('answerFeedback').style.display = 'none';
-  removeInlineCheckBtn();
-  
-  // Re-enable all options
-  document.querySelectorAll('.option').forEach(opt => {
-    opt.classList.remove('disabled', 'correct', 'incorrect');
-    const input = opt.querySelector('input');
-    input.disabled = false;
-  });
-  
-  saveToLocalStorage();
-  renderQuestion();
-  showToast('Answer cleared', 'info');
 }
 
 // ============================================
