@@ -147,6 +147,9 @@ CREATE POLICY tgh_delete_admin
 
 COMMIT;
 
+-- Make the new table visible to the API immediately (clears "not found in the schema cache")
+NOTIFY pgrst, 'reload schema';
+
 -- ── Verify ──────────────────────────────────────────────────
 SELECT 'test_grade_history' AS table_name, count(*) AS rows FROM public.test_grade_history;
 SELECT policyname, cmd, roles FROM pg_policies WHERE tablename = 'test_grade_history' ORDER BY policyname;
