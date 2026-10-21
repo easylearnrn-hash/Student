@@ -9260,13 +9260,33 @@ async function onColdCallGroupChange() {
   coldCallState.lastPicked = null;
   coldCallState.lastCycleEndIds = [];
   coldCallState.cycleComplete = false;
+  coldCallState.currentPickAnswered = false;
+  coldCallState.isLoading = !!group;
+
+  // Drop the previous group's revealed name so the idle/loading state can render
+  const display = document.getElementById('ccNameDisplay');
+  if (display) {
+    display.className = 'cc-name-display';
+    display.innerHTML = group
+      ? '<div class="cc-rolling-dots"><span>·</span><span>·</span><span>·</span></div>'
+      : '<div class="cc-idle-text">Select a group to begin</div>';
+  }
 
   coldCallUpdateUI();
 
   if (!group) return;
 
-  // Load students for selected group
   await coldCallLoadStudentsForGroup(group);
+  // Another group was selected while this one was loading — let that call finish the UI
+  if (coldCallState.selectedGroup !== group) return;
+
+  coldCallState.isLoading = false;
+  if (display) {
+    display.className = 'cc-name-display';
+    display.innerHTML = coldCallState.students.length
+      ? '<div class="cc-idle-text">Press "Pick a Student" to begin</div>'
+      : '<div class="cc-idle-text">No active students in this group</div>';
+  }
   coldCallStartNewCycle();
   coldCallUpdateUI();
 }
@@ -9277,11 +9297,6 @@ async function coldCallLoadStudentsForGroup(groupName) {
   if (coldCallState.studentCache.has(groupName)) {
     coldCallState.students = [...coldCallState.studentCache.get(groupName)];
     return;
-  }
-
-  const nameDisplay = document.getElementById('ccNameDisplay');
-  if (nameDisplay) {
-    nameDisplay.innerHTML = '<div class="cc-rolling-dots"><span>·</span><span>·</span><span>·</span></div>';
   }
 
   try {
@@ -9298,12 +9313,17 @@ async function coldCallLoadStudentsForGroup(groupName) {
 
     const students = (data || []).filter(s => s.name && s.name.trim());
     coldCallState.studentCache.set(groupName, students);
-    coldCallState.students = [...students];
+    // Ignore stale responses from a previously selected group
+    if (coldCallState.selectedGroup === groupName) {
+      coldCallState.students = [...students];
+    }
 
   } catch (err) {
     console.error('coldCallLoadStudentsForGroup error:', err);
-    coldCallState.students = [];
-    showToast('Failed to load students for group', 'error');
+    if (coldCallState.selectedGroup === groupName) {
+      coldCallState.students = [];
+      showToast('Failed to load students for group', 'error');
+    }
   }
 }
 
@@ -9636,9 +9656,11 @@ function coldCallUpdateUI() {
 
   if (!coldCallState.selectedGroup || total === 0) {
     // No group or no students
-    if (progressLabel) progressLabel.textContent = total === 0 && coldCallState.selectedGroup
-      ? 'No students in this group'
-      : 'No group selected';
+    if (progressLabel) progressLabel.textContent = coldCallState.isLoading
+      ? 'Loading students…'
+      : total === 0 && coldCallState.selectedGroup
+        ? 'No students in this group'
+        : 'No group selected';
     if (progressFrac) progressFrac.textContent = '—';
     if (progressFill) progressFill.style.width = '0%';
     if (pickBtn) pickBtn.disabled = true;
