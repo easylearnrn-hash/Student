@@ -7,9 +7,11 @@
 <!-- ── Instant auth gate — runs before a single pixel is painted ── -->
 <script>
 (function(){
+  // Portal sets isLoggedIn; an ARNOMA Supabase session (e.g. an admin opening this page directly) also counts
   var ok = sessionStorage.getItem('isLoggedIn') === 'true' ||
-           localStorage.getItem('isLoggedIn')    === 'true';
-  if (!ok) { window.location.replace('login.html'); }
+           localStorage.getItem('isLoggedIn')    === 'true' ||
+           !!localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token');
+  if (!ok) { window.location.replace('../index.html'); }
 })();
 </script>
 
@@ -3685,11 +3687,6 @@ body[data-zoom="large"] .question-type-badge {
         Start New Test
       </button>
 
-      <a href="student-dashboard.html" class="start-btn-secondary">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
-        My Academic Dashboard
-      </a>
-
       <!-- TEACHER ONLY: View all student quiz results -->
       <button id="teacherGradesBtn" onclick="openGradeHistoryModal()"
         class="start-btn-secondary"
@@ -4428,7 +4425,7 @@ function initializeSupabase() {
 // SESSION ROLE — AUTH & PERMISSION STATE
 // ============================================
 // Populated on DOMContentLoaded from sessionStorage/localStorage.
-// isLoggedIn  — gate: unauthenticated users are redirected to login.html
+// isLoggedIn  — gate: unauthenticated users are redirected to the ARNOMA login (../index.html)
 // isTeacher   — true only for admin_users with role 'teacher','admin','superadmin'
 //               Students always have isTeacher === false.
 // ============================================
@@ -4442,11 +4439,12 @@ const SESSION_ROLE = {
 function initSessionRole() {
   const loggedIn =
     sessionStorage.getItem('isLoggedIn') === 'true' ||
-    localStorage.getItem('isLoggedIn') === 'true';
+    localStorage.getItem('isLoggedIn') === 'true' ||
+    !!localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token');
 
   if (!loggedIn) {
-    // Not authenticated — send to login
-    window.location.replace('login.html');
+    // Not authenticated — send to the ARNOMA login page
+    window.location.replace('../index.html');
     return;
   }
 
@@ -4481,6 +4479,40 @@ function initSessionRole() {
   //   - their stored role matches a teacher role, OR
   //   - isAdmin flag is true (superadmin / primary admin)
   SESSION_ROLE.isTeacher = roleIsTeacher || isAdmin;
+}
+
+// ARNOMA admins sign in with Supabase (admin_accounts), not the storage flags above.
+// Promote them to the teacher role so admin tools (e.g. All Student Grades) are available.
+async function detectArnomaAdmin() {
+  if (!SESSION_ROLE.isLoggedIn || SESSION_ROLE.isTeacher) return;
+  try {
+    const client = initSupabase();
+    if (!client) return;
+    const { data: sessionData } = await withTimeout(client.auth.getSession(), 4000, 'Session check timed out');
+    const user = sessionData && sessionData.session && sessionData.session.user;
+    if (!user) return;
+    const { data, error } = await withTimeout(
+      client.from('admin_accounts').select('auth_user_id').eq('auth_user_id', user.id).maybeSingle(),
+      4000, 'Admin check timed out'
+    );
+    if (error || !data) return;
+    SESSION_ROLE.isTeacher = true;
+    SESSION_ROLE.userRole = 'admin';
+    if (!SESSION_ROLE.userName && user.email) SESSION_ROLE.userName = user.email.split('@')[0];
+  } catch (e) {
+    console.warn('detectArnomaAdmin skipped:', e && e.message);
+  }
+}
+
+// Leave the test: close the portal's test window when embedded, otherwise go to the ARNOMA home page
+function exitTestToPortal() {
+  try {
+    if (window.parent !== window && typeof window.parent.closeGameModal === 'function') {
+      window.parent.closeGameModal();
+      return;
+    }
+  } catch (e) { /* cross-origin parent — fall through */ }
+  window.location.href = '../index.html';
 }
 
 // ============================================
@@ -9468,7 +9500,7 @@ function renderColdCallResults(grades) {
         </div>
         
         <div style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: center;">
-           <button class="btn btn-primary" onclick="window.location.href='index.html'" style="padding: 0.75rem 2rem; background: var(--gold-primary); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+           <button class="btn btn-primary" onclick="exitTestToPortal()" style="padding: 0.75rem 2rem; background: var(--gold-primary); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
              Return Home
            </button>
            <button class="btn btn-secondary" onclick="window.location.reload()" style="padding: 0.75rem 2rem; background: var(--bg-white); color: var(--navy-primary); border: 1px solid var(--border-color); border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
@@ -10867,7 +10899,8 @@ function escapeHtml(str) {
 document.addEventListener('DOMContentLoaded', () => {
   // ── Auth gate & role detection ─────────────────────────────────────────
   initSessionRole();
-  applySessionRole();
+  // Role-gated UI waits for the (fast) ARNOMA admin check so admins get their tools
+  detectArnomaAdmin().finally(() => applySessionRole());
 
   // Initialize Supabase first
   initializeSupabase();
