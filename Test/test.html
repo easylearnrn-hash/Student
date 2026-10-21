@@ -10535,11 +10535,14 @@ async function saveTestGrade(results) {
     });
     if (insertErr) throw insertErr;
 
-    // Fetch full history for this student (newest first)
-    const { data: history, error: fetchErr } = await sdb
-      .from('test_grade_history')
-      .select('*')
-      .eq('owner_id', ownerId)
+    // Fetch full history for this student (newest first).
+    // Signed-in students are matched by their auth user (the DB links rows to it);
+    // fall back to the device owner id when there is no Supabase session.
+    const { data: sessData } = await sdb.auth.getSession();
+    const authUid = sessData && sessData.session && sessData.session.user ? sessData.session.user.id : null;
+    let historyQuery = sdb.from('test_grade_history').select('*');
+    historyQuery = authUid ? historyQuery.eq('auth_user_id', authUid) : historyQuery.eq('owner_id', ownerId);
+    const { data: history, error: fetchErr } = await historyQuery
       .order('taken_at', { ascending: false });
 
     if (fetchErr) throw fetchErr;
