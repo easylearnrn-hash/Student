@@ -1,4 +1,6 @@
 import json
+import re
+import statistics
 import random
 from pathlib import Path
 
@@ -15,168 +17,168 @@ concepts = [
         'fact': 'Cardiomyopathy is heart muscle disease that can make the heart weak, stretched, or stiff and impair pumping.',
         'priority': 'Monitor for progression to heart failure, dysrhythmias, and sudden cardiac death.',
         'true': ['Cardiomyopathy changes muscle structure/function.', 'It impairs pumping effectiveness.', 'Complications include HF and dysrhythmias.'],
-        'false': ['Cardiomyopathy only affects coronary arteries in this note.', 'Cardiomyopathy never affects cardiac output in this note.']
+        'false': ['Cardiomyopathy only affects coronary arteries.', 'Cardiomyopathy never affects cardiac output.']
     },
     {
         'name': 'Dilated cardiomyopathy pattern',
         'fact': 'Dilated cardiomyopathy has enlarged chambers, especially LV, with thin weak muscle and reduced ejection fraction.',
         'priority': 'Prioritize systolic failure monitoring and congestion assessment.',
-        'true': ['Dilated type has enlarged ventricles in this note.', 'Ejection fraction is reduced in dilated type.', 'Systolic failure is the main issue in dilated type.'],
-        'false': ['Dilated type has thick septum with normal chamber size in this note.', 'Dilated type usually has increased EF in this note.']
+        'true': ['Dilated type has enlarged ventricles.', 'Ejection fraction is reduced in dilated type.', 'Systolic failure is the main issue in dilated type.'],
+        'false': ['Dilated type has thick septum with normal chamber size.', 'Dilated type usually has increased EF.']
     },
     {
         'name': 'Dilated causes',
         'fact': 'Dilated causes listed include genetics, alcohol/drug use, viral myocarditis, peripartum state, and hypertension.',
         'priority': 'Address reversible contributors while managing HF symptoms.',
-        'true': ['Alcohol/drug use is listed cause.', 'Viral myocarditis is listed cause.', 'Peripartum cardiomyopathy is included in this note.'],
-        'false': ['Dilated type is only caused by congenital cyanotic defects in this note.', 'Hypertension is excluded in this note.']
+        'true': ['Alcohol/drug use is listed cause.', 'Viral myocarditis is listed cause.', 'Peripartum cardiomyopathy is included.'],
+        'false': ['Dilated type is only caused by congenital cyanotic defects.', 'Hypertension is excluded.']
     },
     {
         'name': 'Dilated signs',
         'fact': 'Dilated signs include SOB, fatigue, edema, S3 gallop, and displaced PMI.',
         'priority': 'Track fluid status and low-output symptoms to detect decompensation.',
         'true': ['S3 gallop is associated with dilated type.', 'Displaced PMI is listed finding.', 'SOB/fatigue/edema are listed symptoms.'],
-        'false': ['S4 gallop is the defining dilated sound in this note.', 'Edema is absent in dilated type in this note.']
+        'false': ['S4 gallop is the defining dilated sound.', 'Edema is absent in dilated type.']
     },
     {
         'name': 'HCM structure',
         'fact': 'Hypertrophic cardiomyopathy features thickened myocardium, especially septum, causing outflow obstruction and decreased cardiac output.',
         'priority': 'Avoid interventions that worsen obstruction by reducing preload.',
-        'true': ['HCM has septal hypertrophy in this note.', 'Outflow obstruction is central in HCM.', 'Cardiac output can decrease in HCM.'],
-        'false': ['HCM is primarily chamber dilation in this note.', 'HCM always improves outflow in this note.']
+        'true': ['HCM has septal hypertrophy.', 'Outflow obstruction is central in HCM.', 'Cardiac output can decrease in HCM.'],
+        'false': ['HCM is primarily chamber dilation.', 'HCM always improves outflow.']
     },
     {
         'name': 'HCM risk profile',
         'fact': 'HCM is genetic autosomal dominant and is the most common cause of sudden death in young athletes.',
         'priority': 'Enforce activity restrictions and high-risk counseling for athletes.',
-        'true': ['HCM is autosomal dominant in this note.', 'Young athletes are high risk for sudden death.', 'Competitive sports restriction is emphasized.'],
-        'false': ['HCM is non-genetic in this note.', 'Athletic exertion is encouraged in HCM in this note.']
+        'true': ['HCM is autosomal dominant.', 'Young athletes are high risk for sudden death.', 'Competitive sports restriction is emphasized.'],
+        'false': ['HCM is non-genetic.', 'Athletic exertion is encouraged in HCM.']
     },
     {
         'name': 'HCM symptoms',
         'fact': 'HCM signs include exertional SOB, syncope, chest pain, and S4 gallop.',
         'priority': 'Treat exertional syncope/chest pain as red flags for obstructive physiology.',
         'true': ['Syncope is listed HCM symptom.', 'Exertional dyspnea is listed symptom.', 'S4 gallop is associated with HCM.'],
-        'false': ['S3 is the hallmark HCM sound in this note.', 'HCM is always asymptomatic in this note.']
+        'false': ['S3 is the hallmark HCM sound.', 'HCM is always asymptomatic.']
     },
     {
         'name': 'HCM exacerbators',
         'fact': 'HCM symptoms worsen with dehydration and Valsalva; nitrates should be avoided.',
         'priority': 'Maintain preload and avoid triggers that intensify obstruction.',
-        'true': ['Dehydration worsens HCM in this note.', 'Valsalva worsens HCM in this note.', 'Nitrates are avoided in HCM in this note.'],
-        'false': ['Dehydration improves HCM symptoms in this note.', 'Nitrates are first-line for HCM obstruction in this note.']
+        'true': ['Dehydration worsens HCM.', 'Valsalva worsens HCM.', 'Nitrates are avoided in HCM.'],
+        'false': ['Dehydration improves HCM symptoms.', 'Nitrates are first-line for HCM obstruction.']
     },
     {
         'name': 'Restrictive pattern',
         'fact': 'Restrictive cardiomyopathy has stiff myocardium with impaired filling and backup into lungs/body.',
         'priority': 'Recognize diastolic failure signs despite less dramatic chamber enlargement.',
         'true': ['Restrictive type has stiffness and poor filling.', 'Blood can back up into lungs/body in restrictive type.', 'Diastolic failure is the main restrictive issue.'],
-        'false': ['Restrictive type is primarily hypercontractile with easy filling in this note.', 'Restrictive type has no congestion risk in this note.']
+        'false': ['Restrictive type is primarily hypercontractile with easy filling.', 'Restrictive type has no congestion risk.']
     },
     {
         'name': 'Restrictive causes',
         'fact': 'Restrictive causes listed are amyloidosis, sarcoidosis, and radiation therapy.',
         'priority': 'Search infiltrative or post-radiation etiologies in stiff-heart presentations.',
         'true': ['Amyloidosis is listed restrictive cause.', 'Sarcoidosis is listed restrictive cause.', 'Radiation therapy is listed restrictive cause.'],
-        'false': ['Alcohol alone is the only restrictive cause in this note.', 'Radiation is unrelated to restrictive disease in this note.']
+        'false': ['Alcohol alone is the only restrictive cause.', 'Radiation is unrelated to restrictive disease.']
     },
     {
         'name': 'ARVC pathology',
         'fact': 'ARVC replaces right ventricular muscle with fat/scar tissue, creating dangerous arrhythmias and sudden death risk.',
         'priority': 'Prioritize arrhythmia prevention and sudden-death mitigation in ARVC.',
         'true': ['RV fat/scar replacement is core ARVC pathology.', 'ARVC raises V-tach/V-fib risk.', 'ARVC carries sudden cardiac death risk.'],
-        'false': ['ARVC primarily causes left ventricular dilation only in this note.', 'ARVC has no arrhythmia risk in this note.']
+        'false': ['ARVC primarily causes left ventricular dilation only.', 'ARVC has no arrhythmia risk.']
     },
     {
         'name': 'ARVC epidemiology',
         'fact': 'ARVC is genetic autosomal dominant and often seen in young males and athletes.',
         'priority': 'Screen family/sports history when unexplained syncope or palpitations occur.',
-        'true': ['ARVC is autosomal dominant in this note.', 'Young males/athletes are highlighted risk groups.', 'Family-risk context matters in ARVC.'],
-        'false': ['ARVC is exclusively acquired after age 80 in this note.', 'Athletes are protected from ARVC in this note.']
+        'true': ['ARVC is autosomal dominant.', 'Young males/athletes are highlighted risk groups.', 'Family-risk context matters in ARVC.'],
+        'false': ['ARVC is exclusively acquired after age 80.', 'Athletes are protected from ARVC.']
     },
     {
         'name': 'ARVC diagnosis treatment',
         'fact': 'MRI is gold standard for ARVC; treatment includes ICD, amiodarone, activity restriction, and avoiding competitive sports.',
         'priority': 'Use definitive imaging and aggressive prevention of lethal arrhythmias.',
         'true': ['MRI is gold-standard in ARVC note.', 'ICD is listed ARVC intervention.', 'Competitive sports avoidance is listed ARVC management.'],
-        'false': ['Echocardiogram alone is gold standard for ARVC in this note.', 'ARVC treatment encourages strenuous sports in this note.']
+        'false': ['Echocardiogram alone is gold standard for ARVC.', 'ARVC treatment encourages strenuous sports.']
     },
     {
         'name': 'Common pathophysiology',
         'fact': 'Across cardiomyopathies, reduced pumping lowers cardiac output and causes fatigue, dyspnea, and fluid buildup.',
         'priority': 'Trend perfusion and volume status regardless of subtype.',
-        'true': ['Lower CO is a shared pathway in this note.', 'Fatigue and dyspnea arise from low output/congestion.', 'Fluid buildup can occur across types.'],
-        'false': ['All types increase cardiac output in this note.', 'Cardiomyopathy never leads to fluid overload in this note.']
+        'true': ['Lower CO is a shared pathway.', 'Fatigue and dyspnea arise from low output/congestion.', 'Fluid buildup can occur across types.'],
+        'false': ['All types increase cardiac output.', 'Cardiomyopathy never leads to fluid overload.']
     },
     {
         'name': 'Assessment table: EF',
         'fact': 'EF trends: dilated decreased, hypertrophic normal/increased, restrictive normal or decreased.',
         'priority': 'Interpret EF in subtype context instead of as isolated number.',
-        'true': ['Dilated EF is reduced in this note.', 'HCM EF can be normal or increased.', 'Restrictive EF can be normal or reduced.'],
-        'false': ['HCM always has reduced EF in this note.', 'Dilated EF is normal in this note.']
+        'true': ['Dilated EF is reduced.', 'HCM EF can be normal or increased.', 'Restrictive EF can be normal or reduced.'],
+        'false': ['HCM always has reduced EF.', 'Dilated EF is normal.']
     },
     {
         'name': 'Assessment table: heart sounds',
         'fact': 'Heart sounds: dilated S3, hypertrophic S4, restrictive may have S3 or S4.',
         'priority': 'Use auscultation pattern to support subtype differentiation.',
         'true': ['S3 is linked to dilated type.', 'S4 is linked to hypertrophic type.', 'Restrictive may present S3 or S4.'],
-        'false': ['S4 is unique to dilated type in this note.', 'No gallop sounds are associated with cardiomyopathy in this note.']
+        'false': ['S4 is unique to dilated type.', 'No gallop sounds are associated with cardiomyopathy.']
     },
     {
         'name': 'Assessment table: risks',
         'fact': 'Risk patterns: dilated HF/thromboembolism, hypertrophic sudden death, restrictive HF.',
         'priority': 'Tailor surveillance to subtype-specific major complications.',
-        'true': ['Dilated type has thromboembolism risk in this note.', 'Hypertrophic type has sudden death risk.', 'Restrictive type is linked with HF risk.'],
-        'false': ['Hypertrophic type has no sudden death risk in this note.', 'Restrictive type risk is only stroke in this note.']
+        'true': ['Dilated type has thromboembolism risk.', 'Hypertrophic type has sudden death risk.', 'Restrictive type is linked with HF risk.'],
+        'false': ['Hypertrophic type has no sudden death risk.', 'Restrictive type risk is only stroke.']
     },
     {
         'name': 'Medication strategy',
         'fact': 'Medication classes listed include ACEi/ARB, beta-blockers, diuretics, anticoagulants (especially with A-fib), and antiarrhythmics like amiodarone.',
         'priority': 'Combine workload reduction, decongestion, and rhythm/thromboembolism prevention.',
         'true': ['ACEi/ARB and beta-blockers are listed therapies.', 'Diuretics are listed for fluid overload.', 'Anticoagulants are noted especially with A-fib.'],
-        'false': ['All cardiomyopathy medications are contraindicated in this note.', 'Antiarrhythmics are never used in this note.']
+        'false': ['All cardiomyopathy medications are contraindicated.', 'Antiarrhythmics are never used.']
     },
     {
         'name': 'Device and advanced therapy',
         'fact': 'Interventions include ICD, CRT, LVAD bridge to transplant, and heart transplant for end-stage dilated cardiomyopathy.',
         'priority': 'Escalate to device/mechanical support when medical therapy is insufficient.',
         'true': ['ICD is listed for life-threatening arrhythmias.', 'LVAD is a bridge strategy in failing LV.', 'Transplant is listed for end-stage dilated disease.'],
-        'false': ['LVAD is used only for temporary arrhythmia suppression in this note.', 'ICD has no role in dangerous rhythms in this note.']
+        'false': ['LVAD is used only for temporary arrhythmia suppression.', 'ICD has no role in dangerous rhythms.']
     },
     {
         'name': 'Lifestyle counseling',
         'fact': 'Patients are instructed to avoid alcohol, stimulants, and high-sodium diet.',
         'priority': 'Reinforce modifiable behaviors that reduce decompensation risk.',
         'true': ['Alcohol avoidance is recommended.', 'Stimulant avoidance is recommended.', 'High sodium intake should be avoided.'],
-        'false': ['High-sodium diet is encouraged in this note.', 'Alcohol is therapeutic in cardiomyopathy in this note.']
+        'false': ['High-sodium diet is encouraged.', 'Alcohol is therapeutic in cardiomyopathy.']
     },
     {
         'name': 'Nursing fluid monitoring',
         'fact': 'Nursing priority: daily weights, and weight gain >2 lb/day indicates fluid retention requiring provider notification.',
         'priority': 'Use rapid weight changes as early warning for worsening HF.',
-        'true': ['Daily weight is emphasized in nursing care.', '>2 lb/day gain is concerning in this note.', 'Provider should be notified for rapid gain.'],
-        'false': ['Daily weights are unnecessary in this note.', 'A 5-lb weekly gain is always normal in this note.']
+        'true': ['Daily weight is emphasized in nursing care.', '>2 lb/day gain is concerning.', 'Provider should be notified for rapid gain.'],
+        'false': ['Daily weights are unnecessary.', 'A 5-lb weekly gain is always normal.']
     },
     {
         'name': 'Nursing respiratory/hemodynamic monitoring',
         'fact': 'Nursing monitoring includes I&O, vital signs, SpO2, and HOB elevation 30–45° for dyspnea relief.',
         'priority': 'Positioning and trend monitoring help detect and reduce decompensation.',
-        'true': ['I&O monitoring is listed.', 'HOB 30–45° helps dyspnea in this note.', 'SpO2 and vitals are ongoing priorities.'],
-        'false': ['Flat supine positioning is preferred for dyspnea in this note.', 'SpO2 monitoring is not needed in this note.']
+        'true': ['I&O monitoring is listed.', 'HOB 30–45° helps dyspnea.', 'SpO2 and vitals are ongoing priorities.'],
+        'false': ['Flat supine positioning is preferred for dyspnea.', 'SpO2 monitoring is not needed.']
     },
     {
         'name': 'HCM nursing teaching',
         'fact': 'For HCM, teach no strenuous activity and avoidance of dehydration, Valsalva, and nitrates.',
         'priority': 'Prevent obstruction-provoked collapse through targeted teaching.',
-        'true': ['No strenuous activity is taught for HCM.', 'Avoid dehydration/Valsalva in HCM.', 'Avoid nitrates in HCM in this note.'],
-        'false': ['Valsalva is encouraged for HCM symptom control in this note.', 'Nitrates are routine HCM therapy in this note.']
+        'true': ['No strenuous activity is taught for HCM.', 'Avoid dehydration/Valsalva in HCM.', 'Avoid nitrates in HCM.'],
+        'false': ['Valsalva is encouraged for HCM symptom control.', 'Nitrates are routine HCM therapy.']
     },
     {
         'name': 'Peripartum alert',
         'fact': 'Peripartum cardiomyopathy can occur in the last month of pregnancy or within 5 months postpartum, presenting with unexplained dyspnea/fatigue.',
         'priority': 'Screen new mothers promptly for cardiomyopathy warning symptoms.',
-        'true': ['Peripartum window includes last pregnancy month in this note.', 'Postpartum risk window extends 5 months.', 'Unexplained dyspnea/fatigue in new moms is concerning.'],
-        'false': ['Peripartum cardiomyopathy only occurs years after delivery in this note.', 'Postpartum dyspnea is always benign in this note.']
+        'true': ['Peripartum window includes last pregnancy month.', 'Postpartum risk window extends 5 months.', 'Unexplained dyspnea/fatigue in new moms is concerning.'],
+        'false': ['Peripartum cardiomyopathy only occurs years after delivery.', 'Postpartum dyspnea is always benign.']
     }
 ]
 
@@ -210,16 +212,24 @@ questions = []
 for i in range(50):
     c = concepts[i % len(concepts)]
     stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
-    correct = c['fact'] if i % 2 == 0 else c['priority']
-
     distractors = c['false'] + [
         # a false statement from another section, never a section heading
         concepts[(i + 5) % len(concepts)]['false'][(i // len(concepts)) % 2],
         'Urgent monitoring is unnecessary because these findings are low-risk.',
         'Volume-depleting strategies are universally beneficial across all subtypes.'
     ]
-    random.shuffle(distractors)
-    options = [correct] + distractors[:3]
+    # pick the correct statement whose length is closest to the wrong ones so length does not give it away
+    meta = re.compile(r'listed|described|highlighted|emphasized|mentioned|noted')
+    cands = [t for t in [c['fact'], c['priority']] + c['true'] if len(t) >= 35 and not meta.search(t)] or [c['fact'], c['priority']]
+    mid = statistics.median(len(d) for d in distractors)
+    cands.sort(key=lambda t: abs(len(t) - mid))
+    correct = cands[(i // len(concepts)) % min(2, len(cands))]
+    own = min(c['false'], key=lambda d: abs(len(d) - len(correct)))
+    extra = [f for k in (3, 8) for f in concepts[(i + k) % len(concepts)]['false']]
+    rest = [d for d in dict.fromkeys(distractors + extra) if d not in (own, correct)]
+    random.shuffle(rest)
+    rest.sort(key=lambda d: abs(len(d) - len(correct)))  # similar lengths so the answer is not the longest option
+    options = [correct, own] + rest[:2]
     random.shuffle(options)
 
     questions.append({

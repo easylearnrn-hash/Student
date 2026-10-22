@@ -1,4 +1,6 @@
 import json
+import re
+import statistics
 import random
 from pathlib import Path
 
@@ -15,175 +17,175 @@ concepts = [
         'fact': 'Blood pressure is determined by cardiac output multiplied by systemic vascular resistance (BP = CO × SVR).',
         'priority': 'Interpret BP changes by evaluating both pump flow and vascular tone.',
         'true': ['BP depends on both CO and SVR.', 'Rising SVR can increase BP when CO constant.', 'Falling CO can lower BP if SVR unchanged.'],
-        'false': ['BP equals HR minus SV in this note.', 'SVR has no influence on BP in this note.']
+        'false': ['BP equals HR minus SV.', 'SVR has no influence on BP.']
     },
     {
         'name': 'CO formula',
         'fact': 'Cardiac output equals stroke volume times heart rate (CO = SV × HR).',
         'priority': 'Assess tachy/bradycardia and stroke volume drivers when perfusion worsens.',
         'true': ['CO combines HR and SV.', 'Changes in either HR or SV change CO.', 'Formula is explicitly provided in note.'],
-        'false': ['CO equals MAP divided by pulse pressure in this note.', 'Heart rate does not affect CO in this note.']
+        'false': ['CO equals MAP divided by pulse pressure.', 'Heart rate does not affect CO.']
     },
     {
         'name': 'MAP formula and normal',
         'fact': 'MAP is calculated as (2×DBP + SBP) ÷ 3 and normal range listed is 70–100 mmHg.',
         'priority': 'Use MAP for organ perfusion triage, not SBP alone.',
         'true': ['MAP formula weights diastolic pressure twice.', 'Normal MAP range listed is 70–100.', 'MAP interpretation is key for perfusion.'],
-        'false': ['MAP is calculated as SBP + DBP divided by 2 in this note.', 'Normal MAP is listed as 30–50 in this note.']
+        'false': ['MAP is calculated as SBP + DBP divided by 2.', 'Normal MAP is listed as 30–50.']
     },
     {
         'name': 'Core definitions',
         'fact': 'BP is force against artery walls, CO is blood pumped per minute by LV, SV is blood per beat, SVR is resistance to LV ejection, preload is venous return stretch, afterload is resistance to ejection.',
         'priority': 'Distinguish preload/afterload effects when choosing interventions.',
-        'true': ['Preload is venous return/stretch in this note.', 'Afterload is resistance to ejection in this note.', 'SV is blood volume pumped per beat in this note.'],
-        'false': ['Afterload means venous return volume in this note.', 'SVR is defined as oxygen saturation in this note.']
+        'true': ['Preload is venous return/stretch.', 'Afterload is resistance to ejection.', 'SV is blood volume pumped per beat.'],
+        'false': ['Afterload means venous return volume.', 'SVR is defined as oxygen saturation.']
     },
     {
         'name': 'HTN staging normal/elevated',
         'fact': 'Normal BP is <120/<80 and elevated is 120–129 systolic with diastolic <80.',
         'priority': 'Catch early elevation stage to prevent progression.',
-        'true': ['Normal is below 120/80 in this note.', 'Elevated has SBP 120–129 with DBP <80.', 'Elevated is not yet stage 1 in this note.'],
-        'false': ['Elevated BP requires DBP over 90 in this note.', 'Normal BP is listed as under 140/90 in this note.']
+        'true': ['Normal is below 120/80.', 'Elevated has SBP 120–129 with DBP <80.', 'Elevated is not yet stage 1.'],
+        'false': ['Elevated BP requires DBP over 90.', 'Normal BP is listed as under 140/90.']
     },
     {
         'name': 'HTN stages 1 and 2',
         'fact': 'Stage 1 HTN is 130–139 or 80–89; stage 2 is ≥140 or ≥90.',
         'priority': 'Stage classification guides urgency and treatment intensity.',
         'true': ['Stage 1 includes 130–139 systolic.', 'Stage 2 begins at 140 systolic.', 'Diastolic thresholds are 80–89 for stage 1 and ≥90 for stage 2.'],
-        'false': ['Stage 1 starts at SBP 150 in this note.', 'Stage 2 requires SBP >200 in this note.']
+        'false': ['Stage 1 starts at SBP 150.', 'Stage 2 requires SBP >200.']
     },
     {
         'name': 'Hypertensive crisis threshold',
         'fact': 'Hypertensive crisis is listed as BP >180/>120.',
         'priority': 'Escalate rapidly and assess for acute organ damage.',
-        'true': ['Crisis threshold includes systolic above 180.', 'Crisis threshold includes diastolic above 120.', 'Crisis is higher risk than stage 2 in this note.'],
-        'false': ['Crisis starts at 150/90 in this note.', 'Crisis requires low BP in this note.']
+        'true': ['Crisis threshold includes systolic above 180.', 'Crisis threshold includes diastolic above 120.', 'Crisis is higher risk than stage 2.'],
+        'false': ['Crisis starts at 150/90.', 'Crisis requires low BP.']
     },
     {
         'name': 'HTN risk factors',
         'fact': 'Non-modifiable risks include age, family history, and race; modifiable include obesity, smoking, high sodium diet, sedentary lifestyle, alcohol, and stress.',
         'priority': 'Target modifiable risks aggressively for BP control.',
         'true': ['Family history is listed non-modifiable risk.', 'High sodium intake is listed modifiable risk.', 'Smoking and obesity are modifiable risks.'],
-        'false': ['Age is modifiable in this note.', 'Stress has no relation to HTN in this note.']
+        'false': ['Age is modifiable.', 'Stress has no relation to HTN.']
     },
     {
         'name': 'HTN complications',
         'fact': 'Complications listed are stroke, MI, heart failure, CKD, and retinal damage.',
         'priority': 'Uncontrolled BP requires organ-protection strategy and close follow-up.',
         'true': ['Stroke and MI are listed complications.', 'CKD is listed complication.', 'Retinal damage is listed complication.'],
-        'false': ['HTN has no end-organ complications in this note.', 'Only skin complications are listed in this note.']
+        'false': ['HTN has no end-organ complications.', 'Only skin complications are listed.']
     },
     {
         'name': 'Lifestyle HTN management',
         'fact': 'Lifestyle management includes DASH (lower sodium/higher potassium), exercise, weight loss, and smoking cessation.',
         'priority': 'Pair medication with sustained lifestyle adherence for long-term control.',
         'true': ['DASH diet is recommended.', 'Exercise and weight loss are recommended.', 'Smoking cessation is part of plan.'],
-        'false': ['High-salt diet is recommended for HTN in this note.', 'Sedentary rest is first-line lifestyle in this note.']
+        'false': ['High-salt diet is recommended for HTN.', 'Sedentary rest is first-line lifestyle.']
     },
     {
         'name': 'ACE inhibitor specifics',
         'fact': 'ACE inhibitors (e.g., lisinopril) can cause dry cough and are contraindicated in pregnancy.',
         'priority': 'Screen for pregnancy status and cough intolerance.',
         'true': ['Dry cough is a listed ACE inhibitor side effect.', 'ACE inhibitors are contraindicated in pregnancy.', 'Lisinopril is listed ACE example.'],
-        'false': ['ACE inhibitors are preferred during pregnancy in this note.', 'ACE inhibitors have no cough risk in this note.']
+        'false': ['ACE inhibitors are preferred during pregnancy.', 'ACE inhibitors have no cough risk.']
     },
     {
         'name': 'ARB specifics',
         'fact': 'ARBs (e.g., losartan) are used if ACE inhibitors are not tolerated and do not cause cough per note.',
         'priority': 'Use ARB substitution when ACE cough limits adherence.',
         'true': ['Losartan is listed ARB example.', 'ARBs are used when ACE not tolerated.', 'No-cough advantage is highlighted.'],
-        'false': ['ARBs are only emergency IV drugs in this note.', 'ARBs worsen ACE cough in this note.']
+        'false': ['ARBs are only emergency IV drugs.', 'ARBs worsen ACE cough.']
     },
     {
         'name': 'Thiazide/CCB/beta-blocker roles',
         'fact': 'Thiazides are first-line for most patients, CCBs cause vasodilation, and beta-blockers reduce HR/contractility.',
         'priority': 'Match medication mechanism to hemodynamic target.',
         'true': ['HCTZ is listed first-line for many patients.', 'Amlodipine is listed for vasodilation.', 'Metoprolol lowers HR and contractility.'],
-        'false': ['Beta-blockers increase contractility in this note.', 'CCBs are listed as preload boosters in this note.']
+        'false': ['Beta-blockers increase contractility.', 'CCBs are listed as preload boosters.']
     },
     {
         'name': 'Hypertensive emergency treatment',
         'fact': 'Hypertensive emergency with organ damage requires IV antihypertensives such as nicardipine, labetalol, or nitroprusside.',
         'priority': 'Treat with controlled IV reduction while monitoring perfusion.',
         'true': ['IV nicardipine/labetalol/nitroprusside are listed.', 'Organ damage presence defines emergency context.', 'Emergency is distinct from asymptomatic severe HTN.'],
-        'false': ['Oral-only delayed treatment is recommended in this note.', 'No organ damage assessment is needed in this note.']
+        'false': ['Oral-only delayed treatment is recommended.', 'No organ damage assessment is needed.']
     },
     {
         'name': 'MAP reduction limit',
         'fact': 'In hypertensive emergency, MAP should not be reduced by more than 25% in the first hour.',
         'priority': 'Avoid overcorrection that can cause organ hypoperfusion.',
         'true': ['First-hour MAP reduction cap is 25%.', 'Rapid excessive reduction is unsafe.', 'MAP-guided titration is emphasized.'],
-        'false': ['Reduce MAP by 60% in first hour in this note.', 'MAP has no role in emergency treatment in this note.']
+        'false': ['Reduce MAP by 60% in first hour.', 'MAP has no role in emergency treatment.']
     },
     {
         'name': 'Hypotension definition',
         'fact': 'Hypotension is systolic <90 or diastolic <60 and is significant when symptoms or hypoperfusion are present.',
         'priority': 'Treat symptomatic low BP rapidly to protect organ perfusion.',
-        'true': ['SBP under 90 is hypotension in this note.', 'DBP under 60 is hypotension in this note.', 'Clinical significance depends on perfusion impact.'],
-        'false': ['Hypotension is defined as SBP under 130 in this note.', 'Any low BP without symptoms is always shock in this note.']
+        'true': ['SBP under 90 is hypotension.', 'DBP under 60 is hypotension.', 'Clinical significance depends on perfusion impact.'],
+        'false': ['Hypotension is defined as SBP under 130.', 'Any low BP without symptoms is always shock.']
     },
     {
         'name': 'Hypotension types and causes',
         'fact': 'Types listed are orthostatic, hypovolemic, neurogenic, and cardiogenic; causes include bleeding/dehydration, HF, sepsis, medications, and Addison disease.',
         'priority': 'Identify subtype/cause to guide targeted therapy.',
         'true': ['Orthostatic and hypovolemic are listed types.', 'Sepsis and HF are listed causes.', 'Meds and Addison disease are listed causes.'],
-        'false': ['Only neurogenic hypotension exists in this note.', 'Sepsis cannot cause hypotension in this note.']
+        'false': ['Only neurogenic hypotension exists.', 'Sepsis cannot cause hypotension.']
     },
     {
         'name': 'Orthostatic criteria',
         'fact': 'Orthostatic hypotension is drop ≥20 systolic or ≥10 diastolic within 3 minutes of standing.',
         'priority': 'Measure postural vitals correctly before labeling orthostasis.',
         'true': ['Systolic drop threshold is 20 mmHg.', 'Diastolic drop threshold is 10 mmHg.', 'Timing window is within 3 minutes of standing.'],
-        'false': ['Orthostatic criteria require HR rise only in this note.', 'Drop must occur after 30 minutes in this note.']
+        'false': ['Orthostatic criteria require HR rise only.', 'Drop must occur after 30 minutes.']
     },
     {
         'name': 'Orthostatic management',
         'fact': 'Nursing actions include dangling legs before standing, slow position changes, and adequate hydration.',
         'priority': 'Prevent falls and syncope with positional safety teaching.',
         'true': ['Dangle legs before standing is listed.', 'Slow position changes are recommended.', 'Hydration support is recommended.'],
-        'false': ['Rapid standing is preferred in this note.', 'Hydration should be restricted in orthostasis in this note.']
+        'false': ['Rapid standing is preferred.', 'Hydration should be restricted in orthostasis.']
     },
     {
         'name': 'Hypotension symptoms',
         'fact': 'Symptoms include dizziness, syncope, blurred vision, confusion, compensatory tachycardia, cool pale skin, and low urine output.',
         'priority': 'Trend neuro, skin, pulse, and urine output for perfusion decline.',
         'true': ['Syncope/dizziness are listed symptoms.', 'Low urine output is listed symptom.', 'Cool pale skin and tachycardia are listed.'],
-        'false': ['Warm flushed skin with high urine output is hallmark in this note.', 'Bradycardia is always present in this note.']
+        'false': ['Warm flushed skin with high urine output is hallmark.', 'Bradycardia is always present.']
     },
     {
         'name': 'Hypotension treatment',
         'fact': 'Management includes treating cause, IV fluids or blood products for hypovolemia, vasopressors for severe cases, supine position with legs elevated, and slow postural changes.',
         'priority': 'Restore circulating volume and perfusion while preventing recurrent drops.',
         'true': ['IV fluids/blood products used if hypovolemic.', 'Norepinephrine/dopamine listed for severe hypotension.', 'Supine with legs elevated is listed positioning.'],
-        'false': ['Diuresis is first-line for hypovolemic hypotension in this note.', 'Standing position is preferred in severe hypotension in this note.']
+        'false': ['Diuresis is first-line for hypovolemic hypotension.', 'Standing position is preferred in severe hypotension.']
     },
     {
         'name': 'CO factors: heart rate',
         'fact': 'CO can increase with tachycardia/epinephrine and decrease with bradycardia/beta-blockers per table.',
         'priority': 'Evaluate whether HR changes are compensatory or harmful to perfusion.',
         'true': ['Tachycardia and epinephrine can raise CO in table.', 'Bradycardia can lower CO in table.', 'Beta-blockers can lower CO via HR effects in table.'],
-        'false': ['HR has no relation to CO in this table.', 'Bradycardia always raises CO in this note.']
+        'false': ['HR has no relation to CO in this table.', 'Bradycardia always raises CO.']
     },
     {
         'name': 'CO factors: preload',
         'fact': 'Preload increase with fluid volume can raise CO; dehydration/hemorrhage lower preload and CO.',
         'priority': 'Volume assessment is central in hypotension and shock states.',
         'true': ['Higher fluid volume can increase preload/CO.', 'Dehydration lowers preload in table.', 'Hemorrhage lowers preload in table.'],
-        'false': ['Hemorrhage raises preload in this note.', 'Preload is unaffected by fluid status in this note.']
+        'false': ['Hemorrhage raises preload.', 'Preload is unaffected by fluid status.']
     },
     {
         'name': 'CO factors: afterload/contractility',
         'fact': 'Vasodilation (lower SVR) can improve CO while vasoconstriction (higher SVR) can reduce CO; contractility rises with digoxin/epinephrine and falls with HF/MI.',
         'priority': 'Balance vascular tone and contractility when optimizing output.',
         'true': ['Higher SVR can reduce CO in the table context.', 'Digoxin/epinephrine increase contractility in table.', 'HF/MI decrease contractility in table.'],
-        'false': ['Vasoconstriction always increases CO in this note.', 'HF improves contractility in this note.']
+        'false': ['Vasoconstriction always increases CO.', 'HF improves contractility.']
     },
     {
         'name': 'NCLEX MAP warning',
         'fact': 'MAP below 60 mmHg means organs are at risk of ischemia and immediate BP/oxygenation support is priority.',
         'priority': 'Treat MAP <60 as urgent perfusion threat.',
         'true': ['MAP <60 is ischemia risk in note tip.', 'Immediate BP support is prioritized.', 'Oxygenation support is also prioritized.'],
-        'false': ['MAP 55 is acceptable organ perfusion in this note.', 'No action needed unless MAP <20 in this note.']
+        'false': ['MAP 55 is acceptable organ perfusion.', 'No action needed unless MAP <20.']
     }
 ]
 
@@ -217,16 +219,24 @@ questions = []
 for i in range(50):
     c = concepts[i % len(concepts)]
     stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
-    correct = c['fact'] if i % 2 == 0 else c['priority']
-
     distractors = c['false'] + [
         # a false statement from another section, never a section heading
         concepts[(i + 4) % len(concepts)]['false'][(i // len(concepts)) % 2],
         'Because perfusion appears stable, immediate reassessment is unnecessary.',
         'Aggressive BP shifts are always preferred regardless of organ perfusion.'
     ]
-    random.shuffle(distractors)
-    options = [correct] + distractors[:3]
+    # pick the correct statement whose length is closest to the wrong ones so length does not give it away
+    meta = re.compile(r'listed|described|highlighted|emphasized|mentioned|noted')
+    cands = [t for t in [c['fact'], c['priority']] + c['true'] if len(t) >= 35 and not meta.search(t)] or [c['fact'], c['priority']]
+    mid = statistics.median(len(d) for d in distractors)
+    cands.sort(key=lambda t: abs(len(t) - mid))
+    correct = cands[(i // len(concepts)) % min(2, len(cands))]
+    own = min(c['false'], key=lambda d: abs(len(d) - len(correct)))
+    extra = [f for k in (3, 8) for f in concepts[(i + k) % len(concepts)]['false']]
+    rest = [d for d in dict.fromkeys(distractors + extra) if d not in (own, correct)]
+    random.shuffle(rest)
+    rest.sort(key=lambda d: abs(len(d) - len(correct)))  # similar lengths so the answer is not the longest option
+    options = [correct, own] + rest[:2]
     random.shuffle(options)
 
     questions.append({

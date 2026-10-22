@@ -1,4 +1,6 @@
 import json
+import re
+import statistics
 import random
 from pathlib import Path
 
@@ -19,8 +21,8 @@ concepts = [
             'Valve involvement is a central feature.'
         ],
         'false': [
-            'Endocarditis is infection of the pericardium in this note.',
-            'Vegetations in this note are sterile in infective cases.'
+            'Endocarditis is infection of the pericardium.',
+            'Vegetations are sterile in infective cases.'
         ]
     },
     {
@@ -28,13 +30,13 @@ concepts = [
         'fact': 'Mitral valve is commonly affected on the left side, and tricuspid involvement is common in IV drug use (right-sided).',
         'priority': 'Use risk profile to anticipate likely side/valve complications.',
         'true': [
-            'Mitral valve involvement is common in this note.',
+            'Mitral valve involvement is common.',
             'IV drug use is linked to right-sided (tricuspid) disease.',
             'Valve pattern can reflect exposure risks.'
         ],
         'false': [
-            'IV drug use is primarily linked to left-sided mitral lesions in this note.',
-            'Valve choice is random and unrelated to risk factors in this note.'
+            'IV drug use is primarily linked to left-sided mitral lesions.',
+            'Valve choice is random and unrelated to risk factors.'
         ]
     },
     {
@@ -44,11 +46,11 @@ concepts = [
         'true': [
             'S. viridans and S. aureus are major pathogens listed.',
             'Enterococcus is associated with GI/GU sources.',
-            'Prosthetic valves are linked with S. epidermidis in this note.'
+            'Prosthetic valves are linked with S. epidermidis.'
         ],
         'false': [
-            'HACEK organisms are excluded in this note.',
-            'Only viral organisms cause infective endocarditis in this note.'
+            'HACEK organisms are excluded.',
+            'Only viral organisms cause infective endocarditis.'
         ]
     },
     {
@@ -56,13 +58,13 @@ concepts = [
         'fact': 'Non-infective endocarditis includes marantic (cancer/wasting) and Libman-Sacks (SLE), where vegetations have no organisms.',
         'priority': 'Differentiate sterile vegetations from true infection before prolonged antimicrobials.',
         'true': [
-            'Marantic endocarditis is a sterile form in this note.',
+            'Marantic endocarditis is a sterile form.',
             'Libman-Sacks is associated with SLE.',
             'Non-infective vegetations lack organisms.'
         ],
         'false': [
-            'Libman-Sacks is caused by S. aureus in this note.',
-            'All endocarditis forms in this note are infectious.'
+            'Libman-Sacks is caused by S. aureus.',
+            'All endocarditis forms are infectious.'
         ]
     },
     {
@@ -70,13 +72,13 @@ concepts = [
         'fact': 'Acute infective endocarditis is commonly due to S. aureus, has sudden severe onset, often attacks healthy valves, and is rapidly destructive.',
         'priority': 'Escalate quickly in high-fever septic presentations with new murmur.',
         'true': [
-            'AIE onset is sudden and severe in this note.',
+            'AIE onset is sudden and severe.',
             'S. aureus is the common acute organism listed.',
             'AIE can involve previously healthy valves.'
         ],
         'false': [
-            'AIE is insidious over months in this note.',
-            'AIE is less destructive than subacute disease in this note.'
+            'AIE is insidious over months.',
+            'AIE is less destructive than subacute disease.'
         ]
     },
     {
@@ -84,13 +86,13 @@ concepts = [
         'fact': 'Subacute infective endocarditis is commonly due to S. viridans, progresses gradually over weeks to months, and usually occurs on pre-existing valve disease.',
         'priority': 'Investigate prolonged low-grade constitutional symptoms in at-risk valve patients.',
         'true': [
-            'SIE course is gradual in this note.',
+            'SIE course is gradual.',
             'S. viridans is the common subacute organism listed.',
             'Pre-existing valve disease is commonly present in SIE.'
         ],
         'false': [
-            'SIE typically presents as sudden sepsis in this note.',
-            'SIE usually occurs on completely normal valves in this note.'
+            'SIE typically presents as sudden sepsis.',
+            'SIE usually occurs on completely normal valves.'
         ]
     },
     {
@@ -103,8 +105,8 @@ concepts = [
             'Sepsis/bacteremia source is included in PATHOGENS.'
         ],
         'false': [
-            'PATHOGENS excludes invasive procedures in this note.',
-            'Age has no impact on risk in this note.'
+            'PATHOGENS excludes invasive procedures.',
+            'Age has no impact on risk.'
         ]
     },
     {
@@ -117,8 +119,8 @@ concepts = [
             'Positive blood cultures support diagnosis.'
         ],
         'false': [
-            'Fever is uncommon in endocarditis in this note.',
-            'A new murmur argues against endocarditis in this note.'
+            'Fever is uncommon in endocarditis.',
+            'A new murmur argues against endocarditis.'
         ]
     },
     {
@@ -126,13 +128,13 @@ concepts = [
         'fact': 'Janeway lesions are painless flat red spots on palms and soles from embolic phenomena.',
         'priority': 'Differentiate painless Janeway lesions from painful Osler nodes at bedside.',
         'true': [
-            'Janeway lesions are painless in this note.',
+            'Janeway lesions are painless.',
             'They are found on palms/soles.',
             'They reflect embolic phenomena.'
         ],
         'false': [
-            'Janeway lesions are painful fingertip nodules in this note.',
-            'Janeway lesions are retinal findings in this note.'
+            'Janeway lesions are painful fingertip nodules.',
+            'Janeway lesions are retinal findings.'
         ]
     },
     {
@@ -140,13 +142,13 @@ concepts = [
         'fact': 'Osler nodes are painful nodules on fingertips/toes and represent immunologic phenomena.',
         'priority': 'Use painful digital lesions to strengthen diagnostic probability with other criteria.',
         'true': [
-            'Osler nodes are painful in this note.',
+            'Osler nodes are painful.',
             'They occur on fingers or toes.',
             'They are categorized as immunologic phenomena in criteria.'
         ],
         'false': [
-            'Osler nodes are painless palm lesions in this note.',
-            'Osler nodes are a vascular catheter complication in this note.'
+            'Osler nodes are painless palm lesions.',
+            'Osler nodes are a vascular catheter complication.'
         ]
     },
     {
@@ -159,8 +161,8 @@ concepts = [
             'Both support systemic endocarditis manifestations.'
         ],
         'false': [
-            'Roth spots are painful toe nodules in this note.',
-            'Splinter hemorrhages are diffuse trunk petechiae in this note.'
+            'Roth spots are painful toe nodules.',
+            'Splinter hemorrhages are diffuse trunk petechiae.'
         ]
     },
     {
@@ -173,8 +175,8 @@ concepts = [
             'Right-sided disease can embolize to lungs (PE).'
         ],
         'false': [
-            'Endocarditis emboli only affect skin in this note.',
-            'Right-sided emboli primarily cause cerebral emboli in this note.'
+            'Endocarditis emboli only affect skin.',
+            'Right-sided emboli primarily cause cerebral emboli.'
         ]
     },
     {
@@ -187,8 +189,8 @@ concepts = [
             'New valve regurgitation supports major criteria.'
         ],
         'false': [
-            'A single nonspecific fever is a major criterion in this note.',
-            'Negative blood cultures satisfy major criteria in this note.'
+            'A single nonspecific fever is a major criterion.',
+            'Negative blood cultures satisfy major criteria.'
         ]
     },
     {
@@ -201,8 +203,8 @@ concepts = [
             'Immunologic findings like Osler/Roth count as minor.'
         ],
         'false': [
-            'Any two minor criteria are definite diagnosis in this note.',
-            'Predisposing condition is excluded from minor criteria in this note.'
+            'Any two minor criteria are definite diagnosis.',
+            'Predisposing condition is excluded from minor criteria.'
         ]
     },
     {
@@ -215,8 +217,8 @@ concepts = [
             'Five minor criteria can establish diagnosis.'
         ],
         'false': [
-            'One major alone is always definitive in this note.',
-            'Three minor criteria alone are definitive in this note.'
+            'One major alone is always definitive.',
+            'Three minor criteria alone are definitive.'
         ]
     },
     {
@@ -224,13 +226,13 @@ concepts = [
         'fact': 'Obtain blood cultures ×3 from different sites before starting antibiotics.',
         'priority': 'Preserve microbiologic yield by drawing cultures prior to first dose.',
         'true': [
-            'Three culture sets are recommended in this note.',
+            'Three culture sets are recommended.',
             'Different collection sites are required.',
             'Cultures should be drawn before antibiotics.'
         ],
         'false': [
-            'Antibiotics should start before any cultures in this note.',
-            'Only one blood culture is needed in this note.'
+            'Antibiotics should start before any cultures.',
+            'Only one blood culture is needed.'
         ]
     },
     {
@@ -238,13 +240,13 @@ concepts = [
         'fact': 'TEE is more sensitive than TTE for detecting vegetations.',
         'priority': 'Escalate to TEE when suspicion remains high despite less-sensitive imaging.',
         'true': [
-            'TEE is more sensitive than TTE in this note.',
+            'TEE is more sensitive than TTE.',
             'Echo evaluates endocardial involvement.',
             'Vegetation detection is central to diagnosis.'
         ],
         'false': [
-            'TTE is always more sensitive than TEE in this note.',
-            'Echo has no role in diagnosis in this note.'
+            'TTE is always more sensitive than TEE.',
+            'Echo has no role in diagnosis.'
         ]
     },
     {
@@ -257,8 +259,8 @@ concepts = [
             'Hematuria may suggest renal embolic involvement.'
         ],
         'false': [
-            'Inflammatory markers are always normal in this note.',
-            'Hematuria excludes endocarditis in this note.'
+            'Inflammatory markers are always normal.',
+            'Hematuria excludes endocarditis.'
         ]
     },
     {
@@ -271,8 +273,8 @@ concepts = [
             'Culture clearance monitoring is required.'
         ],
         'false': [
-            'A 3-day oral course is adequate in this note.',
-            'No culture follow-up is needed after therapy starts in this note.'
+            'A 3-day oral course is adequate.',
+            'No culture follow-up is needed after therapy starts.'
         ]
     },
     {
@@ -285,8 +287,8 @@ concepts = [
             'Enterococcus regimen includes ampicillin + gentamicin.'
         ],
         'false': [
-            'MRSA is first-line treated with amoxicillin alone in this note.',
-            'Enterococcus is treated with no antibiotics in this note.'
+            'MRSA is first-line treated with amoxicillin alone.',
+            'Enterococcus is treated with no antibiotics.'
         ]
     },
     {
@@ -299,8 +301,8 @@ concepts = [
             'Vegetation >10 mm with embolic risk is an indication.'
         ],
         'false': [
-            'All cases should avoid surgery regardless of deterioration in this note.',
-            'Fungal endocarditis is never surgical in this note.'
+            'All cases should avoid surgery regardless of deterioration.',
+            'Fungal endocarditis is never surgical.'
         ]
     },
     {
@@ -313,8 +315,8 @@ concepts = [
             'Long-term IV access maintenance is emphasized.'
         ],
         'false': [
-            'Murmur reassessment is unnecessary in this note.',
-            'Short peripheral IV rotation is preferred over stable long-term access in this note.'
+            'Murmur reassessment is unnecessary.',
+            'Short peripheral IV rotation is preferred over stable long-term access.'
         ]
     },
     {
@@ -327,8 +329,8 @@ concepts = [
             'Prevention targets bacteremia-triggered endocarditis.'
         ],
         'false': [
-            'Dental prophylaxis is unnecessary in high-risk patients in this note.',
-            'Prophylaxis is only after procedures in this note.'
+            'Dental prophylaxis is unnecessary in high-risk patients.',
+            'Prophylaxis is only after procedures.'
         ]
     },
     {
@@ -341,8 +343,8 @@ concepts = [
             'Embolic signs increase concern for active IE.'
         ],
         'false': [
-            'Embolic signs lower IE suspicion in this note.',
-            'Culture positivity should delay treatment in this note.'
+            'Embolic signs lower IE suspicion.',
+            'Culture positivity should delay treatment.'
         ]
     }
 ]
@@ -377,16 +379,24 @@ questions = []
 for i in range(50):
     c = concepts[i % len(concepts)]
     stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
-    correct = c['fact'] if i % 2 == 0 else c['priority']
-
     distractors = c['false'] + [
         # a false statement from another section, never a section heading
         concepts[(i + 5) % len(concepts)]['false'][(i // len(concepts)) % 2],
         'Because embolic risk is minimal, urgent workup is unnecessary.',
         'Cultures should be deferred until after several antibiotic doses.'
     ]
-    random.shuffle(distractors)
-    options = [correct] + distractors[:3]
+    # pick the correct statement whose length is closest to the wrong ones so length does not give it away
+    meta = re.compile(r'listed|described|highlighted|emphasized|mentioned|noted')
+    cands = [t for t in [c['fact'], c['priority']] + c['true'] if len(t) >= 35 and not meta.search(t)] or [c['fact'], c['priority']]
+    mid = statistics.median(len(d) for d in distractors)
+    cands.sort(key=lambda t: abs(len(t) - mid))
+    correct = cands[(i // len(concepts)) % min(2, len(cands))]
+    own = min(c['false'], key=lambda d: abs(len(d) - len(correct)))
+    extra = [f for k in (3, 8) for f in concepts[(i + k) % len(concepts)]['false']]
+    rest = [d for d in dict.fromkeys(distractors + extra) if d not in (own, correct)]
+    random.shuffle(rest)
+    rest.sort(key=lambda d: abs(len(d) - len(correct)))  # similar lengths so the answer is not the longest option
+    options = [correct, own] + rest[:2]
     random.shuffle(options)
 
     ans_id = chr(97 + options.index(correct))

@@ -1,4 +1,6 @@
 import json
+import re
+import statistics
 import random
 from pathlib import Path
 
@@ -91,7 +93,7 @@ concepts = [
             "Anterior MI and chronic hypertension are common contributors."
         ],
         "false": [
-            "Tricuspid disease is listed as the most common isolated cause of left HF in this note.",
+            "Tricuspid disease is listed as the most common isolated cause of left HF.",
             "Left HF is unrelated to cardiomyopathy."
         ]
     },
@@ -105,8 +107,8 @@ concepts = [
             "Pulmonary edema can result from this process."
         ],
         "false": [
-            "LV failure first causes isolated portal venous congestion in the note.",
-            "Left HF pathophysiology in the note excludes alveolar fluid leakage."
+            "LV failure first causes isolated portal venous congestion.",
+            "Left HF pathophysiology excludes alveolar fluid leakage."
         ]
     },
     {
@@ -119,8 +121,8 @@ concepts = [
             "DOE should prompt reassessment of fluid status and respiratory findings."
         ],
         "false": [
-            "DOE is unrelated to left HF in this note.",
-            "DOE appears only in right-sided HF section in this note."
+            "DOE is unrelated to left HF.",
+            "DOE appears only in right-sided HF section."
         ]
     },
     {
@@ -133,8 +135,8 @@ concepts = [
             "Both findings support pulmonary congestion from left HF."
         ],
         "false": [
-            "Orthopnea is identified as a right-sided-only symptom in this note.",
-            "PND indicates isolated GI congestion in this note."
+            "Orthopnea is identified as a right-sided-only symptom.",
+            "PND indicates isolated GI congestion."
         ]
     },
     {
@@ -143,12 +145,12 @@ concepts = [
         "priority": "Treat as high-acuity respiratory compromise.",
         "true": [
             "Pink frothy sputum indicates severe pulmonary edema.",
-            "Pulmonary edema is strongly linked to left-sided failure in the note.",
+            "Pulmonary edema is strongly linked to left-sided failure.",
             "Respiratory compromise may escalate rapidly when this appears."
         ],
         "false": [
             "Pink frothy sputum is listed as a benign right-sided finding.",
-            "Pulmonary edema is excluded from left HF in this note."
+            "Pulmonary edema is excluded from left HF."
         ]
     },
     {
@@ -156,13 +158,13 @@ concepts = [
         "fact": "S3 gallop is described as a hallmark of heart failure (especially in left HF section).",
         "priority": "Interpret S3 with full volume-overload context.",
         "true": [
-            "S3 gallop is a hallmark heart failure clue in this note.",
+            "S3 gallop is a hallmark heart failure clue.",
             "S3 may be present with left-sided congestion.",
             "S3 should be integrated with dyspnea, crackles, and edema findings."
         ],
         "false": [
-            "S3 excludes heart failure in this note.",
-            "S3 is only a normal physiologic finding in this note."
+            "S3 excludes heart failure.",
+            "S3 is only a normal physiologic finding."
         ]
     },
     {
@@ -176,7 +178,7 @@ concepts = [
         ],
         "false": [
             "Right-sided HF is described as isolated alveolar edema only.",
-            "Right-sided HF has no venous pressure effects in this note."
+            "Right-sided HF has no venous pressure effects."
         ]
     },
     {
@@ -184,13 +186,13 @@ concepts = [
         "fact": "Most common right HF cause is left-sided HF; others include tricuspid disease, pulmonary HTN, RV MI, chronic lung disease.",
         "priority": "Search upstream causes when right-sided findings appear.",
         "true": [
-            "Left-sided HF is the most common cause of right-sided HF in this note.",
+            "Left-sided HF is the most common cause of right-sided HF.",
             "Pulmonary hypertension can drive right-sided failure.",
             "RV MI and tricuspid disease are listed right-sided causes."
         ],
         "false": [
-            "Aortic stenosis is listed as the dominant right-sided cause in this note.",
-            "Right-sided HF in this note is unrelated to chronic lung disease."
+            "Aortic stenosis is listed as the dominant right-sided cause.",
+            "Right-sided HF is unrelated to chronic lung disease."
         ]
     },
     {
@@ -203,8 +205,8 @@ concepts = [
             "Peripheral congestion results from this mechanism."
         ],
         "false": [
-            "RV failure in this note lowers venous pressure and prevents edema.",
-            "RV failure in this note directly causes only alveolar edema."
+            "RV failure lowers venous pressure and prevents edema.",
+            "RV failure directly causes only alveolar edema."
         ]
     },
     {
@@ -217,8 +219,8 @@ concepts = [
             "JVD with edema supports peripheral congestion."
         ],
         "false": [
-            "JVD is listed as a hallmark of isolated left alveolar pathology in this note.",
-            "JVD indicates low venous pressure in this note."
+            "JVD is listed as a hallmark of isolated left alveolar pathology.",
+            "JVD indicates low venous pressure."
         ]
     },
     {
@@ -232,7 +234,7 @@ concepts = [
         ],
         "false": [
             "Peripheral edema is absent in right HF according to this note.",
-            "Unilateral trauma edema is listed as classic HF edema in this note."
+            "Unilateral trauma edema is listed as classic HF edema."
         ]
     },
     {
@@ -245,7 +247,7 @@ concepts = [
             "Daily weights are a core monitoring strategy."
         ],
         "false": [
-            "Weight changes are considered unreliable and not used in HF monitoring in this note.",
+            "Weight changes are considered unreliable and not used in HF monitoring.",
             "The note states 1 kg equals 100 mL of fluid."
         ]
     },
@@ -260,7 +262,7 @@ concepts = [
         ],
         "false": [
             "Ascites is listed as a defining left-sided pulmonary finding.",
-            "Hepatomegaly in this note is unrelated to venous congestion."
+            "Hepatomegaly is unrelated to venous congestion."
         ]
     },
     {
@@ -273,8 +275,8 @@ concepts = [
             "JVD and peripheral edema can appear in COPD-related right HF."
         ],
         "false": [
-            "Cor pulmonale in this note is a left-ventricular primary valvular disorder.",
-            "Chronic lung disease reduces RV workload in this note."
+            "Cor pulmonale is a left-ventricular primary valvular disorder.",
+            "Chronic lung disease reduces RV workload."
         ]
     },
     {
@@ -288,7 +290,7 @@ concepts = [
         ],
         "false": [
             "BNP elevation is impossible in right HF according to this note.",
-            "Both sides are associated with the same valve pattern in this note."
+            "Both sides are associated with the same valve pattern."
         ]
     },
     {
@@ -301,8 +303,8 @@ concepts = [
             "Beta-blockers reduce workload in chronic HF care."
         ],
         "false": [
-            "Sodium loading is recommended in this note.",
-            "Daily weights are discouraged in this note."
+            "Sodium loading is recommended.",
+            "Daily weights are discouraged."
         ]
     },
     {
@@ -315,8 +317,8 @@ concepts = [
             "Using same time and same scale is emphasized."
         ],
         "false": [
-            "Any weight change under 10 lb/day is ignored in this note.",
-            "Daily weighing time variability is preferred in this note."
+            "Any weight change under 10 lb/day is ignored.",
+            "Daily weighing time variability is preferred."
         ]
     },
     {
@@ -329,7 +331,7 @@ concepts = [
             "LVAD or transplant is considered in refractory HFrEF."
         ],
         "false": [
-            "Immediate fluid bolus is first-line for pulmonary edema in this note.",
+            "Immediate fluid bolus is first-line for pulmonary edema.",
             "BiPAP is contraindicated in refractory pulmonary edema per this note."
         ]
     },
@@ -352,13 +354,13 @@ concepts = [
         "fact": "Early digoxin toxicity signs listed are nausea/vomiting and visual disturbances (halos).",
         "priority": "Hold and escalate promptly when early toxicity appears.",
         "true": [
-            "Nausea and vomiting are early digoxin toxicity signs in this note.",
-            "Visual halos are a toxicity warning sign in this note.",
+            "Nausea and vomiting are early digoxin toxicity signs.",
+            "Visual halos are a toxicity warning sign.",
             "These findings warrant prompt medication review and provider notification."
         ],
         "false": [
-            "Visual halos are listed as benign and expected in this note.",
-            "Digoxin toxicity is described as asymptomatic in this note."
+            "Visual halos are listed as benign and expected.",
+            "Digoxin toxicity is described as asymptomatic."
         ]
     },
     {
@@ -371,8 +373,8 @@ concepts = [
             "Hold digoxin when infant HR is below 90."
         ],
         "false": [
-            "The same 60 bpm threshold applies to all ages in this note.",
-            "Digoxin is never held for bradycardia in this note."
+            "The same 60 bpm threshold applies to all ages.",
+            "Digoxin is never held for bradycardia."
         ]
     }
 ]
@@ -409,8 +411,6 @@ questions = []
 for i in range(50):
     c = concepts[i % len(concepts)]
     stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
-    correct = c["fact"] if i % 2 == 0 else c["priority"]
-
     distractor_pool = c["false"] + [
         # a false statement from another section, never a section heading
         concepts[(i + 3) % len(concepts)]['false'][(i // len(concepts)) % 2],
@@ -418,10 +418,18 @@ for i in range(50):
         "No further assessment is needed when symptoms fluctuate.",
         "Fluid trends are not useful for cardiovascular reassessment."
     ]
-    random.shuffle(distractor_pool)
-    distractors = distractor_pool[:3]
-
-    choices = [correct] + distractors
+    # pick the correct statement whose length is closest to the wrong ones so length does not give it away
+    meta = re.compile(r'listed|described|highlighted|emphasized|mentioned|noted')
+    cands = [t for t in [c["fact"], c["priority"]] + c["true"] if len(t) >= 35 and not meta.search(t)] or [c["fact"], c["priority"]]
+    mid = statistics.median(len(d) for d in distractor_pool)
+    cands.sort(key=lambda t: abs(len(t) - mid))
+    correct = cands[(i // len(concepts)) % min(2, len(cands))]
+    own = min(c["false"], key=lambda d: abs(len(d) - len(correct)))
+    extra = [f for k in (3, 8) for f in concepts[(i + k) % len(concepts)]["false"]]
+    rest = [d for d in dict.fromkeys(distractor_pool + extra) if d not in (own, correct)]
+    random.shuffle(rest)
+    rest.sort(key=lambda d: abs(len(d) - len(correct)))  # similar lengths so the answer is not the longest option
+    choices = [correct, own] + rest[:2]
     random.shuffle(choices)
     ans_idx = choices.index(correct)
 

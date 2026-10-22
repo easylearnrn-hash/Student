@@ -1,4 +1,6 @@
 import json
+import re
+import statistics
 import random
 from pathlib import Path
 
@@ -16,168 +18,168 @@ concepts = [
         'fact': 'aPTT monitors heparin therapy; normal is about 30–40 sec and therapeutic heparin range is 45–80 sec.',
         'priority': 'Trend aPTT during heparin titration to avoid under- or over-anticoagulation.',
         'true': ['aPTT is used to monitor heparin.', 'Therapeutic heparin aPTT is 45–80 sec.', 'Normal aPTT is around 30–40 sec.'],
-        'false': ['aPTT is the primary warfarin monitoring test in this note.', 'Therapeutic heparin aPTT is below 20 sec in this note.']
+        'false': ['aPTT is the primary warfarin monitoring test.', 'Therapeutic heparin aPTT is below 20 sec.']
     },
     {
         'name': 'PT/INR role',
         'fact': 'PT/INR monitor warfarin; INR therapeutic range is 2–3 for most indications.',
         'priority': 'Use INR trends to guide safe warfarin dosing.',
-        'true': ['INR is used for warfarin monitoring.', 'Typical therapeutic INR is 2–3.', 'PT is associated with warfarin monitoring in this note.'],
-        'false': ['Warfarin is monitored by aPTT only in this note.', 'INR goal for most patients is below 1 in this note.']
+        'true': ['INR is used for warfarin monitoring.', 'Typical therapeutic INR is 2–3.', 'PT is associated with warfarin monitoring.'],
+        'false': ['Warfarin is monitored by aPTT only.', 'INR goal for most patients is below 1.']
     },
     {
         'name': 'heparin basics',
         'fact': 'Heparin is given IV or SubQ, has immediate IV onset, and is used for DVT, PE, ACS, dialysis, and perioperative prevention.',
         'priority': 'Heparin is chosen when rapid anticoagulation is needed.',
         'true': ['Heparin can be IV or SubQ.', 'IV heparin onset is immediate.', 'DVT/PE/ACS are listed uses.'],
-        'false': ['Heparin is oral only in this note.', 'Heparin requires 2–5 days to start working in this note.']
+        'false': ['Heparin is oral only.', 'Heparin requires 2–5 days to start working.']
     },
     {
         'name': 'heparin antidote',
         'fact': 'Protamine sulfate is the antidote for heparin.',
         'priority': 'Prepare protamine quickly when significant heparin-associated bleeding risk is present.',
-        'true': ['Protamine sulfate reverses heparin.', 'Protamine is linked with heparin overdose management.', 'Heparin has a named antidote in this note.'],
-        'false': ['Vitamin K is the heparin antidote in this note.', 'Idarucizumab reverses heparin in this note.']
+        'true': ['Protamine sulfate reverses heparin.', 'Protamine is linked with heparin overdose management.', 'Heparin has a named antidote.'],
+        'false': ['Vitamin K is the heparin antidote.', 'Idarucizumab reverses heparin.']
     },
     {
         'name': 'aPTT above 80',
         'fact': 'If aPTT exceeds 80 sec: stop infusion, assess vitals for bleeding, prepare protamine, then notify provider before giving antidote.',
         'priority': 'Follow sequence: stop, assess, prepare, call.',
         'true': ['Stop heparin infusion if aPTT is >80 sec.', 'Assess for bleeding signs like low BP and high HR.', 'Notify provider before antidote administration.'],
-        'false': ['Continue infusion and recheck next shift in this note.', 'Give antidote before any assessment in this note.']
+        'false': ['Continue infusion and recheck next shift.', 'Give antidote before any assessment.']
     },
     {
         'name': 'HIT recognition',
         'fact': 'HIT is suspected when platelets drop more than 50% on heparin; stop heparin and switch to argatroban.',
         'priority': 'HIT increases clotting risk paradoxically despite thrombocytopenia.',
         'true': ['Platelet drop >50% suggests HIT.', 'Heparin should be stopped in suspected HIT.', 'Argatroban is listed as alternative.'],
-        'false': ['HIT primarily lowers clot risk in this note.', 'Continue heparin despite HIT signs in this note.']
+        'false': ['HIT primarily lowers clot risk.', 'Continue heparin despite HIT signs.']
     },
     {
         'name': 'warfarin basics',
         'fact': 'Warfarin is oral and has delayed onset of 2–5 days, so it is used for long-term anticoagulation.',
         'priority': 'Delayed onset drives need for bridging in acute clot treatment.',
         'true': ['Warfarin is oral.', 'Warfarin onset is delayed 2–5 days.', 'Warfarin is used for long-term anticoagulation.'],
-        'false': ['Warfarin has immediate IV onset in this note.', 'Warfarin is only used during surgery in this note.']
+        'false': ['Warfarin has immediate IV onset.', 'Warfarin is only used during surgery.']
     },
     {
         'name': 'warfarin therapeutic range',
         'fact': 'Therapeutic INR is usually 2–3, but mechanical heart valves often target 2.5–3.5.',
         'priority': 'Valve patients often require higher anticoagulation intensity.',
         'true': ['Usual INR target is 2–3.', 'Mechanical valves may require INR 2.5–3.5.', 'INR goal differs by indication.'],
-        'false': ['Mechanical valve INR target is below 2 in this note.', 'Warfarin has one fixed INR for all patients in this note.']
+        'false': ['Mechanical valve INR target is below 2.', 'Warfarin has one fixed INR for all patients.']
     },
     {
         'name': 'warfarin antidote',
         'fact': 'Vitamin K (phytonadione) is the reversal agent for warfarin.',
         'priority': 'Know warfarin-vitamin K pair for rapid NCLEX decisions.',
         'true': ['Vitamin K reverses warfarin.', 'Phytonadione is vitamin K name in note.', 'Warfarin has specific antidote listed.'],
-        'false': ['Protamine reverses warfarin in this note.', 'Andexanet alfa reverses warfarin in this note.']
+        'false': ['Protamine reverses warfarin.', 'Andexanet alfa reverses warfarin.']
     },
     {
         'name': 'warfarin teaching vitamin K',
         'fact': 'Patients should keep vitamin K intake consistent rather than eliminating leafy greens entirely.',
         'priority': 'Diet consistency prevents INR instability.',
         'true': ['Vitamin K intake should be consistent.', 'Patients should not completely avoid leafy greens.', 'Diet changes can alter warfarin effect.'],
-        'false': ['Leafy greens must be eliminated forever in this note.', 'Vitamin K intake has no effect on warfarin in this note.']
+        'false': ['Leafy greens must be eliminated forever.', 'Vitamin K intake has no effect on warfarin.']
     },
     {
         'name': 'warfarin teaching interactions',
         'fact': 'Avoid NSAIDs and grapefruit while on warfarin due to increased bleeding risk or level changes.',
         'priority': 'Medication/food interaction review is a safety essential.',
         'true': ['NSAIDs should be avoided with warfarin.', 'Grapefruit is listed to avoid.', 'Interaction teaching reduces bleeding risk.'],
-        'false': ['Warfarin patients should take NSAIDs for routine pain in this note.', 'Grapefruit lowers warfarin effect safely in this note.']
+        'false': ['Warfarin patients should take NSAIDs for routine pain.', 'Grapefruit lowers warfarin effect safely.']
     },
     {
         'name': 'warfarin bleeding teaching',
         'fact': 'Teach patients to report unusual bleeding, hematuria, or blood in stool and wear a medical alert bracelet.',
         'priority': 'Early bleeding recognition prevents severe complications.',
         'true': ['Report unusual bleeding immediately.', 'Blood in urine/stool is concerning.', 'Medical alert bracelet is recommended.'],
-        'false': ['Bleeding signs can be ignored if INR is therapeutic in this note.', 'Medical alert ID is unnecessary in this note.']
+        'false': ['Bleeding signs can be ignored if INR is therapeutic.', 'Medical alert ID is unnecessary.']
     },
     {
         'name': 'bridge overlap duration',
         'fact': 'When transitioning heparin to warfarin, overlap both drugs for at least 5–7 days.',
         'priority': 'Bridge prevents gaps in anticoagulation while warfarin effect develops.',
         'true': ['Heparin-warfarin overlap should be 5–7 days minimum.', 'Heparin provides immediate effect during bridge.', 'Warfarin delay necessitates overlap.'],
-        'false': ['Stop heparin the same day warfarin starts in this note.', 'Overlap is unnecessary if INR is pending in this note.']
+        'false': ['Stop heparin the same day warfarin starts.', 'Overlap is unnecessary if INR is pending.']
     },
     {
         'name': 'bridge discontinuation rule',
         'fact': 'Do not stop heparin until INR is therapeutic 2–3 for two consecutive days.',
         'priority': 'Require stable therapeutic INR before removing rapid-acting anticoagulant.',
         'true': ['Heparin continues until INR is therapeutic.', 'Therapeutic INR must persist two consecutive days.', 'Target INR for this bridge is 2–3.'],
-        'false': ['Heparin stops after one therapeutic INR in this note.', 'Heparin stops before INR reaches goal in this note.']
+        'false': ['Heparin stops after one therapeutic INR.', 'Heparin stops before INR reaches goal.']
     },
     {
         'name': 'stable INR follow-up',
         'fact': 'Once INR is stable, warfarin monitoring can be every 3 weeks per note.',
         'priority': 'Stable outpatient monitoring still requires routine checks.',
         'true': ['Stable warfarin INR checks can be every 3 weeks.', 'INR monitoring continues long-term.', 'Monitoring frequency depends on stability.'],
-        'false': ['Warfarin monitoring is discontinued once stable in this note.', 'INR should be checked yearly only in this note.']
+        'false': ['Warfarin monitoring is discontinued once stable.', 'INR should be checked yearly only.']
     },
     {
         'name': 'critical high-risk thresholds',
         'fact': 'INR greater than 4 or aPTT greater than 80 sec indicates high hemorrhage risk and immediate intervention.',
         'priority': 'Recognize threshold triggers for urgent safety response.',
         'true': ['INR >4 is high hemorrhage risk in note.', 'aPTT >80 sec is high hemorrhage risk in note.', 'Both trigger urgent intervention sequence.'],
-        'false': ['INR 4.5 is reassuring in this note.', 'aPTT >80 sec suggests under-anticoagulation in this note.']
+        'false': ['INR 4.5 is reassuring.', 'aPTT >80 sec suggests under-anticoagulation.']
     },
     {
         'name': 'STOP ASSESS PREPARE CALL',
         'fact': 'NCLEX priority order for suspected internal bleeding is STOP anticoagulant, ASSESS vitals/bleeding, PREPARE antidote, then CALL provider.',
         'priority': 'Sequence discipline improves emergency anticoagulant safety.',
         'true': ['Stop anticoagulant first.', 'Assess for low BP/high HR/pallor/bleeding.', 'Prepare antidote then call provider.'],
-        'false': ['Call provider before stopping active infusion in this note.', 'Give antidote before assessment in this note.']
+        'false': ['Call provider before stopping active infusion.', 'Give antidote before assessment.']
     },
     {
         'name': 'internal bleeding signs',
         'fact': 'Signs of internal bleeding include low BP, high HR, melena, hematuria, and severe headache suggesting intracranial bleed.',
         'priority': 'Combine hemodynamic and symptom clues for early detection.',
         'true': ['Low BP plus high HR can indicate internal bleeding.', 'Melena and hematuria are warning signs.', 'Severe headache may indicate intracranial bleed.'],
-        'false': ['Bradycardia with hypertension is classic anticoagulant bleed in this note.', 'Hematuria is expected and not concerning in this note.']
+        'false': ['Bradycardia with hypertension is classic anticoagulant bleed.', 'Hematuria is expected and not concerning.']
     },
     {
         'name': 'dabigatran profile',
         'fact': 'Dabigatran is a direct thrombin inhibitor; monitor renal function and reverse with idarucizumab.',
         'priority': 'Match class and antidote accurately in urgent reversal decisions.',
         'true': ['Dabigatran is direct thrombin inhibitor.', 'Renal function monitoring is listed.', 'Idarucizumab is antidote.'],
-        'false': ['Dabigatran is factor Xa inhibitor in this note.', 'Protamine is dabigatran antidote in this note.']
+        'false': ['Dabigatran is factor Xa inhibitor.', 'Protamine is dabigatran antidote.']
     },
     {
         'name': 'factor Xa inhibitors profile',
         'fact': 'Rivaroxaban and apixaban are factor Xa inhibitors; monitor renal function/CBC and reverse with andexanet alfa.',
         'priority': 'Differentiate Xa inhibitor reversal from other anticoagulants.',
         'true': ['Rivaroxaban/apixaban are factor Xa inhibitors.', 'Andexanet alfa is their listed antidote.', 'Renal function and CBC monitoring are listed.'],
-        'false': ['Idarucizumab reverses apixaban in this note.', 'Xa inhibitors are monitored by daily INR in this note.']
+        'false': ['Idarucizumab reverses apixaban.', 'Xa inhibitors are monitored by daily INR.']
     },
     {
         'name': 'enoxaparin profile',
         'fact': 'Enoxaparin is LMWH with anti-Xa monitoring if needed; protamine provides partial reversal.',
         'priority': 'Understand that reversal is partial, not complete.',
         'true': ['Enoxaparin is LMWH.', 'Anti-Xa may be checked when needed.', 'Protamine gives partial reversal.'],
-        'false': ['Enoxaparin is fully reversed by vitamin K in this note.', 'Enoxaparin is monitored by INR only in this note.']
+        'false': ['Enoxaparin is fully reversed by vitamin K.', 'Enoxaparin is monitored by INR only.']
     },
     {
         'name': 'lab-memory rule',
         'fact': 'Memory cue: H for Heparin equals aPTT; W for Warfarin equals INR.',
         'priority': 'Use mnemonic for rapid exam-time lab matching.',
         'true': ['Heparin pairs with aPTT.', 'Warfarin pairs with INR.', 'Mnemonic supports quick recall.'],
-        'false': ['Heparin pairs with INR in this note.', 'Warfarin pairs only with anti-Xa in this note.']
+        'false': ['Heparin pairs with INR.', 'Warfarin pairs only with anti-Xa.']
     },
     {
         'name': 'monitoring distinction',
         'fact': 'Warfarin monitoring is INR/PT only, while heparin titration requires frequent aPTT checks every 6 hours.',
         'priority': 'Do not interchange heparin and warfarin monitoring labs.',
         'true': ['Heparin titration uses q6h aPTT checks.', 'Warfarin is monitored with INR/PT.', 'Monitoring strategy differs by drug.'],
-        'false': ['Both drugs are monitored with same lab in this note.', 'Warfarin titration uses q6h aPTT in this note.']
+        'false': ['Both drugs are monitored with same lab.', 'Warfarin titration uses q6h aPTT.']
     },
     {
         'name': 'integrated anticoagulant safety',
         'fact': 'Safe anticoagulant care requires correct lab-drug pairing, bleeding surveillance, antidote readiness, and structured escalation.',
         'priority': 'Most preventable harm comes from delayed recognition and delayed response.',
         'true': ['Correct lab-drug matching is central to safety.', 'Bleeding signs require immediate action.', 'Antidote readiness is emphasized in NCLEX priorities.'],
-        'false': ['Anticoagulants do not require routine monitoring in this note.', 'Escalation sequence is optional in this note.']
+        'false': ['Anticoagulants do not require routine monitoring.', 'Escalation sequence is optional.']
     }
 ]
 
@@ -215,16 +217,24 @@ questions = []
 for i in range(50):
     c = concepts[i % len(concepts)]
     stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
-    correct = c['fact'] if i % 2 == 0 else c['priority']
-
     distractors = c['false'] + [
         # a false statement from another section, never a section heading
         concepts[(i + 4) % len(concepts)]['false'][(i // len(concepts)) % 2],
         'Blood pressure alone is enough for all anticoagulant safety decisions.',
         'Antidote planning is unnecessary when labs are elevated.'
     ]
-    random.shuffle(distractors)
-    options = [correct] + distractors[:3]
+    # pick the correct statement whose length is closest to the wrong ones so length does not give it away
+    meta = re.compile(r'listed|described|highlighted|emphasized|mentioned|noted')
+    cands = [t for t in [c['fact'], c['priority']] + c['true'] if len(t) >= 35 and not meta.search(t)] or [c['fact'], c['priority']]
+    mid = statistics.median(len(d) for d in distractors)
+    cands.sort(key=lambda t: abs(len(t) - mid))
+    correct = cands[(i // len(concepts)) % min(2, len(cands))]
+    own = min(c['false'], key=lambda d: abs(len(d) - len(correct)))
+    extra = [f for k in (3, 8) for f in concepts[(i + k) % len(concepts)]['false']]
+    rest = [d for d in dict.fromkeys(distractors + extra) if d not in (own, correct)]
+    random.shuffle(rest)
+    rest.sort(key=lambda d: abs(len(d) - len(correct)))  # similar lengths so the answer is not the longest option
+    options = [correct, own] + rest[:2]
     random.shuffle(options)
 
     questions.append({

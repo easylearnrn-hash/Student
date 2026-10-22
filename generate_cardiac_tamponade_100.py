@@ -1,4 +1,6 @@
 import json
+import re
+import statistics
 import random
 from pathlib import Path
 
@@ -34,7 +36,7 @@ concepts = [
             'Tamponade can produce obstructive shock physiology.'
         ],
         'false': [
-            'Tamponade is primarily distributive shock from vasodilation in this note.',
+            'Tamponade is primarily distributive shock from vasodilation.',
             'Tamponade increases preload by compressing the ventricles.'
         ]
     },
@@ -48,7 +50,7 @@ concepts = [
             'Clinical deterioration depends on accumulation speed, not only total volume.'
         ],
         'false': [
-            'Only massive chronic effusions can cause tamponade in this note.',
+            'Only massive chronic effusions can cause tamponade.',
             'Volume rate of accumulation is irrelevant in tamponade risk.'
         ]
     },
@@ -62,8 +64,8 @@ concepts = [
             'Malignancy and post-cardiac surgery are recognized causes.'
         ],
         'false': [
-            'Tamponade is only caused by isolated dehydration in this note.',
-            'Aortic dissection is excluded as a tamponade cause in this note.'
+            'Tamponade is only caused by isolated dehydration.',
+            'Aortic dissection is excluded as a tamponade cause.'
         ]
     },
     {
@@ -76,8 +78,8 @@ concepts = [
             'Autoimmune disease and uremia are included causes.'
         ],
         'false': [
-            'Radiation therapy cannot contribute to tamponade in this note.',
-            'Tamponade causes are limited to congenital defects in this note.'
+            'Radiation therapy cannot contribute to tamponade.',
+            'Tamponade causes are limited to congenital defects.'
         ]
     },
     {
@@ -90,8 +92,8 @@ concepts = [
             'Hypotension is part of Beck triad.'
         ],
         'false': [
-            'Wheezing replaces JVD in Beck triad in this note.',
-            'Hypertension is part of Beck triad in this note.'
+            'Wheezing replaces JVD in Beck triad.',
+            'Hypertension is part of Beck triad.'
         ]
     },
     {
@@ -104,8 +106,8 @@ concepts = [
             'Auscultation findings can be subtle but clinically important.'
         ],
         'false': [
-            'Muffled sounds indicate hyperdynamic output in this note.',
-            'Muffled tones rule out tamponade in this note.'
+            'Muffled sounds indicate hyperdynamic output.',
+            'Muffled tones rule out tamponade.'
         ]
     },
     {
@@ -118,8 +120,8 @@ concepts = [
             'JVD is a high-yield bedside tamponade clue.'
         ],
         'false': [
-            'JVD in tamponade represents low venous pressure in this note.',
-            'JVD is unrelated to right-heart filling in this note.'
+            'JVD in tamponade represents low venous pressure.',
+            'JVD is unrelated to right-heart filling.'
         ]
     },
     {
@@ -132,7 +134,7 @@ concepts = [
             'Hypotension should prompt emergency intervention readiness.'
         ],
         'false': [
-            'Tamponade typically causes widened pulse pressure in this note.',
+            'Tamponade typically causes widened pulse pressure.',
             'Hypotension is not expected in tamponade according to this note.'
         ]
     },
@@ -143,11 +145,11 @@ concepts = [
         'true': [
             'A >10 mmHg inspiratory systolic drop indicates pulsus paradoxus.',
             'Pulsus paradoxus supports tamponade assessment.',
-            'Inspiratory BP variation is specifically emphasized in this note.'
+            'Inspiratory BP variation is specifically emphasized.'
         ],
         'false': [
-            'Pulsus paradoxus is defined as a diastolic rise in this note.',
-            'A 2 mmHg inspiratory change defines pulsus paradoxus in this note.'
+            'Pulsus paradoxus is defined as a diastolic rise.',
+            'A 2 mmHg inspiratory change defines pulsus paradoxus.'
         ]
     },
     {
@@ -160,8 +162,8 @@ concepts = [
             'Trend vitals rather than evaluating heart rate in isolation.'
         ],
         'false': [
-            'Bradycardia is the expected compensatory response in this note.',
-            'Heart rate has no monitoring value in tamponade in this note.'
+            'Bradycardia is the expected compensatory response.',
+            'Heart rate has no monitoring value in tamponade.'
         ]
     },
     {
@@ -174,8 +176,8 @@ concepts = [
             'Perfusion signs should be trended urgently.'
         ],
         'false': [
-            'Increased urine output is expected in tamponade shock in this note.',
-            'Warm dry skin is listed as hallmark obstructive shock in this note.'
+            'Increased urine output is expected in tamponade shock.',
+            'Warm dry skin is listed as hallmark obstructive shock.'
         ]
     },
     {
@@ -188,8 +190,8 @@ concepts = [
             'Anxiety and restlessness are compatible with acute instability.'
         ],
         'false': [
-            'Tamponade in this note is always asymptomatic until arrest.',
-            'Dysphagia cannot occur with larger effusions in this note.'
+            'Tamponade is always asymptomatic until arrest.',
+            'Dysphagia cannot occur with larger effusions.'
         ]
     },
     {
@@ -198,12 +200,12 @@ concepts = [
         'priority': 'Treat electrical alternans as a red-flag trigger for immediate escalation.',
         'true': [
             'Electrical alternans is beat-to-beat QRS amplitude variation.',
-            'Electrical alternans strongly supports tamponade in this note.',
+            'Electrical alternans strongly supports tamponade.',
             'Alternans should trigger urgent provider notification and prep for intervention.'
         ],
         'false': [
-            'Electrical alternans is a benign normal variant in this note.',
-            'Alternans excludes pericardial fluid in this note.'
+            'Electrical alternans is a benign normal variant.',
+            'Alternans excludes pericardial fluid.'
         ]
     },
     {
@@ -216,8 +218,8 @@ concepts = [
             'Diffuse ST elevation may occur when pericarditis underlies tamponade.'
         ],
         'false': [
-            'High-voltage QRS is the defining tamponade pattern in this note.',
-            'Tamponade cannot coexist with pericarditis EKG changes in this note.'
+            'High-voltage QRS is the defining tamponade pattern.',
+            'Tamponade cannot coexist with pericarditis EKG changes.'
         ]
     },
     {
@@ -230,8 +232,8 @@ concepts = [
             'Echo findings guide urgent decompression decisions.'
         ],
         'false': [
-            'Chest X-ray is the gold standard in this note.',
-            'Echo has no role in tamponade diagnosis in this note.'
+            'Chest X-ray is the gold standard.',
+            'Echo has no role in tamponade diagnosis.'
         ]
     },
     {
@@ -244,8 +246,8 @@ concepts = [
             'Imaging should be integrated with hemodynamics and bedside findings.'
         ],
         'false': [
-            'Normal silhouette excludes tamponade in this note.',
-            'Water-bottle silhouette confirms acute coronary occlusion in this note.'
+            'Normal silhouette excludes tamponade.',
+            'Water-bottle silhouette confirms acute coronary occlusion.'
         ]
     },
     {
@@ -259,7 +261,7 @@ concepts = [
         ],
         'false': [
             'Pericardiocentesis should be deferred until routine clinic follow-up.',
-            'Diuretics alone are definitive first-line emergency treatment in this note.'
+            'Diuretics alone are definitive first-line emergency treatment.'
         ]
     },
     {
@@ -272,8 +274,8 @@ concepts = [
             'Procedure setup should be rapid and organized.'
         ],
         'false': [
-            'Prone positioning is preferred for tamponade aspiration in this note.',
-            'Needle is directed toward the right hip in this note.'
+            'Prone positioning is preferred for tamponade aspiration.',
+            'Needle is directed toward the right hip.'
         ]
     },
     {
@@ -286,8 +288,8 @@ concepts = [
             'Clinical response should be reassessed continuously after drainage.'
         ],
         'false': [
-            'At least 1 liter must be removed before hemodynamics improve in this note.',
-            'Drainage has no immediate effect on output in this note.'
+            'At least 1 liter must be removed before hemodynamics improve.',
+            'Drainage has no immediate effect on output.'
         ]
     },
     {
@@ -300,8 +302,8 @@ concepts = [
             'Chemistry testing is part of fluid analysis.'
         ],
         'false': [
-            'Pericardial fluid analysis is unnecessary after aspiration in this note.',
-            'Only glucose is sent, with no culture/cytology/chemistry in this note.'
+            'Pericardial fluid analysis is unnecessary after aspiration.',
+            'Only glucose is sent, with no culture/cytology/chemistry.'
         ]
     },
     {
@@ -314,8 +316,8 @@ concepts = [
             'Supportive therapy does not replace urgent pericardiocentesis.'
         ],
         'false': [
-            'All preload support is contraindicated in tamponade in this note.',
-            'Tamponade management in this note avoids all IV fluid administration.'
+            'All preload support is contraindicated in tamponade.',
+            'Tamponade management avoids all IV fluid administration.'
         ]
     },
     {
@@ -328,8 +330,8 @@ concepts = [
             'Positive pressure ventilation may reduce venous return and should be avoided if possible.'
         ],
         'false': [
-            'High-dose vasodilators are first-line tamponade stabilizers in this note.',
-            'Positive pressure ventilation always improves tamponade preload in this note.'
+            'High-dose vasodilators are first-line tamponade stabilizers.',
+            'Positive pressure ventilation always improves tamponade preload.'
         ]
     },
     {
@@ -342,7 +344,7 @@ concepts = [
             'Definitive surgical drainage may be needed after repeated episodes.'
         ],
         'false': [
-            'Pericardial window is contraindicated in recurrent tamponade in this note.',
+            'Pericardial window is contraindicated in recurrent tamponade.',
             'Recurrence is impossible after one aspiration according to this note.'
         ]
     },
@@ -356,8 +358,8 @@ concepts = [
             'Delay can lead to arrest within minutes.'
         ],
         'false': [
-            'Routine discharge teaching is first action in this note.',
-            'Observation-only management is adequate in suspected tamponade in this note.'
+            'Routine discharge teaching is first action.',
+            'Observation-only management is adequate in suspected tamponade.'
         ]
     },
     {
@@ -370,8 +372,8 @@ concepts = [
             'Reassessment should include recurring hypotension/JVD/muffled tones signs.'
         ],
         'false': [
-            'No monitoring is needed after successful aspiration in this note.',
-            'Recurrence is not possible post-procedure in this note.'
+            'No monitoring is needed after successful aspiration.',
+            'Recurrence is not possible post-procedure.'
         ]
     },
     {
@@ -379,13 +381,13 @@ concepts = [
         'fact': 'The note states tamponade chest pain worsens during expiration and coughing; cough is not typical of MI.',
         'priority': 'Use distinguishing chest pain pattern and associated symptoms for differential prioritization.',
         'true': [
-            'Tamponade/pericardial pain may worsen with coughing in this note.',
+            'Tamponade/pericardial pain may worsen with coughing.',
             'The note contrasts this pattern with typical MI presentation.',
             'Differential reasoning should incorporate associated respiratory features.'
         ],
         'false': [
             'The note says cough is a classic MI hallmark finding.',
-            'Tamponade pain is unrelated to breathing/cough in this note.'
+            'Tamponade pain is unrelated to breathing/cough.'
         ]
     }
 ]
@@ -421,16 +423,24 @@ questions = []
 for i in range(50):
     c = concepts[i % len(concepts)]
     stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
-    correct = c['fact'] if i % 2 == 0 else c['priority']
-
     distractors = c['false'] + [
         # a false statement from another section, never a section heading
         concepts[(i + 4) % len(concepts)]['false'][(i // len(concepts)) % 2],
         'Immediate deterioration risk is low, so urgent escalation is unnecessary.',
         'Preload reduction is preferred before confirming diagnosis in unstable cases.'
     ]
-    random.shuffle(distractors)
-    options = [correct] + distractors[:3]
+    # pick the correct statement whose length is closest to the wrong ones so length does not give it away
+    meta = re.compile(r'listed|described|highlighted|emphasized|mentioned|noted')
+    cands = [t for t in [c['fact'], c['priority']] + c['true'] if len(t) >= 35 and not meta.search(t)] or [c['fact'], c['priority']]
+    mid = statistics.median(len(d) for d in distractors)
+    cands.sort(key=lambda t: abs(len(t) - mid))
+    correct = cands[(i // len(concepts)) % min(2, len(cands))]
+    own = min(c['false'], key=lambda d: abs(len(d) - len(correct)))
+    extra = [f for k in (3, 8) for f in concepts[(i + k) % len(concepts)]['false']]
+    rest = [d for d in dict.fromkeys(distractors + extra) if d not in (own, correct)]
+    random.shuffle(rest)
+    rest.sort(key=lambda d: abs(len(d) - len(correct)))  # similar lengths so the answer is not the longest option
+    options = [correct, own] + rest[:2]
     random.shuffle(options)
 
     ans_id = chr(97 + options.index(correct))

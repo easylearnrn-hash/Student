@@ -1,4 +1,6 @@
 import json
+import re
+import statistics
 import random
 from pathlib import Path
 
@@ -19,8 +21,8 @@ concepts = [
             'Inflammation can progress to pericardial effusion.'
         ],
         'false': [
-            'Pericarditis is inflammation of heart valves in this note.',
-            'Pericarditis is confined to coronary arteries in this note.'
+            'Pericarditis is inflammation of heart valves.',
+            'Pericarditis is confined to coronary arteries.'
         ]
     },
     {
@@ -28,13 +30,13 @@ concepts = [
         'fact': 'Pericarditis can be acute, recurrent, or chronic constrictive.',
         'priority': 'Recurrent patterns require recurrence-prevention therapy and follow-up.',
         'true': [
-            'Acute forms are described in the note.',
-            'Recurrent forms are described in the note.',
+            'Acute forms are described.',
+            'Recurrent forms are described.',
             'Chronic constrictive forms are also listed.'
         ],
         'false': [
-            'Pericarditis is always single-episode and never recurrent in this note.',
-            'Constrictive disease is unrelated to pericarditis in this note.'
+            'Pericarditis is always single-episode and never recurrent.',
+            'Constrictive disease is unrelated to pericarditis.'
         ]
     },
     {
@@ -47,8 +49,8 @@ concepts = [
             'Tamponade is a life-threatening pericarditis complication.'
         ],
         'false': [
-            'Effusion improves cardiac filling in this note.',
-            'Tamponade is a harmless expected phase in this note.'
+            'Effusion improves cardiac filling.',
+            'Tamponade is a harmless expected phase.'
         ]
     },
     {
@@ -57,12 +59,12 @@ concepts = [
         'priority': 'Prioritize broad etiologic review while managing inflammation and pain.',
         'true': [
             'Viral etiologies are highlighted as most common.',
-            'Idiopathic cases are frequent in this note.',
+            'Idiopathic cases are frequent.',
             'Coxsackievirus/Echovirus/Influenza are listed viral examples.'
         ],
         'false': [
-            'Pericarditis is almost never viral in this note.',
-            'Idiopathic causes are excluded in this note.'
+            'Pericarditis is almost never viral.',
+            'Idiopathic causes are excluded.'
         ]
     },
     {
@@ -71,12 +73,12 @@ concepts = [
         'priority': 'Tailor treatment to the underlying cause while controlling inflammation.',
         'true': [
             'TB and S. aureus are listed infectious causes.',
-            'SLE/RA/scleroderma are autoimmune causes in the note.',
+            'SLE/RA/scleroderma are autoimmune causes.',
             'Hydralazine and Procainamide are listed medication causes.'
         ],
         'false': [
-            'Pericarditis is unrelated to renal failure in this note.',
-            'Radiation cannot cause pericarditis in this note.'
+            'Pericarditis is unrelated to renal failure.',
+            'Radiation cannot cause pericarditis.'
         ]
     },
     {
@@ -86,11 +88,11 @@ concepts = [
         'true': [
             'Dressler syndrome can occur after MI.',
             'Timing is listed as 1–6 weeks post-event.',
-            'Cardiac surgery is another trigger in this note.'
+            'Cardiac surgery is another trigger.'
         ],
         'false': [
-            'Dressler syndrome occurs immediately during MI in this note.',
-            'Dressler syndrome is bacterial endocarditis in this note.'
+            'Dressler syndrome occurs immediately during MI.',
+            'Dressler syndrome is bacterial endocarditis.'
         ]
     },
     {
@@ -98,13 +100,13 @@ concepts = [
         'fact': 'Pericarditis pain is sharp/pleuritic, worse with inspiration and lying flat, and relieved by sitting up/leaning forward.',
         'priority': 'Use positional and pleuritic features to distinguish from ischemic chest pain patterns.',
         'true': [
-            'Pain worsens when lying flat in this note.',
-            'Pain worsens with inspiration in this note.',
-            'Leaning forward provides relief in this note.'
+            'Pain worsens when lying flat.',
+            'Pain worsens with inspiration.',
+            'Leaning forward provides relief.'
         ],
         'false': [
-            'Pain is position-independent pressure pain in this note.',
-            'Leaning forward worsens pain in this note.'
+            'Pain is position-independent pressure pain.',
+            'Leaning forward worsens pain.'
         ]
     },
     {
@@ -117,8 +119,8 @@ concepts = [
             'Viral-associated constitutional symptoms may occur.'
         ],
         'false': [
-            'Trapezius radiation excludes pericarditis in this note.',
-            'Dyspnea never occurs in pericarditis in this note.'
+            'Trapezius radiation excludes pericarditis.',
+            'Dyspnea never occurs in pericarditis.'
         ]
     },
     {
@@ -126,13 +128,13 @@ concepts = [
         'fact': 'Pericardial friction rub is pathognomonic: high-pitched scratchy/grating, best heard at left sternal border with patient leaning forward.',
         'priority': 'Prioritize focused auscultation technique to capture fleeting rub findings.',
         'true': [
-            'Friction rub is pathognomonic in this note.',
+            'Friction rub is pathognomonic.',
             'The rub is described as high-pitched scratchy/grating.',
             'Best heard at left sternal border while leaning forward.'
         ],
         'false': [
-            'Friction rub is a definitive MI finding in this note.',
-            'Rub is best heard at the carotids in this note.'
+            'Friction rub is a definitive MI finding.',
+            'Rub is best heard at the carotids.'
         ]
     },
     {
@@ -145,8 +147,8 @@ concepts = [
             'Loss of rub does not exclude worsening complications.'
         ],
         'false': [
-            'Persistent rub is required throughout all stages in this note.',
-            'Effusion makes rub louder by increasing friction in this note.'
+            'Persistent rub is required throughout all stages.',
+            'Effusion makes rub louder by increasing friction.'
         ]
     },
     {
@@ -154,13 +156,13 @@ concepts = [
         'fact': 'Pericarditis classically shows diffuse (all-lead) saddle-shaped ST elevation.',
         'priority': 'Differentiate diffuse inflammatory ST elevation from territorial ischemic patterns.',
         'true': [
-            'Diffuse ST elevation is emphasized in this note.',
+            'Diffuse ST elevation is emphasized.',
             'Saddle-shaped morphology is associated with pericarditis.',
             'This pattern differs from localized MI territories.'
         ],
         'false': [
-            'Pericarditis causes only contiguous territorial ST elevation in this note.',
-            'ST elevation is absent in pericarditis in this note.'
+            'Pericarditis causes only contiguous territorial ST elevation.',
+            'ST elevation is absent in pericarditis.'
         ]
     },
     {
@@ -168,13 +170,13 @@ concepts = [
         'fact': 'PR depression is a classic early pericarditis finding and opposite ST direction.',
         'priority': 'Use PR deviation as a high-yield discriminator in early interpretation.',
         'true': [
-            'PR depression is a classic finding in this note.',
+            'PR depression is a classic finding.',
             'It appears early in the disease course.',
-            'PR direction contrasts with ST elevation in this note.'
+            'PR direction contrasts with ST elevation.'
         ],
         'false': [
-            'PR elevation is the classic early finding in this note.',
-            'PR changes are irrelevant in pericarditis in this note.'
+            'PR elevation is the classic early finding.',
+            'PR changes are irrelevant in pericarditis.'
         ]
     },
     {
@@ -182,13 +184,13 @@ concepts = [
         'fact': 'Pericarditis has no reciprocal ST depression, unlike MI.',
         'priority': 'Avoid mislabeling diffuse pericarditis as STEMI when reciprocal changes are absent.',
         'true': [
-            'Reciprocal ST depression is absent in pericarditis in this note.',
+            'Reciprocal ST depression is absent in pericarditis.',
             'Reciprocal changes support MI rather than pericarditis.',
             'This distinction is used in pericarditis vs MI comparison.'
         ],
         'false': [
-            'Pericarditis requires reciprocal ST depression in this note.',
-            'Reciprocal changes have no differential value in this note.'
+            'Pericarditis requires reciprocal ST depression.',
+            'Reciprocal changes have no differential value.'
         ]
     },
     {
@@ -201,8 +203,8 @@ concepts = [
             'EKG pattern evolves over time in pericarditis.'
         ],
         'false': [
-            'EKG pattern is fixed and never evolves in this note.',
-            'Electrical alternans excludes effusion in this note.'
+            'EKG pattern is fixed and never evolves.',
+            'Electrical alternans excludes effusion.'
         ]
     },
     {
@@ -210,13 +212,13 @@ concepts = [
         'fact': 'Pericarditis pain is gradual, sharp, pleuritic, and positional; MI pain is sudden, crushing, pressure-like, and non-positional.',
         'priority': 'Use symptom quality and positional response to sharpen early triage decisions.',
         'true': [
-            'Pericarditis pain is often pleuritic and positional in this note.',
+            'Pericarditis pain is often pleuritic and positional.',
             'MI pain is described as pressure-like/crushing.',
-            'MI pain is generally not position-dependent in this note.'
+            'MI pain is generally not position-dependent.'
         ],
         'false': [
-            'Pericarditis pain is classically crushing pressure in this note.',
-            'MI pain improves when leaning forward in this note.'
+            'Pericarditis pain is classically crushing pressure.',
+            'MI pain improves when leaning forward.'
         ]
     },
     {
@@ -229,8 +231,8 @@ concepts = [
             'Troponin may be mildly elevated in myopericarditis but higher in MI.'
         ],
         'false': [
-            'Q waves are a pericarditis hallmark in this note.',
-            'Troponin is never elevated in any pericarditis scenario in this note.'
+            'Q waves are a pericarditis hallmark.',
+            'Troponin is never elevated in any pericarditis scenario.'
         ]
     },
     {
@@ -238,13 +240,13 @@ concepts = [
         'fact': 'First-line treatment is NSAIDs (ibuprofen/aspirin) plus colchicine to reduce recurrence risk.',
         'priority': 'Start anti-inflammatory therapy early and include recurrence prevention.',
         'true': [
-            'NSAIDs are first-line in this note.',
+            'NSAIDs are first-line.',
             'Colchicine is added to reduce recurrence risk.',
             'Combination therapy is emphasized for acute management.'
         ],
         'false': [
-            'Colchicine is contraindicated in all pericarditis in this note.',
-            'Opioids are listed as definitive first-line therapy in this note.'
+            'Colchicine is contraindicated in all pericarditis.',
+            'Opioids are listed as definitive first-line therapy.'
         ]
     },
     {
@@ -257,8 +259,8 @@ concepts = [
             'Activity guidance is part of initial management.'
         ],
         'false': [
-            'High-intensity exercise accelerates recovery in this note.',
-            'No activity limits are needed during acute phase in this note.'
+            'High-intensity exercise accelerates recovery.',
+            'No activity limits are needed during acute phase.'
         ]
     },
     {
@@ -266,13 +268,13 @@ concepts = [
         'fact': 'Corticosteroids are reserved when NSAID/colchicine fails or for specific causes like SLE.',
         'priority': 'Use steroids selectively to avoid unnecessary exposure and recurrence risk concerns.',
         'true': [
-            'Prednisone is not first-line in routine cases in this note.',
+            'Prednisone is not first-line in routine cases.',
             'Steroids are considered when first-line therapy fails.',
             'Specific etiologies (e.g., SLE) can justify steroid use.'
         ],
         'false': [
-            'Steroids are mandatory first-line for all cases in this note.',
-            'SLE-related pericarditis should avoid steroids in this note.'
+            'Steroids are mandatory first-line for all cases.',
+            'SLE-related pericarditis should avoid steroids.'
         ]
     },
     {
@@ -280,13 +282,13 @@ concepts = [
         'fact': 'Avoid NSAIDs in uremic pericarditis; use IV antibiotics for bacterial causes and anti-TB therapy for TB.',
         'priority': 'Adapt treatment to etiology instead of one-size-fits-all prescribing.',
         'true': [
-            'Uremic pericarditis is a context to avoid NSAIDs in this note.',
-            'Bacterial pericarditis requires IV antibiotics in this note.',
-            'TB pericarditis requires anti-TB therapy in this note.'
+            'Uremic pericarditis is a context to avoid NSAIDs.',
+            'Bacterial pericarditis requires IV antibiotics.',
+            'TB pericarditis requires anti-TB therapy.'
         ],
         'false': [
-            'All causes are treated identically with NSAID monotherapy in this note.',
-            'TB management is excluded from pericarditis care in this note.'
+            'All causes are treated identically with NSAID monotherapy.',
+            'TB management is excluded from pericarditis care.'
         ]
     },
     {
@@ -296,11 +298,11 @@ concepts = [
         'true': [
             'Beck triad is listed with tamponade complication.',
             'Emergency pericardiocentesis is required for tamponade.',
-            'Tamponade is life-threatening in this note.'
+            'Tamponade is life-threatening.'
         ],
         'false': [
-            'Tamponade in pericarditis is managed with observation only in this note.',
-            'Beck triad excludes tamponade in this note.'
+            'Tamponade in pericarditis is managed with observation only.',
+            'Beck triad excludes tamponade.'
         ]
     },
     {
@@ -308,13 +310,13 @@ concepts = [
         'fact': 'Dressler syndrome is treated with NSAIDs + colchicine and anticoagulants are avoided due to bleeding risk into pericardium.',
         'priority': 'Prevent iatrogenic hemopericardium by avoiding anticoagulants in this context.',
         'true': [
-            'NSAID plus colchicine is recommended for Dressler syndrome in this note.',
+            'NSAID plus colchicine is recommended for Dressler syndrome.',
             'Anticoagulants are avoided because of pericardial bleeding risk.',
-            'Dressler is autoimmune and post-MI/surgery in this note.'
+            'Dressler is autoimmune and post-MI/surgery.'
         ],
         'false': [
-            'Routine anticoagulation is first-line Dressler treatment in this note.',
-            'Dressler treatment excludes NSAIDs in this note.'
+            'Routine anticoagulation is first-line Dressler treatment.',
+            'Dressler treatment excludes NSAIDs.'
         ]
     },
     {
@@ -327,8 +329,8 @@ concepts = [
             'Monitor for progression to effusion/tamponade.'
         ],
         'false': [
-            'Triage can ignore EKG in chest pain with suspected pericarditis in this note.',
-            'Tamponade surveillance is unnecessary in pericarditis in this note.'
+            'Triage can ignore EKG in chest pain with suspected pericarditis.',
+            'Tamponade surveillance is unnecessary in pericarditis.'
         ]
     },
     {
@@ -336,13 +338,13 @@ concepts = [
         'fact': 'Core hallmarks are pleuritic positional chest pain, friction rub, diffuse ST elevation, PR depression, and absent reciprocal ST changes.',
         'priority': 'Synthesize multi-domain clues rather than relying on one isolated finding.',
         'true': [
-            'Pleuritic positional pain is a hallmark in this note.',
-            'Friction rub is a hallmark in this note.',
+            'Pleuritic positional pain is a hallmark.',
+            'Friction rub is a hallmark.',
             'Diffuse ST elevation with PR depression supports diagnosis.'
         ],
         'false': [
-            'Reciprocal ST depression is a hallmark of pericarditis in this note.',
-            'Localized-only ST elevation is required for diagnosis in this note.'
+            'Reciprocal ST depression is a hallmark of pericarditis.',
+            'Localized-only ST elevation is required for diagnosis.'
         ]
     }
 ]
@@ -378,16 +380,24 @@ questions = []
 for i in range(50):
     c = concepts[i % len(concepts)]
     stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
-    correct = c['fact'] if i % 2 == 0 else c['priority']
-
     distractors = c['false'] + [
         # a false statement from another section, never a section heading
         concepts[(i + 3) % len(concepts)]['false'][(i // len(concepts)) % 2],
         'Immediate escalation is unnecessary because complication risk is negligible.',
         'The best approach is to defer EKG differentiation until outpatient review.'
     ]
-    random.shuffle(distractors)
-    options = [correct] + distractors[:3]
+    # pick the correct statement whose length is closest to the wrong ones so length does not give it away
+    meta = re.compile(r'listed|described|highlighted|emphasized|mentioned|noted')
+    cands = [t for t in [c['fact'], c['priority']] + c['true'] if len(t) >= 35 and not meta.search(t)] or [c['fact'], c['priority']]
+    mid = statistics.median(len(d) for d in distractors)
+    cands.sort(key=lambda t: abs(len(t) - mid))
+    correct = cands[(i // len(concepts)) % min(2, len(cands))]
+    own = min(c['false'], key=lambda d: abs(len(d) - len(correct)))
+    extra = [f for k in (3, 8) for f in concepts[(i + k) % len(concepts)]['false']]
+    rest = [d for d in dict.fromkeys(distractors + extra) if d not in (own, correct)]
+    random.shuffle(rest)
+    rest.sort(key=lambda d: abs(len(d) - len(correct)))  # similar lengths so the answer is not the longest option
+    options = [correct, own] + rest[:2]
     random.shuffle(options)
 
     ans_id = chr(97 + options.index(correct))
