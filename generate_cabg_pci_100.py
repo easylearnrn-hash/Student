@@ -1,4 +1,6 @@
 import json
+import re
+import statistics
 import random
 from pathlib import Path
 
@@ -15,175 +17,175 @@ concepts = [
         'fact': 'CAD progression listed is stable angina to unstable angina to NSTEMI to STEMI.',
         'priority': 'Escalating symptoms should trigger faster revascularization decisions.',
         'true': ['Stable angina appears before unstable in progression.', 'NSTEMI and STEMI are later stages.', 'Progression reflects worsening myocardial perfusion.'],
-        'false': ['STEMI is earliest stage in this note.', 'CAD progression ends at stable angina in this note.']
+        'false': ['STEMI is earliest stage.', 'CAD progression ends at stable angina.']
     },
     {
         'name': 'Revascularization options',
         'fact': 'Two options are PCI (less invasive) and CABG (surgery), selected by vessel count, anatomy, EF, and comorbidities.',
         'priority': 'Procedure choice must match anatomy and risk profile, not convenience.',
         'true': ['PCI is less invasive option.', 'CABG is surgical option.', 'Selection factors include vessels/anatomy/EF/comorbidities.'],
-        'false': ['PCI and CABG are interchangeable regardless anatomy in this note.', 'EF is irrelevant to decision in this note.']
+        'false': ['PCI and CABG are interchangeable regardless anatomy.', 'EF is irrelevant to decision.']
     },
     {
         'name': 'PCI basics',
         'fact': 'PCI is catheter-based via radial or femoral access, using balloon angioplasty and often stent placement.',
         'priority': 'Monitor access-site and reperfusion outcomes immediately post-procedure.',
         'true': ['Radial and femoral access are listed.', 'Balloon compresses plaque.', 'Stent scaffold may be left in artery.'],
-        'false': ['PCI is open-heart surgery in this note.', 'PCI never uses stents in this note.']
+        'false': ['PCI is open-heart surgery.', 'PCI never uses stents.']
     },
     {
         'name': 'Drug-eluting stent role',
         'fact': 'Drug-eluting stents contain antiproliferative medication to reduce restenosis.',
         'priority': 'Maintain antiplatelet adherence to prevent stent thrombosis/restenosis.',
         'true': ['DES has antiproliferative coating.', 'DES aims to lower restenosis risk.', 'Stent choice affects post-procedure management.'],
-        'false': ['DES increases restenosis intentionally in this note.', 'DES removes need for any antiplatelet therapy in this note.']
+        'false': ['DES increases restenosis intentionally.', 'DES removes need for any antiplatelet therapy.']
     },
     {
         'name': 'Primary PCI timing',
         'fact': 'Primary PCI is treatment of choice for STEMI with door-to-balloon goal within 90 minutes.',
         'priority': 'Time-to-balloon directly impacts myocardial salvage.',
         'true': ['STEMI door-to-balloon target is 90 min.', 'Primary PCI is preferred STEMI reperfusion strategy.', 'Rapid activation is essential.'],
-        'false': ['Primary PCI target is 24 hours in this note.', 'Primary PCI is not used for STEMI in this note.']
+        'false': ['Primary PCI target is 24 hours.', 'Primary PCI is not used for STEMI.']
     },
     {
         'name': 'PCI indications',
         'fact': 'PCI indications include STEMI/NSTEMI, refractory unstable angina, suitable 1–2 vessel disease, or high CABG surgical risk.',
         'priority': 'Use PCI when anatomy and risk profile make catheter strategy appropriate.',
         'true': ['STEMI and NSTEMI are listed indications.', 'Refractory unstable angina is listed indication.', '1–2 vessel suitable anatomy is listed indication.'],
-        'false': ['Left main multivessel disease is always first-choice PCI in this note.', 'PCI is contraindicated in all acute MI in this note.']
+        'false': ['Left main multivessel disease is always first-choice PCI.', 'PCI is contraindicated in all acute MI.']
     },
     {
         'name': 'Pre-PCI preparation',
         'fact': 'Pre-PCI care includes NPO 4–6 hours, IV access, type and screen, DAPT initiation, anticoagulation, creatinine check, and pulse marking.',
         'priority': 'Optimize safety by preparing bleeding, renal, and access monitoring plans.',
         'true': ['NPO 4–6 hours is listed.', 'Creatinine check is listed for contrast risk.', 'Pedal pulses are assessed/marked pre-procedure.'],
-        'false': ['Renal function check is unnecessary pre-PCI in this note.', 'Pulse baseline is not needed in this note.']
+        'false': ['Renal function check is unnecessary pre-PCI.', 'Pulse baseline is not needed.']
     },
     {
         'name': 'Post-PCI vitals and site care',
         'fact': 'Post-PCI protocol includes frequent vitals and puncture site checks for bleeding/hematoma.',
         'priority': 'Early detection of access complications prevents deterioration.',
         'true': ['Frequent scheduled vitals are listed.', 'Bleeding/hematoma monitoring is required.', 'Access-site surveillance is key post-PCI.'],
-        'false': ['Vitals can be deferred for several hours in this note.', 'Site checks are unnecessary after sheath removal in this note.']
+        'false': ['Vitals can be deferred for several hours.', 'Site checks are unnecessary after sheath removal.']
     },
     {
         'name': 'Post-PCI limb and hydration',
         'fact': 'Femoral approach requires limb straight with bedrest 4–6 hours; fluids are encouraged to clear contrast.',
         'priority': 'Protect access integrity while lowering nephropathy risk.',
         'true': ['Affected femoral limb kept straight post-procedure.', 'Bedrest 4–6 hours listed for femoral access.', 'Hydration is encouraged to flush contrast.'],
-        'false': ['Immediate vigorous leg flexion is recommended in this note.', 'Fluid restriction is mandatory after contrast in this note.']
+        'false': ['Immediate vigorous leg flexion is recommended.', 'Fluid restriction is mandatory after contrast.']
     },
     {
         'name': 'Post-PCI medication adherence',
         'fact': 'Dual antiplatelet therapy is required for at least 1 year after stent placement.',
         'priority': 'Nonadherence significantly raises stent thrombosis risk.',
         'true': ['DAPT minimum one year is listed.', 'Aspirin + P2Y12 strategy is emphasized.', 'Medication adherence is critical after stent.'],
-        'false': ['DAPT stops after 48 hours in this note.', 'Aspirin alone is immediate replacement for all stent patients in this note.']
+        'false': ['DAPT stops after 48 hours.', 'Aspirin alone is immediate replacement for all stent patients.']
     },
     {
         'name': 'PCI complications',
         'fact': 'Listed PCI complications include access-site bleeding (most common), contrast nephropathy, arterial dissection, restenosis/re-occlusion, and stent thrombosis.',
         'priority': 'Monitor for ischemic recurrence and bleeding/renal complications continuously.',
         'true': ['Bleeding at access site is most common complication listed.', 'Contrast nephropathy is listed.', 'Stent thrombosis is emergency complication.'],
-        'false': ['PCI has no renal complications in this note.', 'Restenosis is impossible with stents in this note.']
+        'false': ['PCI has no renal complications.', 'Restenosis is impossible with stents.']
     },
     {
         'name': 'CABG definition',
         'fact': 'CABG is open-heart bypass surgery using grafts to route blood around blocked coronaries.',
         'priority': 'Post-op priorities focus on airway, hemodynamics, and graft-related complications.',
         'true': ['CABG is open-heart surgery in note.', 'Bypass grafts reroute flow around blockage.', 'CABG is revascularization option for complex CAD.'],
-        'false': ['CABG is a bedside catheter procedure in this note.', 'CABG avoids any graft vessel use in this note.']
+        'false': ['CABG is a bedside catheter procedure.', 'CABG avoids any graft vessel use.']
     },
     {
         'name': 'CABG graft options',
         'fact': 'Graft choices include reversed saphenous vein, internal mammary artery (most durable to LAD), and radial artery.',
         'priority': 'Understand graft source/patency differences for long-term follow-up education.',
         'true': ['Saphenous vein graft is listed.', 'LIMA-to-LAD is highlighted as durable.', 'Radial artery can be used.'],
-        'false': ['Only synthetic grafts are used in this note.', 'Internal mammary graft is never connected to LAD in this note.']
+        'false': ['Only synthetic grafts are used.', 'Internal mammary graft is never connected to LAD.']
     },
     {
         'name': 'CABG indications high risk anatomy',
         'fact': 'CABG indications include left main disease >50%, 3-vessel CAD especially with reduced EF, and proximal LAD involvement.',
         'priority': 'Escalate to surgical strategy for high-risk multivessel anatomy.',
         'true': ['Left main >50% is listed indication.', '3-vessel with low EF favors CABG.', 'Proximal LAD involvement in 2-vessel disease listed indication.'],
-        'false': ['Single-vessel mild disease always requires CABG in this note.', 'Left main stenosis is managed only with lifestyle in this note.']
+        'false': ['Single-vessel mild disease always requires CABG.', 'Left main stenosis is managed only with lifestyle.']
     },
     {
         'name': 'Other CABG indications',
         'fact': 'CABG is indicated for failed PCI and in diabetic patients with multivessel CAD.',
         'priority': 'Recognize scenarios where surgery outperforms repeat catheter interventions.',
         'true': ['Failed PCI is listed CABG indication.', 'Diabetes with multivessel CAD is listed indication.', 'CABG can be chosen when PCI strategy insufficient.'],
-        'false': ['CABG is contraindicated after failed PCI in this note.', 'Diabetic multivessel CAD always avoids surgery in this note.']
+        'false': ['CABG is contraindicated after failed PCI.', 'Diabetic multivessel CAD always avoids surgery.']
     },
     {
         'name': 'Post-CABG airway care',
         'fact': 'Post-op patient is initially intubated, extubated when stable; monitor ABGs and use incentive spirometry/deep breathing to prevent atelectasis.',
         'priority': 'Respiratory optimization reduces post-op pulmonary complications.',
         'true': ['Initial intubation then extubation when ready is listed.', 'ABG monitoring is listed.', 'Incentive spirometry/deep breathing are listed.'],
-        'false': ['Pulmonary exercises are avoided after CABG in this note.', 'ABGs are irrelevant post-CABG in this note.']
+        'false': ['Pulmonary exercises are avoided after CABG.', 'ABGs are irrelevant post-CABG.']
     },
     {
         'name': 'Chest tube threshold',
         'fact': 'Chest tube output greater than 100 mL/hr for 2+ hours suggests hemorrhage and requires provider notification.',
         'priority': 'Treat persistent high drainage as possible active bleeding emergency.',
         'true': ['>100 mL/hr for 2+ hr threshold is listed.', 'High output indicates possible hemorrhage.', 'Escalation/notification is required.'],
-        'false': ['500 mL/hr output is expected and ignored in this note.', 'Chest tube output trends are unimportant in this note.']
+        'false': ['500 mL/hr output is expected and ignored.', 'Chest tube output trends are unimportant.']
     },
     {
         'name': 'Chest tube handling',
         'fact': 'Chest tubes should remain dependent without kinks and may be removed when output drops below 25–50 mL per shift.',
         'priority': 'Maintain drainage patency and monitor for removal readiness safely.',
         'true': ['Dependent tubing is emphasized.', 'Avoid kinks in tubing is listed.', 'Removal threshold <25–50 mL/shift is listed.'],
-        'false': ['Clamp chest tubes routinely to test patency in this note.', 'Tube removal is based only on patient request in this note.']
+        'false': ['Clamp chest tubes routinely to test patency.', 'Tube removal is based only on patient request.']
     },
     {
         'name': 'Post-CABG arrhythmia',
         'fact': 'Atrial fibrillation is the most common arrhythmia after CABG, typically on post-op days 2–4.',
         'priority': 'Heighten rhythm surveillance during peak AF window.',
         'true': ['AF is most common post-CABG arrhythmia.', 'Peak timing days 2–4 is listed.', 'Continuous monitoring is needed.'],
-        'false': ['V-fib is listed most common post-CABG rhythm in this note.', 'Arrhythmias occur only immediately in OR in this note.']
+        'false': ['V-fib is listed most common post-CABG rhythm.', 'Arrhythmias occur only immediately in OR.']
     },
     {
         'name': 'Tamponade vigilance',
         'fact': "Post-CABG priorities include monitoring for tamponade using Beck's triad and maintaining MAP at least 65.",
         'priority': 'Low-pressure triad signs require immediate escalation after cardiac surgery.',
         'true': ["Beck's triad monitoring is listed post-CABG.", 'MAP ≥65 target is listed.', 'Hemodynamic deterioration can indicate tamponade.'],
-        'false': ['Tamponade risk is absent after CABG in this note.', 'MAP target under 40 is acceptable in this note.']
+        'false': ['Tamponade risk is absent after CABG.', 'MAP target under 40 is acceptable.']
     },
     {
         'name': 'Sternal precautions lifting',
         'fact': 'Sternal precautions include no lifting over 5–10 pounds for 6–8 weeks.',
         'priority': 'Protect sternal healing and prevent dehiscence.',
         'true': ['Lifting limit 5–10 lb is listed.', 'Restriction duration 6–8 weeks is listed.', 'Precaution supports sternal healing.'],
-        'false': ['Heavy lifting accelerates healing in this note.', 'No lifting restrictions exist post-CABG in this note.']
+        'false': ['Heavy lifting accelerates healing.', 'No lifting restrictions exist post-CABG.']
     },
     {
         'name': 'Other sternal precautions',
         'fact': 'No heavy pushing/pulling, no driving 4–6 weeks, and splint sternum with pillow when coughing/sneezing.',
         'priority': 'Teach movement restrictions clearly before discharge.',
         'true': ['No driving 4–6 weeks is listed.', 'Pillow splinting when coughing is listed.', 'Heavy push/pull restriction is listed.'],
-        'false': ['Unrestricted driving starts day after surgery in this note.', 'Coughing should avoid splint support in this note.']
+        'false': ['Unrestricted driving starts day after surgery.', 'Coughing should avoid splint support.']
     },
     {
         'name': 'Sternal wound red flags',
         'fact': 'Patients should report sternal clicking, drainage, fever, or increasing redness.',
         'priority': 'Early infection/dehiscence signs require prompt evaluation.',
         'true': ['Sternal clicking is warning sign.', 'Drainage/fever/redness are warning signs.', 'Prompt reporting is part of discharge teaching.'],
-        'false': ['Redness and fever are expected, no report needed in this note.', 'Sternal clicking indicates normal healing in this note.']
+        'false': ['Redness and fever are expected, no report needed.', 'Sternal clicking indicates normal healing.']
     },
     {
         'name': 'PCI vs CABG outcomes summary',
         'fact': 'PCI has shorter recovery and suits selected 1–2 vessel/STEMI/high-surgical-risk cases; CABG has longer recovery and suits left main/multivessel/DM/low EF.',
         'priority': 'Balance invasiveness and durability against anatomy and comorbidity burden.',
         'true': ['PCI recovery is faster in comparison table.', 'CABG preferred for left main/3-vessel/DM/low EF patterns.', 'Procedure selection differs by disease complexity.'],
-        'false': ['CABG is first choice for all simple 1-vessel lesions in this note.', 'PCI recovery is listed longer than CABG in this note.']
+        'false': ['CABG is first choice for all simple 1-vessel lesions.', 'PCI recovery is listed longer than CABG.']
     },
     {
         'name': 'NCLEX priority synthesis',
         'fact': 'NCLEX priorities emphasize post-CABG tamponade assessment, strict sternal precautions, and post-PCI DAPT compliance.',
         'priority': 'Focus teaching and monitoring on highest-risk preventable complications.',
         'true': ['Tamponade assessment is highlighted NCLEX priority.', 'Sternal precautions are highlighted NCLEX priority.', 'DAPT adherence post-PCI is highlighted NCLEX priority.'],
-        'false': ['Medication adherence is optional after stent in this note.', 'Tamponade surveillance is not needed after CABG in this note.']
+        'false': ['Medication adherence is optional after stent.', 'Tamponade surveillance is not needed after CABG.']
     }
 ]
 
@@ -217,16 +219,24 @@ questions = []
 for i in range(50):
     c = concepts[i % len(concepts)]
     stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
-    correct = c['fact'] if i % 2 == 0 else c['priority']
-
     distractors = c['false'] + [
         # a false statement from another section, never a section heading
         concepts[(i + 4) % len(concepts)]['false'][(i // len(concepts)) % 2],
         'Frequent reassessment can be delayed when initial vitals are stable.',
         'Post-procedure education has minimal impact on outcomes.'
     ]
-    random.shuffle(distractors)
-    options = [correct] + distractors[:3]
+    # pick the correct statement whose length is closest to the wrong ones so length does not give it away
+    meta = re.compile(r'listed|described|highlighted|emphasized|mentioned|noted')
+    cands = [t for t in [c['fact'], c['priority']] + c['true'] if len(t) >= 35 and not meta.search(t)] or [c['fact'], c['priority']]
+    mid = statistics.median(len(d) for d in distractors)
+    cands.sort(key=lambda t: abs(len(t) - mid))
+    correct = cands[(i // len(concepts)) % min(2, len(cands))]
+    own = min(c['false'], key=lambda d: abs(len(d) - len(correct)))
+    extra = [f for k in (3, 8) for f in concepts[(i + k) % len(concepts)]['false']]
+    rest = [d for d in dict.fromkeys(distractors + extra) if d not in (own, correct)]
+    random.shuffle(rest)
+    rest.sort(key=lambda d: abs(len(d) - len(correct)))  # similar lengths so the answer is not the longest option
+    options = [correct, own] + rest[:2]
     random.shuffle(options)
 
     questions.append({

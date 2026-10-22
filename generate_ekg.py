@@ -1,194 +1,458 @@
 import json
-import uuid
+import random
+from pathlib import Path
 
-def e(s):
+# Hand-written NCLEX-style EKG questions grounded in Notes/Cardiovascular System/EKG.html:
+# 50 single-best-answer + 50 select-all-that-apply.
+
+OUT_PATH = Path(__file__).resolve().parent / 'Test' / 'INSERT-EKG-QUESTIONS.sql'
+CATEGORY = 'EKG'
+
+# (stem, correct answer, [3 wrong answers], rationale)
+MCQ = [
+    ("The nurse is reviewing the cardiac conduction system with a student. Which structure briefly pauses the impulse so the atria can empty into the ventricles before the ventricles contract?",
+     "AV node", ["SA node", "Bundle of His", "Purkinje fibers"],
+     "The AV node acts as the gatekeeper. It pauses the signal so the atria can empty their blood into the ventricles before the ventricles contract."),
+    ("A student asks which structure normally starts each heartbeat at a rate of 60-100 bpm. What is the nurse's best response?",
+     "The sinoatrial (SA) node", ["The atrioventricular (AV) node", "The Bundle of His", "The Purkinje fibers"],
+     "The SA node is the pacemaker of the heart. It fires at 60-100 bpm and sends the wave through the atria."),
+    ("After the impulse leaves the AV node, which pathway does it follow to make the ventricles contract?",
+     "Bundle of His, then the left and right bundle branches, then the Purkinje fibers",
+     ["Purkinje fibers, then the bundle branches, then the Bundle of His",
+      "Left and right bundle branches, then the SA node, then the Purkinje fibers",
+      "Bundle of His, then the SA node, then the bundle branches"],
+     "The signal travels from the Bundle of His to the left and right bundle branches and then the Purkinje fibers, and the ventricles contract."),
+    ("Which waveform on the ECG strip represents atrial depolarization?",
+     "P wave", ["QRS complex", "T wave", "U wave"],
+     "The P wave represents atrial depolarization."),
+    ("The nurse is identifying ventricular repolarization on a rhythm strip. Which waveform represents this event?",
+     "T wave", ["P wave", "PR segment", "QRS complex"],
+     "The T wave represents ventricular repolarization. The QRS complex represents ventricular depolarization."),
+    ("A client's strip shows a prominent U wave. Which electrolyte imbalance should the nurse suspect?",
+     "Hypokalemia", ["Hyperkalemia", "Hypernatremia", "Hypermagnesemia"],
+     "A U wave is not always present. When it is prominent it may indicate hypokalemia."),
+    ("Which PR interval is within normal limits for an adult?",
+     "0.16 sec", ["0.08 sec", "0.24 sec", "0.32 sec"],
+     "A normal PR interval is 0.12-0.20 sec (3-5 small boxes). Values above 0.20 sec are prolonged."),
+    ("A client's QRS complex measures 0.14 sec. How should the nurse interpret this finding?",
+     "The QRS is wide, which is abnormal", ["The QRS is narrow, which is normal", "The QRS is normal if the PR interval is normal",
+                                            "The QRS is normal because ventricular depolarization can take 0.20 sec"],
+     "A normal QRS is narrow (less than 0.12 sec). A QRS wider than 0.12 sec is wide and abnormal."),
+    ("On standard ECG paper moving at 25 mm/sec, how much time does one large box represent?",
+     "0.20 sec", ["0.04 sec", "0.10 sec", "1.00 sec"],
+     "One large box is 5 small boxes x 0.04 sec = 0.20 sec."),
+    ("A client has a regular rhythm with 4 large boxes between consecutive R waves. What is the heart rate?",
+     "75 bpm", ["60 bpm", "100 bpm", "150 bpm"],
+     "For a regular rhythm, heart rate = 300 divided by the large boxes between R waves, so 300 / 4 = 75 bpm."),
+    ("A client has an irregular rhythm. The nurse counts 8 QRS complexes in a 6-second strip. What is the heart rate?",
+     "80 bpm", ["48 bpm", "100 bpm", "160 bpm"],
+     "For an irregular rhythm, count the QRS complexes in a 6-second strip and multiply by 10: 8 x 10 = 80 bpm."),
+    ("Which method should the nurse use to calculate the heart rate of an irregular rhythm?",
+     "Count the QRS complexes in a 6-second strip and multiply by 10",
+     ["Divide 300 by the number of large boxes between two R waves",
+      "Match the large boxes between R waves to 300, 150, 100, 75, 60, 50",
+      "Count the P waves in one large box and multiply by 60"],
+     "Dividing 300 by large boxes and the 300-150-100-75-60-50 sequence only work for regular rhythms. Irregular rhythms use the QRS count x 10."),
+    ("A client with a palpable pulse has unstable SVT. Which intervention does the nurse anticipate?",
+     "Synchronized cardioversion with the SYNC button on",
+     ["Unsynchronized defibrillation with the SYNC button off", "Chest compressions followed by epinephrine", "IV magnesium sulfate"],
+     "Cardioversion is used when the client has a pulse: low energy, SYNC ON. Unstable SVT is treated with synchronized cardioversion."),
+    ("Why is the synchronizer turned on before cardioversion?",
+     "The shock is timed to the R wave so it does not land on the vulnerable T wave",
+     ["The shock is timed to the P wave so the atria reset first", "The shock is delivered immediately because every second counts",
+      "The shock is delivered at the highest energy setting"],
+     "SYNC ON makes the machine wait and fire on the R wave. A shock on the T wave could cause V-Fib."),
+    ("A client's monitor shows wide, bizarre QRS complexes at 190/min. The client is unresponsive with no pulse. Which action should the nurse take?",
+     "Call a code, start CPR, and defibrillate with the SYNC button off",
+     ["Perform synchronized cardioversion", "Give IV adenosine and reassess", "Have the client bear down as if having a bowel movement"],
+     "Pulseless V-Tach is shockable: Code Blue, CPR, defibrillation (SYNC off), then epinephrine and amiodarone."),
+    ("Which rhythm is never shocked during cardiac arrest?",
+     "Asystole", ["Ventricular fibrillation", "Pulseless ventricular tachycardia", "Unstable torsades de pointes"],
+     "Asystole and PEA are non-shockable rhythms. V-Fib and pulseless V-Tach are shockable."),
+    ("The monitor shows a flat line. Which action should the nurse take to confirm asystole?",
+     "Check the rhythm in a second lead and assess the client for a pulse",
+     ["Prepare to defibrillate immediately", "Begin synchronized cardioversion", "Give IV magnesium sulfate"],
+     "Confirm asystole in 2 leads, then start CPR immediately and give epinephrine. Always check the pulse first."),
+    ("A client's monitor alarms and shows an abnormal rhythm. Which action should the nurse take first?",
+     "Check the client's pulse and level of consciousness", ["Prepare to defibrillate", "Administer amiodarone", "Notify the provider"],
+     "The NCLEX priority rule is to always check the pulse first. Shockable rhythms are V-Fib and pulseless V-Tach."),
+    ("A client has a regular heart rate of 44 bpm with normal P waves and a normal PR interval. The client reports dizziness and looks pale. Which medication does the nurse anticipate?",
+     "Atropine", ["Adenosine", "Diltiazem", "Magnesium sulfate"],
+     "Symptomatic sinus bradycardia (dizziness, pallor, fatigue) is treated with atropine."),
+    ("The nurse has given atropine to a client with symptomatic sinus bradycardia. Which assessment is the priority afterward?",
+     "Blood pressure and heart rate", ["Serum magnesium and QT interval", "Blood glucose and ketones", "Urine output and daily weight"],
+     "Atropine activates the sympathetic nervous system and increases BP and HR, so both are monitored after it is given."),
+    ("A client has a heart rate of 54 bpm with a regular rhythm and normal P waves. The client is alert and has no symptoms. What action is most appropriate?",
+     "Document the rhythm and continue to monitor", ["Administer atropine", "Prepare for emergency pacing", "Perform synchronized cardioversion"],
+     "Asymptomatic sinus bradycardia needs no treatment. Document and monitor."),
+    ("A client with sinus tachycardia also has COPD. Which medication class should the nurse question?",
+     "Calcium channel blockers such as diltiazem and verapamil",
+     ["Anticoagulants such as warfarin", "Electrolyte replacement such as magnesium sulfate", "Stool softeners such as docusate"],
+     "Calcium channel blockers (diltiazem, verapamil) are not given to clients with COPD."),
+    ("Which finding in a client taking digoxin indicates toxicity?",
+     "Yellow-green vision with halos around lights", ["Increased appetite", "A regular pulse of 78 bpm", "Clear vision with improved energy"],
+     "Digoxin toxicity causes nausea, vomiting, loss of appetite, confusion, yellow or green vision, halos, and a slow, fast, or irregular pulse."),
+    ("A stable client has SVT at 170 bpm with a regular rhythm and a narrow QRS. Which intervention should the nurse try first?",
+     "Teach a vagal maneuver such as bearing down", ["Administer IV adenosine", "Prepare for synchronized cardioversion", "Administer IV amiodarone"],
+     "SVT is treated with a vagal maneuver first. If there is no response, adenosine IV is given. Unstable clients are cardioverted."),
+    ("The nurse instructs a client in SVT to perform a vagal maneuver. Which instruction is correct?",
+     "Bear down as if having a bowel movement", ["Take rapid, shallow breaths", "Lie flat and raise the arms overhead", "Drink a large glass of warm water quickly"],
+     "Bearing down (Valsalva) or applying ice or cold water to the face stimulates the vagus nerve."),
+    ("Cold water applied to the face during a vagal maneuver stimulates which cranial nerve?",
+     "Cranial nerve X (vagus)", ["Cranial nerve II (optic)", "Cranial nerve VIII (vestibulocochlear)", "Cranial nerve XII (hypoglossal)"],
+     "Ice or cold water on the face stimulates the vagus nerve (CN X)."),
+    ("A client with SVT does not respond to vagal maneuvers. Which medication is first-line?",
+     "Adenosine IV", ["Atropine IV", "Magnesium sulfate IV", "Epinephrine IV"],
+     "If vagal maneuvers fail, adenosine IV is the first-line drug. Diltiazem or beta-blockers may follow."),
+    ("A rhythm strip shows sawtooth-shaped flutter waves between narrow QRS complexes at an atrial rate of 300 bpm. Which rhythm does the nurse identify?",
+     "Atrial flutter", ["Atrial fibrillation", "Supraventricular tachycardia", "Ventricular tachycardia"],
+     "Atrial flutter has an atrial rate of 250-350 bpm with sawtooth F waves and narrow QRS complexes."),
+    ("Which complication is the nurse most concerned about in a client with atrial flutter?",
+     "Blood clot formation leading to stroke", ["Sudden asystole with no electrical activity", "Cardiac tamponade", "Torsades de pointes"],
+     "Atrial flutter carries a risk of blood clot formation and stroke, so anticoagulants are used."),
+    ("Which finding on the rhythm strip is characteristic of atrial fibrillation?",
+     "An irregular rhythm with a wavy baseline and no distinct P waves",
+     ["A regular rhythm with sawtooth flutter waves", "A regular rhythm with a prolonged PR interval", "A wide, bizarre QRS with no P waves"],
+     "Atrial fibrillation is irregular with a wavy, chaotic baseline, no distinct P waves, and a narrow QRS."),
+    ("A client with new-onset atrial fibrillation lasting longer than 48 hours is scheduled for cardioversion. What does the nurse anticipate?",
+     "Anticoagulation before the cardioversion", ["Immediate cardioversion without anticoagulation", "IV atropine before the procedure",
+                                                  "Withholding anticoagulants to prevent bleeding"],
+     "Because of the stroke risk, a client in A-fib longer than 48 hours is anticoagulated before cardioversion."),
+    ("Which medication is used for rhythm control, rather than rate control, in atrial fibrillation?",
+     "Amiodarone", ["Metoprolol", "Diltiazem", "Digoxin"],
+     "Rate control uses beta-blockers, diltiazem, and digoxin. Rhythm control uses amiodarone or cardioversion."),
+    ("A client in ventricular tachycardia has a palpable pulse and is hemodynamically stable. Which treatment does the nurse anticipate?",
+     "Synchronized cardioversion and antiarrhythmics such as amiodarone or lidocaine",
+     ["Defibrillation and chest compressions", "IV adenosine followed by vagal maneuvers", "Atropine followed by transcutaneous pacing"],
+     "V-Tach with a pulse is treated with synchronized cardioversion and medications such as amiodarone or lidocaine."),
+    ("Which sequence of treatment is correct for a client in ventricular fibrillation?",
+     "CPR, unsynchronized defibrillation, epinephrine, then amiodarone",
+     ["Vagal maneuver, adenosine, then synchronized cardioversion", "Atropine, transcutaneous pacing, then dopamine",
+      "Anticoagulation, beta-blocker, then synchronized cardioversion"],
+     "V-Fib is an emergency: Code Blue, CPR, defibrillation (unsynchronized), epinephrine, then amiodarone."),
+    ("Which description matches ventricular fibrillation on the monitor?",
+     "Chaotic electrical activity with no identifiable QRS complexes or P waves",
+     ["Regular wide QRS complexes at 180/min without P waves", "A flat line with no electrical activity", "Sawtooth waves with narrow QRS complexes"],
+     "V-Fib shows chaotic, irregular electrical activity with no QRS and no P waves, and there is no effective pulse."),
+    ("Which finding identifies a premature ventricular contraction (PVC) on the strip?",
+     "A wide, bizarre QRS with no preceding P wave, followed by a compensatory pause",
+     ["An early narrow QRS preceded by a P wave", "A pacing spike followed by a QRS", "A QRS that is dropped after progressively longer PR intervals"],
+     "A PVC is a wide, bizarre QRS with no P wave before it, and a compensatory pause follows."),
+    ("A client on telemetry has 4 PVCs in a row. How should the nurse interpret and respond?",
+     "Treat it as ventricular tachycardia, monitor closely, and check electrolytes",
+     ["Record it as an expected variation of sinus rhythm", "Prepare for emergency transcutaneous pacing", "Administer atropine and recheck in 4 hours"],
+     "Three or more PVCs in a row are V-Tach. Monitor closely and address the cause, such as electrolytes or ischemia."),
+    ("A client taking a beta-blocker has a regular rate of 72 bpm and a PR interval of 0.26 sec. Every P wave is followed by a QRS. Which interpretation is correct?",
+     "First-degree AV block; no treatment is needed",
+     ["Second-degree type I block; a pacemaker is needed", "Second-degree type II block; urgent pacing is needed", "Third-degree block; emergency pacing is needed"],
+     "A prolonged PR interval (more than 0.20 sec) with every P wave conducting is first-degree AV block, often caused by beta-blockers or aging."),
+    ("A strip shows a PR interval that progressively lengthens until one QRS complex is dropped. Which rhythm is this?",
+     "Second-degree AV block type I (Wenckebach)",
+     ["First-degree AV block", "Second-degree AV block type II", "Third-degree AV block"],
+     "Progressive PR lengthening until a QRS is dropped is Wenckebach (Mobitz I)."),
+    ("A client with structural heart disease has a heart rate of 40 bpm, a constant PR interval, and occasional non-conducted P waves. Which action should the nurse anticipate?",
+     "Preparing for an urgent pacemaker", ["Continuing to monitor with no treatment", "Administering IV adenosine", "Performing synchronized cardioversion"],
+     "Mobitz II has a constant PR interval with non-conducted P waves and needs an urgent pacemaker."),
+    ("A client's strip shows P waves and QRS complexes that are completely independent of each other at a rate of 35 bpm. Which intervention does the nurse anticipate?",
+     "Emergency pacemaker placement", ["Vagal maneuver", "Synchronized cardioversion", "IV adenosine"],
+     "Third-degree (complete) heart block has no communication between atria and ventricles and requires an emergency pacemaker."),
+    ("Which cause is associated with second-degree AV block type II?",
+     "Structural heart disease", ["Beta-blocker use", "Increased vagal tone", "Normal aging"],
+     "Mobitz II is caused by structural heart disease. First-degree block is often caused by beta-blockers or aging, and Wenckebach by vagal tone or medications."),
+    ("The nurse notes small vertical lines just before each QRS complex on a regular rhythm strip. What do these represent?",
+     "Pacing spikes from an artificial pacemaker", ["Electrical alternans", "Prominent U waves", "Premature ventricular contractions"],
+     "An artificial pacemaker produces pacing spikes before P waves or QRS complexes at a regular rate."),
+    ("A client's QRS complexes twist around the baseline at a rate of 220 bpm, and the QT interval was prolonged before onset. Which medication is first-line?",
+     "IV magnesium sulfate", ["IV adenosine", "IV atropine", "Oral digoxin"],
+     "This is torsades de pointes. IV magnesium sulfate is first-line, with defibrillation if the client is unstable."),
+    ("Which electrolyte imbalance is associated with torsades de pointes?",
+     "Hypomagnesemia", ["Hypermagnesemia", "Hypernatremia", "Hypercalcemia"],
+     "Torsades de pointes is associated with hypomagnesemia and QT-prolonging drugs."),
+    ("Which EKG finding is considered pathognomonic for cardiac tamponade?",
+     "Electrical alternans", ["Sawtooth flutter waves", "Prominent U waves", "Pacing spikes"],
+     "Electrical alternans, a beat-to-beat change in QRS amplitude, is pathognomonic for tamponade."),
+    ("The nurse is reviewing EKG findings in a client with cardiac tamponade. Why is the QRS low voltage?",
+     "Fluid surrounding the heart dampens the electrical signal",
+     ["The ventricles depolarize more slowly than normal", "The atria depolarize without the AV node", "Hypokalemia lowers the QRS amplitude"],
+     "Fluid around the heart dampens the signal and produces low-voltage QRS complexes."),
+    ("A client has a prolonged QT interval on the strip. For which rhythm is the client at risk?",
+     "Torsades de pointes", ["Atrial flutter", "First-degree AV block", "Sinus bradycardia"],
+     "A prolonged QT interval (normal 0.36-0.44 sec) is a risk for torsades de pointes."),
+    ("On an ECG, a wave of depolarization traveling toward a lead produces which deflection?",
+     "An upward deflection", ["A downward deflection", "A flat line", "A pacing spike"],
+     "Depolarization toward a lead causes a bump up. Depolarization away from the lead causes a dip down."),
+    ("Which description matches normal sinus rhythm?",
+     "Regular rhythm at 60-100 bpm with a P wave before each narrow QRS and a PR interval of 0.12-0.20 sec",
+     ["Regular rhythm at 100-150 bpm with a hidden P wave", "Irregular rhythm with no distinct P waves and a wavy baseline",
+      "A rate of 30-40 bpm with P waves unrelated to the QRS"],
+     "Normal sinus rhythm is regular at 60-100 bpm with consistent P waves before narrow QRS complexes and needs no treatment."),
+]
+
+# (stem, [correct answers], [wrong answers], rationale)
+SATA = [
+    ("Which structures are part of the cardiac conduction pathway? (Select all that apply)",
+     ["SA node", "AV node", "Purkinje fibers"], ["Chordae tendineae", "Coronary sinus"],
+     "The impulse travels from the SA node to the AV node, the Bundle of His, the bundle branches, and the Purkinje fibers."),
+    ("Which findings are consistent with sinus bradycardia? (Select all that apply)",
+     ["Heart rate below 60 bpm", "Regular rhythm", "Normal P waves and PR interval"], ["Sawtooth flutter waves", "Wide, bizarre QRS complexes"],
+     "Sinus bradycardia is a regular rhythm below 60 bpm that starts in the SA node with normal P waves and a normal PR interval."),
+    ("A client has symptomatic sinus bradycardia. Which signs does the nurse expect? (Select all that apply)",
+     ["Dizziness", "Pallor", "Fatigue"], ["Yellow-green vision", "Bounding pulse with flushed skin"],
+     "Symptomatic sinus bradycardia causes dizziness, pallor, and fatigue and is treated with atropine."),
+    ("Which findings are consistent with sinus tachycardia? (Select all that apply)",
+     ["Heart rate of 100-150 bpm", "Regular rhythm", "Normal P waves before each QRS"],
+     ["Irregular rhythm with a wavy baseline", "Sawtooth flutter waves"],
+     "Sinus tachycardia is regular at 100-150 bpm with normal P waves and a normal PR interval."),
+    ("Which findings are consistent with SVT? (Select all that apply)",
+     ["Rate above 150 bpm", "Regular rhythm with a narrow QRS", "P waves hidden in the preceding T wave"],
+     ["Wide, bizarre QRS complexes", "Irregular rhythm with no distinct P waves"],
+     "SVT is a rapid, regular rhythm above 150 bpm with a narrow QRS and P waves that may be hidden in the T wave."),
+    ("Which interventions are appropriate for a stable client in SVT? (Select all that apply)",
+     ["A Valsalva maneuver", "Cold water or ice applied to the face", "IV adenosine if vagal maneuvers fail"],
+     ["Unsynchronized defibrillation", "IV atropine"],
+     "SVT is treated with vagal maneuvers first, then adenosine IV. Unstable clients are cardioverted."),
+    ("Which medications are used to treat sinus tachycardia? (Select all that apply)",
+     ["Diltiazem or verapamil", "Metoprolol", "Digoxin"], ["Atropine", "IV magnesium sulfate"],
+     "Sinus tachycardia is treated with calcium channel blockers, beta-blockers such as metoprolol, or digoxin. Atropine raises the heart rate."),
+    ("Which findings are consistent with atrial flutter? (Select all that apply)",
+     ["Sawtooth flutter waves", "Atrial rate of 250-350 bpm", "Narrow QRS complexes"],
+     ["A flat line with no electrical activity", "Wide, bizarre QRS complexes"],
+     "Atrial flutter has sawtooth F waves, an atrial rate of 250-350 bpm, and narrow QRS complexes."),
+    ("Which findings are consistent with atrial fibrillation? (Select all that apply)",
+     ["Irregular rhythm with a variable rate", "No distinct P waves", "Narrow QRS complexes"],
+     ["Sawtooth flutter waves", "A constant PR interval before every QRS"],
+     "A-fib is irregular with a wavy baseline, no distinct P waves, and a narrow QRS."),
+    ("Which treatments are used for atrial fibrillation? (Select all that apply)",
+     ["Anticoagulants such as heparin then warfarin", "Rate control with a beta-blocker or diltiazem", "Rhythm control with amiodarone or cardioversion"],
+     ["Atropine", "IV magnesium sulfate"],
+     "A-fib is treated with anticoagulants to prevent stroke, rate control, and rhythm control."),
+    ("Which findings are consistent with ventricular tachycardia? (Select all that apply)",
+     ["Rate of 100-250 bpm", "Wide, bizarre QRS complexes", "No P waves"], ["Sawtooth flutter waves", "Narrow QRS with hidden P waves"],
+     "V-Tach has a rate of 100-250 bpm with wide, bizarre QRS complexes and no P waves."),
+    ("A client in ventricular tachycardia has no pulse. Which actions does the nurse take? (Select all that apply)",
+     ["Call Code Blue", "Start CPR", "Defibrillate with the SYNC button off"], ["Perform a vagal maneuver", "Perform synchronized cardioversion"],
+     "Pulseless V-Tach is treated as cardiac arrest: Code Blue, CPR, defibrillation, then epinephrine and amiodarone."),
+    ("Which findings are consistent with ventricular fibrillation? (Select all that apply)",
+     ["No effective pulse", "Chaotic electrical activity", "No identifiable QRS or P waves"],
+     ["A compensatory pause after each beat", "Pacing spikes before the QRS"],
+     "V-Fib is chaotic electrical activity with no QRS or P waves and no effective pulse. It is a shockable rhythm."),
+    ("Which findings are consistent with PVCs? (Select all that apply)",
+     ["Wide, bizarre QRS", "No P wave before the beat", "A compensatory pause after the beat"],
+     ["Sawtooth baseline", "Pacing spike before each P wave"],
+     "PVCs are wide, bizarre QRS complexes with no preceding P wave, followed by a compensatory pause."),
+    ("Which nursing actions are appropriate for a client with frequent PVCs? (Select all that apply)",
+     ["Monitor closely", "Check electrolytes", "Look for underlying causes such as ischemia"], ["Give IV adenosine", "Start chest compressions"],
+     "Monitor closely and address underlying causes such as electrolyte imbalance or ischemia. Three or more in a row is V-Tach."),
+    ("Which findings are consistent with first-degree AV block? (Select all that apply)",
+     ["PR interval greater than 0.20 sec", "Every P wave conducts to the ventricles", "A heart rate of 60-100 bpm"],
+     ["A QRS dropped after progressive PR lengthening", "P waves independent of the QRS"],
+     "First-degree block has a prolonged PR interval, but every P wave conducts and the rate is normal."),
+    ("Which statements are true about second-degree AV block type I (Wenckebach)? (Select all that apply)",
+     ["The PR interval lengthens progressively", "A QRS complex is eventually dropped", "Increased vagal tone or medications can cause it"],
+     ["The PR interval stays constant", "P waves and QRS complexes are completely independent"],
+     "Wenckebach has a progressively lengthening PR interval until a QRS is dropped and can be caused by vagal tone or medications."),
+    ("Which statements are true about second-degree AV block type II (Mobitz II)? (Select all that apply)",
+     ["The PR interval is constant for conducted beats", "Some P waves are not conducted", "Structural heart disease can cause it"],
+     ["The PR interval lengthens until a beat is dropped", "No treatment is needed"],
+     "Mobitz II has a constant PR interval with non-conducted P waves, is caused by structural heart disease, and needs an urgent pacemaker."),
+    ("Which statements are true about third-degree (complete) heart block? (Select all that apply)",
+     ["P waves and QRS complexes are independent", "The ventricular rate is 30-40 bpm", "An emergency pacemaker is required"],
+     ["Every P wave conducts to the ventricles", "The PR interval is constant"],
+     "In complete heart block the atria and ventricles do not communicate. The rate is 30-40 bpm and an emergency pacemaker is required."),
+    ("Which findings are consistent with an artificial pacemaker rhythm? (Select all that apply)",
+     ["Pacing spikes before P waves or QRS complexes", "A regular rate set by the pacemaker", "A QRS that may be normal or widened"],
+     ["Sawtooth flutter waves", "A wavy baseline with no P waves"],
+     "A paced rhythm has a regular rate, pacing spikes, and a normal or wide QRS depending on atrial versus ventricular pacing."),
+    ("Which actions are appropriate for asystole? (Select all that apply)",
+     ["Confirm the rhythm in two leads", "Start CPR immediately", "Give epinephrine"], ["Defibrillate immediately", "Perform synchronized cardioversion"],
+     "Asystole is non-shockable: confirm in 2 leads, start CPR, give epinephrine, and treat reversible causes."),
+    ("Which statements are true about torsades de pointes? (Select all that apply)",
+     ["QRS complexes twist around the baseline", "A prolonged QT interval precedes onset", "It can degenerate into ventricular fibrillation"],
+     ["It is treated first with atropine", "It is caused by hypermagnesemia"],
+     "Torsades has a twisting 'spindle' QRS, follows a prolonged QT, can become V-Fib, and is treated with IV magnesium sulfate."),
+    ("Which EKG findings suggest cardiac tamponade? (Select all that apply)",
+     ["Electrical alternans", "Low-voltage QRS complexes", "Sinus tachycardia"], ["Sawtooth flutter waves", "Pacing spikes"],
+     "Tamponade shows electrical alternans, low-voltage QRS, and compensatory sinus tachycardia."),
+    ("Which rhythms are shockable in cardiac arrest? (Select all that apply)",
+     ["Ventricular fibrillation", "Pulseless ventricular tachycardia"],
+     ["Asystole", "Pulseless electrical activity (PEA)", "First-degree AV block"],
+     "V-Fib and pulseless V-Tach are shockable. Asystole and PEA are not."),
+    ("Which rhythms are non-shockable in cardiac arrest? (Select all that apply)",
+     ["Asystole", "Pulseless electrical activity (PEA)"],
+     ["Ventricular fibrillation", "Pulseless ventricular tachycardia", "Pulseless torsades de pointes"],
+     "Never shock asystole or PEA. They are treated with CPR and epinephrine."),
+    ("Which statements describe cardioversion? (Select all that apply)",
+     ["The client has a pulse", "The machine is set to SYNC ON", "A low-energy controlled shock is delivered"],
+     ["The shock is delivered immediately regardless of the R wave", "The client is in cardiac arrest"],
+     "Cardioversion is for a client with a pulse. It is a low-energy shock timed to the R wave with SYNC ON."),
+    ("Which statements describe defibrillation? (Select all that apply)",
+     ["The client has no pulse", "A high-energy shock is delivered", "CPR is performed before and after the shock"],
+     ["The SYNC button is on", "The client is sedated first"],
+     "Defibrillation is a high-energy, SYNC OFF shock for a pulseless client and is always preceded and followed by CPR."),
+    ("Which rhythms are treated with synchronized cardioversion when a pulse is present? (Select all that apply)",
+     ["Supraventricular tachycardia", "Atrial flutter", "Ventricular tachycardia with a pulse"], ["Ventricular fibrillation", "Asystole"],
+     "Cardioversion is used for SVT, A-fib, A-flutter, and V-Tach with a pulse. V-Fib is defibrillated and asystole is not shocked."),
+    ("Which statements about ECG paper at standard speed are correct? (Select all that apply)",
+     ["One small box equals 0.04 sec", "One large box equals 0.20 sec", "Five large boxes equal 1 second"],
+     ["One large box equals 0.04 sec", "The paper speed is 50 mm/sec"],
+     "At 25 mm/sec a small box is 0.04 sec, a large box is 0.20 sec, and 5 large boxes are 1 second."),
+    ("Which waveform measurements are within normal limits? (Select all that apply)",
+     ["PR interval of 0.16 sec", "QRS of 0.08 sec", "QT interval of 0.40 sec"], ["PR interval of 0.30 sec", "QRS of 0.16 sec"],
+     "Normal values are PR 0.12-0.20 sec, QRS below 0.12 sec, and QT 0.36-0.44 sec."),
+    ("Which waveforms are correctly matched with the cardiac event? (Select all that apply)",
+     ["P wave: atrial depolarization", "QRS complex: ventricular depolarization", "T wave: ventricular repolarization"],
+     ["PR segment: ventricular repolarization", "QRS complex: atrial repolarization"],
+     "The P wave is atrial depolarization, the QRS is ventricular depolarization, and the T wave is ventricular repolarization."),
+    ("Which methods can the nurse use to determine heart rate? (Select all that apply)",
+     ["Divide 300 by the large boxes between R waves in a regular rhythm", "Multiply the QRS count in a 6-second strip by 10 in an irregular rhythm",
+      "Match large boxes to 300, 150, 100, 75, 60, 50 for a regular rhythm"],
+     ["Multiply the P wave count in one large box by 60", "Divide 150 by the number of small boxes in the PR interval"],
+     "Regular rhythms use 300 divided by large boxes or the 300-150-100-75-60-50 sequence. Irregular rhythms use the QRS count x 10."),
+    ("Which rhythms are irregular? (Select all that apply)",
+     ["Atrial fibrillation", "Normal sinus rhythm with PVCs", "Second-degree AV block type I"], ["Sinus bradycardia", "First-degree AV block"],
+     "A-fib is irregular, PVCs add occasional irregular beats, and Wenckebach drops beats. Sinus bradycardia and first-degree block are regular."),
+    ("Which rhythms typically have a narrow QRS complex? (Select all that apply)",
+     ["Supraventricular tachycardia", "Atrial flutter", "Atrial fibrillation"], ["Ventricular tachycardia", "Ventricular fibrillation"],
+     "Supraventricular rhythms have narrow QRS complexes. V-Tach is wide and bizarre and V-Fib is chaotic."),
+    ("Which rhythms lack distinct P waves? (Select all that apply)",
+     ["Atrial fibrillation", "Ventricular tachycardia", "Ventricular fibrillation"], ["Normal sinus rhythm", "Sinus bradycardia"],
+     "A-fib, V-Tach, and V-Fib have no distinct P waves. Normal sinus rhythm and sinus bradycardia have normal P waves."),
+    ("Which rhythms may require a pacemaker? (Select all that apply)",
+     ["Second-degree AV block type I", "Second-degree AV block type II", "Third-degree AV block"], ["First-degree AV block", "Sinus tachycardia"],
+     "Second-degree blocks and complete heart block need a pacemaker. First-degree block needs no treatment."),
+    ("Which rhythms need no treatment? (Select all that apply)",
+     ["Normal sinus rhythm", "First-degree AV block", "Asymptomatic sinus bradycardia"], ["Ventricular tachycardia", "Torsades de pointes"],
+     "Normal sinus rhythm, first-degree block, and asymptomatic sinus bradycardia are monitored. V-Tach and torsades need treatment."),
+    ("Which rhythms carry a risk of stroke from clot formation? (Select all that apply)",
+     ["Atrial flutter", "Atrial fibrillation"], ["Sinus bradycardia", "First-degree AV block", "Normal sinus rhythm"],
+     "Atrial flutter and A-fib carry a risk of blood clots and stroke, so anticoagulants are used."),
+    ("A client's monitor shows ventricular fibrillation. Which priority actions does the nurse take? (Select all that apply)",
+     ["Check for a pulse", "Call a code", "Start CPR until the defibrillator is ready"],
+     ["Perform a vagal maneuver", "Wait 10 minutes to see whether the rhythm resolves"],
+     "Always check the pulse first. V-Fib is an emergency treated with a code, CPR, and defibrillation."),
+    ("Which medication-rhythm pairings are correct? (Select all that apply)",
+     ["Atropine: symptomatic sinus bradycardia", "Adenosine: SVT after vagal maneuvers fail", "Magnesium sulfate: torsades de pointes"],
+     ["Atropine: ventricular fibrillation", "Adenosine: pulseless ventricular tachycardia"],
+     "Atropine treats symptomatic sinus bradycardia, adenosine treats SVT, and magnesium sulfate treats torsades de pointes."),
+    ("Which rhythm-rate pairings are correct? (Select all that apply)",
+     ["Normal sinus rhythm: 60-100 bpm", "Sinus tachycardia: 100-150 bpm", "Third-degree block: 30-40 bpm"],
+     ["SVT: below 60 bpm", "Torsades de pointes: below 40 bpm"],
+     "Normal sinus rhythm is 60-100 bpm, sinus tachycardia 100-150 bpm, and complete heart block 30-40 bpm. SVT and torsades are fast."),
+    ("A client is taking digoxin. Which findings should the nurse report as signs of toxicity? (Select all that apply)",
+     ["Nausea and vomiting", "Yellow or green vision with halos", "A slow, fast, or irregular pulse"], ["Increased appetite", "Improved energy"],
+     "Digoxin toxicity causes nausea, vomiting, loss of appetite, confusion, visual changes, and pulse abnormalities."),
+    ("Which factors are associated with torsades de pointes? (Select all that apply)",
+     ["Hypomagnesemia", "QT-prolonging medications", "A prolonged QT interval"], ["Hypermagnesemia", "A shortened PR interval"],
+     "Torsades is associated with hypomagnesemia and QT-prolonging drugs, and a prolonged QT precedes onset."),
+    ("Which actions are appropriate when the monitor shows a flat line? (Select all that apply)",
+     ["Check the client's pulse", "Confirm the rhythm in two leads", "Begin CPR if the client is pulseless"],
+     ["Charge the defibrillator and shock", "Turn on the SYNC button"],
+     "Check the pulse and confirm asystole in 2 leads. Asystole is never shocked, so CPR and epinephrine are given."),
+    ("Which statements about heart block are true? (Select all that apply)",
+     ["The SA and AV nodes fail to communicate properly", "There are four degrees of severity", "In first-degree block every P wave conducts, but slowly"],
+     ["Every degree requires an emergency pacemaker", "The heart rate is always above 100 bpm"],
+     "Heart block is a communication failure between the SA and AV nodes with 4 degrees of severity. First-degree block needs no treatment."),
+    ("Which statements about synchronized cardioversion are correct? (Select all that apply)",
+     ["The shock is delivered on the R wave", "This avoids the vulnerable T wave", "The client may be sedated first"],
+     ["The shock is delivered immediately without waiting for the R wave", "It is used for ventricular fibrillation"],
+     "With SYNC ON the shock fires on the R wave, avoiding the T wave. The client may be sedated first."),
+    ("Which statements describe depolarization? (Select all that apply)",
+     ["Sodium enters the cell", "The charge goes from negative to positive", "A wave moving toward a lead causes an upward deflection"],
+     ["The cell resets from positive to negative", "A wave moving toward a lead causes a downward deflection"],
+     "In depolarization Na+ enters the cell and the charge goes negative to positive. Toward a lead is a bump up and away is a dip down."),
+    ("Which statements describe repolarization? (Select all that apply)",
+     ["The cell resets", "The charge goes from positive to negative", "A wave moving away from a lead causes an upward deflection"],
+     ["Sodium enters the cell", "A wave moving toward a lead causes an upward deflection"],
+     "In repolarization the cell resets from positive to negative. Toward a lead is a dip down and away is a bump up."),
+    ("Which findings are consistent with atrial fibrillation on assessment? (Select all that apply)",
+     ["An irregular pulse", "A wavy, chaotic baseline on the strip", "An increased risk of blood clots and stroke"],
+     ["A regular rhythm with sawtooth waves", "A constant PR interval"],
+     "A-fib is irregular with a chaotic baseline and a risk of clots and stroke."),
+    ("Which statements about the QRS complex are correct? (Select all that apply)",
+     ["It represents ventricular depolarization", "A normal QRS is narrow, less than 0.12 sec", "A QRS wider than 3 small boxes is abnormal"],
+     ["It represents atrial depolarization", "A normal QRS is 0.20 sec or longer"],
+     "The QRS is ventricular depolarization. Normal is narrow (below 0.12 sec) and more than 3 small boxes is wide and abnormal."),
+]
+
+assert len(MCQ) == 50 and len(SATA) == 50
+for stem, correct, wrong, _ in MCQ:
+    assert len(wrong) == 3 and correct not in wrong
+for stem, correct, wrong, _ in SATA:
+    assert len(correct) + len(wrong) == 5 and 2 <= len(correct) <= 4 and not set(correct) & set(wrong)
+
+
+def esc(s: str) -> str:
     return s.replace("'", "''")
 
-sql = "BEGIN;\n"
-sql += "DO $$\nDECLARE\n"
-sql += "  subject_id UUID;\n  topic_id UUID;\n  test_id BIGINT;\n"
-sql += "BEGIN\n"
-# Get the topic and subject IDs
-sql += "  SELECT id INTO subject_id FROM test_subjects WHERE name ILIKE '%cardio%' LIMIT 1;\n"
-sql += "  SELECT test_id INTO test_id FROM test_configs WHERE subject_id = subject_id LIMIT 1;\n"
-sql += "  SELECT id INTO topic_id FROM test_topics WHERE name ILIKE '%ekg%' LIMIT 1;\n"
-sql += "  IF topic_id IS NULL THEN\n"
-sql += "    IF subject_id IS NULL THEN\n"
-sql += "      INSERT INTO test_subjects (name, description) VALUES ('Cardiovascular', 'Cardio notes') RETURNING id INTO subject_id;\n"
-sql += "    END IF;\n"
-sql += "    INSERT INTO test_topics (subject_id, name, description, status) VALUES (subject_id, 'EKG', 'Electrocardiogram analysis', 'published') RETURNING id INTO topic_id;\n"
-sql += "  END IF;\n\n"
 
-# These lists will hold my questions. I am randomly generating them from templates to save space but ensure quality
-import random
-random.seed(42)
+rng = random.Random(42)
+positions = [0, 1, 2, 3] * 13
+rng.shuffle(positions)
 
 questions = []
+letters = ['a', 'b', 'c', 'd', 'e']
 
-satas = []
-
-# Because I cannot easily write 100 fully distinct questions by hand in one output, 
-# I will use high-quality variations covering all facts derived from the note to reach exactly 100.
-from itertools import cycle
-
-facts = [
-    # Topic 1: Conduction
-    ("SA Node", "pacemaker of the heart", "fires at 60-100 bpm", "sends wave through atria"),
-    ("AV Node", "gatekeeper", "pauses signal to let atria dump blood", "before ventricles contract"),
-    ("Bundle of His", "pathway to left and right bundle branches", "leads to Purkinje Fibers", "ventricles contract"),
-    ("Depolarization", "Na+ enters cell", "charge goes negative to positive", "Toward a lead = bump UP; Away = dip DOWN"),
-    ("Repolarization", "cell resets", "positive to negative", "Toward lead = dip DOWN; Away = bump UP"),
-    # Topic 2: Strips
-    ("P Wave", "Atrial depolarization", "0.08–0.10 sec", "2–2.5 small boxes"),
-    ("PR Interval", "SA to AV node conduction time", "0.12–0.20 sec", "3–5 small boxes"),
-    ("PR Segment", "AV node delay", "0.04–0.12 sec", "1–3 small boxes"),
-    ("QRS Complex", "Ventricular depolarization", "<0.12 sec (narrow)", ">0.12 sec is wide/abnormal"),
-    ("T Wave", "Ventricular repolarization", "variable 0.10–0.25 sec", ""),
-    ("U Wave", "Not always present", "may indicate hypokalemia", ""),
-    # Topic 3: Cardioversion vs Defib
-    ("Cardioversion", "Patient HAS a pulse", "LOW energy, SYNC ON (R wave)", "SVT, A-Fib, A-Flutter, V-Tach with pulse"),
-    ("Defibrillation", "Patient has NO pulse", "HIGH energy, SYNC OFF (immediate)", "V-Fib, pulseless V-Tach. Needs CPR"),
-    # Topic 4: Paper
-    ("Grid Paper Speed", "25 mm/sec", "standard speed", ""),
-    ("Small Box", "0.04 s", "1 mm width", "QRS width, P-wave duration"),
-    ("Large Box", "0.20 s", "5 small boxes", "PR interval, QRS duration"),
-    ("One Second", "1.00 s", "5 large boxes", "HR Calculation"),
-    # Topic 5: Methods
-    ("Heart Rate: Regular", "300 ÷ Large Boxes", "between two R-wave peaks", ""),
-    ("Heart Rate: Irregular", "QRS Count × 10", "in a 6-second strip (30 large boxes)", ""),
-    ("Heart Rate: Quick", "300, 150, 100, 75, 60, 50", "memorization rule", ""),
-    # Topic 6: Rhythms
-    ("Normal Sinus Rhythm", "60-100 bpm", "Regular rhythm, consistent P waves, PR 0.12-0.20", "No treatment needed"),
-    ("Sinus Bradycardia", "<60 bpm", "Regular, normal P waves", "Symptomatic: Atropine. Asymptomatic: Monitor"),
-    ("Sinus Tachycardia", "100-150 bpm", "Regular, normal P", "Calcium Channel Blockers, Beta-Blockers, Digoxin"),
-    ("SVT", ">150 bpm", "Regular, narrow QRS, P hidden", "Vagal Maneuver -> Adenosine IV -> Cardioversion"),
-    ("Atrial Flutter", "250-350 bpm (atria)", "Sawtooth F waves", "Anticoagulants, Beta-Blockers, Cardioversion"),
-    ("Atrial Fibrillation", "Irregular rate", "Wavy/chaotic baseline, no distinct P", "Anticoagulants, Rate/Rhythm control"),
-    ("V-Tach", "100-250 bpm", "Wide, bizarre QRS, no P", "Pulse: Cardiovert. No Pulse: Defib + CPR"),
-    ("V-Fib", "No effective pulse", "Chaotic, no QRS/P", "Defibrillation (unsync), CPR, Epi, Amiodarone"),
-    ("PVCs", "Occasional irregular beat", "Wide bizarre QRS, no preceding P", "3+ in row = V-Tach. Check electrolytes"),
-    ("1st Degree AV Block", "60-100 bpm", "Prolonged PR (>0.20)", "No treatment needed"),
-    ("2nd Degree Type I", "Variable rate", "PR progressively lengthens until QRS dropped", "Pacemaker needed"),
-    ("2nd Degree Type II", "30-50 bpm", "Constant PR, dropped QRS", "Pacemaker required urgently"),
-    ("3rd Degree Block", "30-40 bpm", "P and QRS completely independent", "Emergency pacemaker required"),
-    ("Artificial Pacemaker", "Regular paced rate", "Pacing spikes before P or QRS", "Normal or wide QRS"),
-    ("Asystole", "No HR", "Flat line. Non-shockable", "CPR + Epi. Confirm in 2 leads"),
-    ("Torsades de Pointes", ">200 bpm", "QRS twists around baseline", "IV Magnesium Sulfate"),
-    ("Cardiac Tamponade", "Electrical Alternans", "Low Voltage QRS, Sinus Tachy", "PR Segment Depression")
-]
-
-# Generate Single Choice (50)
-sc_templates = [
-    ("When analyzing the cardiac conduction system, which component accurately reflects {0}?", 
-     [("{1}, which {2}, and {3}", True), ("{2} only", False), ("An irregular rate without {1}", False), ("{3} alone without {1}", False)],
-     "{0} is associated with {1}. It {2}, and {3}."),
-    ("The nurse is evaluating an ECG strip and identifies characteristics of {0}. Which finding confirms this?",
-     [("{1}", True), ("An inverted T wave with shortened PR", False), ("{2} but with opposing {3}", False), ("Complete absence of P waves", False)],
-     "The key characteristic of {0} is {1}. {2} may also be seen."),
-    ("A client's rhythm strip demonstrates features of {0}. What is the priority nursing intervention or key finding?",
-     [("{3}", True), ("Administer epinephrine immediately", False), ("Perform unsynchronized defibrillation", False), ("Ignore the rhythm as it is an artifact", False)],
-     "For {0}, the key finding/intervention is {3}. It {1} and {2}."),
-    ("Which statement regarding {0} is correct based on standard ECG analysis?",
-     [("It is defined by {2}", True), ("It requires immediate defibrillation regardless of pulse", False), ("It is represented by {1} but only when >150 bpm", False), ("It indicates normal ventricular repolarization", False)],
-     "Characteristics of {0} include: {1}. It {2}."),
-    ("A novice nurse is asking about {0}. The preceptor provides correct teaching by stating:",
-     [("It involves {1} and {2}.", True), ("It is characterized strictly by an absent QRS.", False), ("It always requires synchronized cardioversion.", False), ("It represents normal atrial repolarization.", False)],
-     "{0} involves {1} and {2}. {3}.")
-]
-
-for i in range(50):
-    fact = facts[i % len(facts)]
-    tmpl = sc_templates[i % len(sc_templates)]
-    
-    stem = tmpl[0].format(*fact)
-    opts = []
-    correct_opt = ""
-    for opt_tmpl, is_corr in tmpl[1]:
-        o = opt_tmpl.format(*fact)
-        if o.strip() == "": o = "None of the above"
-        opts.append(o)
-        if is_corr: correct_opt = o
-        
-    # shuffle options safely
-    random.shuffle(opts)
-    # Ensure correct option is still accessible by letter
-    letters = ["a", "b", "c", "d"]
-    corr_ltr = [letters[idx] for idx, val in enumerate(opts) if val == correct_opt][0]
-    
-    rationale = tmpl[2].format(*fact)
-    
+for i, (stem, correct, wrong, rationale) in enumerate(MCQ):
+    options = wrong[:]
+    rng.shuffle(options)
+    options.insert(positions[i], correct)
     questions.append({
-        "stem": stem,
-        "options": [{"id": letters[i].lower(), "text": opts[i]} for i in range(4)],
-        "correct": [corr_ltr],
-        "is_sata": False,
-        "rationale": rationale
+        'stem': stem,
+        'options': [{"id": letters[j], "text": t} for j, t in enumerate(options)],
+        'correct': [letters[options.index(correct)]],
+        'is_multi': False,
+        'rationale': rationale,
     })
 
-
-# Generate SATA (50)
-sata_templates = [
-    ("The nurse is analyzing an ECG strip and notes criteria consistent with {0}. Which of the following statements apply? (Select all that apply)",
-     [("{1}", True), ("{2}", True), ("{3}", True), ("It always presents as wide QRS", False), ("It is treated with high-dose atropine", False)],
-     "{0} features include {1}, {2}, and {3}."),
-    ("A client is at risk for complications related to {0}. Which of the following are clinical facts the nurse should remember? (Select all that apply)",
-     [("It {1}", True), ("It involves {2}", True), ("It strictly indicates a first-degree block", False), ("The key indicator is {3}", True), ("It requires immediate chest compressions", False)],
-     "For {0}, it {1} and involves {2}. Additionally, {3}."),
-    ("When educating a client about {0}, the nurse should include which points? (Select all that apply)",
-     [("The condition involves {1}.", True), ("It is generally defined by {2}.", True), ("It {3}.", True), ("It demonstrates a flatline.", False), ("It indicates normal repolarization.", False)],
-     "Teaching for {0} should include: {1}, {2}, and {3}."),
-    ("An assessment of {0} on the ECG grid reveals which associated findings? (Select all that apply)",
-     [("{1}", True), ("{2}", True), ("Related factor: {3}", True), ("Pacing spikes follow the T wave", False), ("Usually benign with no intervention", False)],
-     "{0} is associated with {1} and {2}. Furthermore, {3}.")
-]
-
-for i in range(50):
-    fact = facts[i % len(facts)]
-    tmpl = sata_templates[i % len(sata_templates)]
-    
-    stem = tmpl[0].format(*fact)
-    opts = []
-    correct_opts = []
-    
-    # Process options
-    for opt_tmpl, is_corr in tmpl[1]:
-        o = opt_tmpl.format(*fact).strip()
-        if not o or o.startswith("Related factor: ") and len(o) == 16:
-            o = "Always observe for changes" # placeholder if fact[3] is empty
-        opts.append({"text": o, "is_corr": is_corr})
-        
-    random.shuffle(opts)
-    letters = ["a", "b", "c", "d", "e"]
-    options_list = []
-    corr_ltrs = []
-    for j in range(5):
-        options_list.append({"id": letters[j], "text": opts[j]["text"]})
-        if opts[j]["is_corr"]:
-            corr_ltrs.append(letters[j])
-            
-    rationale = tmpl[2].format(*fact)
-    
+for stem, correct, wrong, rationale in SATA:
+    options = correct + wrong
+    rng.shuffle(options)
     questions.append({
-        "stem": stem,
-        "options": options_list,
-        "correct": corr_ltrs,
-        "is_sata": True,
-        "rationale": rationale
+        'stem': stem,
+        'options': [{"id": letters[j], "text": t} for j, t in enumerate(options)],
+        'correct': [letters[j] for j, t in enumerate(options) if t in correct],
+        'is_multi': True,
+        'rationale': rationale,
     })
 
+lines = [
+    'BEGIN;',
+    'DO $$',
+    'DECLARE',
+    '  v_subject_id UUID;',
+    '  v_topic_id UUID;',
+    '  v_test_id BIGINT;',
+    'BEGIN',
+    "  SELECT id INTO v_subject_id FROM test_subjects WHERE name ILIKE '%cardio%' ORDER BY id LIMIT 1;",
+    '  IF v_subject_id IS NULL THEN',
+    "    INSERT INTO test_subjects (name, description) VALUES ('Cardiovascular System', 'Cardiovascular notes') RETURNING id INTO v_subject_id;",
+    '  END IF;',
+    "  SELECT id INTO v_topic_id FROM test_topics WHERE name ILIKE '%ekg%' ORDER BY (SELECT COUNT(*) FROM test_questions q WHERE q.topic_id = test_topics.id) DESC, created_at ASC LIMIT 1;",
+    '  IF v_topic_id IS NULL THEN',
+    "    INSERT INTO test_topics (subject_id, name, description, status) VALUES (v_subject_id, 'EKG', 'Electrocardiogram analysis', 'published') RETURNING id INTO v_topic_id;",
+    '  END IF;',
+    '  SELECT id INTO v_test_id FROM tests WHERE is_active = true ORDER BY id LIMIT 1;',
+    '  IF v_test_id IS NULL THEN',
+    '    INSERT INTO tests (test_name, system_category, description, is_active)',
+    "    VALUES ('Cardiovascular System - EKG (Generated)', 'Cardiovascular System', 'Auto-generated NCLEX question set', true)",
+    '    RETURNING id INTO v_test_id;',
+    '  END IF;',
+    f"  DELETE FROM test_questions WHERE topic_id = v_topic_id AND category = '{CATEGORY}';",
+]
 
-# Now write the SQL
-# Ensure Continuous numbering by setting display_order
-for i, q in enumerate(questions):
-    opts_json = json.dumps(q["options"])
-    corr_json = json.dumps(q["correct"])
-    
-    sql += f"  INSERT INTO test_questions (test_id, topic_id, question, question_stem, options, correct_answer, rationale, category, is_multiple_choice, display_order, points, is_active)\n"
-    sql += f"  VALUES (test_id, topic_id, '{e(q['stem'])}', '{e(q['stem'])}', '{e(opts_json)}'::jsonb, '{e(corr_json)}', '{e(q['rationale'])}', 'EKG', {str(q['is_sata']).lower()}, {i+1}, 1, true);\n"
+for i, q in enumerate(questions, start=1):
+    stem = esc(q['stem'])
+    options = esc(json.dumps(q['options'], ensure_ascii=False))
+    correct = esc(json.dumps(q['correct'], ensure_ascii=False))
+    rationale = esc(q['rationale'])
+    is_multi = 'true' if q['is_multi'] else 'false'
+    lines.append('  INSERT INTO test_questions (test_id, topic_id, question, question_stem, options, correct_answer, rationale, category, is_multiple_choice, display_order, points, is_active)')
+    lines.append(
+        f"  VALUES (v_test_id, v_topic_id, '{stem}', '{stem}', '{options}'::jsonb, '{correct}', '{rationale}', '{CATEGORY}', {is_multi}, {i}, 1, true);"
+    )
 
-sql += "\nEND $$;\nCOMMIT;\n"
+lines.append('END $$;')
+lines.append('COMMIT;')
 
-with open('Test/INSERT-EKG-QUESTIONS.sql', 'w') as f:
-    f.write(sql)
-
-print("Generated INSERT-EKG-QUESTIONS.sql with 100 questions.")
+OUT_PATH.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+print(f'Wrote {OUT_PATH} with {len(questions)} questions')
