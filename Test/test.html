@@ -6625,11 +6625,12 @@ async function attachNoteLinks(questions) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NOTE LOCKS — the student portal publishes which study notes this student has locked
-// (class not paid) under NOTE_ACCESS_KEY; their study links show as locked instead.
-// Teachers/admins are never gated. A student with no current list for the signed-in
-// account (portal not opened in the last 24h, or still loading) gets no study links
-// rather than possibly-locked ones. Notes the portal does not list are left as they were.
+// NOTE LOCKS — the student portal publishes which study notes this student may open
+// (posted and paid) under NOTE_ACCESS_KEY. Deny by default: a student sees a study link
+// only for a note on that open list; every other note shows as locked, including notes
+// never posted to them. Teachers/admins are never gated. A student with no current list
+// for the signed-in account (portal not opened in the last 24h, or still loading) gets no
+// study links at all. Access is re-checked when a link is clicked.
 // This is a UI-level lock: the note pages themselves are static files.
 // ─────────────────────────────────────────────────────────────────────────────
 const NOTE_ACCESS_KEY = 'arnoma:noteAccess:v1';
@@ -6644,31 +6645,40 @@ function currentAuthUserId() {
   } catch (_) { return null; }
 }
 
-// Set of locked note paths for this account, or null when there is no valid, current list.
-function readLockedNotePaths() {
+// Set of note paths this account may open, or null when there is no valid, current list.
+function readOpenNotePaths() {
   try {
     const data = JSON.parse(localStorage.getItem(NOTE_ACCESS_KEY) || 'null');
-    if (!data || data.v !== 1 || !data.uid || !Array.isArray(data.locked)) return null;
+    if (!data || data.v !== 1 || !data.uid || !Array.isArray(data.open)) return null;
     if (!(Date.now() - data.ts < NOTE_ACCESS_MAX_AGE_MS)) return null;
     if (data.uid !== currentAuthUserId()) return null;
-    return new Set(data.locked);
+    return new Set(data.open);
   } catch (_) { return null; }
 }
 
-// 'open' | 'locked' | 'unknown'. Pass the set from readLockedNotePaths() when checking many notes.
-function noteAccessState(notePath, lockedPaths) {
+// 'open' | 'locked' | 'unknown'. Pass the set from readOpenNotePaths() when checking many notes.
+function noteAccessState(notePath, openPaths) {
   if (SESSION_ROLE.isTeacher) return 'open';
-  const locked = lockedPaths === undefined ? readLockedNotePaths() : lockedPaths;
-  if (!locked) return 'unknown';
-  return locked.has(notePath) ? 'locked' : 'open';
+  const open = openPaths === undefined ? readOpenNotePaths() : openPaths;
+  if (!open) return 'unknown';
+  return open.has(notePath) ? 'open' : 'locked';
+}
+
+// Click-time guard: the list can change after a link was rendered, so a note that is no longer open never loads.
+function guardNoteLink(el, event) {
+  if (noteAccessState(el.getAttribute('data-note-path')) === 'open') return true;
+  event.preventDefault();
+  event.stopPropagation();
+  showToast('This note is locked until its class is paid.', 'info');
+  return false;
 }
 
 // "Notes" pill beside a topic row: link when open, padlock when locked, nothing when unknown.
-function topicNoteSlotHtml(notePath, lockedPaths) {
+function topicNoteSlotHtml(notePath, openPaths) {
   const href = notePath ? buildNoteUrl(notePath) : null;
   if (!href) return '';
-  const access = noteAccessState(notePath, lockedPaths);
-  if (access === 'open') return `<a class="topic-note-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="Open the study note">Notes</a>`;
+  const access = noteAccessState(notePath, openPaths);
+  if (access === 'open') return `<a class="topic-note-link" href="${escapeHtml(href)}" data-note-path="${escapeHtml(notePath)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation();return guardNoteLink(this,event)" title="Open the study note">Notes</a>`;
   if (access === 'locked') return `<span class="topic-note-link is-locked" title="Unlocks once the class this note was taught in is paid">\u{1F512} Notes</span>`;
   return '';
 }
@@ -6685,7 +6695,7 @@ function noteLinkHtml(question) {
     return `<div class="note-study-link is-locked" title="Unlocks once the class this note was taught in is paid">\u{1F512} ${escapeHtml(n.title)} \u2014 locked until the class is paid</div>`;
   }
   const where = n.section && n.section !== n.title ? ` &rsaquo; ${escapeHtml(n.section)}` : '';
-  return `<div class="note-study-link"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Study this topic: ${escapeHtml(n.title)}${where}</a></div>`;
+  return `<div class="note-study-link"><a href="${escapeHtml(href)}" data-note-path="${escapeHtml(n.path)}" target="_blank" rel="noopener noreferrer" onclick="return guardNoteLink(this,event)">Study this topic: ${escapeHtml(n.title)}${where}</a></div>`;
 }
 
 async function showSubjectSelection() {
@@ -6799,7 +6809,7 @@ async function showSubjectSelection() {
       : subjects;
 
     // Notes this student has locked in the portal (read once for every row below).
-    const lockedNotePaths = readLockedNotePaths();
+    const openNotePaths = readOpenNotePaths();
 
     subjectList.innerHTML = visibleSubjects.map((subject, idx) => {
       const topics = topicsBySubject[subject.id] || [];
@@ -6817,7 +6827,7 @@ async function showSubjectSelection() {
           <input type="checkbox" id="topic-cb-${topic.id}"
             onclick="event.stopPropagation();toggleTopicInline('${topic.id}','${subject.id}',this.checked)">
           <span class="topic-row-name">${safeName}</span>
-          ${topicNoteSlotHtml(topic._notePath, lockedNotePaths)}
+          ${topicNoteSlotHtml(topic._notePath, openNotePaths)}
           ${qCount > 0
             ? `<span style="margin-left:auto;flex-shrink:0;font-size:10px;font-weight:700;color:#94a3b8;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.10);border-radius:5px;padding:2px 7px;letter-spacing:0.3px">${qCount} Question${qCount !== 1 ? 's' : ''}</span>`
             : `<span class="topic-empty-label">No questions yet</span>`}
