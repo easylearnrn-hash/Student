@@ -1006,8 +1006,8 @@
       if (!group) return [];
       const today = fcGetToday();
       // Use UTC midnight for the floor so the loop doesn't duplicate dates in PT timezone
-      const FLOOR_STR = '2026-06-01';
-      const floorTime = Date.UTC(2026, 5, 1);
+      const FLOOR_STR = '2026-05-01'; // same debt floor as the portal, Calendar and Student-Manager
+      const floorTime = Date.UTC(2026, 4, 1);
       const todayTime = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
       let startStr = null;
       if (student.start_date) startStr = student.start_date.split('T')[0];
@@ -1248,11 +1248,24 @@
     }
 
     // ── New loaders needed for Calendar-style debt calculation ───────────────
+    // PostgREST returns at most 1000 rows per request: read page by page (stable order) so no payment is silently dropped.
+    async function fetchAllRows(makeQuery) {
+      const pageSize = 1000;
+      const rows = [];
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await makeQuery().range(from, from + pageSize - 1);
+        if (error) return { data: null, error };
+        rows.push(...(data || []));
+        if (!data || data.length < pageSize) return { data: rows, error: null };
+      }
+    }
+
     async function loadAllPayments() {
       try {
-        const { data, error } = await supabaseClient
+        const { data, error } = await fetchAllRows(() => supabaseClient
           .from('payments')
-          .select('*');
+          .select('*')
+          .order('id'));
         if (error) throw error;
         allPaymentsCache = data || [];
       } catch (err) { console.error('Error loading all payments:', err); }
@@ -1260,10 +1273,12 @@
 
     async function loadPaymentRecordsPaid() {
       try {
-        const { data, error } = await supabaseClient
+        // 'ignored' = class day the admin removed for this student (e.g. old group cancelled it): not a debt.
+        const { data, error } = await fetchAllRows(() => supabaseClient
           .from('payment_records')
           .select('student_id, date, payment_method')
-          .in('status', ['paid', 'excused']);
+          .in('status', ['paid', 'excused', 'ignored'])
+          .order('id'));
         if (error) throw error;
         paymentRecordsPaidCache = data || [];
       } catch (err) { console.error('Error loading paid payment_records:', err); }

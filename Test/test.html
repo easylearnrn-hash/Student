@@ -7,9 +7,11 @@
 <!-- ── Instant auth gate — runs before a single pixel is painted ── -->
 <script>
 (function(){
+  // Portal sets isLoggedIn; an ARNOMA Supabase session (e.g. an admin opening this page directly) also counts
   var ok = sessionStorage.getItem('isLoggedIn') === 'true' ||
-           localStorage.getItem('isLoggedIn')    === 'true';
-  if (!ok) { window.location.replace('login.html'); }
+           localStorage.getItem('isLoggedIn')    === 'true' ||
+           !!localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token');
+  if (!ok) { window.location.replace('../index.html'); }
 })();
 </script>
 
@@ -1211,6 +1213,17 @@ body[data-zoom="large"] .question-type-badge {
   cursor: not-allowed;
 }
 
+/* Back / Next — mirrored icon + label, identical widths */
+.btn-secondary.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 104px;
+  line-height: 1;
+}
+.btn-secondary.nav-btn svg { flex-shrink: 0; display: block; }
+
 .btn-danger {
   background: transparent;
   color: #f87171;
@@ -1232,6 +1245,7 @@ body[data-zoom="large"] .question-type-badge {
 .right-actions {
   display: flex;
   gap: 10px;
+  margin-left: auto;
 }
 
 /* MODAL */
@@ -1283,13 +1297,288 @@ body[data-zoom="large"] .question-type-badge {
   justify-content: flex-end;
 }
 
-/* RESULTS SCREEN */
+/* ── Submit confirmation — mirrors Save Progress modal ── */
+.modal-content.submit-modal {
+  padding: 0;
+  border-radius: 20px;
+  overflow: hidden;
+  max-width: 480px;
+  background: linear-gradient(160deg, var(--navy-light) 0%, var(--navy-primary) 100%);
+  border: 1px solid rgba(201,168,76,0.18);
+  box-shadow: 0 28px 72px rgba(0,0,0,0.6), 0 0 0 1px rgba(201,168,76,0.05);
+}
+.submit-modal-accent {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(201,168,76,0.7), transparent);
+}
+.submit-modal-body { padding: 32px 32px 28px; }
+.submit-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.submit-modal-icon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(201,168,76,0.10);
+  border: 1.5px solid rgba(201,168,76,0.28);
+}
+.submit-modal-eyebrow {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+  color: var(--gold-primary);
+  opacity: 0.85;
+  margin-bottom: 4px;
+}
+.modal-content.submit-modal h2 {
+  font-size: 21px;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+.modal-content.submit-modal .submit-modal-text {
+  font-size: 13.5px;
+  color: #94a3b8;
+  line-height: 1.6;
+  margin-bottom: 22px;
+}
+.submit-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border: 1px solid rgba(201,168,76,0.14);
+  border-radius: 12px;
+  background: rgba(2,6,23,0.35);
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+.submit-summary-item {
+  padding: 14px 10px 12px;
+  text-align: center;
+}
+.submit-summary-item + .submit-summary-item {
+  border-left: 1px solid rgba(201,168,76,0.10);
+}
+.submit-summary-value {
+  font-family: 'Playfair Display', serif;
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: #f8fafc;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.submit-summary-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.submit-summary-label .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+.submit-summary-label .dot.answered   { background: var(--gold-primary); }
+.submit-summary-label .dot.unanswered { background: #64748b; }
+.submit-summary-label .dot.flagged    { background: var(--warning); }
+.submit-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 22px;
+  border-radius: 10px;
+  background: rgba(245,158,11,0.07);
+  border: 1px solid rgba(245,158,11,0.25);
+  color: #fcd34d;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.55;
+}
+.submit-warning svg { flex-shrink: 0; margin-top: 1px; color: #fbbf24; }
+.submit-warning strong { color: #fde68a; font-weight: 700; }
+.submit-modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 10px;
+}
+.submit-modal-cancel {
+  padding: 12px;
+  font-size: 14px;
+  border-radius: 10px;
+}
+.submit-modal-confirm {
+  padding: 12px 20px;
+  font-size: 14px;
+  border-radius: 10px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.submit-modal-cancel,
+.submit-modal-confirm { white-space: nowrap; }
+
+/* ── Test setup modal (question limit + shuffle) ── */
+.setup-available {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  margin-bottom: 22px;
+  border: 1px solid rgba(201,168,76,0.16);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(201,168,76,0.07), rgba(2,6,23,0.35));
+}
+.setup-available-value {
+  font-family: 'Playfair Display', serif;
+  font-size: 34px;
+  font-weight: 700;
+  font-variant-numeric: lining-nums tabular-nums;
+  line-height: 1;
+  background: linear-gradient(135deg, #ffffff 0%, var(--gold-light) 50%, var(--gold-primary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.setup-available-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.setup-available-sub {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+}
+.setup-field-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 10px;
+}
+.setup-input {
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(201,168,76,0.25);
+  background: rgba(255,255,255,0.04);
+  color: #f1f5f9;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: 'Inter', sans-serif;
+  outline: none;
+  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+}
+.setup-input::placeholder { color: #475569; font-weight: 500; }
+.setup-input:focus {
+  border-color: rgba(201,168,76,0.6);
+  background: rgba(201,168,76,0.04);
+  box-shadow: 0 0 0 3px rgba(201,168,76,0.10);
+}
+.setup-input.invalid {
+  border-color: rgba(239,68,68,0.55);
+  box-shadow: 0 0 0 3px rgba(239,68,68,0.10);
+}
+.setup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.setup-chip {
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(201,168,76,0.22);
+  background: rgba(201,168,76,0.05);
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.setup-chip:hover {
+  border-color: rgba(201,168,76,0.5);
+  color: var(--gold-light);
+}
+.setup-chip.active {
+  background: rgba(201,168,76,0.16);
+  border-color: var(--gold-primary);
+  color: var(--gold-primary);
+}
+.setup-hint {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.55;
+  margin: 10px 0 20px;
+}
+.setup-hint.error { color: #f87171; }
+.setup-toggle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  cursor: pointer;
+  padding: 14px 16px;
+  margin-bottom: 24px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.025);
+}
+.setup-toggle input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--gold-primary);
+  flex-shrink: 0;
+}
+.setup-toggle-title {
+  display: block;
+  color: #e2e8f0;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.setup-toggle-sub {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.submit-summary-item { min-width: 0; }
+@media (max-width: 480px) {
+  .submit-modal-body { padding: 26px 22px 22px; }
+  .submit-summary-label { letter-spacing: 0.8px; font-size: 9px; gap: 5px; }
+  .submit-modal-actions { grid-template-columns: 1fr; }
+  .submit-modal-confirm { order: -1; }
+}
+
+/* ═══════════════════════════════════════════════════════
+   RESULTS SCREEN — Elite University Standard
+   ═══════════════════════════════════════════════════════ */
 .results-screen {
   display: none;
   min-height: 100vh;
-  background: linear-gradient(145deg, var(--navy-deep) 0%, #0b1628 50%, var(--navy-primary) 100%);
-  padding: 60px 20px;
+  background: linear-gradient(160deg, #000810 0%, #020d1f 45%, #030f24 100%);
+  padding: 72px 24px 64px;
   position: relative;
+  overflow: hidden;
 }
 
 .results-screen::before {
@@ -1297,13 +1586,26 @@ body[data-zoom="large"] .question-type-badge {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse at 20% 30%, rgba(201,168,76,0.08), transparent 55%),
-    radial-gradient(ellipse at 80% 70%, rgba(201,168,76,0.05), transparent 50%);
+    radial-gradient(ellipse 70% 55% at 50% 0%,   rgba(201,168,76,0.09)  0%, transparent 65%),
+    radial-gradient(ellipse 50% 40% at 15% 60%,  rgba(201,168,76,0.045) 0%, transparent 55%),
+    radial-gradient(ellipse 45% 35% at 85% 70%,  rgba(201,168,76,0.035) 0%, transparent 55%);
+  pointer-events: none;
+}
+
+.results-screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    repeating-linear-gradient(
+      0deg, transparent, transparent 79px,
+      rgba(201,168,76,0.022) 79px, rgba(201,168,76,0.022) 80px
+    );
   pointer-events: none;
 }
 
 .results-container {
-  max-width: 1000px;
+  max-width: 960px;
   margin: 0 auto;
   position: relative;
   z-index: 1;
@@ -1311,99 +1613,378 @@ body[data-zoom="large"] .question-type-badge {
 
 .results-header {
   text-align: center;
-  margin-bottom: 48px;
+  margin-bottom: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Eyebrow label — mirrors .start-eyebrow */
+.results-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 26px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 2.8px;
+  text-transform: uppercase;
+  color: var(--gold-primary);
+  opacity: 0.82;
+}
+.results-eyebrow::before,
+.results-eyebrow::after {
+  content: "";
+  display: block;
+  width: 22px;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+/* Score seal — thin gold ring framing the percentage */
+.score-seal {
+  position: relative;
+  width: 196px;
+  height: 196px;
+  margin-bottom: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.score-seal::before {
+  content: "";
+  position: absolute;
+  inset: -40px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(201,168,76,0.10) 0%, transparent 68%);
+  pointer-events: none;
+}
+.score-seal svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.score-seal-track {
+  fill: none;
+  stroke: rgba(201,168,76,0.12);
+  stroke-width: 3;
+}
+.score-seal-inner {
+  fill: none;
+  stroke: rgba(201,168,76,0.10);
+  stroke-width: 1;
+}
+.score-seal-arc {
+  fill: none;
+  stroke: url(#scoreSealGradient);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1.1s cubic-bezier(.22,1,.36,1);
+}
+.score-seal-center {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .score-display {
   font-family: 'Playfair Display', serif;
-  font-size: 96px;
-  font-weight: 900;
-  background: linear-gradient(135deg, #ffffff 0%, var(--gold-primary) 50%, var(--gold-light) 100%);
+  font-size: 62px;
+  font-weight: 800;
+  font-variant-numeric: lining-nums tabular-nums;
+  letter-spacing: -1px;
+  background: linear-gradient(135deg, #ffffff 0%, var(--gold-light) 45%, var(--gold-primary) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  margin-bottom: 20px;
   line-height: 1;
 }
 
-.pass-badge {
-  display: inline-block;
-  padding: 10px 32px;
-  border-radius: 50px;
+.score-caption {
+  margin-top: 8px;
+  font-size: 9px;
   font-weight: 800;
-  font-size: 18px;
-  margin-bottom: 24px;
-  letter-spacing: 2px;
+  letter-spacing: 2.4px;
   text-transform: uppercase;
+  color: #64748b;
 }
 
+/* Status — refined outlined seal, not a loud pill */
+.pass-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 20px;
+  border-radius: 40px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+  margin-bottom: 26px;
+  border: 1px solid rgba(201,168,76,0.3);
+  background: rgba(201,168,76,0.05);
+  color: var(--gold-primary);
+}
+.pass-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 10px currentColor;
+}
 .pass-badge.pass {
-  background: linear-gradient(135deg, var(--success), #059669);
-  color: white;
-  box-shadow: 0 4px 20px rgba(16,185,129,0.35);
+  color: #34d399;
+  border-color: rgba(16,185,129,0.38);
+  background: linear-gradient(135deg, rgba(16,185,129,0.10), rgba(16,185,129,0.04));
 }
-
 .pass-badge.fail {
-  background: linear-gradient(135deg, var(--error), #dc2626);
-  color: white;
-  box-shadow: 0 4px 20px rgba(239,68,68,0.35);
+  color: #f87171;
+  border-color: rgba(239,68,68,0.34);
+  background: linear-gradient(135deg, rgba(239,68,68,0.09), rgba(239,68,68,0.03));
 }
 
 .results-title {
   font-family: 'Playfair Display', serif;
-  font-size: 32px;
-  color: white;
+  font-size: 40px;
+  color: #f8fafc;
   font-weight: 800;
-  margin-bottom: 10px;
+  letter-spacing: -0.5px;
+  line-height: 1.18;
+  margin: 0;
+}
+.results-title span {
+  font-family: inherit;
+  background: linear-gradient(135deg, var(--gold-primary) 20%, var(--gold-light) 60%, #e6c96a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Ornamental rule — mirrors .start-rule */
+.results-rule {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 20px auto 18px;
+  width: 100%;
+}
+.results-rule::before,
+.results-rule::after {
+  content: "";
+  flex: 1;
+  max-width: 80px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(201,168,76,0.45));
+}
+.results-rule::after {
+  background: linear-gradient(90deg, rgba(201,168,76,0.45), transparent);
+}
+.results-rule-diamond {
+  width: 6px;
+  height: 6px;
+  background: var(--gold-primary);
+  transform: rotate(45deg);
+  opacity: 0.8;
 }
 
 .results-subtitle {
   color: #94a3b8;
-  font-size: 16px;
+  font-size: 15px;
+  line-height: 1.65;
+  max-width: 560px;
+  margin: 0 auto 24px;
 }
 
+/* Meta strip — mirrors .start-meta-strip */
+.results-meta-strip {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 20px;
+  padding: 10px 22px;
+  border: 1px solid rgba(201,168,76,0.15);
+  border-radius: 40px;
+  background: rgba(201,168,76,0.04);
+}
+.results-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.results-meta-item strong {
+  color: #cbd5e1;
+  font-weight: 700;
+}
+.results-meta-item svg { opacity: 0.6; flex-shrink: 0; }
+.results-meta-sep {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(201,168,76,0.3);
+  flex-shrink: 0;
+}
+
+/* Statistic cards */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
 }
 
 .stat-card {
-  background: rgba(15,23,42,0.85);
-  border: 1px solid rgba(201,168,76,0.2);
+  position: relative;
+  background: linear-gradient(180deg, rgba(15,23,42,0.78) 0%, rgba(2,6,23,0.78) 100%);
+  border: 1px solid rgba(201,168,76,0.14);
   border-radius: 14px;
-  padding: 24px;
+  padding: 26px 20px 22px;
   text-align: center;
-  transition: border-color 0.2s;
+  overflow: hidden;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
 }
-
+.stat-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 44px;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--stat-accent, var(--gold-primary));
+  opacity: 0.85;
+}
 .stat-card:hover {
-  border-color: var(--gold-primary);
+  border-color: rgba(201,168,76,0.4);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px rgba(201,168,76,0.06);
 }
+.stat-card.stat-correct   { --stat-accent: #10b981; }
+.stat-card.stat-incorrect { --stat-accent: #ef4444; }
+.stat-card.stat-skipped   { --stat-accent: #64748b; }
+.stat-card.stat-time      { --stat-accent: var(--gold-primary); }
 
 .stat-card .stat-value {
   font-family: 'Playfair Display', serif;
-  font-size: 40px;
-  font-weight: 800;
+  font-size: 38px;
+  font-weight: 700;
+  font-variant-numeric: lining-nums tabular-nums;
   color: #f8fafc;
-  margin-bottom: 8px;
+  line-height: 1;
+  margin-bottom: 12px;
 }
 
 .stat-card .stat-label {
-  color: #94a3b8;
-  font-size: 13px;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #64748b;
+  font-size: 9.5px;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 2px;
+}
+.stat-card .stat-label::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--stat-accent, var(--gold-primary));
 }
 
+/* Action buttons — unified family, mirrors .start-btn-* */
 .results-actions {
   display: flex;
   justify-content: center;
-  gap: 14px;
+  align-items: stretch;
+  gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 40px;
+  margin-bottom: 44px;
+}
+
+.rs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 0 24px;
+  border-radius: 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.15s, box-shadow 0.18s, background 0.18s, border-color 0.18s, color 0.18s, filter 0.15s;
+}
+.rs-btn svg { flex-shrink: 0; }
+.rs-btn:focus-visible {
+  outline: 2px solid var(--gold-light);
+  outline-offset: 3px;
+}
+.rs-btn:active { transform: translateY(0); }
+
+.rs-btn-primary {
+  border: none;
+  background: linear-gradient(135deg, var(--gold-primary) 0%, var(--gold-light) 60%, #dfc06e 100%);
+  color: #050e1e;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  box-shadow: 0 6px 28px rgba(201,168,76,0.32), 0 2px 8px rgba(201,168,76,0.16);
+}
+.rs-btn-primary::before {
+  content: "";
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.18), transparent);
+  transition: left 0.45s ease;
+}
+.rs-btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 36px rgba(201,168,76,0.46), 0 4px 14px rgba(201,168,76,0.2);
+  filter: brightness(1.04);
+}
+.rs-btn-primary:hover::before { left: 140%; }
+
+.rs-btn-secondary {
+  border: 1.5px solid rgba(201,168,76,0.30);
+  background: linear-gradient(135deg, rgba(201,168,76,0.07), rgba(201,168,76,0.03));
+  color: var(--gold-primary);
+}
+.rs-btn-secondary:hover {
+  background: linear-gradient(135deg, rgba(201,168,76,0.14), rgba(201,168,76,0.07));
+  border-color: rgba(201,168,76,0.58);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 18px rgba(201,168,76,0.12);
+}
+
+.rs-btn-ghost {
+  border: 1.5px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.025);
+  color: #cbd5e1;
+}
+.rs-btn-ghost:hover {
+  border-color: rgba(201,168,76,0.45);
+  background: rgba(201,168,76,0.06);
+  color: var(--gold-light);
+  transform: translateY(-1px);
 }
 
 .btn-outline {
@@ -1424,115 +2005,302 @@ body[data-zoom="large"] .question-type-badge {
   color: var(--gold-primary);
 }
 
-/* REVIEW MODE */
+/* ═══════════════════════════════════════════════════════
+   REVIEW MODE — Examination Transcript
+   ═══════════════════════════════════════════════════════ */
 .review-container {
-  background: white;
-  border-radius: 16px;
-  padding: 40px;
-  box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+  position: relative;
+  margin-top: 8px;
+  padding: 52px 52px 44px;
+  background: linear-gradient(180deg, rgba(15,23,42,0.78) 0%, rgba(2,6,23,0.82) 100%);
+  border: 1px solid rgba(201,168,76,0.16);
+  border-radius: 18px;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.03);
+  overflow: hidden;
+  scroll-margin-top: 24px;
+}
+.review-container::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(201,168,76,0.55), transparent);
 }
 
-.review-container h2 {
-  font-family: 'Playfair Display', serif;
-  font-size: 26px;
-  font-weight: 800;
-  margin-bottom: 32px;
-  color: var(--navy-primary);
+.review-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 40px;
 }
+.review-head .results-eyebrow { margin-bottom: 18px; }
+.review-head .results-rule { margin: 16px auto 14px; }
+
+.review-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.4px;
+  line-height: 1.2;
+  color: #f8fafc;
+  margin: 0;
+}
+.review-title span {
+  background: linear-gradient(135deg, var(--gold-primary) 20%, var(--gold-light) 60%, #e6c96a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.review-summary {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 18px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: #64748b;
+}
+.review-summary strong {
+  color: #cbd5e1;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.review-summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.review-summary-item::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--rs-dot, var(--gold-primary));
+}
+.review-summary-item.is-correct   { --rs-dot: var(--success); }
+.review-summary-item.is-incorrect { --rs-dot: var(--error); }
+.review-summary-item.is-skipped   { --rs-dot: #64748b; }
 
 .review-question {
-  margin-bottom: 40px;
-  padding-bottom: 40px;
-  border-bottom: 1px solid #f1f5f9;
+  --rq-accent: #64748b;
+  position: relative;
+  padding: 28px 30px 26px;
+  margin-bottom: 18px;
+  background: rgba(255,255,255,0.018);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 14px;
+  transition: border-color 0.2s;
 }
-
-.review-question:last-child {
-  border-bottom: none;
+.review-question::before {
+  content: "";
+  position: absolute;
+  top: 22px; bottom: 22px; left: -1px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--rq-accent);
+  opacity: 0.85;
 }
+.review-question:hover { border-color: rgba(201,168,76,0.22); }
+.review-question:last-child { margin-bottom: 0; }
+.review-question.is-correct   { --rq-accent: var(--success); }
+.review-question.is-incorrect { --rq-accent: var(--error); }
 
 .review-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
   margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(201,168,76,0.10);
 }
 
-.review-status {
-  padding: 5px 14px;
-  border-radius: 7px;
-  font-weight: 700;
-  font-size: 12px;
+.review-qnum {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2.4px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: var(--gold-primary);
+}
+.review-qnum strong {
+  font-family: 'Playfair Display', serif;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: #f1f5f9;
 }
 
+/* Status — outlined seal, mirrors .pass-badge */
+.review-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 40px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  border: 1px solid rgba(148,163,184,0.26);
+  background: rgba(148,163,184,0.05);
+  color: #94a3b8;
+}
+.review-status::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
 .review-status.correct {
-  background: rgba(16,185,129,0.12);
-  color: #059669;
-  border: 1.5px solid rgba(16,185,129,0.3);
+  color: #34d399;
+  border-color: rgba(16,185,129,0.36);
+  background: linear-gradient(135deg, rgba(16,185,129,0.10), rgba(16,185,129,0.03));
 }
-
+.review-status.correct::before { box-shadow: 0 0 8px currentColor; }
 .review-status.incorrect {
-  background: rgba(239,68,68,0.1);
-  color: #dc2626;
-  border: 1.5px solid rgba(239,68,68,0.25);
+  color: #f87171;
+  border-color: rgba(239,68,68,0.34);
+  background: linear-gradient(135deg, rgba(239,68,68,0.09), rgba(239,68,68,0.03));
 }
-
-.review-status.skipped {
-  background: rgba(148,163,184,0.12);
-  color: #64748b;
-  border: 1.5px solid rgba(148,163,184,0.3);
-}
+.review-status.incorrect::before { box-shadow: 0 0 8px currentColor; }
 
 .review-stem {
   font-size: 16px;
   font-weight: 600;
-  color: var(--navy-primary);
-  margin-bottom: 16px;
   line-height: 1.65;
+  color: #f1f5f9;
+  margin-bottom: 18px;
 }
 
 .review-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   padding: 12px 16px;
   margin-bottom: 8px;
-  border-radius: 9px;
-  border: 1.5px solid #e2e8f0;
-  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.02);
   font-size: 14px;
-  line-height: 1.5;
-  color: #334155;
+  line-height: 1.55;
+  color: #94a3b8;
+}
+.review-option-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 7px;
+  border: 1px solid var(--navy-border);
+  background: rgba(255,255,255,0.04);
+  color: #94a3b8;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+.review-option-text { flex: 1; min-width: 0; }
+.review-option-tag {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .review-option.correct-answer {
-  background: rgba(16,185,129,0.08);
-  border-color: var(--success);
+  background: linear-gradient(135deg, rgba(16,185,129,0.10), rgba(16,185,129,0.03));
+  border-color: rgba(16,185,129,0.42);
+  color: #d1fae5;
   font-weight: 600;
-  color: #047857;
 }
+.review-option.correct-answer .review-option-letter {
+  background: rgba(16,185,129,0.18);
+  border-color: var(--success);
+  color: #34d399;
+}
+.review-option.correct-answer .review-option-tag { color: #34d399; }
 
 .review-option.user-incorrect {
-  background: rgba(239,68,68,0.08);
-  border-color: var(--error);
-  color: #dc2626;
+  background: linear-gradient(135deg, rgba(239,68,68,0.09), rgba(239,68,68,0.03));
+  border-color: rgba(239,68,68,0.40);
+  color: #fecaca;
 }
+.review-option.user-incorrect .review-option-letter {
+  background: rgba(239,68,68,0.16);
+  border-color: var(--error);
+  color: #f87171;
+}
+.review-option.user-incorrect .review-option-tag { color: #f87171; }
 
 .rationale {
-  margin-top: 16px;
-  padding: 16px;
-  background: rgba(201,168,76,0.07);
-  border-left: 4px solid var(--gold-primary);
-  border-radius: 8px;
+  margin-top: 18px;
+  padding: 16px 20px 17px;
+  background: linear-gradient(90deg, rgba(201,168,76,0.07), rgba(201,168,76,0.02) 75%);
+  border: 1px solid rgba(201,168,76,0.14);
+  border-left: 2px solid var(--gold-primary);
+  border-radius: 10px;
   font-size: 14px;
-  line-height: 1.65;
-  color: #475569;
+  line-height: 1.7;
+  color: #cbd5e1;
 }
-
 .rationale strong {
-  color: #92640c;
   display: block;
   margin-bottom: 6px;
-  font-weight: 700;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+  color: var(--gold-primary);
 }
+
+.review-question .note-study-link {
+  margin-top: 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.review-question .note-study-link a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--gold-light);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(201,168,76,0.28);
+  padding-bottom: 2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.review-question .note-study-link a::after {
+  content: "\2197";
+  font-size: 12px;
+  opacity: 0.75;
+  transition: transform 0.15s;
+}
+.review-question .note-study-link a:hover {
+  color: #e6c870;
+  border-bottom-color: rgba(230,200,112,0.7);
+}
+.review-question .note-study-link a:hover::after { transform: translate(2px,-2px); }
+.review-question .note-study-link a:focus-visible {
+  outline: 2px solid var(--gold-light);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+.review-question .note-study-link.is-locked { color: #64748b; }
 
 /* TOAST */
 /* TOAST NOTIFICATIONS */
@@ -1643,8 +2411,64 @@ body[data-zoom="large"] .question-type-badge {
     font-size: 24px;
   }
   
+  .score-seal {
+    width: 164px;
+    height: 164px;
+  }
+
   .score-display {
-    font-size: 64px;
+    font-size: 50px;
+  }
+
+  .results-title {
+    font-size: 30px;
+  }
+
+  .results-subtitle {
+    font-size: 14px;
+  }
+
+  .results-meta-strip {
+    border-radius: 16px;
+  }
+
+  .results-meta-sep {
+    display: none;
+  }
+
+  .review-container {
+    padding: 36px 18px 24px;
+    border-radius: 16px;
+  }
+
+  .review-title {
+    font-size: 26px;
+  }
+
+  .review-question {
+    padding: 22px 18px 20px;
+  }
+
+  .review-stem {
+    font-size: 15px;
+  }
+
+  .review-option {
+    flex-wrap: wrap;
+    gap: 10px 12px;
+  }
+
+  .review-option-tag {
+    width: 100%;
+    padding-left: 40px;
+  }
+
+  .results-actions {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 420px;
+    margin-left: auto;
+    margin-right: auto;
   }
   
   .modal-content {
@@ -1661,11 +2485,25 @@ body[data-zoom="large"] .question-type-badge {
   }
 
   .results-screen {
-    padding: 40px 16px;
+    padding: 48px 16px;
   }
 
   .stats-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .stat-card {
+    padding: 22px 12px 18px;
+  }
+
+  .stat-card .stat-value {
+    font-size: 32px;
+  }
+
+  .stat-card .stat-label {
+    letter-spacing: 1.4px;
+    white-space: nowrap;
   }
 
   .modal-box {
@@ -2050,15 +2888,19 @@ body[data-zoom="large"] .question-type-badge {
   color: var(--gold-primary);
 }
 
-/* Topics drawer */
+/* Topics drawer — grid-row expand animates to the content's real height (no clipping) */
 .subject-topics-list {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.32s cubic-bezier(0.4,0,0.2,1);
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.32s cubic-bezier(0.4,0,0.2,1);
   border-top: 0px solid rgba(201,168,76,0.18);
 }
+.subject-topics-inner {
+  min-height: 0;
+  overflow: hidden;
+}
 .subject-row.expanded .subject-topics-list {
-  max-height: 1400px;
+  grid-template-rows: 1fr;
   border-top-width: 1px;
 }
 
@@ -2107,6 +2949,36 @@ body[data-zoom="large"] .question-type-badge {
   line-height: 1.4;
 }
 .topic-row.selected .topic-row-name { color: #f1f5f9; font-weight: 600; }
+
+/* Study-note link beside a topic, and the empty-topic label */
+.topic-note-link {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--gold-primary);
+  border: 1px solid rgba(201,168,76,0.35);
+  border-radius: 5px;
+  padding: 2px 8px;
+}
+.topic-note-link:hover { background: rgba(201,168,76,0.14); }
+.topic-empty-label {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+.note-study-link { margin-top: 10px; font-size: 13px; }
+.note-study-link a { color: var(--gold-primary); text-decoration: underline; text-underline-offset: 3px; }
+.note-study-link a:hover { color: #e6c870; }
+/* Study link locked by the student portal (class not paid) */
+.topic-note-link.is-locked { color: var(--text-muted); border-color: rgba(255,255,255,0.14); cursor: default; }
+.topic-note-link.is-locked:hover { background: transparent; }
+.note-study-link.is-locked { color: var(--text-muted); }
 
 .stats-box {
   background: rgba(255,255,255,0.06);
@@ -2269,6 +3141,58 @@ body[data-zoom="large"] .question-type-badge {
   border-color: rgba(16,185,129,0.4);
   background: rgba(16,185,129,0.05);
 }
+.cc-name-display.absent {
+  border-color: rgba(245,158,11,0.4);
+  background: rgba(245,158,11,0.05);
+}
+.cc-name-display.absent .cc-name-text {
+  color: #94a3b8;
+  text-decoration: line-through;
+  text-decoration-color: rgba(245,158,11,0.55);
+}
+.cc-name-display.absent .cc-absent-label { color: #fbbf24; }
+.cc-absent-note {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 4px;
+}
+.cc-undo-absent {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--gold-primary);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cc-undo-absent:hover { color: var(--gold-light); }
+.cc-pending-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.cc-pending-row .cc-answered-badge { margin-top: 0; }
+.cc-absent-btn {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 6px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(245,158,11,0.3);
+  background: rgba(245,158,11,0.08);
+  color: #fbbf24;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.cc-absent-btn:hover {
+  background: rgba(245,158,11,0.16);
+  border-color: rgba(245,158,11,0.55);
+}
 /* Student standby state — gold instead of green */
 .cc-name-display.standby {
   border-color: rgba(201,168,76,0.35);
@@ -2380,22 +3304,6 @@ body[data-zoom="large"] .question-type-badge {
   background: rgba(201,168,76,0.07);
 }
 
-/* ── Cycle-complete badge ── */
-.cc-cycle-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  background: rgba(16,185,129,0.07);
-  border: 1px solid rgba(16,185,129,0.22);
-  border-radius: 8px;
-  padding: 9px 12px;
-  color: #34d399;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-}
-
 /* ── Correct / Wrong answer buttons ── */
 .cc-answer-btns {
   display: flex;
@@ -2485,32 +3393,76 @@ body[data-zoom="large"] .question-type-badge {
 
 /* Grade card on results screen */
 .grades-card {
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 14px;
-  margin: 24px auto;
-  max-width: 680px;
+  background: linear-gradient(180deg, rgba(15,23,42,0.72) 0%, rgba(2,6,23,0.72) 100%);
+  border: 1px solid rgba(201,168,76,0.14);
+  border-radius: 16px;
+  margin: 0 auto 24px;
+  max-width: 720px;
   overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.28);
 }
 .grades-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(255,255,255,0.07);
+  padding: 18px 24px;
+  border-bottom: 1px solid rgba(201,168,76,0.10);
+  background: linear-gradient(90deg, rgba(201,168,76,0.05), transparent 70%);
   cursor: pointer;
   user-select: none;
+  transition: background 0.18s;
+}
+.grades-card-header:hover {
+  background: linear-gradient(90deg, rgba(201,168,76,0.09), transparent 75%);
+}
+.grades-card-header:focus-visible {
+  outline: 2px solid var(--gold-light);
+  outline-offset: -2px;
 }
 .grades-card-title {
-  font-size: 14px;
+  font-family: 'Playfair Display', serif;
+  font-size: 12px;
   font-weight: 700;
-  color: #f1f5f9;
+  color: var(--gold-primary);
+  text-transform: uppercase;
+  letter-spacing: 2px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 .grades-card-body {
-  padding: 18px 20px;
+  padding: 22px 24px;
+}
+.grades-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 0 8px;
+  text-align: center;
+}
+.grades-empty-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gold-primary);
+  background: rgba(201,168,76,0.06);
+  border: 1px solid rgba(201,168,76,0.18);
+}
+.grades-empty-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+.grades-empty-sub {
+  font-size: 12.5px;
+  color: #64748b;
+  max-width: 340px;
+  line-height: 1.55;
 }
 
 /* Average badge */
@@ -2960,11 +3912,6 @@ body[data-zoom="large"] .question-type-badge {
         Start New Test
       </button>
 
-      <a href="student-dashboard.html" class="start-btn-secondary">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
-        My Academic Dashboard
-      </a>
-
       <!-- TEACHER ONLY: View all student quiz results -->
       <button id="teacherGradesBtn" onclick="openGradeHistoryModal()"
         class="start-btn-secondary"
@@ -3041,25 +3988,6 @@ body[data-zoom="large"] .question-type-badge {
       <span id="selectedSubjectsCount" style="display:none">0</span>
       <span id="selectedTopicsCount" style="display:none">0</span>
       <span id="totalQuestionsCount" style="display:none">—</span>
-      <div class="stats-box" style="margin-top:20px;background:rgba(255,255,255,0.03);border-color:rgba(255,255,255,0.07)">
-        <div style="padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.07)">
-          <label for="questionCountLimit" style="display:flex;align-items:center;gap:8px;color:#94a3b8;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-            Limit questions (optional)
-          </label>
-          <input type="number" id="questionCountLimit" min="1" placeholder="Leave blank to use all available questions"
-            style="width:100%;padding:11px 14px;border-radius:9px;border:1.5px solid rgba(201,168,76,0.20);background:rgba(255,255,255,0.04);color:#e2e8f0;font-size:13.5px;font-family:'Inter',sans-serif;outline:none;transition:border-color 0.18s"
-            onfocus="this.style.borderColor='rgba(201,168,76,0.5)'" onblur="this.style.borderColor='rgba(201,168,76,0.20)'">
-        </div>
-        <label style="display:flex;align-items:center;cursor:pointer;gap:14px">
-          <input type="checkbox" id="mixQAToggle" checked onchange="toggleMixQA()"
-            style="width:18px;height:18px;cursor:pointer;accent-color:var(--gold-primary);flex-shrink:0">
-          <div>
-            <span style="color:#e2e8f0;font-size:13.5px;font-weight:600;display:block;letter-spacing:0.1px">Shuffle Questions &amp; Answers</span>
-            <span style="color:#64748b;font-size:12px;display:block;margin-top:3px;line-height:1.4">Randomize question order and answer choices for each test session</span>
-          </div>
-        </label>
-      </div>
     </div>
     <div class="modal-footer" style="padding:18px 32px 24px;display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid rgba(255,255,255,0.07)">
       <button onclick="showSavedTestsModal()" class="btn-outline" style="background:linear-gradient(135deg,rgba(201,168,76,0.10),rgba(201,168,76,0.04));border-color:rgba(201,168,76,0.30);color:var(--gold-primary);font-weight:600;font-size:13px;padding:10px 18px;display:flex;align-items:center;gap:8px">
@@ -3203,19 +4131,18 @@ body[data-zoom="large"] .question-type-badge {
       </div><!-- /.question-panel-scrollable -->
       
       <div class="question-actions">
-        <button class="btn-secondary" id="backBtn" onclick="previousQuestion()" disabled>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;margin-right:6px">
-            <polyline points="15 18 9 12 15 6"/>
-          </svg>
-          Back
-        </button>
         <div class="right-actions">
-          <button class="btn-secondary" onclick="clearAnswer()">Clear Answer</button>
           <!-- checkAnswerBtn is now rendered inline on the selected option row; keep in DOM for JS refs -->
           <button class="btn btn-primary" id="checkAnswerBtn" onclick="checkAnswer()" style="display:none!important;position:absolute;pointer-events:none;visibility:hidden;" aria-hidden="true" tabindex="-1"></button>
-          <button class="btn-secondary" id="nextBtn" onclick="nextQuestion()">
-            Next
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;margin-left:6px">
+          <button class="btn-secondary nav-btn" id="backBtn" onclick="previousQuestion()" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+            <span>Back</span>
+          </button>
+          <button class="btn-secondary nav-btn" id="nextBtn" onclick="nextQuestion()">
+            <span>Next</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polyline points="9 18 15 12 9 6"/>
             </svg>
           </button>
@@ -3264,12 +4191,6 @@ body[data-zoom="large"] .question-type-badge {
         <!-- Name display -->
         <div class="cc-name-display" id="ccNameDisplay">
           <div class="cc-idle-text">Select a group to begin</div>
-        </div>
-
-        <!-- Cycle-complete badge -->
-        <div class="cc-cycle-badge" id="ccCycleBadge" style="display:none">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-          All students called — new round starting
         </div>
 
         <!-- Pick button -->
@@ -3408,15 +4329,107 @@ body[data-zoom="large"] .question-type-badge {
   </div>
 </div>
 
+<!-- TEST SETUP MODAL — shown after "Start Test" in the subject picker -->
+<div class="modal" id="testSetupModal" onclick="if(event.target===this)closeTestSetupModal()" onkeydown="if(event.key==='Escape')closeTestSetupModal()">
+  <div class="modal-content submit-modal setup-modal" role="dialog" aria-modal="true" aria-labelledby="testSetupTitle">
+    <div class="submit-modal-accent"></div>
+
+    <div class="submit-modal-body">
+      <div class="submit-modal-head">
+        <div class="submit-modal-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>
+          </svg>
+        </div>
+        <div>
+          <div class="submit-modal-eyebrow">Test Setup</div>
+          <h2 id="testSetupTitle">Configure Your Examination</h2>
+        </div>
+      </div>
+
+      <div class="setup-available">
+        <div class="setup-available-value" id="setupAvailableCount">—</div>
+        <div class="setup-available-text">
+          <div class="setup-available-title">questions available</div>
+          <div class="setup-available-sub" id="setupSelectionSummary">in your selection</div>
+        </div>
+      </div>
+
+      <label for="questionCountLimit" class="setup-field-label">Number of questions</label>
+      <input type="number" id="questionCountLimit" class="setup-input" min="1" inputmode="numeric"
+        placeholder="All available questions" oninput="onSetupLimitInput()"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();confirmTestSetup();}">
+      <div class="setup-chips" id="setupChips"></div>
+      <div class="setup-hint" id="setupHint">Leave blank to include every available question. Questions are distributed evenly across the selected topics.</div>
+
+      <label class="setup-toggle">
+        <input type="checkbox" id="mixQAToggle" checked autocomplete="off" onchange="toggleMixQA()">
+        <div>
+          <span class="setup-toggle-title">Shuffle Questions &amp; Answers</span>
+          <span class="setup-toggle-sub">Randomize question order and answer choices for this session</span>
+        </div>
+      </label>
+
+      <div class="submit-modal-actions">
+        <button type="button" class="btn-secondary submit-modal-cancel" onclick="closeTestSetupModal()">Back</button>
+        <button type="button" class="btn btn-primary submit-modal-confirm" id="setupStartBtn" onclick="confirmTestSetup()">
+          Start Test
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- SUBMIT CONFIRMATION MODAL -->
-<div class="modal" id="submitModal">
-  <div class="modal-content">
-    <h2>Submit Test?</h2>
-    <p>Are you sure you want to submit your test? You won't be able to change your answers after submission.</p>
-    <div id="submitWarning" style="display:none;margin-bottom:20px;padding:14px;background:rgba(245,158,11,0.08);border-left:4px solid var(--warning);border-radius:8px;color:#78350f;font-weight:600;font-size:14px;"></div>
-    <div class="modal-actions">
-      <button class="btn-secondary" onclick="closeSubmitModal()">Cancel</button>
-      <button class="btn-danger" onclick="submitTest()">Yes, Submit</button>
+<div class="modal" id="submitModal" onclick="if(event.target===this)closeSubmitModal()" onkeydown="if(event.key==='Escape')closeSubmitModal()">
+  <div class="modal-content submit-modal" role="dialog" aria-modal="true" aria-labelledby="submitModalTitle">
+    <div class="submit-modal-accent"></div>
+
+    <div class="submit-modal-body">
+      <div class="submit-modal-head">
+        <div class="submit-modal-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <polyline points="9 15 11 17 15 13"/>
+          </svg>
+        </div>
+        <div>
+          <div class="submit-modal-eyebrow">Final Submission</div>
+          <h2 id="submitModalTitle">Submit Examination?</h2>
+        </div>
+      </div>
+
+      <p class="submit-modal-text">Your answers will be finalised and scored. Once submitted, responses can no longer be changed.</p>
+
+      <div class="submit-summary">
+        <div class="submit-summary-item">
+          <div class="submit-summary-value" id="submitAnsweredCount">0</div>
+          <div class="submit-summary-label"><span class="dot answered"></span>Answered</div>
+        </div>
+        <div class="submit-summary-item">
+          <div class="submit-summary-value" id="submitUnansweredCount">0</div>
+          <div class="submit-summary-label"><span class="dot unanswered"></span>Unanswered</div>
+        </div>
+        <div class="submit-summary-item">
+          <div class="submit-summary-value" id="submitFlaggedCount">0</div>
+          <div class="submit-summary-label"><span class="dot flagged"></span>Flagged</div>
+        </div>
+      </div>
+
+      <div id="submitWarning" class="submit-warning" style="display:none">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span id="submitWarningText"></span>
+      </div>
+
+      <div class="submit-modal-actions">
+        <button type="button" class="btn-secondary submit-modal-cancel" onclick="closeSubmitModal()">Return to Test</button>
+        <button type="button" class="btn btn-primary submit-modal-confirm" onclick="submitTest()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Submit Examination
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -3477,64 +4490,92 @@ body[data-zoom="large"] .question-type-badge {
 <div class="results-screen" id="resultsScreen">
   <div class="results-container">
     <div class="results-header">
-      <div class="score-display" id="scoreDisplay">0%</div>
-      <div class="pass-badge" id="passBadge">PASS</div>
-      <h1 class="results-title">Test Complete!</h1>
-      <p class="results-subtitle">You've successfully completed the examination</p>
-      <p class="results-subtitle" id="scoreBasedOn" style="font-size:12px;opacity:0.6;margin-top:-6px;"></p>
+      <div class="results-eyebrow">Official Score Report</div>
+
+      <div class="score-seal" aria-hidden="false">
+        <svg viewBox="0 0 196 196" aria-hidden="true">
+          <defs>
+            <linearGradient id="scoreSealGradient" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#e6c96a"/>
+              <stop offset="55%" stop-color="#d4b56a"/>
+              <stop offset="100%" stop-color="#c9a84c"/>
+            </linearGradient>
+          </defs>
+          <circle class="score-seal-inner" cx="98" cy="98" r="80"/>
+          <circle class="score-seal-track" cx="98" cy="98" r="92"/>
+          <circle class="score-seal-arc" id="scoreSealArc" cx="98" cy="98" r="92"
+                  stroke-dasharray="578.05" stroke-dashoffset="578.05"/>
+        </svg>
+        <div class="score-seal-center">
+          <div class="score-display" id="scoreDisplay">0%</div>
+          <div class="score-caption">Final Score</div>
+        </div>
+      </div>
+
+      <div class="pass-badge" id="passBadge">Passed</div>
+      <h1 class="results-title">Examination <span>Complete</span></h1>
+      <div class="results-rule"><span class="results-rule-diamond"></span></div>
+      <p class="results-subtitle" id="resultsSubtitle">Your examination has been submitted and scored.</p>
+
+      <div class="results-meta-strip">
+        <div class="results-meta-item">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+          Passing Standard <strong id="passingStandard">70%</strong>
+        </div>
+        <span class="results-meta-sep"></span>
+        <div class="results-meta-item">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          <span id="scoreBasedOn">Scored on all questions</span>
+        </div>
+        <span class="results-meta-sep"></span>
+        <div class="results-meta-item">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+          <span id="resultsDate"></span>
+        </div>
+      </div>
     </div>
 
     <div class="stats-grid">
-      <div class="stat-card">
+      <div class="stat-card stat-correct">
         <div class="stat-value" id="correctCount">0</div>
-        <div class="stat-label">Correct Answers</div>
+        <div class="stat-label">Correct</div>
       </div>
-      <div class="stat-card">
+      <div class="stat-card stat-incorrect">
         <div class="stat-value" id="incorrectCount">0</div>
         <div class="stat-label">Incorrect</div>
       </div>
-      <div class="stat-card">
+      <div class="stat-card stat-skipped">
         <div class="stat-value" id="skippedCount">0</div>
         <div class="stat-label">Skipped</div>
       </div>
-      <div class="stat-card">
+      <div class="stat-card stat-time">
         <div class="stat-value" id="timeUsed">0:00</div>
         <div class="stat-label">Time Used</div>
       </div>
     </div>
 
     <div class="results-actions">
-      <button class="btn btn-primary" onclick="showReview()">Review Answers</button>
-      <a href="student-dashboard.html" class="btn-outline"
-         style="display:inline-flex;align-items:center;gap:9px;text-decoration:none;border:1.5px solid rgba(201,168,76,0.4);background:linear-gradient(135deg,rgba(201,168,76,0.09),rgba(201,168,76,0.04));color:var(--gold-primary);font-weight:700;box-shadow:0 2px 12px rgba(201,168,76,0.08);transition:all 0.2s"
-         onmouseover="this.style.background='linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.10))';this.style.borderColor='rgba(201,168,76,0.75)';this.style.transform='translateY(-1px)'"
-         onfocus="this.style.background='linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.10))';this.style.borderColor='rgba(201,168,76,0.75)'"
-         onblur="this.style.background='linear-gradient(135deg,rgba(201,168,76,0.09),rgba(201,168,76,0.04))';this.style.borderColor='rgba(201,168,76,0.4)'"
-         onmouseout="this.style.background='linear-gradient(135deg,rgba(201,168,76,0.09),rgba(201,168,76,0.04))';this.style.borderColor='rgba(201,168,76,0.4)';this.style.transform=''">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>
-        </svg>
-        My Academic Dashboard
-      </a>
-      <button class="btn-outline" onclick="downloadResults()">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;margin-right:6px">
-          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-        </svg>
-        Download Results
+      <button type="button" class="rs-btn rs-btn-primary" onclick="showReview()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        Review Answers
       </button>
-      <button class="btn-outline" onclick="location.reload()">Retake Test</button>
+      <button type="button" class="rs-btn rs-btn-ghost" onclick="location.reload()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+        Retake Test
+      </button>
     </div>
 
     <!-- ── TEST GRADES SECTION ──────────────────────────────────── -->
     <div class="grades-card" id="gradesCard">
-      <div class="grades-card-header" onclick="toggleGradesCard()">
+      <div class="grades-card-header" onclick="toggleGradesCard()" role="button" tabindex="0" aria-controls="gradesCardBody"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleGradesCard();}">
         <div class="grades-card-title">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary,#c9a84c)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary,#c9a84c)" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/>
           </svg>
-          Test Grades
+          Academic Record
         </div>
-        <svg id="gradesChevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.5" style="transition:transform 0.2s"><polyline points="6 9 12 15 18 9"/></svg>
+        <svg id="gradesChevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary,#c9a84c)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="transition:transform 0.2s;opacity:0.7"><polyline points="6 9 12 15 18 9"/></svg>
       </div>
       <div class="grades-card-body" id="gradesCardBody">
         <div id="gradesContent" style="text-align:center;padding:20px 0;color:#475569;font-size:13px">
@@ -3609,7 +4650,7 @@ function initializeSupabase() {
 // SESSION ROLE — AUTH & PERMISSION STATE
 // ============================================
 // Populated on DOMContentLoaded from sessionStorage/localStorage.
-// isLoggedIn  — gate: unauthenticated users are redirected to login.html
+// isLoggedIn  — gate: unauthenticated users are redirected to the ARNOMA login (../index.html)
 // isTeacher   — true only for admin_users with role 'teacher','admin','superadmin'
 //               Students always have isTeacher === false.
 // ============================================
@@ -3623,11 +4664,12 @@ const SESSION_ROLE = {
 function initSessionRole() {
   const loggedIn =
     sessionStorage.getItem('isLoggedIn') === 'true' ||
-    localStorage.getItem('isLoggedIn') === 'true';
+    localStorage.getItem('isLoggedIn') === 'true' ||
+    !!localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token');
 
   if (!loggedIn) {
-    // Not authenticated — send to login
-    window.location.replace('login.html');
+    // Not authenticated — send to the ARNOMA login page
+    window.location.replace('../index.html');
     return;
   }
 
@@ -3662,6 +4704,40 @@ function initSessionRole() {
   //   - their stored role matches a teacher role, OR
   //   - isAdmin flag is true (superadmin / primary admin)
   SESSION_ROLE.isTeacher = roleIsTeacher || isAdmin;
+}
+
+// ARNOMA admins sign in with Supabase (admin_accounts), not the storage flags above.
+// Promote them to the teacher role so admin tools (e.g. All Student Grades) are available.
+async function detectArnomaAdmin() {
+  if (!SESSION_ROLE.isLoggedIn || SESSION_ROLE.isTeacher) return;
+  try {
+    const client = initSupabase();
+    if (!client) return;
+    const { data: sessionData } = await withTimeout(client.auth.getSession(), 4000, 'Session check timed out');
+    const user = sessionData && sessionData.session && sessionData.session.user;
+    if (!user) return;
+    const { data, error } = await withTimeout(
+      client.from('admin_accounts').select('auth_user_id').eq('auth_user_id', user.id).maybeSingle(),
+      4000, 'Admin check timed out'
+    );
+    if (error || !data) return;
+    SESSION_ROLE.isTeacher = true;
+    SESSION_ROLE.userRole = 'admin';
+    if (!SESSION_ROLE.userName && user.email) SESSION_ROLE.userName = user.email.split('@')[0];
+  } catch (e) {
+    console.warn('detectArnomaAdmin skipped:', e && e.message);
+  }
+}
+
+// Leave the test: close the portal's test window when embedded, otherwise go to the ARNOMA home page
+function exitTestToPortal() {
+  try {
+    if (window.parent !== window && typeof window.parent.closeGameModal === 'function') {
+      window.parent.closeGameModal();
+      return;
+    }
+  } catch (e) { /* cross-origin parent — fall through */ }
+  window.location.href = '../index.html';
 }
 
 // ============================================
@@ -4285,7 +5361,7 @@ function revealAllAnswers() {
             background:${isCorrect ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'};
             border:2px solid ${isCorrect ? 'var(--success)' : 'rgba(255,255,255,0.15)'};
             color:${isCorrect ? '#86efac' : '#94a3b8'};font-weight:800;font-size:12px;">${letter}</span>
-          <span style="color:${isCorrect ? '#d1fae5' : '#94a3b8'};font-size:14px;line-height:1.6;${isCorrect ? 'font-weight:600;' : ''}">${opt.text}</span>
+          <span style="color:${isCorrect ? '#d1fae5' : '#94a3b8'};font-size:14px;line-height:1.6;${isCorrect ? 'font-weight:600;' : ''}">${escapeHtml(opt.text)}</span>
           ${isCorrect ? '<span style="margin-left:auto;color:var(--success);flex-shrink:0">✓</span>' : ''}
         </div>`;
     }).join('');
@@ -4297,12 +5373,12 @@ function revealAllAnswers() {
           ${q.multi ? '<span style="background:rgba(99,102,241,0.15);border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;font-size:11px;padding:3px 9px;border-radius:12px;">Multi-select</span>' : ''}
           ${useHy ? '<span style="background:rgba(201,168,76,0.10);border:1px solid rgba(201,168,76,0.3);color:#c9a84c;font-size:11px;padding:3px 9px;border-radius:12px;">ՀԱՅ</span>' : ''}
         </div>
-        <div style="color:#f1f5f9;font-size:15px;font-weight:500;line-height:1.65;margin-bottom:16px;">${displayStem}</div>
+        <div style="color:#f1f5f9;font-size:15px;font-weight:500;line-height:1.65;margin-bottom:16px;">${escapeHtml(displayStem)}</div>
         <div style="margin-bottom:14px;">${optionRows}</div>
         ${displayRationale ? `
           <div style="background:rgba(251,191,36,0.08);border-left:4px solid rgba(251,191,36,0.5);border-radius:0 8px 8px 0;padding:14px 16px;margin-top:4px;">
             <div style="color:#fbbf24;font-weight:700;font-size:12px;letter-spacing:0.5px;margin-bottom:6px;">${useHy ? 'ՀԻՄՆԱՎՈՐՈՒՄ' : 'RATIONALE'}</div>
-            <div style="color:#e2e8f0;font-size:13px;line-height:1.7;">${displayRationale}</div>
+            <div style="color:#e2e8f0;font-size:13px;line-height:1.7;">${escapeHtml(displayRationale)}</div>
           </div>` : ''}
         ${q.key_point ? `
           <div style="background:rgba(201,168,76,0.06);border-left:3px solid rgba(201,168,76,0.35);border-radius:0 6px 6px 0;padding:10px 14px;margin-top:10px;">
@@ -4564,6 +5640,22 @@ function withTimeout(promise, ms, timeoutMessage) {
   });
 }
 
+// PostgREST caps every response at its max-rows setting (1000 here) regardless of .limit(),
+// so a single query silently drops every row past that point. Page with .range() instead.
+// buildQuery must return a FRESH query each call and carry a deterministic .order().
+async function fetchAllRows(buildQuery, pageSize = 1000) {
+  const all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    from += data.length; // advance by what was returned, so a lower server cap cannot skip rows
+  }
+  return all;
+}
+
 function isNetworkFailure(error) {
   const msg = String(error?.message || '');
   return msg.includes('Load failed') ||
@@ -4740,6 +5832,7 @@ async function addMoreQuestions(count = 10) {
 
     // 6. Append to session state
     testState.questions.push(...picks);
+    attachNoteLinks(picks);
 
     // 7. Rebuild the bilingual snapshot to include new questions
     testState.snapshot = buildBilingualSnapshot(testState.questions);
@@ -4796,33 +5889,34 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
       throw new Error('No questions found for the selected topics');
     }
 
-    let query = db
-      .from('test_questions')
-      .select('id, test_id, question_stem, question_stem_hy, options, options_hy, correct_answer, is_multiple_choice, rationale, rationale_hy, category, display_order, points, is_active, topic_id')
-      .eq('is_active', true)
-      .order('display_order', { ascending: true });
+    const buildQuery = () => {
+      let query = db
+        .from('test_questions')
+        .select('id, test_id, question_stem, question_stem_hy, options, options_hy, correct_answer, is_multiple_choice, rationale, rationale_hy, category, display_order, points, is_active, topic_id')
+        .eq('is_active', true)
+        .order('display_order', { ascending: true })
+        .order('id', { ascending: true });
 
-    if (useTopicSystem) {
-      // Topic-based: filter by topic_id only (works across all subjects/test_ids)
-      query = query.in('topic_id', topicIds);
-    } else {
-      // Legacy: filter by test_id, optionally by category
-      query = query.eq('test_id', testId);
-      if (categoryFilter) {
-        query = query.eq('category', categoryFilter);
+      if (useTopicSystem) {
+        // Topic-based: filter by topic_id only (works across all subjects/test_ids)
+        query = query.in('topic_id', topicIds);
+      } else {
+        // Legacy: filter by test_id, optionally by category
+        query = query.eq('test_id', testId);
+        if (categoryFilter) {
+          query = query.eq('category', categoryFilter);
+        }
       }
-    }
+      return query;
+    };
 
-    // Raise the page limit so large question banks (300+) are never silently truncated.
-    // PostgREST defaults to 1000; we set 5000 to accommodate all current subjects combined.
-    query = query.limit(5000);
-
-    const { data: questions, error } = await withTimeout(
-      query,
-      12000,
+    // Paged: a single query is capped at 1000 rows by the server, which would silently
+    // drop questions whenever a selection spans more than 1000.
+    const questions = await withTimeout(
+      fetchAllRows(buildQuery),
+      20000,
       'Loading questions timed out'
     );
-    if (error) throw error;
     
     if (!questions || questions.length === 0) {
       throw new Error('No questions found for the selected topics');
@@ -5416,6 +6510,184 @@ function getSubjectIcon(name) {
   return `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTE LINKS — questions and topics are tied to study notes by stable ids
+// (note_catalog.note_id), never by title text. Every helper here fails soft:
+// if the tables are unavailable the picker simply behaves as it did before.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// note_id -> { title, path, system }. Cached for the page session.
+async function loadNoteCatalog() {
+  if (window._cachedNoteCatalog) return window._cachedNoteCatalog;
+  const map = new Map();
+  try {
+    const rows = await fetchAllRows(() => db
+      .from('note_catalog')
+      .select('note_id, title, path, system_name')
+      .eq('is_active', true)
+      .order('path', { ascending: true }));
+    rows.forEach(r => map.set(r.note_id, { title: r.title, path: r.path, system: r.system_name }));
+  } catch (e) {
+    console.warn('[Notes] catalog unavailable — topics shown without note links:', e?.message || e);
+  }
+  window._cachedNoteCatalog = map;
+  return map;
+}
+
+// Notes live at /Notes/... and this page at /Test/, so the stored repo path is made page-relative.
+function buildNoteUrl(notePath, anchorText) {
+  if (!notePath) return null;
+  let url = '../' + String(notePath).split('/').map(encodeURIComponent).join('/');
+  const name = SESSION_ROLE.userName || sessionStorage.getItem('userName') || localStorage.getItem('userName');
+  if (name) url += '?studentName=' + encodeURIComponent(name);
+  if (anchorText) {
+    // Text fragment: lets supporting browsers scroll to and highlight the supporting passage.
+    const words = String(anchorText).replace(/\s+/g, ' ').trim().split(' ').slice(0, 8).join(' ');
+    if (words.length >= 8) url += '#:~:text=' + encodeURIComponent(words).replace(/-/g, '%2D');
+  }
+  return url;
+}
+
+// Collapse topics so students see one row per study note, labelled with the note's exact title.
+// A topic is shown when it has a note OR holds questions (so questions are never hidden), and
+// topics that point at the same note are merged into one row whose pool is all of them.
+function buildTopicRows(allTopics, counts, notes) {
+  if (!notes || notes.size === 0) {
+    return { rows: (allTopics || []).map(t => ({ ...t, _groupIds: [t.id] })), siblings: new Map() };
+  }
+  const groups = new Map();
+  (allTopics || []).forEach(t => {
+    const note = t.note_id ? notes.get(t.note_id) : null;
+    const n = counts[t.id] || 0;
+    if (!note && n === 0) return; // not in the notes and no questions: nothing to practise
+    const key = note ? `${t.subject_id}|${t.note_id}` : `solo|${t.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ topic: t, note, n });
+  });
+  const rows = [];
+  const siblings = new Map();
+  groups.forEach(members => {
+    members.sort((a, b) => (b.n - a.n) || ((a.topic.display_order || 0) - (b.topic.display_order || 0)) || String(a.topic.name).localeCompare(String(b.topic.name)));
+    const lead = members[0];
+    const note = lead.note;
+    const ids = members.map(m => m.topic.id);
+    rows.push({
+      ...lead.topic,
+      name: note ? note.title : lead.topic.name,
+      _origName: lead.topic.name,
+      _aliases: members.map(m => m.topic.name),
+      _notePath: note ? note.path : null,
+      _groupIds: ids
+    });
+    siblings.set(lead.topic.id, ids);
+  });
+  rows.sort((a, b) => (a.display_order || 0) - (b.display_order || 0) || String(a.name).localeCompare(String(b.name)));
+  return { rows, siblings };
+}
+
+// Selected rows -> every topic id whose questions belong to them (empty siblings add nothing).
+function expandSelectedTopicIds(ids) {
+  const sib = window._topicSiblings || new Map();
+  const counts = window._cachedTopicCounts || {};
+  const out = new Set();
+  (ids || []).forEach(id => {
+    out.add(id);
+    (sib.get(id) || []).forEach(s => { if (s === id || (counts[s] || 0) > 0) out.add(s); });
+  });
+  return Array.from(out);
+}
+
+// Look up each question's primary note. Runs in the background; a failure only means no "Study"
+// link is shown, never that the test cannot run. Results live in a side map keyed by question id,
+// NOT on the question objects, because those are broadcast/persisted (teacher sessions, snapshots).
+window._questionNotes = window._questionNotes || new Map();
+async function attachNoteLinks(questions) {
+  try {
+    const notes = await loadNoteCatalog();
+    if (!notes.size || !questions || !questions.length) return;
+    const ids = questions.map(q => q.id).filter(id => Number.isFinite(Number(id)) && !window._questionNotes.has(String(id)));
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += 150) chunks.push(ids.slice(i, i + 150));
+    const results = await Promise.all(chunks.map(c => db
+      .from('v_question_primary_note')
+      .select('question_id, note_id, section_heading, anchor_text')
+      .in('question_id', c)));
+    results.forEach(r => {
+      if (r.error || !r.data) return;
+      r.data.forEach(row => {
+        const note = row.note_id ? notes.get(row.note_id) : null;
+        if (note) window._questionNotes.set(String(row.question_id), { title: note.title, path: note.path, section: row.section_heading || null, anchor: row.anchor_text || null });
+      });
+    });
+  } catch (e) {
+    console.warn('[Notes] could not attach note links:', e?.message || e);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTE LOCKS — the student portal publishes which study notes this student has locked
+// (class not paid) under NOTE_ACCESS_KEY; their study links show as locked instead.
+// Teachers/admins are never gated. A student with no current list for the signed-in
+// account (portal not opened in the last 24h, or still loading) gets no study links
+// rather than possibly-locked ones. Notes the portal does not list are left as they were.
+// This is a UI-level lock: the note pages themselves are static files.
+// ─────────────────────────────────────────────────────────────────────────────
+const NOTE_ACCESS_KEY = 'arnoma:noteAccess:v1';
+const NOTE_ACCESS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+// Signed-in account id, read from the Supabase session the portal stored (same origin).
+function currentAuthUserId() {
+  try {
+    const ref = new URL(SUPABASE_CONFIG.url).hostname.split('.')[0];
+    const stored = JSON.parse(localStorage.getItem('sb-' + ref + '-auth-token') || 'null');
+    return (stored && stored.user && stored.user.id) || null;
+  } catch (_) { return null; }
+}
+
+// Set of locked note paths for this account, or null when there is no valid, current list.
+function readLockedNotePaths() {
+  try {
+    const data = JSON.parse(localStorage.getItem(NOTE_ACCESS_KEY) || 'null');
+    if (!data || data.v !== 1 || !data.uid || !Array.isArray(data.locked)) return null;
+    if (!(Date.now() - data.ts < NOTE_ACCESS_MAX_AGE_MS)) return null;
+    if (data.uid !== currentAuthUserId()) return null;
+    return new Set(data.locked);
+  } catch (_) { return null; }
+}
+
+// 'open' | 'locked' | 'unknown'. Pass the set from readLockedNotePaths() when checking many notes.
+function noteAccessState(notePath, lockedPaths) {
+  if (SESSION_ROLE.isTeacher) return 'open';
+  const locked = lockedPaths === undefined ? readLockedNotePaths() : lockedPaths;
+  if (!locked) return 'unknown';
+  return locked.has(notePath) ? 'locked' : 'open';
+}
+
+// "Notes" pill beside a topic row: link when open, padlock when locked, nothing when unknown.
+function topicNoteSlotHtml(notePath, lockedPaths) {
+  const href = notePath ? buildNoteUrl(notePath) : null;
+  if (!href) return '';
+  const access = noteAccessState(notePath, lockedPaths);
+  if (access === 'open') return `<a class="topic-note-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" title="Open the study note">Notes</a>`;
+  if (access === 'locked') return `<span class="topic-note-link is-locked" title="Unlocks once the class this note was taught in is paid">\u{1F512} Notes</span>`;
+  return '';
+}
+
+// "Study this topic" line shown under a rationale. Empty when the question has no note.
+function noteLinkHtml(question) {
+  const n = question && window._questionNotes ? window._questionNotes.get(String(question.id)) : null;
+  if (!n) return '';
+  const href = buildNoteUrl(n.path, n.anchor);
+  if (!href) return '';
+  const access = noteAccessState(n.path);
+  if (access === 'unknown') return '';
+  if (access === 'locked') {
+    return `<div class="note-study-link is-locked" title="Unlocks once the class this note was taught in is paid">\u{1F512} ${escapeHtml(n.title)} \u2014 locked until the class is paid</div>`;
+  }
+  const where = n.section && n.section !== n.title ? ` &rsaquo; ${escapeHtml(n.section)}` : '';
+  return `<div class="note-study-link"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">Study this topic: ${escapeHtml(n.title)}${where}</a></div>`;
+}
+
 async function showSubjectSelection() {
   const btn = document.getElementById('initialStartBtn');
   btn.innerHTML = '<div class="loading" style="width:20px;height:20px"></div> Loading...';
@@ -5476,22 +6748,24 @@ async function showSubjectSelection() {
           throw new Error('rpc_unavailable');
         }
       } catch (rpcFallbackErr) {
-        // Fallback: fetch only topic_id column with limit 5000 (single request, no loop)
+        // Fallback: fetch only topic_id, paged because the server caps one response at 1000 rows.
         if (rpcFallbackErr?.message !== 'rpc_unavailable') {
-          console.warn('[Topic Counts] RPC error, using fallback single query');
+          console.warn('[Topic Counts] RPC error, using fallback paged query');
         }
-        const { data: allRows, error: fallbackError } = await db
-          .from('test_questions')
-          .select('topic_id')
-          .eq('is_active', true)
-          .limit(5000);
-        if (!fallbackError && allRows) {
+        try {
+          const allRows = await fetchAllRows(() => db
+            .from('test_questions')
+            .select('topic_id')
+            .eq('is_active', true)
+            .order('id', { ascending: true }));
           allRows.forEach(row => {
             if (row.topic_id) {
               topicQuestionCounts[row.topic_id] = (topicQuestionCounts[row.topic_id] || 0) + 1;
             }
           });
           console.log(`[Topic Counts] loaded via fallback: ${Object.keys(topicQuestionCounts).length} topics`);
+        } catch (fallbackError) {
+          console.warn('[Topic Counts] fallback query failed:', fallbackError);
         }
       }
       // Cache for this session so reopening the modal is instant
@@ -5501,7 +6775,11 @@ async function showSubjectSelection() {
     }
 
     allSubjects = subjects;
-    availableTopics = allTopicsRaw || [];
+    // One row per study note (exact note title); topics outside the notes are hidden unless they hold questions.
+    const noteCatalog = await loadNoteCatalog();
+    const topicRowData = buildTopicRows(allTopicsRaw || [], topicQuestionCounts, noteCatalog);
+    window._topicSiblings = topicRowData.siblings;
+    availableTopics = topicRowData.rows;
     selectedSubjects.clear();
     selectedTopics.clear();
 
@@ -5515,21 +6793,34 @@ async function showSubjectSelection() {
     const subjectList = document.getElementById('subjectList');
     if (!subjectList) throw new Error('Subject list element not found');
 
-    subjectList.innerHTML = subjects.map((subject, idx) => {
+    // Hide systems that have no note-backed topic and no questions (only when the note catalog loaded).
+    const visibleSubjects = noteCatalog.size
+      ? subjects.filter(s => (topicsBySubject[s.id] || []).length > 0)
+      : subjects;
+
+    // Notes this student has locked in the portal (read once for every row below).
+    const lockedNotePaths = readLockedNotePaths();
+
+    subjectList.innerHTML = visibleSubjects.map((subject, idx) => {
       const topics = topicsBySubject[subject.id] || [];
       const hasTopics = topics.length > 0;
       const iconSvg = getSubjectIcon(subject.name);
 
       const topicRows = topics.map(topic => {
-        const qCount = topicQuestionCounts[topic.id] || 0;
+        const qCount = (topic._groupIds || [topic.id]).reduce((sum, id) => sum + (topicQuestionCounts[id] || 0), 0);
+        const safeName = escapeHtml(topic.name);
+        const searchKey = escapeHtml([topic.name, ...(topic._aliases || [])].join(' ').toLowerCase());
         return `
         <div class="topic-row" id="topic-row-${topic.id}"
-             data-topic-name="${topic.name.toLowerCase()}"
+             data-topic-name="${searchKey}"
              onclick="toggleTopicInline('${topic.id}', '${subject.id}')">
           <input type="checkbox" id="topic-cb-${topic.id}"
             onclick="event.stopPropagation();toggleTopicInline('${topic.id}','${subject.id}',this.checked)">
-          <span class="topic-row-name">${topic.name}</span>
-          ${qCount > 0 ? `<span style="margin-left:auto;flex-shrink:0;font-size:10px;font-weight:700;color:#94a3b8;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.10);border-radius:5px;padding:2px 7px;letter-spacing:0.3px">${qCount} Question${qCount !== 1 ? 's' : ''}</span>` : ''}
+          <span class="topic-row-name">${safeName}</span>
+          ${topicNoteSlotHtml(topic._notePath, lockedNotePaths)}
+          ${qCount > 0
+            ? `<span style="margin-left:auto;flex-shrink:0;font-size:10px;font-weight:700;color:#94a3b8;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.10);border-radius:5px;padding:2px 7px;letter-spacing:0.3px">${qCount} Question${qCount !== 1 ? 's' : ''}</span>`
+            : `<span class="topic-empty-label">No questions yet</span>`}
         </div>
       `;
       }).join('');
@@ -5537,7 +6828,7 @@ async function showSubjectSelection() {
       return `
         <div class="subject-row" id="subject-row-${subject.id}"
              data-subject-name="${subject.name.toLowerCase()}"
-             data-topic-names="${topics.map(t=>t.name.toLowerCase()).join('|')}">
+             data-topic-names="${escapeHtml(topics.map(t => [t.name, ...(t._aliases || [])].join(' ').toLowerCase()).join('|'))}">
           <div class="subject-header" onclick="toggleSubject('${subject.id}')">
             <svg class="subject-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <polyline points="9 18 15 12 9 6"/>
@@ -5558,6 +6849,7 @@ async function showSubjectSelection() {
           </div>
           ${hasTopics ? `
             <div class="subject-topics-list" id="topics-list-${subject.id}">
+             <div class="subject-topics-inner">
               <div class="subject-topics-select-all" onclick="selectAllTopicsForSubject('${subject.id}', true)">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
                 Select all topics
@@ -5569,6 +6861,7 @@ async function showSubjectSelection() {
                 </span>
               </div>
               ${topicRows}
+             </div>
             </div>
           ` : ''}
         </div>
@@ -5579,6 +6872,7 @@ async function showSubjectSelection() {
     btn.innerHTML = 'Start Test';
     btn.disabled = false;
     updateSubjectStats();
+    applyNoteDeepLink();
 
   } catch (error) {
     console.error('Error loading subjects:', error);
@@ -5586,6 +6880,26 @@ async function showSubjectSelection() {
     btn.disabled = false;
     showToast(error.message || 'Failed to load subjects', 'error');
   }
+}
+
+// ?note=<note_id> (sent by the "Practice" button on a note page): preselect that note's topic, once.
+function applyNoteDeepLink() {
+  const noteId = new URLSearchParams(window.location.search).get('note');
+  if (!noteId || window._noteDeepLinkApplied) return;
+  window._noteDeepLinkApplied = true;
+  const topic = availableTopics.find(t => t.note_id === noteId);
+  if (!topic) {
+    showToast('No practice questions are linked to that note yet.', 'info');
+    return;
+  }
+  const counts = window._cachedTopicCounts || {};
+  const available = (topic._groupIds || [topic.id]).reduce((sum, id) => sum + (counts[id] || 0), 0);
+  const subjectRow = document.getElementById(`subject-row-${topic.subject_id}`);
+  if (subjectRow) subjectRow.classList.add('expanded');
+  toggleTopicInline(topic.id, topic.subject_id, true);
+  const topicRow = document.getElementById(`topic-row-${topic.id}`);
+  if (topicRow && topicRow.scrollIntoView) topicRow.scrollIntoView({ block: 'center' });
+  if (available === 0) showToast(`"${escapeHtml(topic.name)}" has no practice questions yet.`, 'info');
 }
 
 // Toggle the expand/collapse of a subject's topic list.
@@ -5747,7 +7061,7 @@ function updateSubjectStats() {
       db.from('test_questions')
         .select('*', { count: 'exact', head: true })
         .eq('is_active', true)
-        .in('topic_id', Array.from(selectedTopics))
+        .in('topic_id', expandSelectedTopicIds(Array.from(selectedTopics)))
         .then(({ count, error }) => {
           const val = (!error && count != null) ? count : '—';
           document.getElementById('totalQuestionsCount').textContent = val;
@@ -5807,11 +7121,6 @@ async function startFromSubjectModal() {
     return;
   }
 
-  // User is actively starting a NEW test based on the current modal selection.
-  // Don't allow a previously-saved session (possibly for different topics like Cranial Nerves)
-  // to bleed into this run.
-  clearLocalStorage();
-
   // If subject selected but no topics explicitly picked, auto-select all its topics
   selectedSubjects.forEach(subjectId => {
     const subjectTopics = availableTopics.filter(t => t.subject_id === subjectId);
@@ -5825,15 +7134,10 @@ async function startFromSubjectModal() {
     return;
   }
 
-  // Read options from the subject modal's controls
-  const mixQAToggle   = document.getElementById('mixQAToggle');
-  const limitInput    = document.getElementById('questionCountLimit');
-  TEST_CONFIG.shuffleQuestions = mixQAToggle ? mixQAToggle.checked : true;
-  TEST_CONFIG.shuffleOptions   = mixQAToggle ? mixQAToggle.checked : true;
-  TEST_CONFIG.questionCount    = limitInput && limitInput.value ? parseInt(limitInput.value) : null;
-  TEST_CONFIG.selectedTopicIds = Array.from(selectedTopics);
+  // A row can stand for several topics that share one study note; load questions from all of them.
+  TEST_CONFIG.selectedTopicIds = expandSelectedTopicIds(Array.from(selectedTopics));
   // Store human-readable names so the header title is correct during the test AND after resume
-  TEST_CONFIG.selectedTopicNames = TEST_CONFIG.selectedTopicIds
+  TEST_CONFIG.selectedTopicNames = Array.from(selectedTopics)
     .map(id => availableTopics.find(t => t.id === id)?.name)
     .filter(Boolean);
 
@@ -5875,6 +7179,145 @@ async function startFromSubjectModal() {
 
   // Clear any lingering warning banner before hiding the modal
   clearSubjectModalWarning();
+
+  // Ask how many questions to include before launching
+  openTestSetupModal();
+}
+
+// ─── Test setup pop-up (question limit + shuffle) ────────────────────────────
+let _setupAvailableCount = null;
+let _setupCountRequest = 0;
+
+async function openTestSetupModal() {
+  const modal = document.getElementById('testSetupModal');
+  const input = document.getElementById('questionCountLimit');
+  const topicIds = TEST_CONFIG.selectedTopicIds || [];
+
+  // Instant estimate from the cached per-topic counts, then refine with an exact count
+  const counts = window._cachedTopicCounts || {};
+  _setupAvailableCount = topicIds.reduce((sum, id) => sum + (counts[id] || 0), 0) || null;
+
+  const subjectIds = new Set(topicIds.map(id => availableTopics.find(t => t.id === id)?.subject_id).filter(Boolean));
+  const topicCount = selectedTopics.size;
+  document.getElementById('setupSelectionSummary').textContent =
+    `across ${topicCount} topic${topicCount !== 1 ? 's' : ''} in ${subjectIds.size} subject${subjectIds.size !== 1 ? 's' : ''}`;
+
+  if (input) {
+    input.value = '';
+    input.classList.remove('invalid');
+  }
+  // Shuffle is on by default every time the setup opens
+  const shuffleToggle = document.getElementById('mixQAToggle');
+  if (shuffleToggle) shuffleToggle.checked = true;
+  renderSetupAvailable();
+  modal.classList.add('active');
+  setTimeout(() => input && input.focus(), 50);
+
+  const req = ++_setupCountRequest;
+  try {
+    const { count, error } = await db.from('test_questions')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_active', true)
+      .in('topic_id', topicIds);
+    if (req !== _setupCountRequest) return;
+    if (!error && count != null) {
+      _setupAvailableCount = count;
+      renderSetupAvailable();
+    }
+  } catch (e) {
+    console.warn('Test setup count failed, using cached estimate:', e);
+  }
+}
+
+function renderSetupAvailable() {
+  const n = _setupAvailableCount;
+  const valueEl = document.getElementById('setupAvailableCount');
+  const input = document.getElementById('questionCountLimit');
+  if (valueEl) valueEl.textContent = n != null ? n.toLocaleString('en-US') : '—';
+  if (input) {
+    input.placeholder = n != null ? `All ${n.toLocaleString('en-US')} questions` : 'All available questions';
+    if (n != null) input.max = n; else input.removeAttribute('max');
+  }
+
+  const chipsEl = document.getElementById('setupChips');
+  if (chipsEl) {
+    const presets = [10, 25, 50, 100].filter(v => n == null || v < n);
+    chipsEl.innerHTML = presets.map(v =>
+      `<button type="button" class="setup-chip" data-value="${v}" onclick="setSetupLimit(${v})">${v}</button>`
+    ).join('') + `<button type="button" class="setup-chip" data-value="" onclick="setSetupLimit('')">All</button>`;
+  }
+  onSetupLimitInput();
+}
+
+function setSetupLimit(value) {
+  const input = document.getElementById('questionCountLimit');
+  if (!input) return;
+  input.value = value;
+  onSetupLimitInput();
+  input.focus();
+}
+
+// Validates the limit field and syncs chip/hint state. Returns the limit (null = all) or false if invalid.
+function onSetupLimitInput() {
+  const input = document.getElementById('questionCountLimit');
+  const hint = document.getElementById('setupHint');
+  const n = _setupAvailableCount;
+  const raw = input ? input.value.trim() : '';
+  let result = null;
+  let error = '';
+
+  if (raw !== '') {
+    const v = Number(raw);
+    if (!Number.isInteger(v) || v < 1) {
+      error = 'Enter a whole number of at least 1, or leave blank for all questions.';
+      result = false;
+    } else if (n != null && v > n) {
+      error = `Only ${n.toLocaleString('en-US')} questions are available in your selection.`;
+      result = false;
+    } else {
+      result = (n != null && v === n) ? null : v;
+    }
+  }
+
+  if (input) input.classList.toggle('invalid', !!error);
+  if (hint) {
+    hint.classList.toggle('error', !!error);
+    hint.textContent = error || (result
+      ? `${result.toLocaleString('en-US')} questions will be drawn evenly across the selected topics.`
+      : 'Leave blank to include every available question. Questions are distributed evenly across the selected topics.');
+  }
+  document.querySelectorAll('#setupChips .setup-chip').forEach(chip => {
+    chip.classList.toggle('active', chip.dataset.value === raw);
+  });
+  const startBtn = document.getElementById('setupStartBtn');
+  if (startBtn) startBtn.disabled = result === false;
+  return result;
+}
+
+function closeTestSetupModal() {
+  _setupCountRequest++;
+  document.getElementById('testSetupModal').classList.remove('active');
+}
+
+async function confirmTestSetup() {
+  const limit = onSetupLimitInput();
+  if (limit === false) {
+    document.getElementById('questionCountLimit')?.focus();
+    return;
+  }
+  const mixQAToggle = document.getElementById('mixQAToggle');
+  TEST_CONFIG.shuffleQuestions = mixQAToggle ? mixQAToggle.checked : true;
+  TEST_CONFIG.shuffleOptions   = mixQAToggle ? mixQAToggle.checked : true;
+  TEST_CONFIG.questionCount    = limit;
+  closeTestSetupModal();
+  await launchTestFromSelection();
+}
+
+async function launchTestFromSelection() {
+  // User is actively starting a NEW test based on the current modal selection.
+  // Don't allow a previously-saved session (possibly for different topics like Cranial Nerves)
+  // to bleed into this run.
+  clearLocalStorage();
 
   document.getElementById('subjectModal').classList.add('hidden');
 
@@ -5985,7 +7428,7 @@ async function updateTopicStats() {
         .from('test_questions')
         .select('*', { count: 'exact', head: true })
         .eq('is_active', true)
-        .in('topic_id', Array.from(selectedTopics));
+        .in('topic_id', expandSelectedTopicIds(Array.from(selectedTopics)));
       if (!error && qEl) qEl.textContent = count || 0;
     } catch (_) { if (qEl) qEl.textContent = '?'; }
   }
@@ -6196,6 +7639,9 @@ async function initializeNewTest() {
     testState.questions = [buildEnglishDisclaimerQuestion(), ...testState.questions];
   }
 
+  // Background lookup of each question's study note (never blocks or breaks the test)
+  attachNoteLinks(testState.questions);
+
   // ── Build the frozen bilingual snapshot (once, permanent for this session) ──
   testState.snapshot = buildBilingualSnapshot(testState.questions);
   setLoadingStatus('Preparing interface...');
@@ -6268,10 +7714,36 @@ async function resumeTest(saved) {
     }));
   }
 
+  // The pool can change between sessions (retired duplicates, added questions), which would
+  // reshuffle a resumed test under the student. Restore the exact saved order instead; ids that
+  // no longer exist are dropped and questions added since are not injected mid-session.
+  const savedCurrentId = Array.isArray(saved.questionIds) ? saved.questionIds[saved.currentIndex] : null;
+  if (Array.isArray(saved.questionIds) && saved.questionIds.length) {
+    const byId = new Map(testState.questions.map(q => [String(q.id), q]));
+    const ordered = [];
+    saved.questionIds.forEach(id => {
+      const q = byId.get(String(id));
+      if (q) { ordered.push(q); byId.delete(String(id)); }
+    });
+    if (ordered.length) testState.questions = ordered;
+  }
+
   // Re-prepend English disclaimer if not already present (always first)
   if (isEnglishSubject() && (!testState.questions[0] || testState.questions[0].id !== 'english-disclaimer-q0')) {
     testState.questions = [buildEnglishDisclaimerQuestion(), ...testState.questions];
   }
+
+  // Keep the student on the same question, or clamp if it was retired.
+  if (savedCurrentId != null) {
+    const idx = testState.questions.findIndex(q => String(q.id) === String(savedCurrentId));
+    if (idx >= 0) testState.currentIndex = idx;
+  }
+  if (testState.currentIndex >= testState.questions.length) {
+    testState.currentIndex = Math.max(0, testState.questions.length - 1);
+  }
+
+  // Background lookup of each question's study note (never blocks or breaks the test)
+  attachNoteLinks(testState.questions);
 
   // ── Restore bilingual snapshot (preferred from localStorage for speed;
   //    rebuild from freshly loaded questions as fallback) ─────────────────
@@ -6681,6 +8153,13 @@ function renderQuestion() {
       if (e.target.closest('.option-check-btn')) return;
       // Ignore clicks directly on the input (browser already handled it)
       if (e.target === input) return;
+      // Clicking the already-selected answer (before it's checked) deselects it.
+      // Radios don't fire `change` when re-clicked, so handle it explicitly.
+      if (input.type === 'radio' && input.checked && !input.disabled) {
+        input.checked = false;
+        handleAnswerChange(question.id, question.multi);
+        return;
+      }
       input.click();
     });
   });
@@ -6718,33 +8197,7 @@ function renderQuestion() {
       const feedbackEl = document.getElementById('answerFeedback');
       feedbackEl.style.display = 'block';
 
-      if (isCorrect) {
-        feedbackEl.style.background = 'linear-gradient(135deg, rgba(34,197,94,0.15), rgba(34,197,94,0.05))';
-        feedbackEl.style.border = '2px solid var(--success)';
-        feedbackEl.style.color = '#15803d';
-        feedbackEl.innerHTML = `
-          <div style="display:flex;align-items:center;gap:12px">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
-            <div>
-              <div style="font-size:18px;margin-bottom:4px">${testState.language === 'hy' ? 'Ճիշտ է!' : 'Correct!'}</div>
-              ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#166534;margin-top:8px">${rationaleText}</div>` : ''}
-            </div>
-          </div>
-        `;
-      } else {
-        feedbackEl.style.background = 'linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.05))';
-        feedbackEl.style.border = '2px solid var(--error)';
-        feedbackEl.style.color = '#991b1b';
-        feedbackEl.innerHTML = `
-          <div style="display:flex;align-items:center;gap:12px">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            <div>
-              <div style="font-size:18px;margin-bottom:4px">${testState.language === 'hy' ? 'Սխալ է' : 'Incorrect'}</div>
-              ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#7f1d1d;margin-top:8px"><strong>${testState.language === 'hy' ? 'Բացատրություն' : 'Explanation'}:</strong> ${rationaleText}</div>` : ''}
-            </div>
-          </div>
-        `;
-      }
+      renderAnswerFeedback(feedbackEl, isCorrect, rationaleText, question);
 
       // Re-apply correct/incorrect option highlighting and disable inputs
       document.querySelectorAll('.option').forEach(opt => {
@@ -6849,6 +8302,43 @@ function removeInlineCheckBtn() {
   if (existing) existing.remove();
 }
 
+// Shared Correct/Incorrect feedback panel — used on Check and when revisiting a checked question
+function renderAnswerFeedback(feedbackEl, isCorrect, rationaleText, question) {
+  if (isCorrect) {
+    feedbackEl.style.background = 'rgba(16,185,129,0.12)';
+    feedbackEl.style.border = '1.5px solid rgba(16,185,129,0.45)';
+    feedbackEl.style.color = '#6ee7b7';
+    feedbackEl.innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:14px">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="3" style="flex-shrink:0;margin-top:2px">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        <div>
+          <div style="font-size:17px;font-weight:800;color:#a7f3d0;margin-bottom:6px">${testState.language === 'hy' ? 'Ճիշտ է!' : 'Correct!'}</div>
+          ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#6ee7b7;line-height:1.65;margin-top:4px">${escapeHtml(rationaleText)}</div>` : ''}
+          ${noteLinkHtml(question)}
+        </div>
+      </div>
+    `;
+  } else {
+    feedbackEl.style.background = 'rgba(239,68,68,0.12)';
+    feedbackEl.style.border = '1.5px solid rgba(239,68,68,0.45)';
+    feedbackEl.style.color = '#fca5a5';
+    feedbackEl.innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:14px">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="3" style="flex-shrink:0;margin-top:2px">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+        <div>
+          <div style="font-size:17px;font-weight:800;color:#fca5a5;margin-bottom:6px">${testState.language === 'hy' ? 'Սխալ է' : 'Incorrect'}</div>
+          ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#fda4af;line-height:1.65;margin-top:4px"><strong style="color:#fca5a5">${testState.language === 'hy' ? 'Բացատրություն' : 'Explanation'}:</strong> ${escapeHtml(rationaleText)}</div>` : ''}
+          ${noteLinkHtml(question)}
+        </div>
+      </div>
+    `;
+  }
+}
+
 function checkAnswer() {
   // STUDENT VIEW: Prevent checking answers
   if (TEACHER_MODE.isStudent && !TEACHER_MODE.enabled) {
@@ -6899,37 +8389,7 @@ function checkAnswer() {
     rationaleText = question.rationale || '';
   }
   
-  if (isCorrect) {
-    feedbackEl.style.background = 'rgba(16,185,129,0.12)';
-    feedbackEl.style.border = '1.5px solid rgba(16,185,129,0.45)';
-    feedbackEl.style.color = '#6ee7b7';
-    feedbackEl.innerHTML = `
-      <div style="display:flex;align-items:flex-start;gap:14px">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="3" style="flex-shrink:0;margin-top:2px">
-          <polyline points="20 6 9 17 4 12"/>
-        </svg>
-        <div>
-          <div style="font-size:17px;font-weight:800;color:#a7f3d0;margin-bottom:6px">${testState.language === 'hy' ? 'Ճիշտ է!' : 'Correct!'}</div>
-          ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#6ee7b7;line-height:1.65;margin-top:4px">${rationaleText}</div>` : ''}
-        </div>
-      </div>
-    `;
-  } else {
-    feedbackEl.style.background = 'rgba(239,68,68,0.12)';
-    feedbackEl.style.border = '1.5px solid rgba(239,68,68,0.45)';
-    feedbackEl.style.color = '#fca5a5';
-    feedbackEl.innerHTML = `
-      <div style="display:flex;align-items:flex-start;gap:14px">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#f87171" stroke-width="3" style="flex-shrink:0;margin-top:2px">
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-        <div>
-          <div style="font-size:17px;font-weight:800;color:#fca5a5;margin-bottom:6px">${testState.language === 'hy' ? 'Սխալ է' : 'Incorrect'}</div>
-          ${rationaleText ? `<div style="font-weight:400;font-size:14px;color:#fda4af;line-height:1.65;margin-top:4px"><strong style="color:#fca5a5">${testState.language === 'hy' ? 'Բացատրություն' : 'Explanation'}:</strong> ${rationaleText}</div>` : ''}
-        </div>
-      </div>
-    `;
-  }
+  renderAnswerFeedback(feedbackEl, isCorrect, rationaleText, question);
   
   // Highlight correct and incorrect options
   document.querySelectorAll('.option').forEach(opt => {
@@ -7052,45 +8512,31 @@ function toggleFlag() {
   renderQuestion();
 }
 
-function clearAnswer() {
-  const currentQ = testState.questions[testState.currentIndex];
-  if (!currentQ) return;
-  delete testState.answers[currentQ.id];
-  delete testState.answerStatus[currentQ.id];
-  
-  // Clear feedback
-  document.getElementById('answerFeedback').style.display = 'none';
-  removeInlineCheckBtn();
-  
-  // Re-enable all options
-  document.querySelectorAll('.option').forEach(opt => {
-    opt.classList.remove('disabled', 'correct', 'incorrect');
-    const input = opt.querySelector('input');
-    input.disabled = false;
-  });
-  
-  saveToLocalStorage();
-  renderQuestion();
-  showToast('Answer cleared', 'info');
-}
-
 // ============================================
 // SUBMISSION
 // ============================================
 
 function showSubmitModal() {
-  const answered = Object.keys(testState.answers).length;
-  const total = testState.questions.length;
-  const unanswered = total - answered;
-  
+  const questions = testState.questions.filter(q => !q.isDisclaimer);
+  const hasAnswer = a => Array.isArray(a) ? a.length > 0 : (a !== null && a !== undefined && a !== '');
+  const answered = questions.filter(q => hasAnswer(testState.answers[q.id])).length;
+  const unanswered = questions.length - answered;
+  const flagged = questions.filter(q => testState.flagged.has(q.id)).length;
+
+  document.getElementById('submitAnsweredCount').textContent = answered;
+  document.getElementById('submitUnansweredCount').textContent = unanswered;
+  document.getElementById('submitFlaggedCount').textContent = flagged;
+
   const warningEl = document.getElementById('submitWarning');
   if (unanswered > 0) {
-    warningEl.textContent = `⚠️ You have ${unanswered} unanswered question${unanswered > 1 ? 's' : ''}. Unanswered questions will be marked as incorrect.`;
-    warningEl.style.display = 'block';
+    document.getElementById('submitWarningText').innerHTML =
+      `<strong>${unanswered} question${unanswered !== 1 ? 's are' : ' is'} unanswered.</strong> ` +
+      `${unanswered !== 1 ? 'They' : 'It'} will be recorded as skipped and will not count toward your score.`;
+    warningEl.style.display = 'flex';
   } else {
     warningEl.style.display = 'none';
   }
-  
+
   document.getElementById('submitModal').classList.add('active');
 }
 
@@ -8282,7 +9728,7 @@ function renderColdCallResults(grades) {
         </div>
         
         <div style="margin-top: 2rem; display: flex; gap: 1rem; justify-content: center;">
-           <button class="btn btn-primary" onclick="window.location.href='index.html'" style="padding: 0.75rem 2rem; background: var(--gold-primary); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+           <button class="btn btn-primary" onclick="exitTestToPortal()" style="padding: 0.75rem 2rem; background: var(--gold-primary); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
              Return Home
            </button>
            <button class="btn btn-secondary" onclick="window.location.reload()" style="padding: 0.75rem 2rem; background: var(--bg-white); color: var(--navy-primary); border: 1px solid var(--border-color); border-radius: 8px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
@@ -8373,26 +9819,48 @@ function displayResults(results) {
   document.getElementById('skippedCount').textContent = results.skipped;
   document.getElementById('timeUsed').textContent = formatTime(results.timeUsed);
 
-  // Show grading basis note
+  const passMark = TEST_CONFIG.passingScorePercent;
+  const passStdEl = document.getElementById('passingStandard');
+  if (passStdEl) passStdEl.textContent = passMark + '%';
+
   const basedOnEl = document.getElementById('scoreBasedOn');
   if (basedOnEl) {
-    if (results.skipped > 0) {
-      basedOnEl.textContent = `Score based on ${results.answeredQuestions} answered question${results.answeredQuestions !== 1 ? 's' : ''} (${results.skipped} skipped)`;
-    } else {
-      basedOnEl.textContent = '';
-    }
+    const answered = results.answeredQuestions;
+    basedOnEl.innerHTML = results.skipped > 0
+      ? `Scored on <strong>${answered}</strong> answered question${answered !== 1 ? 's' : ''}`
+      : `Scored on <strong>${answered}</strong> of <strong>${results.totalQuestions}</strong> questions`;
   }
-  
+
+  const dateEl = document.getElementById('resultsDate');
+  if (dateEl) {
+    dateEl.textContent = new Date(testState.endTime || Date.now())
+      .toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  }
+
   const badge = document.getElementById('passBadge');
+  const subtitle = document.getElementById('resultsSubtitle');
   if (results.passed) {
-    badge.textContent = '✓ PASS';
+    badge.textContent = 'Passed';
     badge.className = 'pass-badge pass';
+    if (subtitle) subtitle.textContent = `Congratulations — you have met the ${passMark}% passing standard for this examination.`;
   } else {
-    badge.textContent = '✗ FAIL';
+    badge.textContent = 'Not Passed';
     badge.className = 'pass-badge fail';
+    if (subtitle) subtitle.textContent = `The ${passMark}% passing standard was not met. Review your answers to strengthen your understanding before your next attempt.`;
   }
-  
+
   screen.style.display = 'block';
+
+  const arc = document.getElementById('scoreSealArc');
+  if (arc) {
+    const circumference = 2 * Math.PI * 92;
+    const pct = Math.max(0, Math.min(100, results.scorePercent));
+    arc.style.strokeDasharray = circumference;
+    arc.style.strokeDashoffset = circumference;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      arc.style.strokeDashoffset = circumference * (1 - pct / 100);
+    }));
+  }
   
   // Store results for review
   window.testResults = results;
@@ -8405,32 +9873,53 @@ function showReview() {
   }
   
   const container = document.getElementById('reviewContainer');
-  container.innerHTML = '<h2>Answer Review</h2>';
   const frag = document.createDocumentFragment();
+  const details = window.testResults.details;
+  const count = s => details.filter(d => d.status === s).length;
+  const nCorrect = count('correct');
+  const nIncorrect = count('incorrect');
+  const nSkipped = details.length - nCorrect - nIncorrect;
+
+  const head = document.createElement('div');
+  head.className = 'review-head';
+  head.innerHTML = `
+    <div class="results-eyebrow">Examination Transcript</div>
+    <h2 class="review-title">Answer <span>Review</span></h2>
+    <div class="results-rule"><span class="results-rule-diamond"></span></div>
+    <div class="review-summary">
+      <span class="review-summary-item"><strong>${details.length}</strong> Questions</span>
+      <span class="review-summary-item is-correct"><strong>${nCorrect}</strong> Correct</span>
+      <span class="review-summary-item is-incorrect"><strong>${nIncorrect}</strong> Incorrect</span>
+      <span class="review-summary-item is-skipped"><strong>${nSkipped}</strong> Skipped</span>
+    </div>
+  `;
+  frag.appendChild(head);
   
-  window.testResults.details.forEach((detail, index) => {
+  details.forEach((detail, index) => {
     const q = detail.question;
     const div = document.createElement('div');
     div.className = 'review-question';
     
     let statusBadge = '';
     if (detail.status === 'correct') {
-      statusBadge = '<span class="review-status correct">✓ Correct</span>';
+      div.classList.add('is-correct');
+      statusBadge = '<span class="review-status correct">Correct</span>';
     } else if (detail.status === 'incorrect') {
-      statusBadge = '<span class="review-status incorrect">✗ Incorrect</span>';
+      div.classList.add('is-incorrect');
+      statusBadge = '<span class="review-status incorrect">Incorrect</span>';
     } else {
-      statusBadge = '<span class="review-status skipped">— Skipped</span>';
+      statusBadge = '<span class="review-status skipped">Skipped</span>';
     }
     
     let html = `
       <div class="review-header">
-        <div class="question-number">Question ${index + 1}</div>
+        <div class="review-qnum">Question <strong>${String(index + 1).padStart(2, '0')}</strong></div>
         ${statusBadge}
       </div>
-      <div class="review-stem">${q.stem}</div>
+      <div class="review-stem">${escapeHtml(q.stem)}</div>
     `;
     
-    q.options.forEach(opt => {
+    q.options.forEach((opt, optIndex) => {
       const optId = String(opt.id);
       const isCorrect = q.correct.map(String).includes(optId);
       const isUserAnswer = detail.userAnswer !== null && detail.userAnswer !== undefined &&
@@ -8439,23 +9928,28 @@ function showReview() {
           : String(detail.userAnswer) === optId);
       
       let className = 'review-option';
-      let prefix = '';
+      let tag = '';
       
       if (isCorrect) {
         className += ' correct-answer';
-        prefix = '✓ ';
+        tag = isUserAnswer ? 'Your answer' : 'Correct answer';
       }
       if (isUserAnswer && !isCorrect) {
         className += ' user-incorrect';
-        prefix = '✗ ';
+        tag = 'Your answer';
       }
       
-      html += `<div class="${className}">${prefix}${opt.text}</div>`;
+      html += `<div class="${className}">
+        <span class="review-option-letter">${String.fromCharCode(65 + optIndex)}</span>
+        <span class="review-option-text">${escapeHtml(opt.text)}</span>
+        ${tag ? `<span class="review-option-tag">${tag}</span>` : ''}
+      </div>`;
     });
     
     if (q.rationale) {
-      html += `<div class="rationale"><strong>Rationale:</strong> ${q.rationale}</div>`;
+      html += `<div class="rationale"><strong>Rationale</strong> ${escapeHtml(q.rationale)}</div>`;
     }
+    html += noteLinkHtml(q);
     
     div.innerHTML = html;
     frag.appendChild(div);
@@ -8464,38 +9958,6 @@ function showReview() {
   
   container.style.display = 'block';
   container.scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
-
-function downloadResults() {
-  const data = {
-    testTitle: TEST_CONFIG.testTitle,
-    studentSession: testState.sessionId,
-    completedAt: new Date(testState.endTime).toISOString(),
-    timeUsed: formatTime(Math.floor((testState.endTime - testState.startTime) / 1000)),
-    score: window.testResults.scorePercent + '%',
-    passed: window.testResults.passed,
-    correct: window.testResults.correct,
-    incorrect: window.testResults.incorrect,
-    skipped: window.testResults.skipped,
-    total: window.testResults.totalQuestions,
-    answers: window.testResults.details.map((d, i) => ({
-      questionNumber: i + 1,
-      question: d.question.stem,
-      userAnswer: d.userAnswer || 'Not answered',
-      correctAnswer: d.correctAnswer,
-      isCorrect: d.isCorrect
-    }))
-  };
-  
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `ACNHS_Test_Results_${testState.sessionId}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-  
-  showToast('Results downloaded successfully', 'success');
 }
 
 // ============================================
@@ -8526,8 +9988,16 @@ const coldCallState = {
   sessionStarted: false,
   // Map: student.id → { name, correct: 0, wrong: 0, questions: [] }
   analytics: new Map(),
-  currentPickAnswered: false  // whether correct/wrong has been pressed for the current pick
+  currentPickAnswered: false,  // whether correct/wrong has been pressed for the current pick
+  // Students marked absent — this session only (in-memory, never persisted)
+  absentKeys: new Set(),
+  lastAbsent: null             // most recent absent student, for Undo
 };
+
+function coldCallStudentKey(s) { return String(s.id || s.name); }
+function coldCallPresentStudents() {
+  return coldCallState.students.filter(s => !coldCallState.absentKeys.has(coldCallStudentKey(s)));
+}
 
 // ─── Initialise (called on DOMContentLoaded) ─────────────────────────────────
 function initColdCallPicker() {
@@ -8543,10 +10013,11 @@ async function coldCallLoadGroups() {
 
   try {
     const db = initSupabase();
-    // Fetch distinct group values from students that have a group assigned
+    // Only groups that have at least one active student (paused/graduated are not callable)
     const { data, error } = await db
       .from('students')
       .select('group_name')
+      .eq('status', 'active')
       .not('group_name', 'is', null)
       .order('group_name', { ascending: true });
 
@@ -8589,13 +10060,34 @@ async function onColdCallGroupChange() {
   coldCallState.lastPicked = null;
   coldCallState.lastCycleEndIds = [];
   coldCallState.cycleComplete = false;
+  coldCallState.currentPickAnswered = false;
+  coldCallState.lastAbsent = null;
+  coldCallState.isLoading = !!group;
+
+  // Drop the previous group's revealed name so the idle/loading state can render
+  const display = document.getElementById('ccNameDisplay');
+  if (display) {
+    display.className = 'cc-name-display';
+    display.innerHTML = group
+      ? '<div class="cc-rolling-dots"><span>·</span><span>·</span><span>·</span></div>'
+      : '<div class="cc-idle-text">Select a group to begin</div>';
+  }
 
   coldCallUpdateUI();
 
   if (!group) return;
 
-  // Load students for selected group
   await coldCallLoadStudentsForGroup(group);
+  // Another group was selected while this one was loading — let that call finish the UI
+  if (coldCallState.selectedGroup !== group) return;
+
+  coldCallState.isLoading = false;
+  if (display) {
+    display.className = 'cc-name-display';
+    display.innerHTML = coldCallState.students.length
+      ? '<div class="cc-idle-text">Press "Pick a Student" to begin</div>'
+      : '<div class="cc-idle-text">No active students in this group</div>';
+  }
   coldCallStartNewCycle();
   coldCallUpdateUI();
 }
@@ -8608,41 +10100,50 @@ async function coldCallLoadStudentsForGroup(groupName) {
     return;
   }
 
-  const nameDisplay = document.getElementById('ccNameDisplay');
-  if (nameDisplay) {
-    nameDisplay.innerHTML = '<div class="cc-rolling-dots"><span>·</span><span>·</span><span>·</span></div>';
-  }
-
   try {
     const db = initSupabase();
+    // Active only: paused/graduated are never called on. Free students keep status 'active'.
     const { data, error } = await db
       .from('students')
       .select('id, name, group_name')
       .eq('group_name', groupName)
+      .eq('status', 'active')
       .order('name', { ascending: true });
 
     if (error) throw error;
 
     const students = (data || []).filter(s => s.name && s.name.trim());
     coldCallState.studentCache.set(groupName, students);
-    coldCallState.students = [...students];
+    // Ignore stale responses from a previously selected group
+    if (coldCallState.selectedGroup === groupName) {
+      coldCallState.students = [...students];
+    }
 
   } catch (err) {
     console.error('coldCallLoadStudentsForGroup error:', err);
-    coldCallState.students = [];
-    showToast('Failed to load students for group', 'error');
+    if (coldCallState.selectedGroup === groupName) {
+      coldCallState.students = [];
+      showToast('Failed to load students for group', 'error');
+    }
   }
 }
 
 // ─── Start a fresh cycle (shuffle the full student list) ─────────────────────
 function coldCallStartNewCycle() {
   if (coldCallState.students.length === 0) return;
+  const present = coldCallPresentStudents();
+  if (present.length === 0) {
+    coldCallState.queue = [];
+    coldCallState.calledThisRound = [];
+    coldCallState.cycleComplete = false;
+    return;
+  }
 
   // Remember the tail of the cycle we're about to replace so we can keep those
   // students away from the START of the new cycle.
   // We save up to min(3, floor(n/2)) IDs so we don't over-constrain small groups.
   const tail = coldCallState.calledThisRound;
-  const guardCount = Math.min(3, Math.floor(coldCallState.students.length / 2));
+  const guardCount = Math.min(3, Math.floor(present.length / 2));
   if (tail.length > 0) {
     // Take the last `guardCount` students who were called (end of the old cycle)
     coldCallState.lastCycleEndIds = tail
@@ -8651,7 +10152,7 @@ function coldCallStartNewCycle() {
   }
 
   // Fisher-Yates shuffle
-  const arr = [...coldCallState.students];
+  const arr = [...present];
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
@@ -8708,7 +10209,10 @@ async function coldCallPickStudent() {
   // If queue is empty, start a new cycle
   if (coldCallState.queue.length === 0) {
     coldCallStartNewCycle();
-    // Brief "cycle complete" feedback already shown; now continue picking
+    if (coldCallState.queue.length === 0) {
+      showToast('All students in this group are marked absent', 'warning');
+      return;
+    }
   }
 
   // ── Auto-advance question when the current one is already answered ────────
@@ -8791,6 +10295,9 @@ function coldCallRefreshActiveStudent() {
     resultBadge = `<div class="cc-answered-badge wrong"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Wrong</div>`;
   } else {
     resultBadge = `<div class="cc-answered-badge" style="background:rgba(100,116,139,0.18);border-color:rgba(100,116,139,0.35);color:#94a3b8;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>Not answered yet</div>`;
+    if (!coldCallState.currentPickAnswered) {
+      resultBadge = `<div class="cc-pending-row">${resultBadge}<button type="button" class="cc-absent-btn" onclick="coldCallMarkAbsent()" title="Mark absent for this session only">Absent</button></div>`;
+    }
   }
 
   const key = coldCallState.lastPicked.id || coldCallState.lastPicked.name;
@@ -8813,6 +10320,50 @@ function coldCallRefreshActiveStudent() {
 }
 
 
+
+// ─── Absent (this session only — in-memory, never saved) ─────────────────────
+function coldCallMarkAbsent() {
+  const s = coldCallState.lastPicked;
+  if (!s || coldCallState.currentPickAnswered) return;
+  const key = coldCallStudentKey(s);
+
+  coldCallState.absentKeys.add(key);
+  coldCallState.queue = coldCallState.queue.filter(x => coldCallStudentKey(x) !== key);
+  coldCallState.calledThisRound = coldCallState.calledThisRound.filter(x => coldCallStudentKey(x) !== key);
+  coldCallState.lastPicked = null;
+  coldCallState.lastAbsent = s;
+  coldCallState.currentPickAnswered = false;
+
+  const display = document.getElementById('ccNameDisplay');
+  if (display) {
+    display.className = 'cc-name-display absent';
+    display.innerHTML = `
+      <div class="cc-called-label cc-absent-label">Marked absent</div>
+      <div class="cc-name-text">${escapeHtml(s.name)}</div>
+      <div class="cc-absent-note">Skipped for this session ·
+        <button type="button" class="cc-undo-absent" onclick="coldCallUndoAbsent()">Undo</button>
+      </div>`;
+  }
+  coldCallUpdateUI();
+}
+
+function coldCallUndoAbsent() {
+  const s = coldCallState.lastAbsent;
+  if (!s) return;
+  const key = coldCallStudentKey(s);
+
+  coldCallState.absentKeys.delete(key);
+  coldCallState.lastAbsent = null;
+  coldCallState.queue = coldCallState.queue.filter(x => coldCallStudentKey(x) !== key);
+  if (!coldCallState.calledThisRound.some(x => coldCallStudentKey(x) === key)) {
+    coldCallState.calledThisRound.push(s);
+  }
+  coldCallState.lastPicked = s;
+  coldCallState.currentPickAnswered = false;
+
+  coldCallRefreshActiveStudent();
+  coldCallUpdateUI();
+}
 
 function coldCallUpdateBadgeIfPending(isCorrect) {
   // Only act when a student is picked and their result hasn't been recorded yet
@@ -8950,22 +10501,29 @@ function coldCallUpdateUI() {
   const progressLabel = document.getElementById('ccProgressLabel');
   const progressFrac = document.getElementById('ccProgressFraction');
   const progressFill = document.getElementById('ccProgressFill');
-  const cycleBadge   = document.getElementById('ccCycleBadge');
   const resetBtn     = document.getElementById('ccResetBtn');
   const display      = document.getElementById('ccNameDisplay');
 
-  const total = coldCallState.students.length;
+  // Round finished — roll straight into a new round (no interstitial)
+  if (coldCallState.cycleComplete && coldCallState.students.length > 0) {
+    coldCallStartNewCycle();
+  }
+
+  const total = coldCallPresentStudents().length;
   const called = coldCallState.calledThisRound.length;
 
   if (!coldCallState.selectedGroup || total === 0) {
     // No group or no students
-    if (progressLabel) progressLabel.textContent = total === 0 && coldCallState.selectedGroup
-      ? 'No students in this group'
-      : 'No group selected';
+    if (progressLabel) progressLabel.textContent = coldCallState.isLoading
+      ? 'Loading students…'
+      : coldCallState.students.length > 0 && total === 0
+        ? 'All students marked absent'
+        : total === 0 && coldCallState.selectedGroup
+          ? 'No students in this group'
+          : 'No group selected';
     if (progressFrac) progressFrac.textContent = '—';
     if (progressFill) progressFill.style.width = '0%';
     if (pickBtn) pickBtn.disabled = true;
-    if (cycleBadge) cycleBadge.style.display = 'none';
     if (resetBtn) resetBtn.style.display = 'none';
     if (display && !coldCallState.selectedGroup) {
       display.className = 'cc-name-display';
@@ -8979,19 +10537,6 @@ function coldCallUpdateUI() {
   if (progressFrac) progressFrac.textContent = `${called} / ${total}`;
   if (progressFill) progressFill.style.width = pct + '%';
 
-  // Cycle-complete badge
-  if (coldCallState.cycleComplete) {
-    if (cycleBadge) cycleBadge.style.display = 'flex';
-    // Auto-hide after 2.5s and start new cycle
-    setTimeout(() => {
-      if (cycleBadge) cycleBadge.style.display = 'none';
-      coldCallStartNewCycle();
-      coldCallUpdateUI();
-    }, 2500);
-  } else {
-    if (cycleBadge) cycleBadge.style.display = 'none';
-  }
-
   // Show reset button once at least one student has been called
   if (resetBtn) resetBtn.style.display = called > 0 ? 'inline-block' : 'none';
 
@@ -8999,7 +10544,7 @@ function coldCallUpdateUI() {
   if (pickBtn && !coldCallState.isRolling) pickBtn.disabled = false;
 
   // If no one has been picked yet, set the idle state on the display
-  if (!coldCallState.lastPicked && display && !display.classList.contains('rolling') && !display.classList.contains('revealed')) {
+  if (!coldCallState.lastPicked && display && !display.classList.contains('rolling') && !display.classList.contains('revealed') && !display.classList.contains('absent')) {
     display.className = 'cc-name-display';
     display.innerHTML = `<div class="cc-idle-text">Press "Pick a Student" to begin</div>`;
   }
@@ -9127,6 +10672,8 @@ function coldCallStartNewSession() {
   coldCallState.sessionStarted = false;
   coldCallState.analytics = new Map();
   coldCallState.currentPickAnswered = false;
+  coldCallState.absentKeys = new Set();
+  coldCallState.lastAbsent = null;
   const endRow = document.getElementById('ccEndSessionRow');
   if (endRow) endRow.style.display = 'none';
   coldCallStartNewCycle();
@@ -9238,11 +10785,14 @@ async function saveTestGrade(results) {
     });
     if (insertErr) throw insertErr;
 
-    // Fetch full history for this student (newest first)
-    const { data: history, error: fetchErr } = await sdb
-      .from('test_grade_history')
-      .select('*')
-      .eq('owner_id', ownerId)
+    // Fetch full history for this student (newest first).
+    // Signed-in students are matched by their auth user (the DB links rows to it);
+    // fall back to the device owner id when there is no Supabase session.
+    const { data: sessData } = await sdb.auth.getSession();
+    const authUid = sessData && sessData.session && sessData.session.user ? sessData.session.user.id : null;
+    let historyQuery = sdb.from('test_grade_history').select('*');
+    historyQuery = authUid ? historyQuery.eq('auth_user_id', authUid) : historyQuery.eq('owner_id', ownerId);
+    const { data: history, error: fetchErr } = await historyQuery
       .order('taken_at', { ascending: false });
 
     if (fetchErr) throw fetchErr;
@@ -9259,7 +10809,14 @@ function renderGradesCard(history, currentPercent) {
   if (!content) return;
 
   if (!history || history.length === 0) {
-    content.innerHTML = '<div style="color:#475569;font-size:13px;text-align:center;padding:16px 0">No grade history found.</div>';
+    content.innerHTML = `
+      <div class="grades-empty">
+        <div class="grades-empty-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>
+        </div>
+        <div class="grades-empty-title">No grade history yet</div>
+        <div class="grades-empty-sub">Your recorded examination grades will appear here once they have been saved to your academic record.</div>
+      </div>`;
     return;
   }
 
@@ -9598,7 +11155,8 @@ function escapeHtml(str) {
 document.addEventListener('DOMContentLoaded', () => {
   // ── Auth gate & role detection ─────────────────────────────────────────
   initSessionRole();
-  applySessionRole();
+  // Role-gated UI waits for the (fast) ARNOMA admin check so admins get their tools
+  detectArnomaAdmin().finally(() => applySessionRole());
 
   // Initialize Supabase first
   initializeSupabase();
@@ -9620,6 +11178,14 @@ document.addEventListener('DOMContentLoaded', () => {
     requestIdleCallback(() => loadSavedSessions(), { timeout: 3000 });
   } else {
     setTimeout(() => loadSavedSessions(), 800);
+  }
+
+  // Deep link from a note page (?note=<note_id>): open the picker with that note's topic preselected.
+  if (new URLSearchParams(window.location.search).get('note')) {
+    setTimeout(() => {
+      const startBtn = document.getElementById('initialStartBtn');
+      if (startBtn && !startBtn.disabled) showSubjectSelection();
+    }, 400);
   }
 });
 </script>

@@ -1168,6 +1168,68 @@
     } else {
       fetchAndInject();
     }
+
+    /* ─── PRACTICE LINK ────────────────────────────────────────────
+     * If this note is itself a test topic with active practice
+     * questions, add a "Practice questions" pill to the hero's meta
+     * row that opens the test page with this note's topic preselected
+     * (?note=<note_id>).
+     * Purely additive: offline, missing tables, or a note without
+     * questions simply leave the page exactly as it was.
+     * It lives in the hero meta row (a wrapping flex row) rather than
+     * the nav bar, which has no spare width; the pill class also gives
+     * it the inverted-colour styling and print hiding for free.
+     * ─────────────────────────────────────────────────────────────*/
+    function addPracticeButton() {
+      try {
+        var notePath = getNotePath();
+        var href = window.location.href;
+        var notesIdx = href.search(/\/[Nn]otes\//);
+        if (!document.querySelector('.acnhs-doc-hero .acnhs-hero-meta') || !notePath || notesIdx === -1 || document.getElementById('acnhs-practice-btn')) return;
+
+        var testUrl = href.slice(0, notesIdx) + '/Test/test.html';
+        var query = 'test_topics?select=note_id,note_catalog!inner(path),test_questions!inner(id)' +
+          '&note_catalog.path=eq.' + encodeURIComponent(notePath) +
+          '&note_catalog.is_active=eq.true&test_questions.is_active=eq.true&test_questions.limit=1&limit=1';
+
+        var opts = { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY } };
+        if (typeof AbortController === 'function') {
+          var ctl = new AbortController();
+          setTimeout(function () { ctl.abort(); }, 6000);
+          opts.signal = ctl.signal;
+        }
+
+        fetch(SUPABASE_URL + '/rest/v1/' + query, opts)
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (rows) {
+            if (!rows || !rows[0] || !/^[0-9a-f-]{36}$/i.test(rows[0].note_id || '')) return;
+            var meta = document.querySelector('.acnhs-doc-hero .acnhs-hero-meta');
+            if (!meta || document.getElementById('acnhs-practice-btn')) return;
+            var a = document.createElement('a');
+            a.id = 'acnhs-practice-btn';
+            a.className = 'acnhs-hero-pill';
+            a.href = testUrl + '?note=' + encodeURIComponent(rows[0].note_id);
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.title = 'Practice questions for this note';
+            a.style.cssText = 'text-decoration:none;cursor:pointer;color:#d4b56a;border:1px solid rgba(201,168,76,.4);';
+            a.innerHTML =
+              '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+                '<path d="M9 11l3 3L22 4"/>' +
+                '<path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>' +
+              '</svg>' +
+              'Practice questions';
+            meta.appendChild(a);
+          })
+          .catch(function () {});
+      } catch (e) {}
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', addPracticeButton);
+    } else {
+      addPracticeButton();
+    }
   })();
 
 })();

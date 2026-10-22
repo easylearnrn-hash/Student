@@ -74,6 +74,24 @@ function parseMetadataList(raw?: string): string[] {
   return raw.split(',').map((v) => String(v || '').trim()).filter(Boolean);
 }
 
+// for_class_groups is parallel to the dates and an empty entry means "home-group class, no tag",
+// so empties must be kept. Dropping them tagged home-group classes with the one-time class's group.
+function resolveClassGroups(rawGroups: string | undefined, legacyGroup: string | undefined, count: number): string[] {
+  const fallback = String(legacyGroup || '').trim();
+  let groups: string[] = [];
+  if (rawGroups) {
+    try {
+      const parsed = JSON.parse(rawGroups);
+      if (Array.isArray(parsed)) groups = parsed.map((g) => String(g || '').trim());
+    } catch {
+      groups = rawGroups.split(',').map((g) => String(g || '').trim());
+    }
+  }
+  if (groups.length === 0 && fallback) groups = [fallback];
+  while (groups.length < count) groups.push(fallback);
+  return groups.slice(0, count);
+}
+
 function normalizeClassDate(dateStr: string): string {
   return String(dateStr || '').split('T')[0].trim();
 }
@@ -178,16 +196,7 @@ serve(async (req: Request) => {
 
       // Resolve per-date class_group tags so webhook fallback can preserve
       // cross-group one-time class mappings exactly.
-      let classGroupArray = parseMetadataList(for_class_groups).map((g) => String(g || '').trim());
-      if (classGroupArray.length === 0 && class_group) {
-        classGroupArray = [String(class_group || '').trim()];
-      }
-      while (classGroupArray.length < datesToInsert.length) {
-        classGroupArray.push(String(class_group || '').trim());
-      }
-      if (classGroupArray.length > datesToInsert.length) {
-        classGroupArray = classGroupArray.slice(0, datesToInsert.length);
-      }
+      const classGroupArray = resolveClassGroups(for_class_groups, class_group, datesToInsert.length);
 
       // Deduplicate exact (date, class_group) units to avoid double inserts.
       const uniqueUnits: Array<{ date: string; group: string }> = [];

@@ -10301,6 +10301,8 @@
         }
         
         await supabaseClient.auth.signOut();
+        try { localStorage.removeItem(NOTE_ACCESS_STORAGE_KEY); } catch (_) {}
+        noteAccessForTests = null;
         currentStudent = null;
         window.currentStudent = null; // Also clear window property
         currentEmail = null;
@@ -10504,6 +10506,7 @@
       // test.html uses isLoggedIn flag — set it so its auth gate passes inside the iframe
       localStorage.setItem('isLoggedIn', 'true');
       sessionStorage.setItem('isLoggedIn', 'true');
+      stampNoteAccessForTests(); // keep the study-link lock list fresh for the test page (no-op until notes have loaded)
       
       iframe.src = gameUrl;
       modal.classList.add('active');
@@ -13186,6 +13189,7 @@
         if (allAccessibleNoteIds.length === 0) {
           classroomList.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.7); padding: 40px;">No notes available yet.</div>';
           allSystemNotes = [];
+          if (!permError && !freeAccessError) publishNoteAccessForTests([]);
           refreshSystemAssignmentStats();
           updateSystemNotifications();
           return [];
@@ -13337,7 +13341,8 @@
                                 (note.class_date ? note.class_date.split('T')[0] : null);
           // isAbsent is false when the student was absent but PAID for this class
           // (paid-for-absent students get note access; absent flag only locks unpaid absences)
-          const isAbsent = noteClassDate
+          // A free-access grant is unconditional, so it also overrides the absence lock.
+          const isAbsent = (noteClassDate && !hasFreeAccess)
             ? (absentDatesSet.has(noteClassDate) && !currentStudentPaidDates.has(noteClassDate))
             : false;
           
@@ -13413,6 +13418,10 @@
         
         allSystemNotes = transformedNotes;
 
+        // Hand the lock state to the practice-test page. Uses the full evaluated set (before the
+        // new-student display filter below): hiding an old note here does not make it paid.
+        if (!permError && !freeAccessError) publishNoteAccessForTests(transformedNotes);
+
         // ── New-student note filter ──────────────────────────────────────────
         // Hide notes whose POSTING date is older than effectiveStartStr (14 days before
         // account creation). This prevents new students from seeing months of old notes
@@ -13474,6 +13483,50 @@
         updateSystemNotifications();
         return [];
       }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 🔒 STUDY-LINK LOCKS FOR THE PRACTICE-TEST PAGE
+    // Test/test.html links its questions/topics to the same HTML notes. It runs in an
+    // iframe (or a new tab) of this origin and cannot see this page's note state, so the
+    // notes this student currently has LOCKED (class not paid, or absent and unpaid) are
+    // handed over through localStorage — bound to the signed-in account and time-stamped.
+    // A path is listed only when none of its cards is unlocked. Notes never posted to this
+    // student are not listed (the test page leaves those as they were).
+    // ─────────────────────────────────────────────────────────────────────────
+    const NOTE_ACCESS_STORAGE_KEY = 'arnoma:noteAccess:v1';
+    let noteAccessForTests = null;   // { v, uid, locked[] } from the last completed notes load
+
+    async function publishNoteAccessForTests(notes) {
+      try {
+        // Smart quotes / accents in a posted title would otherwise miss the title→page map
+        // (e.g. "Parkinson’s Disease") and leave that note's study link open.
+        const cleanTitle = t => String(t || '').replace(/[\u2018\u2019]/g, "'").normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const unlocked = new Set();
+        const locked = new Set();
+        (notes || []).forEach(note => {
+          const att = note.attachments && note.attachments[0];
+          const path = (att && att.type === 'html' && att.url) || resolveHtmlNotePath(cleanTitle(note.title));
+          if (!path) return;
+          (note.isPaid && !note.isAbsent ? unlocked : locked).add(path);
+        });
+        unlocked.forEach(path => locked.delete(path));   // any unlocked card keeps the note open
+        const { data } = await supabaseClient.auth.getSession();
+        const uid = data && data.session && data.session.user && data.session.user.id;
+        if (!uid) return;
+        noteAccessForTests = { v: 1, uid, locked: Array.from(locked) };
+        stampNoteAccessForTests();
+      } catch (error) {
+        console.warn('Could not publish note locks for the practice-test page:', error);
+      }
+    }
+
+    // Refreshes the timestamp (the test page ignores a list older than 24 hours).
+    function stampNoteAccessForTests() {
+      if (!noteAccessForTests) return;
+      try {
+        localStorage.setItem(NOTE_ACCESS_STORAGE_KEY, JSON.stringify({ ...noteAccessForTests, ts: Date.now() }));
+      } catch (_) { /* storage unavailable — the test page then shows no study links */ }
     }
     
     // Filter notes by system and update UI
