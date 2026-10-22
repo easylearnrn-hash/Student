@@ -4367,8 +4367,8 @@ body[data-zoom="large"] .question-type-badge {
       <label class="setup-toggle">
         <input type="checkbox" id="mixQAToggle" checked autocomplete="off" onchange="toggleMixQA()">
         <div>
-          <span class="setup-toggle-title">Shuffle Questions &amp; Answers</span>
-          <span class="setup-toggle-sub">Randomize question order and answer choices for this session</span>
+          <span class="setup-toggle-title">Shuffle Questions</span>
+          <span class="setup-toggle-sub">Randomize the question order for this session. Answer choices are always shuffled.</span>
         </div>
       </label>
 
@@ -5580,8 +5580,8 @@ function copyStudentUrl() {
 const TEST_CONFIG = {
   testTitle: "Nursing Fundamentals - Midterm Exam",
   durationMinutes: 60,
-  shuffleQuestions: true, // Default: enabled (can be toggled via Mix Q/A checkbox)
-  shuffleOptions: true,   // Default: enabled (can be toggled via Mix Q/A checkbox)
+  shuffleQuestions: true, // Default: enabled (the student can turn it off in the test setup)
+  shuffleOptions: true,   // Always true: answer choices are never shown in their stored order
   showBackButton: true,
   allowReview: true,
   passingScorePercent: 70,
@@ -5718,7 +5718,6 @@ async function loadTestConfiguration(testId) {
     TEST_CONFIG.testTitle = config.title;
     TEST_CONFIG.durationMinutes = config.duration_minutes;
     TEST_CONFIG.shuffleQuestions = config.shuffle_questions;
-    TEST_CONFIG.shuffleOptions = config.shuffle_options;
     TEST_CONFIG.showBackButton = config.show_back_button;
     TEST_CONFIG.allowReview = config.allow_review;
     TEST_CONFIG.passingScorePercent = config.passing_score_percent;
@@ -5822,15 +5821,11 @@ async function addMoreQuestions(count = 10) {
       picks = available.slice(0, Math.min(count, available.length));
     }
 
-    // 5. Optionally shuffle options (match the session's shuffle setting)
-    if (TEST_CONFIG.shuffleOptions) {
-      picks = picks.map(q => ({
-        ...q,
-        options: q.options
-          ? shuffleArray(q.options, testState.shuffleSeed + q.id.toString().charCodeAt(0))
-          : []
-      }));
-    }
+    // 5. Always shuffle the answer choices
+    picks = picks.map(q => ({
+      ...q,
+      options: q.options ? shuffleArray(q.options, optionShuffleSeed(q)) : []
+    }));
 
     // 6. Append to session state
     testState.questions.push(...picks);
@@ -6113,6 +6108,16 @@ function shuffleArray(array, seed) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+// Per-question seed for the answer-choice shuffle. It hashes the whole question id (not just its
+// first character) so different questions get different permutations, and it is deterministic so
+// every device and every resume shows the same order.
+function optionShuffleSeed(question) {
+  const key = String(question.id);
+  let h = 7;
+  for (let i = 0; i < key.length; i++) h = (h * 131 + key.charCodeAt(i)) % 999983;
+  return testState.shuffleSeed + h;
 }
 
 /**
@@ -7319,7 +7324,7 @@ async function confirmTestSetup() {
   }
   const mixQAToggle = document.getElementById('mixQAToggle');
   TEST_CONFIG.shuffleQuestions = mixQAToggle ? mixQAToggle.checked : true;
-  TEST_CONFIG.shuffleOptions   = mixQAToggle ? mixQAToggle.checked : true;
+  TEST_CONFIG.shuffleOptions   = true; // answer choices are always shuffled
   TEST_CONFIG.questionCount    = limit;
   closeTestSetupModal();
   await launchTestFromSelection();
@@ -7543,9 +7548,9 @@ function closeTopicModal() {
 function toggleMixQA() {
   const toggle = document.getElementById('mixQAToggle');
   if (toggle.checked) {
-    showToast('Mix Q/A enabled: Questions and answers will be shuffled', 'success');
+    showToast('Question shuffle on: questions will appear in random order', 'success');
   } else {
-    showToast('Mix Q/A disabled: Questions and answers will appear in order', 'info');
+    showToast('Question shuffle off: questions will appear in order (answers are always shuffled)', 'info');
   }
 }
 
@@ -7637,14 +7642,12 @@ async function initializeNewTest() {
     testState.questions = [...questions];
   }
   
-  // Shuffle options for each question if enabled (applied to EN options;
+  // Always shuffle the options of each question (applied to EN options;
   // buildBilingualSnapshot will re-align HY options to the shuffled EN order)
-  if (TEST_CONFIG.shuffleOptions) {
-    testState.questions = testState.questions.map(q => ({
-      ...q,
-      options: q.options ? shuffleArray(q.options, testState.shuffleSeed + q.id.toString().charCodeAt(0)) : []
-    }));
-  }
+  testState.questions = testState.questions.map(q => ({
+    ...q,
+    options: q.options ? shuffleArray(q.options, optionShuffleSeed(q)) : []
+  }));
 
   // Prepend the English disclaimer as Question 1 (after shuffle, always first)
   if (isEnglishSubject()) {
@@ -7719,12 +7722,10 @@ async function resumeTest(saved) {
     testState.questions = [...questions];
   }
   
-  if (TEST_CONFIG.shuffleOptions) {
-    testState.questions = testState.questions.map(q => ({
-      ...q,
-      options: q.options ? shuffleArray(q.options, saved.shuffleSeed + q.id.toString().charCodeAt(0)) : []
-    }));
-  }
+  testState.questions = testState.questions.map(q => ({
+    ...q,
+    options: q.options ? shuffleArray(q.options, optionShuffleSeed(q)) : []
+  }));
 
   // The pool can change between sessions (retired duplicates, added questions), which would
   // reshuffle a resumed test under the student. Restore the exact saved order instead; ids that
@@ -9099,13 +9100,13 @@ async function loadSavedSession(sessionId) {
     : deriveShuffleSeed(TEST_CONFIG.testId, TEST_CONFIG.selectedTopicIds);
 
   // Re-apply options shuffling so the snapshot builds correctly
-  if (TEST_CONFIG.shuffleOptions && testState.questions && testState.questions.length > 0) {
+  if (testState.questions && testState.questions.length > 0) {
     testState.questions = testState.questions.map(q => {
       // If the question is a full object (not just a stub)
       if (q.options) {
         return {
           ...q,
-          options: shuffleArray(q.options, testState.shuffleSeed + q.id.toString().charCodeAt(0))
+          options: shuffleArray(q.options, optionShuffleSeed(q))
         };
       }
       return q;
