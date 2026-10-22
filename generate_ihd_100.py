@@ -6,6 +6,7 @@ random.seed(46)
 
 OUT_PATH = Path('/Users/richyf/Library/Mobile Documents/com~apple~CloudDocs/COMPLETE NEW /modules/Test/INSERT-IHD-100.sql')
 CATEGORY = 'Ischemic Heart Disease - NCLEX'
+TOPIC = 'Ischemic Heart Disease'
 
 concepts = [
     {
@@ -193,19 +194,19 @@ concepts = [
 ]
 
 mcq_templates = [
-    'In this high-acuity chest pain scenario, which finding best supports {name}?',
-    'Which interpretation most accurately reflects {name}?',
-    'The nurse prioritizes interventions; which statement aligns with {name}?',
-    'Which conclusion is most consistent with {name} in this patient?',
-    'Which clinical judgment best matches {name}?'
+    'According to the {topic} note, which statement about "{name}" is most accurate?',
+    'The nurse is reviewing "{name}" in {topic}. Which statement is correct?',
+    'Which clinical judgment is most accurate regarding "{name}" in {topic}?',
+    'In rapid prioritization, which statement is most consistent with "{name}" in {topic}?',
+    'Which conclusion about "{name}" in {topic} would the nurse recognize as correct?'
 ]
 
 sata_templates = [
-    'A patient is being assessed for {name}. Which findings/actions are appropriate? (Select all that apply)',
-    'For suspected ACS and {name}, which statements are correct? (Select all that apply)',
-    'During reassessment, which observations support {name}? (Select all that apply)',
-    'The nurse plans care around {name}. Which items belong in the plan? (Select all that apply)',
-    'Which clues are consistent with {name} from this note? (Select all that apply)'
+    'Which statements about "{name}" in {topic} are correct? (Select all that apply)',
+    'For {topic}, which findings or actions relate to "{name}"? (Select all that apply)',
+    'The nurse is planning care. Which items apply to "{name}" in {topic}? (Select all that apply)',
+    'Which of the following are consistent with "{name}" in {topic}? (Select all that apply)',
+    'During reassessment, which observations align with "{name}" in {topic}? (Select all that apply)'
 ]
 
 
@@ -221,11 +222,12 @@ questions = []
 
 for i in range(50):
     c = concepts[i % len(concepts)]
-    stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'])
+    stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
     correct = c['fact'] if i % 2 == 0 else c['priority']
 
     distractors = c['false'] + [
-        f'This presentation is more consistent with {concepts[(i + 4) % len(concepts)]["name"]}.',
+        # a false statement from another section, never a section heading
+        concepts[(i + 4) % len(concepts)]['false'][(i // len(concepts)) % 2],
         'Emergency escalation is unnecessary because these findings are low risk.',
         'Serial evaluation can be deferred to outpatient follow-up.'
     ]
@@ -246,7 +248,7 @@ for i in range(50):
 
 for i in range(50):
     c = concepts[i % len(concepts)]
-    stem = sata_templates[i % len(sata_templates)].format(name=c['name'])
+    stem = sata_templates[i % len(sata_templates)].format(name=c['name'], topic=TOPIC)
 
     true_opts = c['true'][:]
     false_opts = c['false'][:]

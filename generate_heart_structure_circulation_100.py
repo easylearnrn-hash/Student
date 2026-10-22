@@ -6,6 +6,7 @@ random.seed(55)
 
 OUT_PATH = Path('/Users/richyf/Library/Mobile Documents/com~apple~CloudDocs/COMPLETE NEW /modules/Test/INSERT-HEART-STRUCTURE-CIRCULATION-100.sql')
 CATEGORY = 'Heart Structure and Circulation - NCLEX'
+TOPIC = 'Heart Structure & Circulation'
 TOPIC_NAME = 'Heart Structure & Circulation'
 TEST_NAME = 'Cardiovascular System - Heart Structure & Circulation (Generated)'
 
@@ -181,19 +182,19 @@ concepts = [
 ]
 
 mcq_templates = [
-    'Which finding best supports {name} in this cardiac anatomy scenario?',
-    'The nurse reviews cardiovascular physiology data. Which interpretation best matches {name}?',
-    'Which clinical judgment is most accurate regarding {name}?',
-    'In urgent triage, which conclusion aligns with {name}?',
-    'Which statement most appropriately reflects {name}?'
+    'According to the {topic} note, which statement about "{name}" is most accurate?',
+    'The nurse is reviewing "{name}" in {topic}. Which statement is correct?',
+    'Which clinical judgment is most accurate regarding "{name}" in {topic}?',
+    'In rapid prioritization, which statement is most consistent with "{name}" in {topic}?',
+    'Which conclusion about "{name}" in {topic} would the nurse recognize as correct?'
 ]
 
 sata_templates = [
-    'A patient is evaluated for concepts related to {name}. Which findings/statements are correct? (Select all that apply)',
-    'For assessment involving {name}, which options are appropriate? (Select all that apply)',
-    'The nurse teaches cardiac flow and {name}. Which points should be included? (Select all that apply)',
-    'During reassessment, which observations support {name}? (Select all that apply)',
-    'Which cues are consistent with {name} in this note? (Select all that apply)'
+    'Which statements about "{name}" in {topic} are correct? (Select all that apply)',
+    'For {topic}, which findings or actions relate to "{name}"? (Select all that apply)',
+    'The nurse is planning care. Which items apply to "{name}" in {topic}? (Select all that apply)',
+    'Which of the following are consistent with "{name}" in {topic}? (Select all that apply)',
+    'During reassessment, which observations align with "{name}" in {topic}? (Select all that apply)'
 ]
 
 
@@ -213,11 +214,12 @@ questions = []
 
 for i in range(50):
     c = concepts[i % len(concepts)]
-    stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'])
+    stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
     correct = c['fact'] if i % 2 == 0 else c['priority']
 
     distractors = c['false'] + [
-        f'This pattern is more consistent with {concepts[(i + 5) % len(concepts)]["name"]}.',
+        # a false statement from another section, never a section heading
+        concepts[(i + 5) % len(concepts)]['false'][(i // len(concepts)) % 2],
         'Direction of blood flow is optional when identifying vessel type.',
         'Valve-sequence recall has no impact on hemodynamic interpretation.'
     ]
@@ -235,7 +237,7 @@ for i in range(50):
 
 for i in range(50):
     c = concepts[i % len(concepts)]
-    stem = sata_templates[i % len(sata_templates)].format(name=c['name'])
+    stem = sata_templates[i % len(sata_templates)].format(name=c['name'], topic=TOPIC)
 
     t = c['true'][:]
     f = c['false'][:]

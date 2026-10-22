@@ -6,6 +6,7 @@ random.seed(42)
 
 OUT_PATH = Path("/Users/richyf/Library/Mobile Documents/com~apple~CloudDocs/COMPLETE NEW /modules/Test/INSERT-RLHF-100.sql")
 CATEGORY = "Right-Left Heart Failure - NCLEX"
+TOPIC = 'Right & Left Heart Failure'
 TOPIC_NAME = "Right & Left Heart Failure"
 
 # Source-constrained facts from Notes/Cardiovascular System/Right-Left-Heart-Failure.html
@@ -378,19 +379,19 @@ concepts = [
 
 
 mcq_templates = [
-    "A patient with cardiovascular decompensation is being reassessed. Which finding most strongly supports {name}?",
-    "During clinical handoff, which interpretation is most accurate for {name}?",
-    "The nurse is prioritizing care. Which statement best reflects {name}?",
-    "A complex symptom cluster is reviewed. Which conclusion best matches {name}?",
-    "Which clinical judgment is most consistent with {name}?"
+    'According to the {topic} note, which statement about "{name}" is most accurate?',
+    'The nurse is reviewing "{name}" in {topic}. Which statement is correct?',
+    'Which clinical judgment is most accurate regarding "{name}" in {topic}?',
+    'In rapid prioritization, which statement is most consistent with "{name}" in {topic}?',
+    'Which conclusion about "{name}" in {topic} would the nurse recognize as correct?'
 ]
 
 sata_templates = [
-    "A nurse is evaluating a patient for {name}. Which findings or actions are appropriate? (Select all that apply)",
-    "For a patient with suspected {name}, which statements are correct? (Select all that apply)",
-    "The charge nurse audits care planning for {name}. Which items should be included? (Select all that apply)",
-    "During patient teaching about {name}, which points are accurate? (Select all that apply)",
-    "Which assessment findings support {name}? (Select all that apply)"
+    'Which statements about "{name}" in {topic} are correct? (Select all that apply)',
+    'For {topic}, which findings or actions relate to "{name}"? (Select all that apply)',
+    'The nurse is planning care. Which items apply to "{name}" in {topic}? (Select all that apply)',
+    'Which of the following are consistent with "{name}" in {topic}? (Select all that apply)',
+    'During reassessment, which observations align with "{name}" in {topic}? (Select all that apply)'
 ]
 
 
@@ -407,11 +408,12 @@ questions = []
 # 50 very hard MCQ
 for i in range(50):
     c = concepts[i % len(concepts)]
-    stem = mcq_templates[i % len(mcq_templates)].format(name=c["name"])
+    stem = mcq_templates[i % len(mcq_templates)].format(name=c['name'], topic=TOPIC)
     correct = c["fact"] if i % 2 == 0 else c["priority"]
 
     distractor_pool = c["false"] + [
-        f"This finding is more consistent with {concepts[(i+3) % len(concepts)]['name']}.",
+        # a false statement from another section, never a section heading
+        concepts[(i + 3) % len(concepts)]['false'][(i // len(concepts)) % 2],
         f"This finding excludes heart failure when EF is preserved.",
         "No further assessment is needed when symptoms fluctuate.",
         "Fluid trends are not useful for cardiovascular reassessment."
@@ -436,7 +438,7 @@ for i in range(50):
 # 50 SATA
 for i in range(50):
     c = concepts[i % len(concepts)]
-    stem = sata_templates[i % len(sata_templates)].format(name=c["name"])
+    stem = sata_templates[i % len(sata_templates)].format(name=c['name'], topic=TOPIC)
 
     true_pool = c["true"][:]
     false_pool = c["false"][:]
