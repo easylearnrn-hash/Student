@@ -104,7 +104,7 @@ body[data-zoom="large"] .hint,body[data-zoom="large"] .bt-col .opt{font-size:16.
 body[data-zoom="large"] select{font-size:17px}
 
 /* Invert (light reading mode): warm ivory paper, deep navy ink, rich gold accents */
-body.invert-read{background:#f5f0e4;background-image:radial-gradient(ellipse at 15% 0%,rgba(201,168,76,.18),transparent 55%),radial-gradient(ellipse at 92% 100%,rgba(201,168,76,.12),transparent 50%);background-attachment:fixed;color:#0f172a}
+body.invert-read{background:#fff;background-image:none;color:#0f172a}
 body.invert-read input[type="checkbox"],body.invert-read input[type="radio"]{accent-color:#9a7420}
 body.invert-read .test-header{background:linear-gradient(180deg,#fffefb,#f8f1df);border-bottom:2px solid #c9a84c;box-shadow:0 6px 22px rgba(90,66,12,.13)}
 body.invert-read .test-title{color:#0f172a}
