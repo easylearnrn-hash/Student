@@ -212,18 +212,19 @@ const ITEMS = [
     correct: [0, 2, 5, 7],
     rationale: 'Crushing chest pain that radiates to the left arm and jaw, with diaphoresis and nausea, is the classic MI presentation. ST elevation in V1–V4 is a STEMI pattern, and a troponin I of 0.9 ng/mL is far above the < 0.04 ng/mL reference, so both show heart muscle injury. A normal temperature and clear breath sounds do not need follow-up now. High cholesterol is a risk factor and atorvastatin is a home medication: background information, not current cues.' },
 
-  { step: 'Analyze Cues', time: 0, type: 'matrix', max: 5,
-    prompt: 'For each finding, select whether it supports an acute MI or is not specific.',
-    hint: 'Select one column per row. Each correct row earns +1.',
-    cols: ['Supports acute MI', 'Not specific'],
+  { step: 'Analyze Cues', time: 0, type: 'matrix', multi: true, max: 6,
+    prompt: 'The nurse is comparing Acute MI with Pericarditis. For each finding, select every condition it supports.',
+    hint: 'Select one or both conditions in each row. Each row with exactly the right selection earns +1.',
+    cols: ['Acute MI', 'Pericarditis'],
     rows: [
-      ['Pain is sudden, crushing and pressure-like and does not change with position', 0],
-      ['Heart rate 104 bpm', 1],
-      ['ST elevation in V1–V4 with reciprocal ST depression', 0],
-      ['Respiratory rate 22/min', 1],
-      ['Troponin I 0.9 ng/mL (normal < 0.04 ng/mL)', 0]
+      ['Sharp pain that is worse lying flat and better sitting forward', [1]],
+      ['Pain is sudden, crushing and pressure-like and does not change with position', [0]],
+      ['Troponin level above the normal range', [0, 1]],
+      ['Pericardial friction rub heard at the left sternal border', [1]],
+      ['ST elevation in V1–V4 with reciprocal ST depression', [0]],
+      ['ST elevation on the 12-lead EKG', [0, 1]]
     ],
-    rationale: 'MI pain is sudden, crushing and pressure-like with no positional change. MI shows territory-specific ST elevation with reciprocal changes (here V1–V4 with ST depression), and troponin is significantly elevated in MI. A heart rate above 100 bpm (tachycardia) and a respiratory rate above 20/min (tachypnea) are caused by pain, anxiety and hypoxia, so they are not specific to MI.' },
+    rationale: 'Pain that is sharp and pleuritic, worse lying flat and better sitting forward, is pericarditis. Pain that is sudden, crushing and pressure-like with no positional change is MI. A friction rub is pathognomonic for pericarditis and is absent in MI. ST elevation in specific leads (V1–V4) with reciprocal ST depression is MI, because pericarditis shows diffuse ST elevation with no reciprocal changes. ST elevation by itself appears in both conditions, so it supports both until the pattern is checked. Troponin is significantly elevated in MI and may be mildly elevated in pericarditis (myopericarditis), so a raised troponin supports both.' },
 
   { step: 'Prioritize Hypotheses', time: 0, type: 'cloze', max: 2,
     prompt: 'Complete the sentence to show the complication the nurse should anticipate.',
@@ -362,7 +363,7 @@ function buildSata(it) {
 }
 function buildMatrix(it) {
   return `<div class="scroll-x"><table class="matrix"><thead><tr><th>Finding</th>${it.cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>` +
-    it.rows.map((r, n) => `<tr data-row="${n}"><td>${esc(r[0])}</td>${it.cols.map((c, k) => `<td data-col="${k}"><input type="radio" name="r${n}" value="${k}" aria-label="${esc(r[0])} — ${esc(c)}"></td>`).join('')}</tr>`).join('') + '</tbody></table></div>';
+    it.rows.map((r, n) => `<tr data-row="${n}"><td>${esc(r[0])}</td>${it.cols.map((c, k) => `<td data-col="${k}"><input type="${it.multi ? 'checkbox' : 'radio'}" name="r${n}" value="${k}" aria-label="${esc(r[0])} — ${esc(c)}"></td>`).join('')}</tr>`).join('') + '</tbody></table></div>';
 }
 function buildCloze(it) {
   let slot = 0;
@@ -384,6 +385,7 @@ function buildBowtie(it) {
 /* ---------- answer state ---------- */
 function readAnswer(it) {
   if (it.type === 'sata') return [...panel.querySelectorAll('input:checked')].map(i => +i.value);
+  if (it.type === 'matrix' && it.multi) return it.rows.map((_, n) => [...panel.querySelectorAll(`input[name="r${n}"]:checked`)].map(i => +i.value));
   if (it.type === 'matrix') return it.rows.map((_, n) => { const c = panel.querySelector(`input[name="r${n}"]:checked`); return c ? +c.value : null; });
   if (it.type === 'cloze') return [...panel.querySelectorAll('select')].map(s => s.value === '' ? null : +s.value);
   const grp = k => [...panel.querySelectorAll(`input[data-group="${k}"]:checked`)].map(i => +i.value);
@@ -392,6 +394,7 @@ function readAnswer(it) {
 }
 function isReady(it, a) {
   if (it.type === 'sata') return a.length > 0;
+  if (it.type === 'matrix' && it.multi) return a.every(v => v.length > 0);
   if (it.type === 'matrix' || it.type === 'cloze') return a.every(v => v !== null);
   return a.condition !== null && a.actions.length === it.actions.pick && a.params.length === it.params.pick;
 }
@@ -427,6 +430,17 @@ function score(it, a) {
       else if (right) mark(l, 'miss', 'Missed');
     });
     return Math.max(0, pts);
+  }
+  if (it.type === 'matrix' && it.multi) {
+    let pts = 0;
+    it.rows.forEach((r, n) => {
+      const tr = panel.querySelector(`tr[data-row="${n}"]`);
+      const ok = a[n].length === r[1].length && r[1].every(k => a[n].includes(k)); if (ok) pts++;
+      tr.classList.add(ok ? 'ok' : 'bad');
+      r[1].forEach(k => tr.querySelector(`td[data-col="${k}"]`).classList.add('right'));
+      a[n].forEach(k => { if (!r[1].includes(k)) tr.querySelector(`td[data-col="${k}"]`).classList.add('wrong'); });
+    });
+    return pts;
   }
   if (it.type === 'matrix') {
     let pts = 0;
