@@ -294,12 +294,18 @@ const panel = document.getElementById('itemPanel');
 const unseenTabs = new Set();
 const EMBEDDED = new URLSearchParams(location.search).get('embedded') === '1'; // opened inside test.html
 const flagged = new Set();
+// Inside test.html: ask it to close the overlay. Opened on its own: go back to the test page.
+function exitCaseStudy() {
+  if (window.parent !== window) parent.postMessage({ type: 'case-study-exit' }, '*');
+  else window.location.href = 'test.html';
+}
 let adminNav = false; // true only after a server-side admin check (see onRole / goToItem)
 const hdr = CaseStudyShell.mount({
   title: 'Crushing Chest Pain in the Emergency Department',
   total: ITEMS.length,
   embedded: EMBEDDED,
-  onExit: () => parent.postMessage({ type: 'case-study-exit' }, '*'),
+  // Inside test.html: ask it to close the overlay. Opened on its own: go back to the test page.
+  onExit: exitCaseStudy,
   onFlag: () => { flagged.has(state.i) ? flagged.delete(state.i) : flagged.add(state.i); hdr.setFlagged(flagged.has(state.i)); renderStepper(); },
   onRole: (isAdmin) => { adminNav = isAdmin; renderStepper(); },
   items: ITEMS,
@@ -584,7 +590,7 @@ function renderResults() {
       <p class="hint" style="margin:8px 0 0">${earned} of ${max} points across ${done.length} clinical judgment ${done.length === 1 ? 'step' : 'steps'}</p></div>
     ${done.map(r => `<div class="skill"><div class="row"><span>${esc(r.step)}</span><b>${r.pts} / ${r.max}</b></div><div class="bar"><i style="width:${r.pts / r.max * 100}%"></i></div></div>`).join('')}
     <div class="actions"><span class="counter">Your answers are not saved.</span><span style="display:flex;gap:10px">${EMBEDDED ? '<button class="btn ghost" id="exitCase">Back to topics</button>' : ''}<button class="btn ghost" id="again">Try again</button></span></div>`;
-  if (EMBEDDED) document.getElementById('exitCase').onclick = () => parent.postMessage({ type: 'case-study-exit' }, '*');
+  if (EMBEDDED) document.getElementById('exitCase').onclick = exitCaseStudy;
   document.getElementById('again').onclick = () => {
     Object.assign(state, { i: 0, results: [], submitted: false, activeTab: 'hp' });
     unseenTabs.clear(); flagged.clear(); hdr.startTimer();
