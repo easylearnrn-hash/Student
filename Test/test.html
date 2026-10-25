@@ -5809,17 +5809,32 @@ function withTimeout(promise, ms, timeoutMessage) {
 // PostgREST caps every response at its max-rows setting (1000 here) regardless of .limit(),
 // so a single query silently drops every row past that point. Page with .range() instead.
 // buildQuery must return a FRESH query each call and carry a deterministic .order().
-async function fetchAllRows(buildQuery, pageSize = 1000) {
-  const all = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+// After the first page, later pages are requested in parallel batches instead of one at a time.
+async function fetchAllRows(buildQuery, pageSize = 1000, parallel = 8) {
+  const fetchPage = async (from, size) => {
+    const { data, error } = await buildQuery().range(from, from + size - 1);
     if (error) throw error;
-    if (!data || data.length === 0) break;
-    all.push(...data);
-    from += data.length; // advance by what was returned, so a lower server cap cannot skip rows
+    return data || [];
+  };
+  const first = await fetchPage(0, pageSize);
+  const all = [...first];
+  // The first page's length is the real server cap, so a lower cap cannot skip rows.
+  const step = first.length;
+  if (step === 0) return all;
+  let offset = step;
+  // A short first page is usually the whole result: confirm with one request before fanning out.
+  let batch = step < pageSize ? 1 : parallel;
+  for (;;) {
+    const pages = await Promise.all(
+      Array.from({ length: batch }, (_, i) => fetchPage(offset + i * step, step))
+    );
+    for (const page of pages) {
+      all.push(...page);
+      if (page.length < step) return all;
+    }
+    offset += batch * step;
+    batch = parallel;
   }
-  return all;
 }
 
 function isNetworkFailure(error) {
@@ -6891,6 +6906,52 @@ function noteLinkHtml(question) {
   return `<div class="note-study-link"><a href="${escapeHtml(href)}" data-note-path="${escapeHtml(n.path)}" target="_blank" rel="noopener noreferrer" onclick="return guardNoteLink(this,event)">Study this topic: ${escapeHtml(n.title)}${where}</a></div>`;
 }
 
+// topic_id -> active question count. Cached on window so reopening the modal is instant.
+// Uses the get_topic_question_counts RPC when enabled, else a paged topic_id select.
+async function loadTopicQuestionCounts() {
+  if (window._cachedTopicCounts) {
+    console.log(`[Topic Counts] served from cache: ${Object.keys(window._cachedTopicCounts).length} topics`);
+    return window._cachedTopicCounts;
+  }
+  const topicQuestionCounts = {};
+  try {
+    // Only call the RPC if the function has been deployed in Supabase
+    if (!FEATURES.topicCountsRpc) throw new Error('rpc_unavailable');
+    const { data: rpcRows, error: rpcError } = await db.rpc('get_topic_question_counts');
+    if (!rpcError && rpcRows) {
+      rpcRows.forEach(row => {
+        if (row.topic_id) topicQuestionCounts[row.topic_id] = row.question_count;
+      });
+      console.log(`[Topic Counts] loaded via RPC: ${Object.keys(topicQuestionCounts).length} topics`);
+    } else {
+      // RPC not yet created — use fallback silently
+      throw new Error('rpc_unavailable');
+    }
+  } catch (rpcFallbackErr) {
+    // Fallback: fetch only topic_id, paged because the server caps one response at 1000 rows.
+    if (rpcFallbackErr?.message !== 'rpc_unavailable') {
+      console.warn('[Topic Counts] RPC error, using fallback paged query');
+    }
+    try {
+      const allRows = await fetchAllRows(() => db
+        .from('test_questions')
+        .select('topic_id')
+        .eq('is_active', true)
+        .order('id', { ascending: true }));
+      allRows.forEach(row => {
+        if (row.topic_id) {
+          topicQuestionCounts[row.topic_id] = (topicQuestionCounts[row.topic_id] || 0) + 1;
+        }
+      });
+      console.log(`[Topic Counts] loaded via fallback: ${Object.keys(topicQuestionCounts).length} topics`);
+    } catch (fallbackError) {
+      console.warn('[Topic Counts] fallback query failed:', fallbackError);
+    }
+  }
+  window._cachedTopicCounts = topicQuestionCounts;
+  return topicQuestionCounts;
+}
+
 async function showSubjectSelection() {
   const btn = document.getElementById('initialStartBtn');
   btn.innerHTML = '<div class="loading" style="width:20px;height:20px"></div> Loading...';
@@ -6905,11 +6966,25 @@ async function showSubjectSelection() {
       if (!initializeSupabase()) throw new Error('Cannot connect to database');
     }
 
+    // Start the independent loads together instead of one after another. Neither promise
+    // rejects (both handle their own errors), so leaving them pending on an early throw is safe.
+    const countsPromise  = loadTopicQuestionCounts();
+    const catalogPromise = loadNoteCatalog();
+
+    // Subjects + topics are cached after the first fetch so reopening the modal is instant.
+    const subjectsTopicsPromise = (window._cachedSubjects && window._cachedTopics)
+      ? null
+      : Promise.all([
+          db.from('test_subjects').select('*').eq('is_active', true).order('display_order'),
+          db.from('test_topics').select('*').or('status.eq.published,status.is.null').order('subject_id').order('display_order')
+        ]);
+    // Marks the promise handled if the config load below throws first; awaiting it still rethrows.
+    subjectsTopicsPromise?.catch(() => {});
+
     await loadTestConfiguration(testId);
 
-    // Load subjects + topics — cached after first fetch so reopening the modal is instant.
     let subjects, allTopicsRaw;
-    if (window._cachedSubjects && window._cachedTopics) {
+    if (!subjectsTopicsPromise) {
       subjects     = window._cachedSubjects;
       allTopicsRaw = window._cachedTopics;
       console.log('[SubjectModal] served subjects/topics from cache');
@@ -6917,10 +6992,7 @@ async function showSubjectSelection() {
       const [
         { data: subjectsData, error: subjectError },
         { data: topicsData,   error: topicError }
-      ] = await Promise.all([
-        db.from('test_subjects').select('*').eq('is_active', true).order('display_order'),
-        db.from('test_topics').select('*').or('status.eq.published,status.is.null').order('subject_id').order('display_order')
-      ]);
+      ] = await subjectsTopicsPromise;
       if (subjectError) throw subjectError;
       subjects     = subjectsData;
       allTopicsRaw = topicsData;
@@ -6930,56 +7002,11 @@ async function showSubjectSelection() {
 
     if (!subjects || subjects.length === 0) throw new Error('No subjects available for this test');
 
-    // Build a map: topic_id → question count
-    // Use a single Supabase RPC call to get counts grouped by topic_id in one round-trip.
-    // Falls back to a lightweight select if the RPC doesn't exist yet.
-    // Results are cached on the window object so reopening the modal is instant.
-    let topicQuestionCounts = window._cachedTopicCounts || null;
-    if (!topicQuestionCounts) {
-      topicQuestionCounts = {};
-      try {
-        // Only call the RPC if the function has been deployed in Supabase
-        if (!FEATURES.topicCountsRpc) throw new Error('rpc_unavailable');
-        const { data: rpcRows, error: rpcError } = await db.rpc('get_topic_question_counts');
-        if (!rpcError && rpcRows) {
-          rpcRows.forEach(row => {
-            if (row.topic_id) topicQuestionCounts[row.topic_id] = row.question_count;
-          });
-          console.log(`[Topic Counts] loaded via RPC: ${Object.keys(topicQuestionCounts).length} topics`);
-        } else {
-          // RPC not yet created — use fallback silently
-          throw new Error('rpc_unavailable');
-        }
-      } catch (rpcFallbackErr) {
-        // Fallback: fetch only topic_id, paged because the server caps one response at 1000 rows.
-        if (rpcFallbackErr?.message !== 'rpc_unavailable') {
-          console.warn('[Topic Counts] RPC error, using fallback paged query');
-        }
-        try {
-          const allRows = await fetchAllRows(() => db
-            .from('test_questions')
-            .select('topic_id')
-            .eq('is_active', true)
-            .order('id', { ascending: true }));
-          allRows.forEach(row => {
-            if (row.topic_id) {
-              topicQuestionCounts[row.topic_id] = (topicQuestionCounts[row.topic_id] || 0) + 1;
-            }
-          });
-          console.log(`[Topic Counts] loaded via fallback: ${Object.keys(topicQuestionCounts).length} topics`);
-        } catch (fallbackError) {
-          console.warn('[Topic Counts] fallback query failed:', fallbackError);
-        }
-      }
-      // Cache for this session so reopening the modal is instant
-      window._cachedTopicCounts = topicQuestionCounts;
-    } else {
-      console.log(`[Topic Counts] served from cache: ${Object.keys(topicQuestionCounts).length} topics`);
-    }
+    const topicQuestionCounts = await countsPromise;
 
     allSubjects = subjects;
     // One row per study note (exact note title); topics outside the notes are hidden unless they hold questions.
-    const noteCatalog = await loadNoteCatalog();
+    const noteCatalog = await catalogPromise;
     const topicRowData = buildTopicRows(allTopicsRaw || [], topicQuestionCounts, noteCatalog);
     window._topicSiblings = topicRowData.siblings;
     availableTopics = topicRowData.rows;
