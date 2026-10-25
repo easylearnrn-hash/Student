@@ -104,12 +104,17 @@
       ----------------------------------- */
       .toggle-container {
         display: flex;
+        flex-wrap: wrap;
         margin-bottom: 28px;
         background: rgba(196,164,95,0.06);
         border: 1px solid var(--gold-border);
         padding: 4px;
         border-radius: 12px;
         gap: 4px;
+      }
+
+      .toggle-container .toggle-btn--wide {
+        flex: 1 1 100%;
       }
 
       .toggle-btn {
@@ -546,6 +551,7 @@
       <div class="toggle-container">
         <div class="toggle-btn active" id="studentBtn">Student Login</div>
         <div class="toggle-btn" id="adminBtn">Admin Login</div>
+        <div class="toggle-btn toggle-btn--wide" id="nclexBtn">NCLEX Test</div>
       </div>
 
       <!-- TITLE -->
@@ -859,6 +865,7 @@
       // ============================================================
       const studentBtn = document.getElementById('studentBtn');
       const adminBtn = document.getElementById('adminBtn');
+      const nclexBtn = document.getElementById('nclexBtn');
       const emailInput = document.getElementById('emailInput');
       const passwordInput = document.getElementById('passwordInput');
       const passwordGroup = document.getElementById('passwordGroup');
@@ -916,6 +923,7 @@
         mode = 'student';
         studentBtn.classList.add('active');
         adminBtn.classList.remove('active');
+        nclexBtn.classList.remove('active');
         loginBtn.innerText = 'Login';
         passwordGroup.style.display = 'block';
         hideMessages();
@@ -925,7 +933,18 @@
         mode = 'admin';
         adminBtn.classList.add('active');
         studentBtn.classList.remove('active');
+        nclexBtn.classList.remove('active');
         loginBtn.innerText = 'Admin Login';
+        passwordGroup.style.display = 'block';
+        hideMessages();
+      };
+
+      nclexBtn.onclick = () => {
+        mode = 'nclex';
+        nclexBtn.classList.add('active');
+        studentBtn.classList.remove('active');
+        adminBtn.classList.remove('active');
+        loginBtn.innerText = 'Start NCLEX Test';
         passwordGroup.style.display = 'block';
         hideMessages();
       };
@@ -988,7 +1007,9 @@
         try {
           const _loginAction = mode === 'admin'
             ? handleAdminLogin(email, password)
-            : handleStudentLogin(email, password);
+            : mode === 'nclex'
+              ? handleNclexTestLogin(email, password)
+              : handleStudentLogin(email, password);
           await Promise.race([_loginAction, _loginTimeout]);
         } catch (error) {
           const errorMsg = error.message || 'An error occurred. Please try again.';
@@ -1101,6 +1122,81 @@
             window.location.href = 'Payment-Records.html';
           }, 800);
         }
+      }
+
+      // ============================================================
+      // NCLEX TEST LOGIN (straight to Test/test.html)
+      // Admins always get in. Students must be registered (linked to an account) and active.
+      // ============================================================
+      async function handleNclexTestLogin(email, password) {
+        const rememberMe = rememberMeCheckbox.checked;
+
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw new Error(error.message);
+        const user = data?.user;
+        if (!user) throw new Error('Login failed. Please try again.');
+
+        const deny = async (message) => {
+          await supabase.auth.signOut();
+          throw new Error(message);
+        };
+
+        let isAdmin = MASTER_ACCESS_EMAILS.includes((user.email || '').toLowerCase());
+        if (!isAdmin) {
+          const { data: adminRow } = await supabase
+            .from('admin_accounts')
+            .select('auth_user_id')
+            .eq('auth_user_id', user.id)
+            .maybeSingle();
+          isAdmin = !!adminRow;
+        }
+
+        let student = null;
+        if (!isAdmin) {
+          const lookup = () => supabase
+            .from('students')
+            .select('role, name, status')
+            .eq('auth_user_id', user.id)
+            .maybeSingle();
+          ({ data: student } = await lookup());
+          if (!student) {
+            // First login after registering: link the auth account to its student record, then re-read it
+            await autoLinkStudentAccount(user);
+            ({ data: student } = await lookup());
+          }
+          if (!student) await deny('Account not found. Please contact administrator.');
+          if (student.role === 'admin') {
+            isAdmin = true;
+          } else if ((student.status || 'active') !== 'active') {
+            await deny('Your student account is not active. Please contact administrator.');
+          }
+        }
+
+        if (rememberMe) {
+          localStorage.setItem('arnoma:remember-me', 'true');
+          localStorage.setItem('arnoma:session-expiry', Date.now() + (30 * 24 * 60 * 60 * 1000));
+        } else {
+          localStorage.removeItem('arnoma:remember-me');
+          localStorage.removeItem('arnoma:session-expiry');
+        }
+        if (data.session && window.ArnomaAuth?.saveSessionSnapshot) {
+          window.ArnomaAuth.saveSessionSnapshot(data.session);
+        }
+
+        // Flags test.html reads. Teacher flags are cleared for non-admins so a student can never inherit a previous admin's.
+        const displayName = student?.name || (user.email || '').split('@')[0];
+        const staleKeys = ['student_login_id', 'student_login_name', 'is_admin_viewing', 'admin_session_backup'];
+        if (!isAdmin) staleKeys.push('isAdmin', 'userRole', 'teacherName');
+        staleKeys.forEach(key => { sessionStorage.removeItem(key); localStorage.removeItem(key); });
+        sessionStorage.setItem('isLoggedIn', 'true');
+        localStorage.setItem('isLoggedIn', 'true');
+        sessionStorage.setItem('userName', displayName);
+        localStorage.setItem('userName', displayName);
+        if (isAdmin) localStorage.setItem('arnoma:is_admin', 'true');
+        else localStorage.removeItem('arnoma:is_admin');
+
+        showSuccess('Login successful! Opening the NCLEX test...');
+        setTimeout(() => { window.location.href = 'Test/test.html'; }, 600);
       }
 
       // ============================================================
