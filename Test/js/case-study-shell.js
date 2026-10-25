@@ -4,9 +4,13 @@
    and the same role split:
      - Admin / faculty: gold pill + REVEAL ALL button
      - Student:         blue pill, the Reveal All button is never created
+   ADMIN GATE: browser flags (isAdmin / userRole in storage) are NEVER trusted, because anyone can
+   type them into devtools. Admin status comes only from a live Supabase session whose user has a row
+   in admin_accounts (row-level security means a student's query returns nothing). It is checked when
+   the header loads and AGAIN on every Reveal All click. Any error or timeout = student view.
    Usage in a case study page:
      <script src="js/case-study-shell.js"></script>
-     const hdr = CaseStudyShell.mount({ title, total, embedded, onExit, onFlag, getRevealHtml });
+     const hdr = CaseStudyShell.mount({ title, total, items, embedded, onExit, onFlag });
 */
 (function () {
   'use strict';
@@ -207,16 +211,13 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
   };
   var store = function (k) { return sessionStorage.getItem(k) || localStorage.getItem(k) || ''; };
 
-  // Same identity rules as test.html initSessionRole()
-  var ROLE = { isLoggedIn: false, isTeacher: false, userRole: null, userName: null };
+  // Display-only identity. Nothing here decides admin access.
+  var ROLE = { isLoggedIn: false, userName: null, adminEmail: null };
+  var verifiedAdmin = false; // private: only set by a successful server-side check, never exposed
   (function initRole() {
     ROLE.isLoggedIn = sessionStorage.getItem('isLoggedIn') === 'true' || localStorage.getItem('isLoggedIn') === 'true' ||
       !!localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token');
-    var isAdmin = store('isAdmin') === 'true';
-    var role = store('userRole').toLowerCase().trim();
-    ROLE.userRole = role || (isAdmin ? 'admin' : 'student');
     ROLE.userName = store('userName') || store('teacherName') || null;
-    ROLE.isTeacher = ['teacher', 'admin', 'superadmin', 'instructor'].indexOf(role) !== -1 || isAdmin;
   })();
 
   function withTimeout(p, ms) {
@@ -230,41 +231,35 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
     });
   }
 
-  // ARNOMA admins sign in with Supabase (admin_accounts), same check as test.html detectArnomaAdmin()
-  async function detectAdmin() {
-    if (ROLE.isTeacher) return;
-    try {
-      if (window.parent !== window && window.parent.SESSION_ROLE && window.parent.SESSION_ROLE.isTeacher) {
-        ROLE.isTeacher = true;
-        ROLE.userRole = window.parent.SESSION_ROLE.userRole || 'admin';
-        ROLE.userName = ROLE.userName || window.parent.SESSION_ROLE.userName;
-        return;
-      }
-    } catch (e) { /* cross-origin parent: fall through */ }
+  // Server-checked admin test (same source of truth as detectArnomaAdmin() in test.html and every admin tool).
+  // Fails closed: no session, no admin_accounts row, error or timeout all return false.
+  async function verifyAdmin() {
     try {
       if (!window.supabase) await loadScript(BASE + 'supabase.min.js');
       if (typeof window.initSupabase !== 'function') await loadScript(BASE + 'supabase-config.js');
       var client = window.initSupabase();
-      if (!client) return;
-      var sd = await withTimeout(client.auth.getSession(), 4000);
+      if (!client) return false;
+      var sd = await withTimeout(client.auth.getSession(), 6000);
       var user = sd && sd.data && sd.data.session && sd.data.session.user;
-      if (!user) return;
-      var r = await withTimeout(client.from('admin_accounts').select('auth_user_id').eq('auth_user_id', user.id).maybeSingle(), 4000);
-      if (r.error || !r.data) return;
-      ROLE.isTeacher = true;
-      ROLE.userRole = 'admin';
-      if (!ROLE.userName && user.email) ROLE.userName = user.email.split('@')[0];
-    } catch (e) { console.warn('case study admin check skipped:', e && e.message); }
+      if (!user || !user.id) return false;
+      var r = await withTimeout(client.from('admin_accounts').select('auth_user_id').eq('auth_user_id', user.id).maybeSingle(), 6000);
+      if (r.error || !r.data || r.data.auth_user_id !== user.id) return false;
+      ROLE.adminEmail = user.email || null;
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   function identity() {
     var email = store('userEmail') || store('teacherEmail');
     var name = (ROLE.userName || '').trim();
     if (!name && email) name = email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); });
-    if (!name) name = ROLE.isTeacher ? 'Faculty' : 'Student';
+    if (!name && verifiedAdmin && ROLE.adminEmail) name = ROLE.adminEmail.split('@')[0];
+    if (!name) name = verifiedAdmin ? 'Administrator' : 'Student';
     var parts = name.split(/\s+/).filter(Boolean);
     var initials = parts.length >= 2 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : name.slice(0, 2).toUpperCase();
-    var roleLabel = ROLE.isTeacher ? (ROLE.userRole === 'admin' || ROLE.userRole === 'superadmin' ? 'Administrator' : 'Faculty') : 'Student';
+    var roleLabel = verifiedAdmin ? 'Administrator' : 'Student';
     return { name: name, initials: initials, roleLabel: roleLabel };
   }
 
@@ -328,7 +323,7 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
   }
 
   function showRevealModal(title, built) {
-    if (!ROLE.isTeacher) return; // students can never open this
+    if (!verifiedAdmin) return; // defence in depth: the modal only ever opens for a verified admin
     var old = document.getElementById('csRevealModal');
     if (old) old.remove();
     var m = document.createElement('div');
@@ -389,7 +384,7 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
     // Student view first; the admin-only controls are added only once admin status is confirmed
     function applyRole() {
       var id = identity();
-      var teacher = ROLE.isTeacher;
+      var teacher = verifiedAdmin;
       var color = teacher ? 'var(--gold-primary)' : '#38bdf8';
       var av = document.getElementById('csUserAvatar'), pill = document.getElementById('csUserPill');
       av.textContent = id.initials;
@@ -408,12 +403,23 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
         var b = document.createElement('button');
         b.type = 'button'; b.id = 'csRevealBtn'; b.className = 'reveal-all-btn';
         b.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>REVEAL ALL';
-        b.onclick = function () { if (opts.getRevealHtml) showRevealModal('Answer key', opts.getRevealHtml()); };
+        b.onclick = async function () {
+          // Re-verify on every click: a session that ended, or a non-admin, gets nothing
+          var ok = await verifyAdmin();
+          if (!ok) {
+            verifiedAdmin = false;
+            var open = document.getElementById('csRevealModal'); if (open) open.remove();
+            applyRole();
+            return;
+          }
+          verifiedAdmin = true;
+          if (opts.items) showRevealModal('Answer key', buildRevealHtml(opts.items));
+        };
         slot.appendChild(b);
       }
     }
     applyRole();
-    detectAdmin().then(applyRole);
+    verifyAdmin().then(function (ok) { verifiedAdmin = ok; applyRole(); });
 
     function fmt(s) { return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
     function startTimer() {
@@ -432,5 +438,5 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
     };
   }
 
-  window.CaseStudyShell = { mount: mount, buildRevealHtml: buildRevealHtml, role: ROLE };
+  window.CaseStudyShell = { mount: mount };
 })();
