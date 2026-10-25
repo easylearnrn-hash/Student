@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Case Study — Cardiovascular | ARNOMA</title>
+<script>
+(function(){
+  // Same gate as test.html: only signed-in users can open it
+  var ok = sessionStorage.getItem('isLoggedIn') === 'true' ||
+           localStorage.getItem('isLoggedIn')    === 'true' ||
+           !!localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token');
+  if (!ok) { window.location.replace('../index.html'); }
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy-deep:#020617; --navy-primary:#0f172a; --navy-light:#1e293b; --navy-border:#334155;
+  --gold-primary:#c9a84c; --gold-light:#d4b56a; --gold-dim:rgba(201,168,76,0.4); --gold-glow:rgba(201,168,76,0.15);
+  --text:#e2e8f0; --text-muted:#94a3b8; --success:#10b981; --error:#ef4444; --warning:#f59e0b;
+}
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased}
+body{background:var(--navy-deep);color:var(--text);min-height:100vh;
+  background-image:radial-gradient(ellipse at 15% 0%,rgba(201,168,76,0.06),transparent 55%),radial-gradient(ellipse at 90% 100%,rgba(201,168,76,0.04),transparent 50%)}
+
+/* Header */
+.topbar{position:sticky;top:0;z-index:50;background:rgba(15,23,42,0.97);border-bottom:2px solid var(--gold-primary);padding:12px 24px;box-shadow:0 4px 20px rgba(0,0,0,.25)}
+.topbar-inner{max-width:1360px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.crumbs{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--gold-primary)}
+.crumbs span{color:var(--text-muted);margin:0 6px}
+.case-title{font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:#fff;margin-top:2px}
+.sample-badge{font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--warning);border:1px solid rgba(245,158,11,.45);background:rgba(245,158,11,.1);border-radius:20px;padding:5px 12px}
+
+/* Stepper */
+.stepper{max-width:1360px;margin:18px auto 0;padding:0 24px;display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.step{background:var(--navy-primary);border:1px solid var(--navy-border);border-radius:10px;padding:9px 10px;opacity:.55;transition:.2s}
+.step .n{font-size:10px;font-weight:800;letter-spacing:1px;color:var(--text-muted)}
+.step .l{font-size:12px;font-weight:600;color:var(--text);margin-top:1px;line-height:1.3}
+.step.active{opacity:1;border-color:var(--gold-primary);background:rgba(201,168,76,.08)}
+.step.active .n{color:var(--gold-primary)}
+.step.done{opacity:1;border-color:rgba(16,185,129,.45)}
+.step.done .n{color:var(--success)}
+@media(max-width:820px){.stepper{grid-template-columns:repeat(3,1fr)}}
+
+/* Layout */
+.layout{max-width:1360px;margin:18px auto 60px;padding:0 24px;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:22px;align-items:start}
+@media(max-width:980px){.layout{grid-template-columns:1fr}}
+.panel{background:var(--navy-primary);border:1px solid var(--navy-border);border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+
+/* Chart */
+.chart{position:sticky;top:96px;overflow:hidden}
+@media(max-width:980px){.chart{position:static}}
+.chart-head{padding:16px 20px;border-bottom:1px solid var(--navy-border);display:flex;align-items:center;justify-content:space-between;gap:10px}
+.chart-head h3{font-family:'Playfair Display',serif;font-size:16px;color:var(--gold-light)}
+.chart-head small{color:var(--text-muted);font-size:12px}
+.tabs{display:flex;gap:4px;padding:10px 12px 0;border-bottom:1px solid var(--navy-border);background:rgba(2,6,23,.4)}
+.tab{position:relative;padding:9px 14px;font-size:12.5px;font-weight:600;color:var(--text-muted);background:none;border:1px solid transparent;border-bottom:none;border-radius:9px 9px 0 0;cursor:pointer}
+.tab.active{color:var(--gold-light);background:var(--navy-primary);border-color:var(--navy-border)}
+.tab .dot{position:absolute;top:6px;right:5px;width:8px;height:8px;border-radius:50%;background:var(--gold-primary);box-shadow:0 0 8px var(--gold-primary)}
+.chart-body{padding:18px 20px;max-height:560px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--navy-border) transparent}
+.entry{border-left:2px solid var(--gold-dim);padding:2px 0 2px 14px;margin-bottom:16px;animation:fadeIn .4s ease}
+.entry.new{border-left-color:var(--gold-primary);background:linear-gradient(90deg,var(--gold-glow),transparent)}
+.entry .time{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.8px;color:var(--gold-primary);margin-bottom:4px}
+.entry p{font-size:13.5px;line-height:1.65;margin-bottom:6px}
+.entry b{color:#fff}
+.vt{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.vt th{font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;color:var(--text-muted);text-align:center;padding:8px 8px;border-bottom:1px solid var(--navy-border);background:rgba(2,6,23,.45)}
+.vt th:first-child{text-align:left}
+.vt th.new{color:var(--gold-primary)}
+.vt td{padding:12px 8px;border-bottom:1px solid rgba(255,255,255,.07);text-align:center;font-weight:700;color:#fff;vertical-align:middle}
+.vt td.label{text-align:left;font-weight:700;color:var(--gold-light);line-height:1.35;min-width:140px}
+.vt td.label small{display:block;font-weight:500;font-size:11.5px;color:var(--text-muted);margin-top:1px}
+.vt td.new{background:var(--gold-glow)}
+.vt tr:last-child td{border-bottom:none}
+.vt td .unit{font-weight:500;font-size:12px;color:var(--text-muted);margin-left:1px}
+.vt td .unit.pct{margin-left:0}
+.vt td .dev{display:block;font-weight:500;font-size:11px;color:var(--text-muted)}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+
+/* Item card */
+.item{padding:26px 28px}
+@media(max-width:560px){.item{padding:20px 16px}}
+.step-chip{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--gold-primary);background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:20px;padding:4px 12px;margin-bottom:12px}
+.prompt{font-family:'Playfair Display',serif;font-size:21px;line-height:1.4;font-weight:700;color:#fff;margin-bottom:8px}
+.hint{font-size:12.5px;color:var(--text-muted);margin-bottom:18px;line-height:1.5}
+.new-info{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--gold-light);background:var(--gold-glow);border:1px solid var(--gold-dim);border-radius:10px;padding:9px 12px;margin-bottom:16px}
+
+.opt{display:flex;gap:12px;align-items:flex-start;background:var(--navy-light);border:1.5px solid var(--navy-border);border-radius:10px;padding:12px 14px;margin-bottom:9px;cursor:pointer;transition:.15s;font-size:14px;line-height:1.5}
+.opt:hover{border-color:var(--gold-dim)}
+.opt input{margin-top:3px;accent-color:var(--gold-primary);width:16px;height:16px;flex-shrink:0}
+.opt:has(input:checked){border-color:var(--gold-primary);background:rgba(201,168,76,.08)}
+/* !important so the result colours beat the selected-option highlight above */
+.opt.ok{border-color:var(--success)!important;background:rgba(16,185,129,.1)!important}
+.opt.bad{border-color:var(--error)!important;background:rgba(239,68,68,.1)!important}
+.opt.miss{border-color:var(--warning)!important;background:rgba(245,158,11,.08)!important;border-style:dashed!important}
+.opt .tag{margin-left:auto;font-size:10px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;white-space:nowrap;padding-left:8px}
+.opt.ok .tag{color:var(--success)} .opt.bad .tag{color:var(--error)} .opt.miss .tag{color:var(--warning)}
+
+/* Matrix */
+.matrix{width:100%;border-collapse:collapse;font-size:13.5px}
+.matrix th{font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;color:var(--text-muted);padding:8px 6px;text-align:center;border-bottom:1px solid var(--navy-border)}
+.matrix th:first-child{text-align:left}
+.matrix td{padding:11px 6px;border-bottom:1px solid rgba(255,255,255,.06);text-align:center;vertical-align:middle}
+.matrix td:first-child{text-align:left;line-height:1.45;padding-right:12px}
+.matrix input{accent-color:var(--gold-primary);width:17px;height:17px;cursor:pointer}
+.matrix tr.ok td:first-child{box-shadow:inset 3px 0 0 var(--success)}
+.matrix tr.bad td:first-child{box-shadow:inset 3px 0 0 var(--error)}
+.matrix td.right{background:rgba(16,185,129,.14)}
+.matrix td.wrong{background:rgba(239,68,68,.14)}
+.scroll-x{overflow-x:auto}
+
+/* Cloze + select */
+.cloze{font-size:16px;line-height:2.4;color:var(--text)}
+select{font-size:14px;font-weight:600;color:var(--gold-light);background:var(--navy-light);border:1.5px solid var(--gold-dim);border-radius:8px;padding:7px 10px;max-width:100%;cursor:pointer}
+select:focus{outline:none;border-color:var(--gold-primary)}
+select.ok{border-color:var(--success);color:#6ee7b7} select.bad{border-color:var(--error);color:#fca5a5}
+.correct-note{font-size:12px;color:var(--success);margin-left:6px}
+
+/* Bowtie */
+.bowtie{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+@media(max-width:760px){.bowtie{grid-template-columns:1fr}}
+.bt-col{background:rgba(2,6,23,.45);border:1px solid var(--navy-border);border-radius:12px;padding:12px}
+.bt-col.center{border-color:var(--gold-dim);background:rgba(201,168,76,.05)}
+.bt-col h4{font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:var(--gold-primary);margin-bottom:3px}
+.bt-col .sub{font-size:11.5px;color:var(--text-muted);margin-bottom:10px}
+.bt-col .opt{padding:9px 10px;font-size:12.5px;margin-bottom:7px}
+
+/* Buttons & feedback */
+.actions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:20px;padding-top:16px;border-top:1px solid var(--navy-border);flex-wrap:wrap}
+.counter{font-size:12.5px;color:var(--text-muted)}
+.btn{font-weight:700;font-size:14px;padding:11px 24px;border-radius:9px;border:1.5px solid var(--gold-primary);cursor:pointer;color:#0b1020;background:linear-gradient(135deg,var(--gold-light),var(--gold-primary));transition:.15s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(201,168,76,.25)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.btn.ghost{background:transparent;color:var(--gold-light)}
+.fb{margin-top:18px;border-radius:12px;padding:16px 18px;border:1.5px solid}
+.fb.full{border-color:rgba(16,185,129,.5);background:rgba(16,185,129,.09)}
+.fb.part{border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.08)}
+.fb.none{border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.08)}
+.fb .score{font-size:15px;font-weight:800;color:#fff;margin-bottom:6px}
+.fb p{font-size:13.5px;line-height:1.7;color:var(--text)}
+.fb p + p{margin-top:8px}
+
+/* Results */
+.result-head{text-align:center;padding:10px 0 20px}
+.big{font-family:'Playfair Display',serif;font-size:56px;font-weight:800;color:var(--gold-light);line-height:1}
+.skill{margin-bottom:14px}
+.skill .row{display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px}
+.skill .bar{height:9px;border-radius:9px;background:var(--navy-light);overflow:hidden}
+.skill .bar i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,var(--gold-primary),var(--gold-light))}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div>
+      <div class="crumbs">Cardiovascular<span>›</span>Case Studies</div>
+      <div class="case-title">Crushing Chest Pain in the Emergency Department</div>
+    </div>
+    <div class="sample-badge">Next Gen NCLEX style</div>
+  </div>
+</header>
+
+<div class="stepper" id="stepper"></div>
+
+<main class="layout">
+  <section class="panel chart" aria-label="Client chart">
+    <div class="chart-head"><h3>Client Chart</h3><small id="chartClient">58-year-old male • Emergency Department</small></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="chart-body" id="chartBody"></div>
+  </section>
+
+  <section class="panel item" id="itemPanel" aria-live="polite"></section>
+</main>
+
+<script>
+/* ============================================================
+   CASE DATA — one unfolding case study, six items (one per
+   Clinical Judgment Model step), chart revealed in 3 stages.
+   ============================================================ */
+const CHART = {
+  hp: [
+    { t: 0, time: '10:05', html: '<p><b>Client:</b> 58-year-old male brought in by EMS.</p><p><b>History of present illness:</b> 1 hour of crushing chest pain (“elephant on the chest”) radiating to the left arm and jaw, rated 8/10. It began suddenly during physical exertion and has not eased with rest. Reports sweating and nausea.</p><p><b>Past history:</b> Hypertension and high cholesterol. Smoker for 30 years.</p><p><b>Home medications:</b> Lisinopril and atorvastatin. No known drug allergies.</p>' }
+  ],
+  notes: [
+    { t: 0, time: '10:08', html: '<p><b>12-lead EKG:</b> ST elevation in V1–V4 with reciprocal ST depression.</p><p><b>Troponin I:</b> 0.9 ng/mL (normal &lt; 0.04 ng/mL).</p><p><b>Assessment:</b> Skin diaphoretic. Breath sounds clear bilaterally. IV access established. Chewable aspirin 324 mg given. Cath lab team notified for primary PCI.</p>' },
+    { t: 1, time: '10:40', html: '<p>Client is now sitting upright and anxious: <i>“I can’t catch my breath.”</i> States he cannot lie flat. Pink, frothy sputum. Crackles heard in both lungs. S3 gallop present. Monitor shows about 8 PVCs per minute. Nitroglycerin was given at 10:20 after the blood pressure was checked, with partial relief. Cath lab ready in about 25 minutes.</p>' },
+    { t: 2, time: '12:10', html: '<p>Returned from the cath lab after primary PCI with a stent to the LAD (right femoral artery access). Chest pain 0/10. Repeat 12-lead EKG: ST segments have returned toward baseline. Crackles are decreased. Urine output is above goal (&gt; 0.5 mL/kg/hr) since furosemide. Still about 8 PVCs per minute on the monitor. Right femoral puncture site: <b>firm swelling (hematoma) with bleeding</b> that was not present on return, and the client reports new groin pain.</p>' }
+  ],
+  vitals: [
+    { t: 0, time: '10:05', bp: '168/96', hr: '104', rr: '22', spo2: '96', spo2Note: 'room air', temp: '98.6', pain: '8/10' },
+    { t: 1, time: '10:40', bp: '112/68', hr: '118', rr: '30', spo2: '88', spo2Note: 'room air', temp: '98.8', pain: '4/10' },
+    { t: 2, time: '12:10', bp: '124/74', hr: '78',  rr: '18', spo2: '96', spo2Note: 'on oxygen', temp: '98.4', pain: '0/10' }
+  ]
+};
+
+// Normal ranges are the ones in the Vital Signs note
+const VITAL_ROWS = [
+  { key: 'bp',   label: 'Blood pressure',    range: '&lt;120/&lt;80 mmHg', unit: 'mmHg' },
+  { key: 'hr',   label: 'Heart rate',        range: '60–100 bpm', unit: 'bpm' },
+  { key: 'rr',   label: 'Respiratory rate',  range: '12–20/min', unit: '/min' },
+  { key: 'spo2', label: 'Oxygen saturation', range: '95–100%', unit: '%' },
+  { key: 'temp', label: 'Temperature',       range: '36.6°C / 97.88°F', unit: '°F' },
+  { key: 'pain', label: 'Pain',              range: '0/10 = no pain', unit: '' }
+];
+
+const ITEMS = [
+  { step: 'Recognize Cues', time: 0, type: 'sata', max: 4,
+    prompt: 'Which findings require immediate follow-up by the nurse?',
+    hint: 'Select all that apply. Each correct choice earns +1 and each incorrect choice costs −1 (minimum 0).',
+    options: [
+      'Crushing chest pain radiating to the left arm and jaw, not relieved by rest',
+      'Temperature 98.6 °F',
+      'Troponin I 0.9 ng/mL',
+      'History of high cholesterol',
+      'Breath sounds clear bilaterally',
+      'ST elevation in V1–V4',
+      'Home medication: atorvastatin',
+      'Diaphoresis (sweating) and nausea'
+    ],
+    correct: [0, 2, 5, 7],
+    rationale: 'Crushing chest pain that radiates to the left arm and jaw, with diaphoresis and nausea, is the classic MI presentation. ST elevation in V1–V4 is a STEMI pattern, and a troponin I of 0.9 ng/mL is far above the < 0.04 ng/mL reference, so both show heart muscle injury. A normal temperature and clear breath sounds do not need follow-up now. High cholesterol is a risk factor and atorvastatin is a home medication: background information, not current cues.' },
+
+  { step: 'Analyze Cues', time: 0, type: 'matrix', max: 5,
+    prompt: 'For each finding, select the condition it best supports.',
+    hint: 'Select one column per row. Each correct row earns +1.',
+    cols: ['Acute MI', 'Pericarditis', 'Not specific'],
+    rows: [
+      ['Pain is sudden, crushing and pressure-like and does not change with position', 0],
+      ['Heart rate 104 bpm', 2],
+      ['ST elevation in V1–V4 with reciprocal ST depression', 0],
+      ['Respiratory rate 22/min', 2],
+      ['Troponin I 0.9 ng/mL (normal < 0.04 ng/mL)', 0]
+    ],
+    rationale: 'Using the Pericarditis vs MI comparison: MI pain is sudden, crushing and pressure-like with no positional change, while pericarditis pain is gradual, sharp and pleuritic, worse lying flat and better sitting forward. MI shows territory-specific ST elevation with reciprocal changes (pericarditis is diffuse with none), and troponin is significantly elevated in MI but only mildly in pericarditis. A heart rate above 100 bpm (tachycardia) and a respiratory rate above 20/min (tachypnea) are caused by pain, anxiety and hypoxia, so they do not separate the two.' },
+
+  { step: 'Prioritize Hypotheses', time: 0, type: 'cloze', max: 2,
+    prompt: 'Complete the sentence to show the complication the nurse should anticipate.',
+    hint: 'Choose from the lists. Each correct choice earns +1.',
+    parts: [
+      'Because of the ST elevation in V1–V4, the client is at greatest risk for ',
+      { opts: ['cardiac tamponade', 'left ventricular failure', 'bradycardia and heart block'], correct: 1 },
+      ' because ',
+      { opts: ['the RCA supplies the AV node', 'fluid collects in the pericardial space', 'the LAD supplies the anterior wall of the left ventricle'], correct: 2 },
+      '.'
+    ],
+    rationale: 'LAD occlusion causes an anterior STEMI (V1–V4). The LAD supplies the anterior wall of the left ventricle and 2/3 of the interventricular septum, so there is a high risk of left ventricular failure. Bradycardia and heart block are the concern after RCA occlusion (inferior STEMI: II, III, aVF) because the RCA supplies the AV node. Cardiac tamponade comes from fluid collecting in the pericardial space, a complication of pericarditis.' },
+
+  { step: 'Generate Solutions', time: 1, type: 'bowtie', max: 5,
+    prompt: 'Complete the diagram: choose the condition the client is most likely experiencing, two actions the nurse should take, and two parameters to monitor.',
+    hint: 'Choose 1 condition, 2 actions and 2 parameters. Each correct choice earns +1.',
+    condition: { title: 'Condition most likely experiencing', opts: ['Right-sided heart failure', 'Left-sided heart failure with pulmonary edema', 'Cardiac tamponade'], correct: 1 },
+    actions: { title: 'Actions to take', pick: 2, opts: ['Lay the client flat', 'Apply supplemental oxygen', 'Allow unrestricted sodium and fluid intake', 'Place the client in semi-Fowler’s position (45°)', 'Give atropine for the fast heart rate'], correct: [1, 3] },
+    params: { title: 'Parameters to monitor', pick: 2, opts: ['Bowel sounds', 'Pupillary response', 'Oxygen saturation (SpO₂)', 'Stool color', 'Blood pressure'], correct: [2, 4] },
+    rationale: 'Pulmonary edema, crackles, pink frothy sputum, an S3 gallop, orthopnea and hypoxia are left-sided heart failure, a complication of the LAD infarct. JVD, peripheral edema and ascites belong to right-sided failure, and tamponade shows Beck’s triad (muffled heart sounds, JVD, hypotension). For heart failure the emergency actions are diuretics, oxygen and positioning the head of the bed: semi-Fowler’s at 45°, which also relieves orthopnea. Sodium is restricted, not liberalized, and atropine is for a slow heart rate. The note’s monitoring list for left-sided failure includes SpO₂ and blood pressure.' },
+
+  { step: 'Take Actions', time: 1, type: 'sata', max: 4,
+    prompt: 'The provider has written the orders below. Which orders should the nurse implement?',
+    hint: 'Select all that apply. Each correct choice earns +1 and each incorrect choice costs −1 (minimum 0).',
+    options: [
+      'Verapamil IV now for heart rate 118',
+      'Furosemide (Lasix) now',
+      'Diltiazem IV now for heart rate 118',
+      'Monitor urine output hourly (goal > 0.5 mL/kg/hr)',
+      'Continuous cardiac monitoring',
+      'Atropine IV now for heart rate 118',
+      'Monitor the serum potassium level'
+    ],
+    correct: [1, 3, 4, 6],
+    rationale: 'Furosemide is a loop diuretic that removes excess fluid, and it lowers potassium, so the potassium level is monitored. Urine output shows the response (goal > 0.5 mL/kg/hr; below 30 mL/hr is oliguria). Arrhythmias are a complication of heart failure, and 3 or more PVCs in a row become V-Tach, so continuous cardiac monitoring is needed. Calcium channel blockers (diltiazem and verapamil) must be avoided in left-sided heart failure because they can worsen it and cause bronchospasm, and atropine is for a slow heart rate, not a fast one.' },
+
+  { step: 'Evaluate Outcomes', time: 2, type: 'matrix', max: 5,
+    prompt: 'The client has returned from the cath lab. For each finding, select whether the client’s condition has improved, shown no change, or worsened.',
+    hint: 'Select one column per row. Each correct row earns +1.',
+    cols: ['Improved', 'No change', 'Worsened'],
+    rows: [
+      ['Chest pain 0/10 (was 8/10)', 0],
+      ['Firm swelling (hematoma) and bleeding at the right femoral puncture site', 2],
+      ['ST segments back toward baseline on the 12-lead EKG', 0],
+      ['About 8 PVCs per minute on the monitor (was about 8)', 1],
+      ['Oxygen saturation 96% on oxygen (was 88% on room air)', 0]
+    ],
+    rationale: 'Pain relief, ST segments returning to baseline and better oxygenation show that reperfusion by primary PCI and the heart failure treatment worked. The PVC rate is unchanged and needs continued monitoring (address electrolytes and ischemia). Bleeding at the access site is the most common PCI complication, and the puncture site is monitored for bleeding and hematoma. A new hematoma with bleeding is a worsening problem: notify the provider and keep the affected limb straight.' }
+];
+
+/* ============================================================
+   STATE + RENDER
+   ============================================================ */
+const state = { i: 0, results: [], submitted: false, seenTime: 0, activeTab: 'hp' };
+const TAB_LABELS = { hp: 'History & Physical', vitals: 'Vitals', notes: 'Nurses’ Notes' };
+const stepper = document.getElementById('stepper');
+const tabsEl = document.getElementById('tabs');
+const chartBody = document.getElementById('chartBody');
+const panel = document.getElementById('itemPanel');
+const unseenTabs = new Set();
+const EMBEDDED = new URLSearchParams(location.search).get('embedded') === '1'; // opened inside test.html
+
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function renderStepper() {
+  stepper.innerHTML = ITEMS.map((it, n) => {
+    const cls = state.i === n && state.i < ITEMS.length ? 'active' : (n < state.i ? 'done' : '');
+    return `<div class="step ${cls}"><div class="n">ITEM ${n + 1}</div><div class="l">${esc(it.step)}</div></div>`;
+  }).join('');
+}
+
+function visibleTime() { return state.i >= ITEMS.length ? 2 : ITEMS[state.i].time; }
+
+function renderChart() {
+  const t = visibleTime();
+  tabsEl.innerHTML = Object.keys(TAB_LABELS).map(k =>
+    `<button class="tab ${state.activeTab === k ? 'active' : ''}" data-tab="${k}">${TAB_LABELS[k]}${unseenTabs.has(k) ? '<span class="dot"></span>' : ''}</button>`
+  ).join('');
+  tabsEl.querySelectorAll('.tab').forEach(b => b.onclick = () => { state.activeTab = b.dataset.tab; unseenTabs.delete(b.dataset.tab); renderChart(); });
+
+  if (state.activeTab === 'vitals') {
+    const cols = CHART.vitals.filter(v => v.t <= t);
+    const isNew = v => v.t === t && t > 0;
+    chartBody.innerHTML = `<table class="vt"><thead><tr><th>Vital sign (normal range)</th>${cols.map(v => `<th class="${isNew(v) ? 'new' : ''}">${v.time}</th>`).join('')}</tr></thead><tbody>` +
+      VITAL_ROWS.map(r => `<tr><td class="label">${r.label}<small>(${r.range})</small></td>${cols.map(v => `<td class="${isNew(v) ? 'new' : ''}">${v[r.key]}${r.unit ? `<span class="unit${r.unit === '%' ? ' pct' : ''}">${r.unit}</span>` : ''}${v[r.key + 'Note'] ? `<span class="dev">${v[r.key + 'Note']}</span>` : ''}</td>`).join('')}</tr>`).join('') + '</tbody></table>';
+  } else {
+    chartBody.innerHTML = CHART[state.activeTab].filter(e => e.t <= t).map(e =>
+      `<div class="entry ${e.t === t && t > 0 ? 'new' : ''}"><span class="time">${e.time}</span>${e.html}</div>`).join('');
+  }
+}
+
+function revealIfNew(prevTime) {
+  const t = visibleTime();
+  if (t > prevTime) {
+    ['vitals', 'notes'].forEach(k => unseenTabs.add(k));
+    unseenTabs.delete(state.activeTab);
+  }
+  return t > prevTime;
+}
+
+function renderItem(showNew) {
+  const it = ITEMS[state.i];
+  const builders = { sata: buildSata, matrix: buildMatrix, cloze: buildCloze, bowtie: buildBowtie };
+  panel.innerHTML = `
+    <div class="step-chip">Item ${state.i + 1} of ${ITEMS.length} • ${esc(it.step)}</div>
+    ${showNew ? '<div class="new-info">⏱ New information has been added to the client chart — check the tabs marked with a gold dot.</div>' : ''}
+    <h2 class="prompt">${esc(it.prompt)}</h2>
+    <p class="hint">${esc(it.hint)}</p>
+    <div id="answerArea">${builders[it.type](it)}</div>
+    <div id="feedback"></div>
+    <div class="actions">
+      <span class="counter" id="counter"></span>
+      <button class="btn" id="mainBtn" disabled>Submit answer</button>
+    </div>`;
+  state.submitted = false;
+  const btn = document.getElementById('mainBtn');
+  btn.onclick = onMain;
+  panel.querySelectorAll('input,select').forEach(el => el.addEventListener('change', updateReady));
+  updateReady();
+}
+
+/* ---------- builders ---------- */
+function buildSata(it) {
+  return it.options.map((o, n) => `<label class="opt"><input type="checkbox" value="${n}"><span>${esc(o)}</span></label>`).join('');
+}
+function buildMatrix(it) {
+  return `<div class="scroll-x"><table class="matrix"><thead><tr><th>Finding</th>${it.cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>` +
+    it.rows.map((r, n) => `<tr data-row="${n}"><td>${esc(r[0])}</td>${it.cols.map((c, k) => `<td data-col="${k}"><input type="radio" name="r${n}" value="${k}" aria-label="${esc(r[0])} — ${esc(c)}"></td>`).join('')}</tr>`).join('') + '</tbody></table></div>';
+}
+function buildCloze(it) {
+  let slot = 0;
+  return '<div class="cloze">' + it.parts.map(p => typeof p === 'string' ? esc(p) :
+    `<select data-slot="${slot++}"><option value="">Select…</option>${p.opts.map((o, n) => `<option value="${n}">${esc(o)}</option>`).join('')}</select>`).join('') + '</div>';
+}
+function buildBowtie(it) {
+  const col = (key, type) => {
+    const c = it[key];
+    return `<div class="bt-col"><h4>${esc(c.title)}</h4><div class="sub">Choose ${c.pick}</div>` +
+      c.opts.map((o, n) => `<label class="opt"><input type="checkbox" data-group="${key}" value="${n}"><span>${esc(o)}</span></label>`).join('') + '</div>';
+  };
+  const cond = it.condition;
+  const center = `<div class="bt-col center"><h4>${esc(cond.title)}</h4><div class="sub">Choose 1</div>` +
+    cond.opts.map((o, n) => `<label class="opt"><input type="radio" name="cond" value="${n}"><span>${esc(o)}</span></label>`).join('') + '</div>';
+  return `<div class="bowtie">${col('actions')}${center}${col('params')}</div>`;
+}
+
+/* ---------- answer state ---------- */
+function readAnswer(it) {
+  if (it.type === 'sata') return [...panel.querySelectorAll('input:checked')].map(i => +i.value);
+  if (it.type === 'matrix') return it.rows.map((_, n) => { const c = panel.querySelector(`input[name="r${n}"]:checked`); return c ? +c.value : null; });
+  if (it.type === 'cloze') return [...panel.querySelectorAll('select')].map(s => s.value === '' ? null : +s.value);
+  const grp = k => [...panel.querySelectorAll(`input[data-group="${k}"]:checked`)].map(i => +i.value);
+  const cond = panel.querySelector('input[name="cond"]:checked');
+  return { condition: cond ? +cond.value : null, actions: grp('actions'), params: grp('params') };
+}
+function isReady(it, a) {
+  if (it.type === 'sata') return a.length > 0;
+  if (it.type === 'matrix' || it.type === 'cloze') return a.every(v => v !== null);
+  return a.condition !== null && a.actions.length === it.actions.pick && a.params.length === it.params.pick;
+}
+function updateReady() {
+  if (state.submitted) return;
+  const it = ITEMS[state.i];
+  if (it.type === 'bowtie') {
+    ['actions', 'params'].forEach(k => {
+      const boxes = [...panel.querySelectorAll(`input[data-group="${k}"]`)];
+      const full = boxes.filter(b => b.checked).length >= it[k].pick;
+      boxes.forEach(b => { if (!b.checked) b.disabled = full; });
+    });
+  }
+  const a = readAnswer(it);
+  document.getElementById('mainBtn').disabled = !isReady(it, a);
+  document.getElementById('counter').textContent = it.type === 'sata' ? `${a.length} selected` : '';
+}
+
+/* ---------- scoring + feedback ---------- */
+function mark(el, cls, tag) {
+  el.classList.add(cls);
+  if (tag) el.insertAdjacentHTML('beforeend', `<span class="tag">${tag}</span>`);
+}
+function score(it, a) {
+  if (it.type === 'sata') {
+    let pts = 0;
+    a.forEach(n => { pts += it.correct.includes(n) ? 1 : -1; });
+    const labels = [...panel.querySelectorAll('.opt')];
+    labels.forEach((l, n) => {
+      const picked = a.includes(n), right = it.correct.includes(n);
+      if (picked && right) mark(l, 'ok', 'Correct');
+      else if (picked) mark(l, 'bad', 'Not indicated');
+      else if (right) mark(l, 'miss', 'Missed');
+    });
+    return Math.max(0, pts);
+  }
+  if (it.type === 'matrix') {
+    let pts = 0;
+    it.rows.forEach((r, n) => {
+      const tr = panel.querySelector(`tr[data-row="${n}"]`);
+      const ok = a[n] === r[1]; if (ok) pts++;
+      tr.classList.add(ok ? 'ok' : 'bad');
+      tr.querySelector(`td[data-col="${r[1]}"]`).classList.add('right');
+      if (!ok) tr.querySelector(`td[data-col="${a[n]}"]`).classList.add('wrong');
+    });
+    return pts;
+  }
+  if (it.type === 'cloze') {
+    let pts = 0, s = 0;
+    it.parts.forEach(p => {
+      if (typeof p === 'string') return;
+      const sel = panel.querySelectorAll('select')[s]; const ok = a[s] === p.correct;
+      if (ok) pts++; else sel.insertAdjacentHTML('afterend', `<span class="correct-note">Correct: ${esc(p.opts[p.correct])}</span>`);
+      sel.classList.add(ok ? 'ok' : 'bad'); s++;
+    });
+    return pts;
+  }
+  let pts = 0;
+  const cond = it.condition;
+  panel.querySelectorAll('input[name="cond"]').forEach((inp, n) => {
+    const l = inp.closest('.opt');
+    if (n === cond.correct) mark(l, a.condition === n ? 'ok' : 'miss', a.condition === n ? 'Correct' : 'Answer');
+    else if (a.condition === n) mark(l, 'bad', 'Incorrect');
+  });
+  if (a.condition === cond.correct) pts++;
+  ['actions', 'params'].forEach(k => {
+    panel.querySelectorAll(`input[data-group="${k}"]`).forEach((inp, n) => {
+      const l = inp.closest('.opt'), picked = a[k].includes(n), right = it[k].correct.includes(n);
+      if (picked && right) { pts++; mark(l, 'ok', 'Correct'); }
+      else if (picked) mark(l, 'bad', 'Incorrect');
+      else if (right) mark(l, 'miss', 'Answer');
+    });
+  });
+  return pts;
+}
+
+function onMain() {
+  const it = ITEMS[state.i];
+  if (!state.submitted) {
+    const a = readAnswer(it);
+    const pts = score(it, a);
+    state.results.push({ step: it.step, pts, max: it.max });
+    state.submitted = true;
+    panel.querySelectorAll('input,select').forEach(el => el.disabled = true);
+    const cls = pts === it.max ? 'full' : pts === 0 ? 'none' : 'part';
+    document.getElementById('feedback').innerHTML =
+      `<div class="fb ${cls}"><div class="score">${pts} of ${it.max} points</div><p>${esc(it.rationale)}</p></div>`;
+    const btn = document.getElementById('mainBtn');
+    btn.textContent = state.i === ITEMS.length - 1 ? 'See results' : 'Next item';
+    btn.disabled = false;
+    document.getElementById('counter').textContent = '';
+    document.getElementById('feedback').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    return;
+  }
+  const prev = visibleTime();
+  state.i++;
+  renderStepper();
+  if (state.i >= ITEMS.length) { renderResults(); return; }
+  const isNew = revealIfNew(prev);
+  renderChart();
+  renderItem(isNew);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function renderResults() {
+  const earned = state.results.reduce((s, r) => s + r.pts, 0);
+  const max = state.results.reduce((s, r) => s + r.max, 0);
+  const pct = Math.round(earned / max * 100);
+  panel.innerHTML = `
+    <div class="result-head"><div class="step-chip">Case study complete</div>
+      <div class="big">${pct}%</div>
+      <p class="hint" style="margin:8px 0 0">${earned} of ${max} points across 6 clinical judgment steps</p></div>
+    ${state.results.map(r => `<div class="skill"><div class="row"><span>${esc(r.step)}</span><b>${r.pts} / ${r.max}</b></div><div class="bar"><i style="width:${r.pts / r.max * 100}%"></i></div></div>`).join('')}
+    <div class="actions"><span class="counter">Your answers are not saved.</span><span style="display:flex;gap:10px">${EMBEDDED ? '<button class="btn ghost" id="exitCase">Back to topics</button>' : ''}<button class="btn ghost" id="again">Try again</button></span></div>`;
+  if (EMBEDDED) document.getElementById('exitCase').onclick = () => parent.postMessage({ type: 'case-study-exit' }, '*');
+  document.getElementById('again').onclick = () => {
+    Object.assign(state, { i: 0, results: [], submitted: false, activeTab: 'hp' });
+    unseenTabs.clear();
+    renderStepper(); renderChart(); renderItem(false);
+  };
+}
+
+renderStepper(); renderChart(); renderItem(false);
+</script>
+</body>
+</html>
