@@ -540,6 +540,18 @@
         filter: blur(6px);
       }
 
+      /* Row, date-total and detail-panel amounts stay blurred until clicked (see initializeAmountPrivacy) */
+      .payment-amount:not(.amount-revealed) :is(.amount-usd, .amount-amd),
+      .date-separator-total:not(.amount-revealed) :is(.total-usd, .total-amd),
+      #detailAmount:not(.amount-revealed),
+      #payerSummaryAmountUSD:not(.amount-revealed),
+      #payerSummaryAmountAMD:not(.amount-revealed) {
+        filter: blur(7px);
+        user-select: none;
+        cursor: pointer;
+        transition: filter 0.3s ease;
+      }
+
       .month-stats-container .search-pill {
         flex: 1.5;
         padding: 8px 14px;
@@ -10260,6 +10272,8 @@ ORDER BY timestamp DESC;</pre>
         document.getElementById('payerSummaryName').textContent = payerDisplayName;
         document.getElementById('payerSummaryAmountUSD').textContent = `${Math.round(amountUsd)} $`;
         document.getElementById('payerSummaryAmountAMD').textContent = `${Math.round(amountAmd).toLocaleString()} ֏`;
+        document.getElementById('payerSummaryAmountUSD').classList.remove('amount-revealed');
+        document.getElementById('payerSummaryAmountAMD').classList.remove('amount-revealed');
   const dateLabelText = record?.dateLabelText || (record?.dateLabel ? record.dateLabel.replace(/<[^>]+>/g, '').trim() : null);
   document.getElementById('payerSummaryDate').textContent = dateLabelText || paymentData.date || '—';
         document.getElementById('payerSummaryMessage').textContent = record?.memo || paymentData.message || 'No message';
@@ -11534,6 +11548,21 @@ ORDER BY timestamp DESC;</pre>
         amdElement.addEventListener('click', () => removeBlur(amdElement));
       }
 
+      /**
+       * Row, per-date total and detail-panel amounts are blurred by CSS. The first click on one
+       * reveals it (and is swallowed so it does not also open the row); later clicks behave normally.
+       */
+      function initializeAmountPrivacy() {
+        const unitSelector = '.payment-amount, .date-separator-total, #detailAmount, #payerSummaryAmountUSD, #payerSummaryAmountAMD';
+        document.addEventListener('click', (event) => {
+          const unit = event.target.closest(unitSelector);
+          if (!unit || unit.classList.contains('amount-revealed')) return;
+          unit.classList.add('amount-revealed');
+          event.preventDefault();
+          event.stopPropagation();
+        }, true);
+      }
+
       // ============================================================
       // EVENT LISTENERS
       // ============================================================
@@ -11548,7 +11577,7 @@ ORDER BY timestamp DESC;</pre>
 
         // Initialize blur effect for payment totals
         initializePaymentTotalsBlur();
-
+        initializeAmountPrivacy();
         setupFilterToolbar();
         setupPaymentGridEvents();
         setupGridPaginationControls();
@@ -13314,6 +13343,7 @@ ORDER BY timestamp DESC;</pre>
         // Populate payment information (read-only)
         document.getElementById('detailPaymentId').textContent = payment.paymentId || payment.id || payment.gmailId || '—';
         document.getElementById('detailAmount').textContent = `${payment.amountUSDLabel || payment.amount + ' $'} (${payment.amountAMDLabel || '—'})`;
+        document.getElementById('detailAmount').classList.remove('amount-revealed');
         document.getElementById('detailMethod').textContent = payment.paymentMethod || 'unspecified';
         document.getElementById('detailDate').innerHTML = `${payment.dateLabel} • ${payment.timeLabel}`;
         document.getElementById('detailPayer').textContent = payment.payerName || '—';
