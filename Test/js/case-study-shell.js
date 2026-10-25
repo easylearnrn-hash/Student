@@ -10,7 +10,8 @@
    the header loads and AGAIN on every Reveal All click. Any error or timeout = student view.
    Usage in a case study page:
      <script src="js/case-study-shell.js"></script>
-     const hdr = CaseStudyShell.mount({ title, total, items, embedded, onExit, onFlag });
+     const hdr = CaseStudyShell.mount({ title, total, items, embedded, onExit, onFlag, onRole });
+   onRole(isAdmin) fires after each server check; hdr.verifyAdmin() re-checks on demand (use it before any admin-only action).
 */
 (function () {
   'use strict';
@@ -128,6 +129,7 @@ body.invert-read .step.active .n{color:#6b4e0a}
 body.invert-read .step.done{opacity:1;border-color:#15803d;background:#f0fdf4}
 body.invert-read .step.done .n{color:#15803d}
 body.invert-read .step.flagged::after{color:#b45309}
+body.invert-read .step.nav:hover{border-color:#a8832a;opacity:1}
 body.invert-read .chart-head,body.invert-read .tabs,body.invert-read .actions{border-color:#cbd5e1}
 body.invert-read .chart-head h3{color:#6b4e0a}
 body.invert-read .chart-head small,body.invert-read .counter,body.invert-read .hint{color:#475569}
@@ -419,7 +421,8 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
       }
     }
     applyRole();
-    verifyAdmin().then(function (ok) { verifiedAdmin = ok; applyRole(); });
+    function notifyRole() { if (opts.onRole) opts.onRole(verifiedAdmin); }
+    verifyAdmin().then(function (ok) { verifiedAdmin = ok; applyRole(); notifyRole(); });
 
     function fmt(s) { return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }
     function startTimer() {
@@ -431,6 +434,14 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
     startTimer();
 
     return {
+      // Fresh server-side admin check for gated actions. Fails closed and drops admin UI if it fails.
+      verifyAdmin: async function () {
+        var ok = await verifyAdmin();
+        var changed = ok !== verifiedAdmin;
+        verifiedAdmin = ok;
+        if (changed) { applyRole(); notifyRole(); }
+        return ok;
+      },
       setProgress: function (cur, total) { document.getElementById('csProgress').textContent = cur + ' / ' + total; },
       setFlagged: function (on) { document.getElementById('csFlagBtn').classList.toggle('flagged', !!on); },
       startTimer: startTimer,

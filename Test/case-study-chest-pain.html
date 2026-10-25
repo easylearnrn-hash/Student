@@ -35,6 +35,9 @@ body{background:var(--navy-deep);color:var(--text);min-height:100vh;
 .step.active .n{color:var(--gold-primary)}
 .step.done{opacity:1;border-color:rgba(16,185,129,.45)}
 .step.done .n{color:var(--success)}
+.step.nav{cursor:pointer}
+.step.nav:hover{border-color:var(--gold-primary);opacity:1}
+.step.nav:focus-visible{outline:2px solid var(--gold-primary);outline-offset:2px}
 .step{position:relative}
 .step.flagged::after{content:"⚑";position:absolute;top:6px;right:9px;font-size:13px;color:var(--warning)}
 @media(max-width:820px){.stepper{grid-template-columns:repeat(3,1fr)}}
@@ -291,12 +294,14 @@ const panel = document.getElementById('itemPanel');
 const unseenTabs = new Set();
 const EMBEDDED = new URLSearchParams(location.search).get('embedded') === '1'; // opened inside test.html
 const flagged = new Set();
+let adminNav = false; // true only after a server-side admin check (see onRole / goToItem)
 const hdr = CaseStudyShell.mount({
   title: 'Crushing Chest Pain in the Emergency Department',
   total: ITEMS.length,
   embedded: EMBEDDED,
   onExit: () => parent.postMessage({ type: 'case-study-exit' }, '*'),
   onFlag: () => { flagged.has(state.i) ? flagged.delete(state.i) : flagged.add(state.i); hdr.setFlagged(flagged.has(state.i)); renderStepper(); },
+  onRole: (isAdmin) => { adminNav = isAdmin; renderStepper(); },
   items: ITEMS
 });
 
@@ -307,8 +312,30 @@ function renderStepper() {
   hdr.setFlagged(flagged.has(state.i));
   stepper.innerHTML = ITEMS.map((it, n) => {
     const cls = (state.i === n && state.i < ITEMS.length ? 'active' : (n < state.i ? 'done' : '')) + (flagged.has(n) ? ' flagged' : '');
-    return `<div class="step ${cls}"><div class="n">ITEM ${n + 1}</div><div class="l">${esc(it.step)}</div></div>`;
+    const nav = adminNav ? ` nav" role="button" tabindex="0" title="Admin: open this item" data-goto="${n}` : '';
+    return `<div class="step ${cls}${nav}"><div class="n">ITEM ${n + 1}</div><div class="l">${esc(it.step)}</div></div>`;
   }).join('');
+  if (adminNav) stepper.querySelectorAll('.step.nav').forEach(el => {
+    const go = () => goToItem(+el.dataset.goto);
+    el.onclick = go;
+    el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
+  });
+}
+
+// Admin/teacher only: open any item without answering. The admin check is repeated on every jump,
+// so a student (or an expired session) can never use this, even by calling it from the console.
+async function goToItem(n) {
+  if (!adminNav || !(n >= 0 && n < ITEMS.length) || n === state.i) return;
+  if (!(await hdr.verifyAdmin())) return;
+  const prev = visibleTime();
+  const wasResults = state.i >= ITEMS.length;
+  state.i = n;
+  renderStepper();
+  const isNew = revealIfNew(prev);
+  renderChart();
+  renderItem(isNew);
+  if (wasResults) hdr.startTimer();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function visibleTime() { return state.i >= ITEMS.length ? 2 : ITEMS[state.i].time; }
@@ -491,7 +518,7 @@ function onMain() {
   if (!state.submitted) {
     const a = readAnswer(it);
     const pts = score(it, a);
-    state.results.push({ step: it.step, pts, max: it.max });
+    state.results[state.i] = { step: it.step, pts, max: it.max };
     state.submitted = true;
     panel.querySelectorAll('input,select').forEach(el => el.disabled = true);
     const cls = pts === it.max ? 'full' : pts === 0 ? 'none' : 'part';
@@ -516,14 +543,15 @@ function onMain() {
 
 function renderResults() {
   hdr.stopTimer();
-  const earned = state.results.reduce((s, r) => s + r.pts, 0);
-  const max = state.results.reduce((s, r) => s + r.max, 0);
+  const done = state.results.filter(Boolean);
+  const earned = done.reduce((s, r) => s + r.pts, 0);
+  const max = done.reduce((s, r) => s + r.max, 0);
   const pct = Math.round(earned / max * 100);
   panel.innerHTML = `
     <div class="result-head"><div class="step-chip">Case study complete</div>
       <div class="big">${pct}%</div>
-      <p class="hint" style="margin:8px 0 0">${earned} of ${max} points across 6 clinical judgment steps</p></div>
-    ${state.results.map(r => `<div class="skill"><div class="row"><span>${esc(r.step)}</span><b>${r.pts} / ${r.max}</b></div><div class="bar"><i style="width:${r.pts / r.max * 100}%"></i></div></div>`).join('')}
+      <p class="hint" style="margin:8px 0 0">${earned} of ${max} points across ${done.length} clinical judgment ${done.length === 1 ? 'step' : 'steps'}</p></div>
+    ${done.map(r => `<div class="skill"><div class="row"><span>${esc(r.step)}</span><b>${r.pts} / ${r.max}</b></div><div class="bar"><i style="width:${r.pts / r.max * 100}%"></i></div></div>`).join('')}
     <div class="actions"><span class="counter">Your answers are not saved.</span><span style="display:flex;gap:10px">${EMBEDDED ? '<button class="btn ghost" id="exitCase">Back to topics</button>' : ''}<button class="btn ghost" id="again">Try again</button></span></div>`;
   if (EMBEDDED) document.getElementById('exitCase').onclick = () => parent.postMessage({ type: 'case-study-exit' }, '*');
   document.getElementById('again').onclick = () => {
