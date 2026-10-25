@@ -283,7 +283,7 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
 
   // Generic teacher answer key: quick-glance table first, then one scannable card per item
   var L = function (i) { return String.fromCharCode(65 + i); };
-  var HOW = { sata: 'Select all that apply', matrix: 'Match each row to one column', cloze: 'Drop-down sentence', bowtie: 'Bowtie: 1 condition, 2 actions, 2 parameters' };
+  var HOW = { sata: 'Select all that apply', matrix: 'Match each row to its column(s)', cloze: 'Drop-down sentence', bowtie: 'Bowtie: 1 condition, 2 actions, 2 parameters' };
 
   function optRows(opts, correct) {
     return opts.map(function (t, i) {
@@ -293,14 +293,14 @@ body.invert-read #csRevealModal .rv-why li{color:#0f172a}
   }
   function keyText(it) {
     if (it.type === 'sata') return it.correct.map(L).join(' · ') + ' (' + it.correct.length + ' of ' + it.options.length + ')';
-    if (it.type === 'matrix') return it.rows.map(function (r) { return it.cols[r[1]]; }).join(' · ');
+    if (it.type === 'matrix') return it.rows.map(function (r) { return [].concat(r[1]).map(function (k) { return it.cols[k]; }).join(' + '); }).join(' · ');
     if (it.type === 'cloze') return it.parts.filter(function (p) { return typeof p !== 'string'; }).map(function (p) { return p.opts[p.correct]; }).join(' → ');
     return it.condition.opts[it.condition.correct] + ' | Actions ' + it.actions.correct.map(function (i) { return L(i); }).join('+') + ' | Monitor ' + it.params.correct.map(function (i) { return L(i); }).join('+');
   }
   function answerBody(it) {
     if (it.type === 'sata') return optRows(it.options, it.correct);
     if (it.type === 'matrix') {
-      return '<table class="rv-tbl">' + it.rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td class="rv-ansc"><span class="rv-pill">' + esc(it.cols[r[1]]) + '</span></td></tr>'; }).join('') + '</table>';
+      return '<table class="rv-tbl">' + it.rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td class="rv-ansc">' + [].concat(r[1]).map(function (k) { return '<span class="rv-pill">' + esc(it.cols[k]) + '</span>'; }).join(' ') + '</td></tr>'; }).join('') + '</table>';
     }
     if (it.type === 'cloze') {
       return '<div class="rv-sent">' + it.parts.map(function (p) { return typeof p === 'string' ? esc(p) : '<span class="rv-pill">' + esc(p.opts[p.correct]) + '</span>'; }).join('') + '</div>';
