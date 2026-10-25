@@ -4029,7 +4029,7 @@ body[data-zoom="large"] .question-type-badge {
       <div style="display:flex;gap:10px;align-items:center">
         <div style="text-align:right;margin-right:4px">
           <div style="font-size:11px;color:#64748b;font-weight:500;letter-spacing:0.3px"><span id="footerSubjectsCount" style="color:var(--gold-primary);font-weight:800">0</span> subjects · <span id="footerTopicsCount" style="color:var(--gold-primary);font-weight:800">0</span> topics</div>
-          <div style="font-size:11px;color:#475569;margin-top:1px"><span id="footerQuestionsCount" style="color:#94a3b8;font-weight:700">—</span> questions available</div>
+          <div style="font-size:11px;color:#475569;margin-top:1px"><span id="footerQuestionsCount" style="color:#94a3b8;font-weight:700">—</span> <span id="footerQuestionsLabel">questions available</span></div>
         </div>
         <button id="continueToTopicsBtn" onclick="startFromSubjectModal()" disabled class="btn btn-primary" style="padding:11px 24px;font-size:14px;white-space:nowrap">
           Start Test →
@@ -6492,7 +6492,7 @@ let selectedSubjects = new Set();
 let selectedTopics = new Set();
 let caseStudySelected = false;
 // Case studies are not database topics: they get their own row and never enter selectedTopics or any query.
-const CASE_STUDY = { name: 'Case Studies', tag: 'Case study • 6 items', items: 6, url: 'case-study-chest-pain.html', subjectMatch: /cardiovascular/i };
+const CASE_STUDY = { name: 'Case Studies', tag: '1 case study', items: 1, url: 'case-study-chest-pain.html', subjectMatch: /cardiovascular/i };
 let availableTopics = [];
 let allSubjects = [];
 let _updateSubjectStatsTimer = null; // debounce timer for live question count DB query
@@ -6877,13 +6877,15 @@ async function showSubjectSelection() {
             : `<span class="topic-empty-label">No questions yet</span>`}
         </div>
       `;
-      }).join('') + (hasCaseStudy ? `
+      }).join('');
+
+      const caseStudyRow = hasCaseStudy ? `
         <div class="topic-row case-study-row" id="casestudy-row" data-topic-name="case studies case study"
              onclick="toggleCaseStudy()">
           <input type="checkbox" id="casestudy-cb" onclick="event.stopPropagation();toggleCaseStudy(this.checked)">
           <span class="topic-row-name">${CASE_STUDY.name}</span>
           <span class="case-study-tag">${CASE_STUDY.tag}</span>
-        </div>` : '');
+        </div>` : '';
 
       return `
         <div class="subject-row" id="subject-row-${subject.id}"
@@ -6920,6 +6922,7 @@ async function showSubjectSelection() {
                   Deselect all
                 </span>
               </div>
+              ${caseStudyRow}
               ${topicRows}
              </div>
             </div>
@@ -7156,6 +7159,11 @@ window.addEventListener('message', (e) => {
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCaseStudy(); });
 
+function setFooterQuestionsLabel(text) {
+  const el = document.getElementById('footerQuestionsLabel');
+  if (el) el.textContent = text;
+}
+
 function updateSubjectStats() {
   const sCount = selectedSubjects.size;
   const tCount = selectedTopics.size;
@@ -7183,8 +7191,10 @@ function updateSubjectStats() {
     if (footerT) footerT.textContent = 1;
     document.getElementById('totalQuestionsCount').textContent = CASE_STUDY.items;
     if (footerQ) footerQ.textContent = CASE_STUDY.items;
+    setFooterQuestionsLabel('case study available');
     return;
   }
+  setFooterQuestionsLabel('questions available');
 
   // Live question count — debounced 300ms so rapid checkbox clicks don't flood Supabase
   if (_updateSubjectStatsTimer) clearTimeout(_updateSubjectStatsTimer);
