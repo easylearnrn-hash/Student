@@ -94,14 +94,16 @@
 
 /* Text size (same levels as test.html) */
 body[data-zoom="medium"] .prompt{font-size:24px}
-body[data-zoom="medium"] .opt,body[data-zoom="medium"] .matrix,body[data-zoom="medium"] .entry p,body[data-zoom="medium"] .vt,body[data-zoom="medium"] .fb p{font-size:16px}
-body[data-zoom="medium"] .cloze{font-size:19px}
-body[data-zoom="medium"] .hint,body[data-zoom="medium"] .bt-col .opt{font-size:14.5px}
+body[data-zoom="medium"] .opt,body[data-zoom="medium"] .matrix,body[data-zoom="medium"] .entry p,body[data-zoom="medium"] .vt,body[data-zoom="medium"] .fb p{font-size:17.5px}
+body[data-zoom="medium"] .cloze{font-size:20px}
+body[data-zoom="medium"] .hint{font-size:15.5px}
+body[data-zoom="medium"] .bt-col .opt{font-size:15px}
 body[data-zoom="large"] .prompt{font-size:28px}
-body[data-zoom="large"] .opt,body[data-zoom="large"] .matrix,body[data-zoom="large"] .entry p,body[data-zoom="large"] .vt,body[data-zoom="large"] .fb p{font-size:18.5px}
-body[data-zoom="large"] .cloze{font-size:22px}
-body[data-zoom="large"] .hint,body[data-zoom="large"] .bt-col .opt{font-size:16.5px}
-body[data-zoom="large"] select{font-size:17px}
+body[data-zoom="large"] .opt,body[data-zoom="large"] .matrix,body[data-zoom="large"] .entry p,body[data-zoom="large"] .vt,body[data-zoom="large"] .fb p{font-size:20px}
+body[data-zoom="large"] .cloze{font-size:23px}
+body[data-zoom="large"] .hint{font-size:17.5px}
+body[data-zoom="large"] .bt-col .opt{font-size:17px}
+body[data-zoom="large"] select{font-size:18px}
 
 /* Invert (light reading mode): warm ivory paper, deep navy ink, rich gold accents */
 body.invert-read{background:#fff;background-image:none;color:#0f172a}
@@ -218,8 +220,10 @@ body.invert-read #csRevealModal .rv-why-t{color:#7a5a12}
 body.invert-read #csRevealModal .rv-why li{color:#1d2740}
 `;
 
+  var textFormatter = null; // set only while building the answer key so long forms show there too
   var esc = function (s) {
-    return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+    var out = String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+    return textFormatter ? textFormatter(out) : out;
   };
   var store = function (k) { return sessionStorage.getItem(k) || localStorage.getItem(k) || ''; };
 
@@ -320,7 +324,11 @@ body.invert-read #csRevealModal .rv-why li{color:#1d2740}
     var parts = String(text).split(/(?<=[.!?])\s+(?=[A-Z“(])/).filter(Boolean);
     return '<div class="rv-why"><div class="rv-why-t">Why</div><ul>' + parts.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul></div>';
   }
-  function buildRevealHtml(items) {
+  function buildRevealHtml(items, format) {
+    textFormatter = format || null;
+    try { return buildRevealInner(items); } finally { textFormatter = null; }
+  }
+  function buildRevealInner(items) {
     var total = items.reduce(function (s, it) { return s + it.max; }, 0);
     var glance = '<div class="rv-glance"><div class="rv-glance-title">Answer key at a glance · click a row to jump</div>' +
       items.map(function (it, n) {
@@ -425,7 +433,7 @@ body.invert-read #csRevealModal .rv-why li{color:#1d2740}
             return;
           }
           verifiedAdmin = true;
-          if (opts.items) showRevealModal('Answer key', buildRevealHtml(opts.items));
+          if (opts.items) showRevealModal('Answer key', buildRevealHtml(opts.items, opts.format));
         };
         slot.appendChild(b);
       }
