@@ -41,19 +41,51 @@
 #csUserName{color:#f1f5f9;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.1px}
 #csUserRole{font-size:9.5px;font-weight:800;letter-spacing:.8px;text-transform:uppercase}
 
-/* Reveal All modal (admin only) */
-#csRevealModal{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);display:flex;align-items:flex-start;justify-content:center;padding:32px 16px;overflow-y:auto}
-#csRevealModal .rv-box{background:#0f172a;border:1px solid #334155;border-radius:16px;max-width:860px;width:100%;padding:24px 28px}
-#csRevealModal .rv-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+/* Reveal All modal (admin only): built to be scanned in seconds */
+#csRevealModal{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);display:flex;align-items:flex-start;justify-content:center;padding:28px 16px;overflow-y:auto}
+#csRevealModal .rv-box{background:#0f172a;border:1px solid #334155;border-radius:16px;max-width:980px;width:100%;padding:22px 26px}
+#csRevealModal .rv-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px}
 #csRevealModal h2{font-family:'Playfair Display',serif;font-size:22px;color:#f1f5f9}
-#csRevealModal .rv-close{background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.15);color:#cbd5e1;border-radius:8px;padding:7px 14px;font-weight:700;cursor:pointer}
-#csRevealModal .rv-item{border:1px solid #334155;border-left:3px solid var(--gold-primary);border-radius:12px;padding:16px 18px;margin-bottom:14px;background:#1e293b}
-#csRevealModal .rv-step{font-size:10px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--gold-primary);margin-bottom:6px}
-#csRevealModal .rv-prompt{font-weight:700;color:#f1f5f9;margin-bottom:8px;line-height:1.5}
-#csRevealModal ul{margin:0 0 10px 18px;color:#cbd5e1;font-size:14px;line-height:1.6}
-#csRevealModal .rv-ans li{color:#6ee7b7}
-#csRevealModal .rv-lbl{font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#94a3b8;margin:8px 0 3px}
-#csRevealModal .rv-rat{font-size:13.5px;line-height:1.7;color:#cbd5e1}
+#csRevealModal .rv-sub{font-size:12.5px;color:#94a3b8;margin-top:2px}
+#csRevealModal .rv-close{background:rgba(255,255,255,.06);border:1.5px solid rgba(255,255,255,.15);color:#cbd5e1;border-radius:8px;padding:7px 14px;font-weight:700;cursor:pointer;flex-shrink:0}
+#csRevealModal .rv-glance{border:1px solid #334155;border-radius:12px;background:#1e293b;margin-bottom:18px;overflow:hidden}
+#csRevealModal .rv-glance-title{font-size:10.5px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--gold-primary);padding:10px 14px;border-bottom:1px solid #334155}
+#csRevealModal .rv-grow{display:grid;grid-template-columns:34px 170px 1fr;gap:10px;align-items:center;padding:8px 14px;border-bottom:1px solid rgba(255,255,255,.06);color:inherit;text-decoration:none;font-size:13px;cursor:pointer}
+#csRevealModal .rv-grow:last-child{border-bottom:none}
+#csRevealModal .rv-grow:hover{background:rgba(201,168,76,.08)}
+#csRevealModal .rv-gn{width:26px;height:26px;border-radius:50%;background:rgba(201,168,76,.18);border:1px solid rgba(201,168,76,.5);color:var(--gold-light);font-weight:800;font-size:12px;display:flex;align-items:center;justify-content:center}
+#csRevealModal .rv-gs{font-weight:700;color:#e2e8f0}
+#csRevealModal .rv-gk{color:#6ee7b7;font-weight:700;line-height:1.5}
+#csRevealModal .rv-item{border:1px solid #334155;border-left:4px solid var(--gold-primary);border-radius:12px;padding:16px 18px 18px;margin-bottom:16px;background:#1e293b}
+#csRevealModal .rv-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
+#csRevealModal .rv-step{font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--gold-primary)}
+#csRevealModal .rv-pts{font-size:11px;font-weight:800;letter-spacing:.6px;color:#cbd5e1;border:1px solid #475569;border-radius:20px;padding:3px 10px}
+#csRevealModal .rv-prompt{font-weight:700;color:#f1f5f9;margin-bottom:4px;line-height:1.5;font-size:16px}
+#csRevealModal .rv-how{font-size:12px;color:#94a3b8;margin-bottom:12px}
+#csRevealModal .rv-opt{display:flex;align-items:flex-start;gap:10px;padding:8px 12px;border-radius:9px;margin-bottom:6px;font-size:14px;line-height:1.5;border:1.5px solid transparent;color:#94a3b8;background:rgba(255,255,255,.03)}
+#csRevealModal .rv-opt .rv-l{width:24px;height:24px;flex-shrink:0;border-radius:6px;border:1.5px solid #475569;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800}
+#csRevealModal .rv-opt .rv-t{flex:1}
+#csRevealModal .rv-opt .rv-m{font-size:10.5px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;white-space:nowrap;padding-left:8px}
+#csRevealModal .rv-opt.yes{background:rgba(16,185,129,.14);border-color:#10b981;color:#ecfdf5}
+#csRevealModal .rv-opt.yes .rv-l{background:#10b981;border-color:#10b981;color:#052e1b}
+#csRevealModal .rv-opt.yes .rv-m{color:#6ee7b7}
+#csRevealModal .rv-opt.no .rv-m{color:#64748b}
+#csRevealModal .rv-tbl{width:100%;border-collapse:collapse;font-size:14px}
+#csRevealModal .rv-tbl td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.07);vertical-align:middle;color:#e2e8f0;line-height:1.45}
+#csRevealModal .rv-tbl tr:last-child td{border-bottom:none}
+#csRevealModal .rv-tbl td.rv-ansc{width:1%;white-space:nowrap;text-align:right}
+#csRevealModal .rv-pill{display:inline-block;font-size:12.5px;font-weight:800;padding:4px 12px;border-radius:20px;background:rgba(16,185,129,.16);border:1.5px solid #10b981;color:#6ee7b7}
+#csRevealModal .rv-sent{font-size:16px;line-height:2.1;color:#e2e8f0}
+#csRevealModal .rv-sent .rv-pill{font-size:14px;margin:0 2px}
+#csRevealModal .rv-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+@media(max-width:820px){#csRevealModal .rv-cols{grid-template-columns:1fr}#csRevealModal .rv-grow{grid-template-columns:34px 1fr}#csRevealModal .rv-gk{grid-column:1 / -1}}
+#csRevealModal .rv-col{background:rgba(2,6,23,.35);border:1px solid #334155;border-radius:10px;padding:10px}
+#csRevealModal .rv-col h4{font-size:10.5px;letter-spacing:1px;text-transform:uppercase;color:var(--gold-primary);margin-bottom:8px}
+#csRevealModal .rv-col .rv-opt{font-size:13px;padding:7px 9px}
+#csRevealModal .rv-why{margin-top:14px;border-radius:10px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.3);padding:12px 14px}
+#csRevealModal .rv-why-t{font-size:10.5px;font-weight:800;letter-spacing:1.1px;text-transform:uppercase;color:var(--gold-light);margin-bottom:6px}
+#csRevealModal .rv-why ul{margin:0 0 0 18px;padding:0}
+#csRevealModal .rv-why li{font-size:13.5px;line-height:1.6;color:#e2e8f0;margin-bottom:4px}
 
 /* Text size (same levels as test.html) */
 body[data-zoom="medium"] .prompt{font-size:24px}
@@ -142,12 +174,32 @@ body.invert-read .big{color:#6b4e0a}
 body.invert-read .skill .bar{background:#e2e8f0}
 body.invert-read .skill .bar i{background:linear-gradient(90deg,#a8832a,#c9a84c)}
 body.invert-read #csRevealModal .rv-box{background:#fff;border-color:#94a3b8}
-body.invert-read #csRevealModal h2,body.invert-read #csRevealModal .rv-prompt{color:#0f172a}
-body.invert-read #csRevealModal .rv-item{background:#f8fafc;border-color:#94a3b8;border-left-color:#a8832a}
-body.invert-read #csRevealModal ul,body.invert-read #csRevealModal .rv-rat{color:#0f172a}
-body.invert-read #csRevealModal .rv-ans li{color:#166534}
-body.invert-read #csRevealModal .rv-step{color:#6b4e0a}
+body.invert-read #csRevealModal h2,body.invert-read #csRevealModal .rv-prompt,body.invert-read #csRevealModal .rv-gs{color:#0f172a}
+body.invert-read #csRevealModal .rv-sub,body.invert-read #csRevealModal .rv-how{color:#475569}
 body.invert-read #csRevealModal .rv-close{background:#f1f5f9;border-color:#94a3b8;color:#0f172a}
+body.invert-read #csRevealModal .rv-glance{background:#f8fafc;border-color:#94a3b8}
+body.invert-read #csRevealModal .rv-glance-title{color:#6b4e0a;border-color:#cbd5e1}
+body.invert-read #csRevealModal .rv-grow{border-color:#e2e8f0}
+body.invert-read #csRevealModal .rv-grow:hover{background:#fdf8e6}
+body.invert-read #csRevealModal .rv-gn{background:#fdf3d0;border-color:#a8832a;color:#6b4e0a}
+body.invert-read #csRevealModal .rv-gk{color:#166534}
+body.invert-read #csRevealModal .rv-item{background:#fff;border-color:#94a3b8;border-left-color:#a8832a}
+body.invert-read #csRevealModal .rv-step{color:#6b4e0a}
+body.invert-read #csRevealModal .rv-pts{color:#334155;border-color:#94a3b8}
+body.invert-read #csRevealModal .rv-opt{color:#475569;background:#f8fafc}
+body.invert-read #csRevealModal .rv-opt .rv-l{border-color:#94a3b8}
+body.invert-read #csRevealModal .rv-opt.yes{background:#dcfce7;border-color:#15803d;color:#0f172a}
+body.invert-read #csRevealModal .rv-opt.yes .rv-l{background:#15803d;border-color:#15803d;color:#fff}
+body.invert-read #csRevealModal .rv-opt.yes .rv-m{color:#166534}
+body.invert-read #csRevealModal .rv-opt.no .rv-m{color:#64748b}
+body.invert-read #csRevealModal .rv-tbl td{color:#0f172a;border-color:#e2e8f0}
+body.invert-read #csRevealModal .rv-pill{background:#dcfce7;border-color:#15803d;color:#166534}
+body.invert-read #csRevealModal .rv-sent{color:#0f172a}
+body.invert-read #csRevealModal .rv-col{background:#f8fafc;border-color:#94a3b8}
+body.invert-read #csRevealModal .rv-col h4{color:#6b4e0a}
+body.invert-read #csRevealModal .rv-why{background:#fdf8e6;border-color:#a8832a}
+body.invert-read #csRevealModal .rv-why-t{color:#6b4e0a}
+body.invert-read #csRevealModal .rv-why li{color:#0f172a}
 `;
 
   var esc = function (s) {
@@ -229,32 +281,64 @@ body.invert-read #csRevealModal .rv-close{background:#f1f5f9;border-color:#94a3b
     if (b) { b.classList.toggle('active', !!on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
   }
 
-  // Generic "all answers + rationales" view for the admin Reveal All button
-  function buildRevealHtml(items) {
-    var li = function (arr) { return '<ul class="rv-ans">' + arr.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>'; };
-    return items.map(function (it, n) {
-      var body = '';
-      if (it.type === 'sata') body = li(it.correct.map(function (i) { return it.options[i]; }));
-      else if (it.type === 'matrix') body = li(it.rows.map(function (r) { return r[0] + ' → ' + it.cols[r[1]]; }));
-      else if (it.type === 'cloze') body = li([it.parts.map(function (p) { return typeof p === 'string' ? p : '[' + p.opts[p.correct] + ']'; }).join('')]);
-      else {
-        body = '<div class="rv-lbl">' + esc(it.condition.title) + '</div>' + li([it.condition.opts[it.condition.correct]]) +
-          '<div class="rv-lbl">' + esc(it.actions.title) + '</div>' + li(it.actions.correct.map(function (i) { return it.actions.opts[i]; })) +
-          '<div class="rv-lbl">' + esc(it.params.title) + '</div>' + li(it.params.correct.map(function (i) { return it.params.opts[i]; }));
-      }
-      return '<div class="rv-item"><div class="rv-step">Item ' + (n + 1) + ' • ' + esc(it.step) + '</div><div class="rv-prompt">' + esc(it.prompt) + '</div>' +
-        body + '<div class="rv-lbl">Rationale</div><div class="rv-rat">' + esc(it.rationale) + '</div></div>';
+  // Generic teacher answer key: quick-glance table first, then one scannable card per item
+  var L = function (i) { return String.fromCharCode(65 + i); };
+  var HOW = { sata: 'Select all that apply', matrix: 'Match each row to one column', cloze: 'Drop-down sentence', bowtie: 'Bowtie: 1 condition, 2 actions, 2 parameters' };
+
+  function optRows(opts, correct) {
+    return opts.map(function (t, i) {
+      var yes = correct.indexOf(i) !== -1;
+      return '<div class="rv-opt ' + (yes ? 'yes' : 'no') + '"><span class="rv-l">' + L(i) + '</span><span class="rv-t">' + esc(t) + '</span><span class="rv-m">' + (yes ? '✓ Correct' : 'Wrong') + '</span></div>';
     }).join('');
   }
+  function keyText(it) {
+    if (it.type === 'sata') return it.correct.map(L).join(' · ') + ' (' + it.correct.length + ' of ' + it.options.length + ')';
+    if (it.type === 'matrix') return it.rows.map(function (r) { return it.cols[r[1]]; }).join(' · ');
+    if (it.type === 'cloze') return it.parts.filter(function (p) { return typeof p !== 'string'; }).map(function (p) { return p.opts[p.correct]; }).join(' → ');
+    return it.condition.opts[it.condition.correct] + ' | Actions ' + it.actions.correct.map(function (i) { return L(i); }).join('+') + ' | Monitor ' + it.params.correct.map(function (i) { return L(i); }).join('+');
+  }
+  function answerBody(it) {
+    if (it.type === 'sata') return optRows(it.options, it.correct);
+    if (it.type === 'matrix') {
+      return '<table class="rv-tbl">' + it.rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td class="rv-ansc"><span class="rv-pill">' + esc(it.cols[r[1]]) + '</span></td></tr>'; }).join('') + '</table>';
+    }
+    if (it.type === 'cloze') {
+      return '<div class="rv-sent">' + it.parts.map(function (p) { return typeof p === 'string' ? esc(p) : '<span class="rv-pill">' + esc(p.opts[p.correct]) + '</span>'; }).join('') + '</div>';
+    }
+    var col = function (g, title) { return '<div class="rv-col"><h4>' + esc(title) + '</h4>' + optRows(g.opts, g.correct) + '</div>'; };
+    var cond = { opts: it.condition.opts, correct: [it.condition.correct] };
+    return '<div class="rv-cols">' + col(it.actions, 'Actions (pick 2)') + col(cond, 'Condition (pick 1)') + col(it.params, 'Monitor (pick 2)') + '</div>';
+  }
+  function whyList(text) {
+    var parts = String(text).split(/(?<=[.!?])\s+(?=[A-Z“(])/).filter(Boolean);
+    return '<div class="rv-why"><div class="rv-why-t">Why</div><ul>' + parts.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul></div>';
+  }
+  function buildRevealHtml(items) {
+    var total = items.reduce(function (s, it) { return s + it.max; }, 0);
+    var glance = '<div class="rv-glance"><div class="rv-glance-title">Answer key at a glance · click a row to jump</div>' +
+      items.map(function (it, n) {
+        return '<a class="rv-grow" data-jump="rv-item-' + n + '"><span class="rv-gn">' + (n + 1) + '</span><span class="rv-gs">' + esc(it.step) + '</span><span class="rv-gk">' + esc(keyText(it)) + '</span></a>';
+      }).join('') + '</div>';
+    var cards = items.map(function (it, n) {
+      return '<div class="rv-item" id="rv-item-' + n + '"><div class="rv-top"><span class="rv-step">Item ' + (n + 1) + ' of ' + items.length + ' • ' + esc(it.step) + '</span><span class="rv-pts">' + it.max + ' pts</span></div>' +
+        '<div class="rv-prompt">' + esc(it.prompt) + '</div><div class="rv-how">' + esc(HOW[it.type] || '') + '</div>' +
+        answerBody(it) + whyList(it.rationale) + '</div>';
+    }).join('');
+    return { sub: items.length + ' items · ' + total + ' points total', html: glance + cards };
+  }
 
-  function showRevealModal(title, html) {
+  function showRevealModal(title, built) {
     if (!ROLE.isTeacher) return; // students can never open this
     var old = document.getElementById('csRevealModal');
     if (old) old.remove();
     var m = document.createElement('div');
     m.id = 'csRevealModal';
-    m.innerHTML = '<div class="rv-box"><div class="rv-head"><h2>' + esc(title) + '</h2><button class="rv-close" type="button">Close</button></div>' + html + '</div>';
-    m.addEventListener('click', function (e) { if (e.target === m || e.target.classList.contains('rv-close')) m.remove(); });
+    m.innerHTML = '<div class="rv-box"><div class="rv-head"><div><h2>' + esc(title) + '</h2><div class="rv-sub">' + esc(built.sub || '') + ' · green = correct answer</div></div><button class="rv-close" type="button">Close</button></div>' + built.html + '</div>';
+    m.addEventListener('click', function (e) {
+      if (e.target === m || e.target.classList.contains('rv-close')) { m.remove(); return; }
+      var row = e.target.closest && e.target.closest('[data-jump]');
+      if (row) { var t = m.querySelector('#' + row.getAttribute('data-jump')); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    });
     document.body.appendChild(m);
   }
 
@@ -324,7 +408,7 @@ body.invert-read #csRevealModal .rv-close{background:#f1f5f9;border-color:#94a3b
         var b = document.createElement('button');
         b.type = 'button'; b.id = 'csRevealBtn'; b.className = 'reveal-all-btn';
         b.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>REVEAL ALL';
-        b.onclick = function () { if (opts.getRevealHtml) showRevealModal('All answers & rationales', opts.getRevealHtml()); };
+        b.onclick = function () { if (opts.getRevealHtml) showRevealModal('Answer key', opts.getRevealHtml()); };
         slot.appendChild(b);
       }
     }
