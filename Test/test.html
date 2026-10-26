@@ -7588,9 +7588,29 @@ function buildNoteUrl(notePath, anchorText, question) {
 // Collapse topics so students see one row per study note, labelled with the note's exact title.
 // A topic is shown when it has a note OR holds questions (so questions are never hidden), and
 // topics that point at the same note are merged into one row whose pool is all of them.
+// Display-only: drops the words "NCLEX" and "Overview" from topic labels (ids and stored data are untouched).
+function cleanTopicLabel(value) {
+  const src = String(value == null ? '' : value);
+  if (!/nclex|overview/i.test(src)) return src;
+  const out = src
+    .replace(/\s*[\u2014\u2013-]\s*NCLEX\s+Review\b/gi, '')
+    .replace(/\bOverview\s+of\s+/gi, '')
+    .replace(/\bNCLEX\b\s*/gi, '')
+    .replace(/\s*\bOverview\b/gi, '')
+    .replace(/\s*[\u2014\u2013&-]+\s*(?=,|$)/g, '')
+    .replace(/\s+,/g, ',')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  return out || src;
+}
+function cleanTopicList(names) {
+  const seen = new Set();
+  return (names || []).map(cleanTopicLabel).filter(n => n && !seen.has(n) && seen.add(n));
+}
+
 function buildTopicRows(allTopics, counts, notes) {
   if (!notes || notes.size === 0) {
-    return { rows: (allTopics || []).map(t => ({ ...t, _groupIds: [t.id] })), siblings: new Map() };
+    return { rows: (allTopics || []).map(t => ({ ...t, name: cleanTopicLabel(t.name), _groupIds: [t.id] })), siblings: new Map() };
   }
   const groups = new Map();
   (allTopics || []).forEach(t => {
@@ -7610,7 +7630,7 @@ function buildTopicRows(allTopics, counts, notes) {
     const ids = members.map(m => m.topic.id);
     rows.push({
       ...lead.topic,
-      name: note ? note.title : lead.topic.name,
+      name: cleanTopicLabel(note ? note.title : lead.topic.name),
       _origName: lead.topic.name,
       _aliases: members.map(m => m.topic.name),
       _notePath: note ? note.path : null,
@@ -9132,7 +9152,8 @@ async function ensureSelectedGroups() {
           const sj = subjects.find(x => x.id === row.subject_id);
           if (!by.has(row.subject_id)) by.set(row.subject_id, { subject: sj ? sj.name : 'Other', order: sj ? (sj.display_order || 0) : 9999, topics: [] });
           const g = by.get(row.subject_id);
-          if (!g.topics.includes(row.name)) g.topics.push(row.name);
+          const label = cleanTopicLabel(row.name);
+          if (!g.topics.includes(label)) g.topics.push(label);
         });
         TEST_CONFIG.selectedGroups = Array.from(by.values()).sort((a, b) => a.order - b.order).map(g => ({ subject: g.subject, topics: g.topics }));
         return TEST_CONFIG.selectedGroups;
@@ -9155,7 +9176,7 @@ async function toggleTestTitleMenu(ev) {
   if (document.getElementById('testTitleMenu')) { closeTestTitleMenu(); return; }
   const btn = document.getElementById('testTitleBtn');
   if (!btn) return;
-  const groups = await ensureSelectedGroups();
+  const groups = (await ensureSelectedGroups()).map(g => ({ ...g, topics: cleanTopicList(g.topics) }));
   if (document.getElementById('testTitleMenu')) return;
 
   const topicCount = groups.reduce((n, g) => n + g.topics.length, 0);
@@ -9193,10 +9214,10 @@ function getDisplayTestTitle() {
     : [];
 
   // Single topic → show just the topic name (e.g., "Stroke")
-  if (names.length === 1) return names[0];
+  if (names.length === 1) return cleanTopicLabel(names[0]);
 
   // Multiple topics → show comma-joined list (e.g., "Stroke, Cranial Nerves")
-  if (names.length > 1) return names.join(', ');
+  if (names.length > 1) return cleanTopicList(names).join(', ');
 
   // Fallback: base title from test_configs (shown before any topic is selected)
   return TEST_CONFIG.testTitle || 'Practice Test';
@@ -10051,7 +10072,7 @@ function inboxWhen(iso) {
 function inboxQuestionHtml(r) {
   const opts = Array.isArray(r.options) ? r.options : [];
   return `
-    ${r.topic_name ? `<div class="ti-meta"><span>${escapeHtml(r.topic_name)}</span></div>` : ''}
+    ${r.topic_name ? `<div class="ti-meta"><span>${escapeHtml(cleanTopicLabel(r.topic_name))}</span></div>` : ''}
     <div class="ti-stem">${escapeHtml(r.question_text || '(question text unavailable)')}</div>
     ${opts.map(o => `<div class="ti-opt${o.correct ? ' ti-correct' : ''}">${escapeHtml(o.text)}${o.correct ? ' &nbsp;✓' : ''}</div>`).join('')}`;
 }
@@ -10688,6 +10709,7 @@ async function loadSavedSessions() {
 
       // Cap display to 4 pills + overflow badge
       const MAX_PILLS = 4;
+      topicNames = cleanTopicList(topicNames);
       const visibleTopics = topicNames.slice(0, MAX_PILLS);
       const overflowCount = topicNames.length - visibleTopics.length;
 
@@ -12666,7 +12688,7 @@ function buildTestTitle() {
   // Fall back to topic names
   const topics = TEST_CONFIG.selectedTopicNames || [];
   if (topics.length > 0) {
-    return 'Test on ' + topics.slice(0, 3).join(', ') + (topics.length > 3 ? '…' : '');
+    return 'Test on ' + cleanTopicList(topics).slice(0, 3).join(', ') + (topics.length > 3 ? '…' : '');
   }
   return 'Practice Test';
 }
@@ -12815,8 +12837,8 @@ function renderGradesCard(history, currentPercent) {
       <tr class="${isCurrent ? 'current-attempt' : ''}">
         <td style="color:#475569;font-size:11px">${history.length - idx}</td>
         <td style="max-width:200px">
-          <div style="font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(row.test_title)}</div>
-          ${row.topics ? `<div style="font-size:10px;color:#475569;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(row.topics)}</div>` : ''}
+          <div style="font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(cleanTopicLabel(row.test_title))}</div>
+          ${row.topics ? `<div style="font-size:10px;color:#475569;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(cleanTopicLabel(row.topics))}</div>` : ''}
         </td>
         <td style="white-space:nowrap;color:#64748b;font-size:11.5px">${fmt(row.taken_at)}</td>
         <td style="text-align:center;font-weight:700;color:${gradeColor(gl)}">${row.score_percent}%</td>
@@ -13068,8 +13090,8 @@ function showGradeDetail(studentKey) {
     rowsHtml += `
       <tr>
         <td>
-          <div style="font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#e2e8f0">${escapeHtml(row.test_title || 'Untitled Test')}</div>
-          ${row.topics ? `<div style="font-family:'Inter',sans-serif;font-size:10px;color:#475569;margin-top:2px">${escapeHtml(row.topics)}</div>` : ''}
+          <div style="font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#e2e8f0">${escapeHtml(cleanTopicLabel(row.test_title || 'Untitled Test'))}</div>
+          ${row.topics ? `<div style="font-family:'Inter',sans-serif;font-size:10px;color:#475569;margin-top:2px">${escapeHtml(cleanTopicLabel(row.topics))}</div>` : ''}
         </td>
         <td style="white-space:nowrap;font-family:'Inter',sans-serif">
           <div style="font-size:12px;color:#94a3b8">${fmt(row.taken_at)}</div>
