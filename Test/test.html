@@ -6221,7 +6221,8 @@ const TEST_CONFIG = {
   selectedTopicIds: [],   // Topic UUIDs chosen by the user
   selectedTopicNames: [], // Human-readable names — persisted so title works after resume
   selectedGroups: [],     // [{ subject, topics: [names] }] — shown in the title dropdown
-  testNumber: null        // this student's running test number ("Anna Test #3")
+  testNumber: null,       // this student's running test number ("Anna Test #3")
+  openedAt: null          // ISO time the test was first opened (shown under a saved test's name)
 };
 
 // Feature flags — set false for DB tables/RPCs that don't exist yet
@@ -6249,6 +6250,7 @@ let testState = {
   testConfig: null,
   studentId: null,
   savedSessionDbId: null,
+  savedSessionName: null,
   // ── Bilingual session snapshot ────────────────────────────────────────
   // Built once at session creation, never changes.
   // snapshot.en  — array of {id,stem,options,correct,rationale,multi,points,category}
@@ -8363,6 +8365,7 @@ async function confirmTestSetup() {
 
 async function launchTestFromSelection() {
   TEST_CONFIG.testNumber = null; // a new test gets the next number
+  TEST_CONFIG.openedAt = new Date().toISOString();
   // User is actively starting a NEW test based on the current modal selection.
   // Don't allow a previously-saved session (possibly for different topics like Cranial Nerves)
   // to bleed into this run.
@@ -8643,6 +8646,7 @@ function isEnglishSubject() {
 async function initializeNewTest() {
   clearLocalStorage();
   testState.savedSessionDbId = null;
+  testState.savedSessionName = null;
   questionHighlights.clear();
   setLoadingStatus('Preparing session...');
   
@@ -10013,6 +10017,7 @@ function leaveTestEnd() {
 function resetTestRunState() {
   closeTestTitleMenu();
   TEST_CONFIG.testNumber = null;
+  TEST_CONFIG.openedAt = null;
   if (testState.timerInterval) { clearInterval(testState.timerInterval); testState.timerInterval = null; }
   window.removeEventListener('beforeunload', handleBeforeUnload);
   window.removeEventListener('pagehide', handleBeforeUnload, { capture: true });
@@ -10025,6 +10030,7 @@ function resetTestRunState() {
   testState.startTime = null;
   testState.endTime = null;
   testState.savedSessionDbId = null;
+  testState.savedSessionName = null;
   testState.snapshot = { en: null, hy: null };
   questionHighlights.clear();
   setHighlighter(false);
@@ -10043,7 +10049,10 @@ function leaveTestToTopics() {
 let _saveThenTopics = false;
 function showSaveModal(thenTopics) {
   _saveThenTopics = thenTopics === true;
-  const sessionName = `Test Session - ${new Date().toLocaleDateString()}`;
+  // A test that was saved before keeps its (possibly renamed) name; a new one is named after the student's test
+  const first = studentFirstName();
+  const sessionName = testState.savedSessionName
+    || (first && TEST_CONFIG.testNumber ? `${first} Test #${TEST_CONFIG.testNumber}` : `Test Session - ${new Date().toLocaleDateString()}`);
   document.getElementById('saveSessionName').value = sessionName;
   document.getElementById('saveTestModal').classList.add('active');
 }
@@ -10138,6 +10147,7 @@ function buildSavedSessionPayload(sessionName) {
       selectedTopicNames: TEST_CONFIG.selectedTopicNames || [],
       selectedGroups: TEST_CONFIG.selectedGroups || [],
       testNumber: TEST_CONFIG.testNumber || null,
+      openedAt: TEST_CONFIG.openedAt || null,
       categoryFilter: TEST_CONFIG.categoryFilter || null,
       questionCount: TEST_CONFIG.questionCount || null,
       shuffleQuestions: TEST_CONFIG.shuffleQuestions,
@@ -10216,6 +10226,7 @@ async function saveTestSession() {
     }
 
     testState.savedSessionDbId = data.id;
+    testState.savedSessionName = sessionName;
     closeSaveModal();
     restoreBtn();
     leaveTestAfterSave();
@@ -10260,6 +10271,66 @@ async function discardSavedSessionAfterSubmit() {
   }
   console.error('Could not remove saved session after submit:', id);
 }
+
+// When a saved test was first opened. Renaming or re-saving never changes it (older saves fall back to their first-save time).
+function savedSessionOpenedDate(session) {
+  let cfg = session.test_config || {};
+  if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch (e) { cfg = {}; } }
+  const d = new Date(cfg.openedAt || session.created_at || session.updated_at);
+  return isNaN(d.getTime()) ? new Date(session.updated_at || Date.now()) : d;
+}
+
+// Rename a saved test in place (start-screen cards and the Load Saved Test list).
+function renameSavedSession(id, ev) {
+  if (ev) ev.stopPropagation();
+  const card = ev && ev.currentTarget ? ev.currentTarget.closest('[data-session-card]') : null;
+  const nameEl = card ? card.querySelector('[data-session-name]') : null;
+  if (!nameEl || nameEl.dataset.editing === '1') return;
+  const current = nameEl.textContent;
+  nameEl.dataset.editing = '1';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = current;
+  input.maxLength = 80;
+  input.setAttribute('aria-label', 'Saved test name');
+  input.style.cssText = 'width:100%;min-width:0;padding:4px 10px;border-radius:8px;border:1.5px solid rgba(201,168,76,0.6);background:rgba(255,255,255,0.06);color:#f1f5f9;font:inherit;outline:none;';
+  nameEl.textContent = '';
+  nameEl.style.overflow = 'visible';
+  nameEl.appendChild(input);
+  input.focus();
+  input.select();
+
+  let finished = false;
+  const finish = async (save) => {
+    if (finished) return;
+    finished = true;
+    const next = input.value.trim();
+    nameEl.textContent = current;
+    nameEl.style.overflow = '';
+    nameEl.dataset.editing = '';
+    if (!save || !next || next === current) return;
+    nameEl.textContent = next;
+    try {
+      if (!db && !initializeSupabase()) throw new Error('db_unavailable');
+      const { error } = await db.from('saved_test_sessions').update({ session_name: next }).eq('id', id);
+      if (error) throw error;
+      if (testState.savedSessionDbId === id) testState.savedSessionName = next;
+      showToast('Saved test renamed', 'success');
+    } catch (e) {
+      console.warn('Rename failed:', e && e.message);
+      nameEl.textContent = current;
+      showToast('Could not rename. Please try again.', 'error');
+    }
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+const RENAME_BTN_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 
 async function loadSavedSessions() {
   try {
@@ -10324,7 +10395,7 @@ async function loadSavedSessions() {
     listContainer.innerHTML = '';
     
     savedSessions.forEach((session, idx) => {
-      const savedDate = new Date(session.updated_at || session.created_at);
+      const savedDate = savedSessionOpenedDate(session);
       const progress = session.progress_percent || 0;
       const answered = session.answered_questions || 0;
       const total = session.total_questions || 0;
@@ -10396,6 +10467,7 @@ async function loadSavedSessions() {
         card.style.transform = 'translateY(0)';
       };
 
+      card.setAttribute('data-session-card', session.id);
       card.innerHTML = `
         <!-- Gold top accent line -->
         <div style="height:2px;background:linear-gradient(90deg,transparent 0%,rgba(201,168,76,0.6) 40%,rgba(201,168,76,0.6) 60%,transparent 100%)"></div>
@@ -10407,7 +10479,10 @@ async function loadSavedSessions() {
               <!-- Session index badge + name -->
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
                 <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.28);font-family:'Inter',sans-serif;font-size:11px;font-weight:800;color:#c9a84c;flex-shrink:0">${idx + 1}</span>
-                <h4 style="font-family:'Playfair Display',serif;font-size:16px;font-weight:700;color:#f1f5f9;margin:0;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(session.session_name)}</h4>
+                <h4 style="font-family:'Playfair Display',serif;font-size:16px;font-weight:700;color:#f1f5f9;margin:0;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1" data-session-name="${session.id}">${escapeHtml(session.session_name)}</h4>
+                <button type="button" onclick="renameSavedSession('${session.id}', event)" title="Rename this saved test" aria-label="Rename this saved test"
+                  style="flex-shrink:0;background:transparent;border:1px solid rgba(201,168,76,0.25);color:#c9a84c;width:26px;height:26px;border-radius:7px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:all 0.15s"
+                  onmouseover="this.style.background='rgba(201,168,76,0.14)';this.style.borderColor='rgba(201,168,76,0.6)'" onmouseout="this.style.background='transparent';this.style.borderColor='rgba(201,168,76,0.25)'">${RENAME_BTN_ICON}</button>
               </div>
               <!-- Date line -->
               <div style="display:flex;align-items:center;gap:6px;padding-left:36px">
@@ -10539,6 +10614,7 @@ async function loadSavedSession(sessionId) {
     testState.testId = session.test_id;
   testState.sessionId = session.session_id;
   testState.savedSessionDbId = session.id;
+  testState.savedSessionName = session.session_name || null;
     testState.currentIndex = session.current_question_index;
   testState.answers = parsedAnswers || {};
   testState.answerStatus = parsedAnswerStatus || {};
@@ -10674,6 +10750,7 @@ async function loadSavedSession(sessionId) {
   TEST_CONFIG.timeLimitMinutes = null; // older saves had no timer
   TEST_CONFIG.selectedGroups = [];     // older saves: rebuilt from the topic ids when the dropdown opens
   TEST_CONFIG.testNumber = null;       // older saves are numbered when resumed
+  TEST_CONFIG.openedAt = null;
   Object.assign(TEST_CONFIG, parsedConfig || {});
 
   // Regenerate the exact shuffle seed used when the session started.
@@ -11006,7 +11083,7 @@ async function loadSavedTestsInModal() {
     // Show saved database sessions
     if (hasSaved) {
       savedSessions.forEach((session) => {
-        const savedDate = new Date(session.updated_at || session.created_at);
+        const savedDate = savedSessionOpenedDate(session);
         const progress = session.progress_percent || 0;
         
         const card = document.createElement('div');
@@ -11014,11 +11091,15 @@ async function loadSavedTestsInModal() {
         card.onmouseenter = () => { card.style.borderColor = 'rgba(201,168,76,0.4)'; card.style.background = 'rgba(201,168,76,0.04)'; };
         card.onmouseleave = () => { card.style.borderColor = 'var(--navy-border)'; card.style.background = 'var(--navy-light)'; };
 
+        card.setAttribute('data-session-card', session.id);
         card.innerHTML = `
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
-            <div style="min-width:0;">
-              <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;">${escapeHtml(session.session_name)}</div>
-              <div style="font-size:11.5px;color:var(--text-muted);">Saved ${savedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${savedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div>
+            <div style="min-width:0;flex:1;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                <div data-session-name="${session.id}" style="font-size:14px;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;min-width:0;">${escapeHtml(session.session_name)}</div>
+                <button type="button" onclick="renameSavedSession('${session.id}', event)" title="Rename this saved test" aria-label="Rename this saved test" style="flex-shrink:0;background:transparent;border:1px solid rgba(201,168,76,0.25);color:#c9a84c;width:24px;height:24px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;">${RENAME_BTN_ICON}</button>
+              </div>
+              <div style="font-size:11.5px;color:var(--text-muted);">Opened ${savedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${savedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div>
             </div>
             <button onclick="deleteSavedSession('${session.id}', event)"
               style="flex-shrink:0;background:rgba(239,68,68,0.08);border:1.5px solid rgba(239,68,68,0.25);color:#f87171;padding:5px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;transition:all 0.15s;"
