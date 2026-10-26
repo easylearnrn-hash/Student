@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS saved_test_sessions (
   id                       UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
   session_name             TEXT,
   student_id               TEXT          NOT NULL,
+  owner_auth_id            UUID          NOT NULL DEFAULT auth.uid(),  -- the signed-in Supabase user who owns this row
   test_id                  BIGINT        REFERENCES tests(id) ON DELETE SET NULL,
   session_id               TEXT,
   current_question_index   INT           NOT NULL DEFAULT 0,
@@ -48,44 +49,46 @@ CREATE TRIGGER trg_saved_test_sessions_updated_at
   BEFORE UPDATE ON saved_test_sessions
   FOR EACH ROW EXECUTE FUNCTION update_saved_test_sessions_updated_at();
 
+-- Tables created before the ownership column existed (safe to re-run)
+ALTER TABLE saved_test_sessions ADD COLUMN IF NOT EXISTS owner_auth_id UUID DEFAULT auth.uid();
+DELETE FROM saved_test_sessions WHERE owner_auth_id IS NULL;  -- unattributed rows could never be shown to their owner
+ALTER TABLE saved_test_sessions ALTER COLUMN owner_auth_id SET DEFAULT auth.uid();
+ALTER TABLE saved_test_sessions ALTER COLUMN owner_auth_id SET NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_saved_test_sessions_owner ON saved_test_sessions (owner_auth_id);
+
 -- ============================================================
--- RLS
--- Anyone (anon) can save/load their own sessions by student_id.
--- Admins get full access.
+-- RLS — every signed-in person (student, teacher or admin) can see, change and delete ONLY
+-- their own saved tests. There is deliberately NO admin override: nobody can read an
+-- admin's saved tests, and an admin cannot read a student's. Signed-out visitors get nothing.
 -- ============================================================
 ALTER TABLE saved_test_sessions ENABLE ROW LEVEL SECURITY;
 
--- Drop existing policies first so this script is safe to re-run
-DROP POLICY IF EXISTS "anon_insert_own_sessions" ON saved_test_sessions;
-DROP POLICY IF EXISTS "anon_select_own_sessions" ON saved_test_sessions;
-DROP POLICY IF EXISTS "anon_update_own_sessions" ON saved_test_sessions;
-DROP POLICY IF EXISTS "anon_delete_own_sessions" ON saved_test_sessions;
+-- Remove every earlier policy (including the old "anyone can read/write everything" ones)
+DO $$
+DECLARE pol record;
+BEGIN
+  FOR pol IN SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'saved_test_sessions' LOOP
+    EXECUTE format('DROP POLICY %I ON public.saved_test_sessions', pol.policyname);
+  END LOOP;
+END $$;
 
--- Anon / public: insert own rows
-CREATE POLICY "anon_insert_own_sessions"
-  ON saved_test_sessions
-  FOR INSERT
-  TO anon, authenticated
-  WITH CHECK (true);
+REVOKE ALL ON saved_test_sessions FROM anon;
+REVOKE ALL ON saved_test_sessions FROM PUBLIC;
+GRANT SELECT, INSERT, UPDATE, DELETE ON saved_test_sessions TO authenticated;
 
--- Anon / public: select own rows
-CREATE POLICY "anon_select_own_sessions"
-  ON saved_test_sessions
-  FOR SELECT
-  TO anon, authenticated
-  USING (true);
+CREATE POLICY "saved_sessions_owner_select" ON saved_test_sessions
+  FOR SELECT TO authenticated
+  USING (owner_auth_id = (SELECT auth.uid()));
 
--- Anon / public: update own rows
-CREATE POLICY "anon_update_own_sessions"
-  ON saved_test_sessions
-  FOR UPDATE
-  TO anon, authenticated
-  USING (true)
-  WITH CHECK (true);
+CREATE POLICY "saved_sessions_owner_insert" ON saved_test_sessions
+  FOR INSERT TO authenticated
+  WITH CHECK (owner_auth_id = (SELECT auth.uid()));
 
--- Anon / public: delete own rows
-CREATE POLICY "anon_delete_own_sessions"
-  ON saved_test_sessions
-  FOR DELETE
-  TO anon, authenticated
-  USING (true);
+CREATE POLICY "saved_sessions_owner_update" ON saved_test_sessions
+  FOR UPDATE TO authenticated
+  USING (owner_auth_id = (SELECT auth.uid()))
+  WITH CHECK (owner_auth_id = (SELECT auth.uid()));
+
+CREATE POLICY "saved_sessions_owner_delete" ON saved_test_sessions
+  FOR DELETE TO authenticated
+  USING (owner_auth_id = (SELECT auth.uid()));
