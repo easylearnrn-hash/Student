@@ -653,6 +653,40 @@ body{
   flex-shrink: 0;
 }
 
+/* ── HIGHLIGHTER (admin only) ── */
+.hl-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 37px;
+  padding: 0;
+  background: rgba(255,255,255,0.05);
+  border: 1.5px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.hl-btn:hover { background: rgba(255,255,255,0.07); color: #f1f5f9; }
+.hl-btn.active {
+  background: linear-gradient(135deg, rgba(201,168,76,0.22), rgba(201,168,76,0.10));
+  border-color: rgba(201,168,76,0.45);
+  color: var(--gold-primary);
+}
+.question-stem.hl-active {
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M9 11l-6 6v3h9l3-3' fill='%23fde047' stroke='%230f172a' stroke-width='1.6' stroke-linejoin='round'/><path d='M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4' fill='%23fde047' stroke='%230f172a' stroke-width='1.6' stroke-linejoin='round'/></svg>") 2 22, text;
+}
+mark.q-hl {
+  background: #fde047;
+  color: #0f172a;
+  border-radius: 3px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 /* ── TOPICS (leave test) BUTTON — same look as the case study ── */
 .topics-btn {
   display: flex;
@@ -821,6 +855,7 @@ body.invert-read .test-title { color: #0f172a; }
 body.invert-read .progress-text { color: #334155; }
 body.invert-read .timer { background: #fee2e2; border-color: #dc2626; color: #991b1b; }
 body.invert-read .topics-btn,
+body.invert-read .hl-btn,
 body.invert-read .flag-btn,
 body.invert-read .zoom-picker,
 body.invert-read .lang-picker,
@@ -830,9 +865,11 @@ body.invert-read .lang-btn { color: #334155; }
 body.invert-read .zoom-btn:hover,
 body.invert-read .lang-btn:hover,
 body.invert-read .flag-btn:hover,
+body.invert-read .hl-btn:hover,
 body.invert-read .topics-btn:hover { background: #e2e8f0; color: #0f172a; }
 body.invert-read .zoom-btn.active,
 body.invert-read .lang-btn.active,
+body.invert-read .hl-btn.active,
 body.invert-read .invert-btn.active { background: #fdf3d0; border-color: #a8832a; color: #6b4e0a; }
 
 body.invert-read .question-panel,
@@ -4333,6 +4370,10 @@ body[data-zoom="large"] .question-type-badge {
           <button class="zoom-btn"        data-size="medium" onclick="setZoom('medium')" title="Medium text">A</button>
           <button class="zoom-btn"        data-size="large"  onclick="setZoom('large')"  title="Large text">A</button>
         </div>
+        <!-- HIGHLIGHTER — administrators only (shown after the admin check passes) -->
+        <button class="hl-btn" id="highlightBtn" type="button" style="display:none" onclick="toggleHighlighter()" aria-pressed="false" title="Highlighter — click or drag over words in the question to highlight them">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-6 6v3h9l3-3"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+        </button>
         <!-- INVERT COLORS (bright background, dark text) -->
         <button class="invert-btn" id="invertBtn" onclick="toggleInvert()" title="Invert colors (bright background, dark text)" aria-pressed="false">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>
@@ -6629,6 +6670,198 @@ function toggleInvert() {
   setInvert(localStorage.getItem('acnhs_test_invert') === '1');
 })();
 
+// ── HIGHLIGHTER (administrators only) ─────────────────────────────────────
+// With the highlighter on, a click highlights the word under the cursor (click it again to remove it)
+// and dragging highlights the selected text. Only the question text is highlightable, never the answers.
+// Highlights live in memory, per question, and are cleared as soon as that question is answered.
+const HIGHLIGHTER = { allowed: false, on: false };
+const questionHighlights = new Map(); // "<questionId>|<language>" -> [[start, end], ...] character offsets
+
+function hlKey() {
+  const q = testState.questions[testState.currentIndex];
+  return q ? `${q.id}|${testState.language}` : null;
+}
+
+function hlAdd(list, s, e) {
+  const out = [];
+  let ns = s, ne = e;
+  list.forEach(([a, b]) => {
+    if (b < ns || a > ne) out.push([a, b]);
+    else { ns = Math.min(ns, a); ne = Math.max(ne, b); }
+  });
+  out.push([ns, ne]);
+  return out.sort((x, y) => x[0] - y[0]);
+}
+
+function hlSubtract(list, s, e) {
+  const out = [];
+  list.forEach(([a, b]) => {
+    if (b <= s || a >= e) { out.push([a, b]); return; }
+    if (a < s) out.push([a, s]);
+    if (b > e) out.push([e, b]);
+  });
+  return out;
+}
+
+function hlCovers(list, s, e) { return list.some(([a, b]) => a <= s && b >= e); }
+
+function hlTextNodes(root) {
+  const nodes = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let pos = 0, n;
+  while ((n = walker.nextNode())) {
+    nodes.push({ node: n, start: pos, end: pos + n.nodeValue.length });
+    pos += n.nodeValue.length;
+  }
+  return nodes;
+}
+
+function hlOffset(root, node, offset) {
+  const r = document.createRange();
+  r.selectNodeContents(root);
+  r.setEnd(node, offset);
+  return r.toString().length;
+}
+
+function hlRangeFromOffsets(root, s, e) {
+  const nodes = hlTextNodes(root);
+  const a = nodes.find(n => s >= n.start && s <= n.end);
+  const b = nodes.find(n => e >= n.start && e <= n.end);
+  if (!a || !b) return null;
+  const r = document.createRange();
+  r.setStart(a.node, s - a.start);
+  r.setEnd(b.node, e - b.start);
+  return r;
+}
+
+// Repaint the current question's highlights from the stored ranges
+function applyStemHighlights() {
+  const stem = document.getElementById('questionStem');
+  if (!stem) return;
+  const q = testState.questions[testState.currentIndex];
+  stem.classList.toggle('hl-active', HIGHLIGHTER.allowed && HIGHLIGHTER.on && !(q && q.isDisclaimer));
+  stem.querySelectorAll('mark.q-hl').forEach(m => m.replaceWith(...m.childNodes));
+  stem.normalize();
+  const key = hlKey();
+  const ranges = (key && !(q && q.isDisclaimer) && questionHighlights.get(key)) || [];
+  if (!ranges.length) return;
+  hlTextNodes(stem).forEach(({ node, start, end }) => {
+    const parts = ranges
+      .map(([a, b]) => [Math.max(a, start) - start, Math.min(b, end) - start])
+      .filter(([a, b]) => b > a)
+      .sort((x, y) => y[0] - x[0]); // last piece first so earlier offsets stay valid
+    parts.forEach(([a, b]) => {
+      const r = document.createRange();
+      r.setStart(node, a);
+      r.setEnd(node, b);
+      const m = document.createElement('mark');
+      m.className = 'q-hl';
+      r.surroundContents(m);
+    });
+  });
+}
+
+function clearQuestionHighlights(questionId) {
+  let removed = false;
+  [...questionHighlights.keys()].forEach(k => {
+    if (k.startsWith(String(questionId) + '|')) { questionHighlights.delete(k); removed = true; }
+  });
+  if (removed) applyStemHighlights();
+}
+
+function setHighlighter(on) {
+  HIGHLIGHTER.on = !!on && HIGHLIGHTER.allowed;
+  const btn = document.getElementById('highlightBtn');
+  if (btn) {
+    btn.classList.toggle('active', HIGHLIGHTER.on);
+    btn.setAttribute('aria-pressed', HIGHLIGHTER.on ? 'true' : 'false');
+  }
+  applyStemHighlights();
+}
+
+function toggleHighlighter() {
+  if (!HIGHLIGHTER.allowed) return;
+  setHighlighter(!HIGHLIGHTER.on);
+}
+
+function hlWordAt(text, i) {
+  const isWord = c => /[\p{L}\p{N}'’\-]/u.test(c);
+  if (i < 0 || i >= text.length || !isWord(text[i])) return null;
+  let s = i, e = i + 1;
+  while (s > 0 && isWord(text[s - 1])) s--;
+  while (e < text.length && isWord(text[e])) e++;
+  return [s, e];
+}
+
+function hlCaretAt(x, y) {
+  if (document.caretPositionFromPoint) {
+    const p = document.caretPositionFromPoint(x, y);
+    return p ? { node: p.offsetNode, offset: p.offset } : null;
+  }
+  if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(x, y);
+    return r ? { node: r.startContainer, offset: r.startOffset } : null;
+  }
+  return null;
+}
+
+function onStemPointerUp(e) {
+  if (!HIGHLIGHTER.allowed || !HIGHLIGHTER.on) return;
+  const stem = document.getElementById('questionStem');
+  const q = testState.questions[testState.currentIndex];
+  if (!stem || !q || q.isDisclaimer) return;
+  const key = hlKey();
+  const text = stem.textContent;
+  let list = questionHighlights.get(key) || [];
+
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed && sel.rangeCount) {
+    // Dragged selection: highlight it (trimmed), then drop the browser selection
+    const r = sel.getRangeAt(0);
+    if (!stem.contains(r.startContainer) || !stem.contains(r.endContainer)) return;
+    let s = hlOffset(stem, r.startContainer, r.startOffset);
+    let en = hlOffset(stem, r.endContainer, r.endOffset);
+    while (s < en && /\s/.test(text[s])) s++;
+    while (en > s && /\s/.test(text[en - 1])) en--;
+    sel.removeAllRanges();
+    if (en <= s) return;
+    list = hlAdd(list, s, en);
+  } else {
+    // Plain click: toggle the word under the pointer (only if the pointer is really on that word)
+    const caret = hlCaretAt(e.clientX, e.clientY);
+    if (!caret || !stem.contains(caret.node)) return;
+    const word = hlWordAt(text, hlOffset(stem, caret.node, caret.offset)) ||
+                 hlWordAt(text, hlOffset(stem, caret.node, caret.offset) - 1);
+    if (!word) return;
+    const wr = hlRangeFromOffsets(stem, word[0], word[1]);
+    const onWord = wr && [...wr.getClientRects()].some(b =>
+      e.clientX >= b.left - 2 && e.clientX <= b.right + 2 && e.clientY >= b.top - 2 && e.clientY <= b.bottom + 2);
+    if (!onWord) return;
+    list = hlCovers(list, word[0], word[1]) ? hlSubtract(list, word[0], word[1]) : hlAdd(list, word[0], word[1]);
+  }
+  if (list.length) questionHighlights.set(key, list); else questionHighlights.delete(key);
+  applyStemHighlights();
+}
+document.getElementById('questionStem').addEventListener('mouseup', onStemPointerUp);
+
+// Administrators only: shown after the server confirms an admin_accounts row for the signed-in user.
+async function verifyHighlighterAccess() {
+  let ok = false;
+  try {
+    const uid = await getSignedInUserId();
+    if (uid) {
+      const { data, error } = await withTimeout(
+        db.from('admin_accounts').select('auth_user_id').eq('auth_user_id', uid).maybeSingle(),
+        6000, 'Admin check timed out');
+      ok = !error && !!data && data.auth_user_id === uid;
+    }
+  } catch (e) { ok = false; }
+  HIGHLIGHTER.allowed = ok;
+  const btn = document.getElementById('highlightBtn');
+  if (btn) btn.style.display = ok ? 'flex' : 'none';
+  if (!ok) setHighlighter(false);
+}
+
 // Language switch — called by the picker buttons
 function switchLanguage(lang) {
   if (lang === testState.language) return;
@@ -8070,6 +8303,7 @@ function isEnglishSubject() {
 async function initializeNewTest() {
   clearLocalStorage();
   testState.savedSessionDbId = null;
+  questionHighlights.clear();
   setLoadingStatus('Preparing session...');
   
   testState.sessionId = generateSessionId();
@@ -8551,8 +8785,10 @@ function renderQuestion() {
         : `<p style="margin:0 0 10px 0;line-height:1.65">${p}</p>`
     ).join('');
   } else {
+ 
     stemEl.textContent = displayQuestion.stem;
   }
+  applyStemHighlights();
   
   // Render options (text from active language, id/value always from EN for correct-check)
   const container = document.getElementById('optionsContainer');
@@ -8710,6 +8946,9 @@ function handleAnswerChange(questionId, isMulti) {
     const checked = document.querySelector(`input[name="${inputName}"]:checked`);
     testState.answers[questionId] = checked ? checked.value : null;
   }
+
+  // The question has been answered: its highlights are done
+  if (testState.answers[questionId]) clearQuestionHighlights(questionId);
 
   delete testState.answerStatus[questionId];
   
@@ -9070,6 +9309,8 @@ function resetTestRunState() {
   testState.endTime = null;
   testState.savedSessionDbId = null;
   testState.snapshot = { en: null, hy: null };
+  questionHighlights.clear();
+  setHighlighter(false);
 }
 
 // Back to the start screen with the topic picker open (no grade is recorded).
@@ -11756,7 +11997,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Auth gate & role detection ─────────────────────────────────────────
   initSessionRole();
   // Role-gated UI waits for the (fast) ARNOMA admin check so admins get their tools
-  detectArnomaAdmin().finally(() => applySessionRole());
+  detectArnomaAdmin().finally(() => { applySessionRole(); verifyHighlighterAccess(); });
 
   // Initialize Supabase first
   initializeSupabase();
