@@ -5362,6 +5362,10 @@ function applySessionRole() {
   if (SESSION_ROLE.isTeacher) {
     revealBtn.style.display = 'inline-flex';
     if (teacherGradesBtn) teacherGradesBtn.style.display = 'inline-flex';
+    // Inbox buttons appear together with the other teacher buttons; the server admin check (verifyInboxAccess) still decides
+    if (typeof INBOX !== 'undefined' && !INBOX.checked) {
+      ['askInboxBtn', 'flagInboxBtn'].forEach(id => { const b = document.getElementById(id); if (b) b.style.display = 'inline-flex'; });
+    }
     
     // Show the Add Questions home button
     const teacherAddQHome = document.getElementById('teacherAddQuestionsHomeBtn');
@@ -7043,16 +7047,7 @@ document.getElementById('questionStem').addEventListener('mouseup', onStemPointe
 
 // Administrators only: shown after the server confirms an admin_accounts row for the signed-in user.
 async function verifyHighlighterAccess() {
-  let ok = false;
-  try {
-    const uid = await getSignedInUserId();
-    if (uid) {
-      const { data, error } = await withTimeout(
-        db.from('admin_accounts').select('auth_user_id').eq('auth_user_id', uid).maybeSingle(),
-        6000, 'Admin check timed out');
-      ok = !error && !!data && data.auth_user_id === uid;
-    }
-  } catch (e) { ok = false; }
+  const ok = await checkAdminAccount();
   HIGHLIGHTER.allowed = ok;
   const btn = document.getElementById('highlightBtn');
   if (btn) btn.style.display = ok ? 'flex' : 'none';
@@ -9484,7 +9479,7 @@ function toggleFlag() {
 // TEACHER INBOX — student flags + "Ask the teacher" (Supabase tables question_flags / teacher_questions)
 // Rows are owned by the signed-in student; only administrators can read everyone's rows (RLS).
 // ============================================
-const INBOX = { allowed: false, mode: null, askQuestion: null, flagsById: new Map() };
+const INBOX = { allowed: false, checked: false, mode: null, askQuestion: null, flagsById: new Map() };
 
 function inboxQuestionSnapshot(q) {
   const en = (testState.snapshot && testState.snapshot.en && testState.snapshot.en[testState.currentIndex]) || q;
@@ -9581,17 +9576,9 @@ async function sendAskTeacher() {
 }
 
 // Administrators only: confirmed server-side (admin_accounts row for the signed-in user); fails closed.
-async function verifyInboxAccess() {
-  let ok = false;
-  try {
-    const uid = await getSignedInUserId();
-    if (uid) {
-      const { data, error } = await withTimeout(
-        db.from('admin_accounts').select('auth_user_id').eq('auth_user_id', uid).maybeSingle(),
-        6000, 'Admin check timed out');
-      ok = !error && !!data && data.auth_user_id === uid;
-    }
-  } catch (e) { ok = false; }
+async function verifyInboxAccess(force) {
+  const ok = await checkAdminAccount(force);
+  INBOX.checked = true;
   INBOX.allowed = ok;
   ['askInboxBtn', 'flagInboxBtn'].forEach(id => {
     const b = document.getElementById(id);
@@ -9630,7 +9617,7 @@ function inboxQuestionHtml(r) {
 
 async function openTeacherInbox(mode) {
   // Re-check on every open; the database also enforces this with row-level security.
-  await verifyInboxAccess();
+  await verifyInboxAccess(true);
   if (!INBOX.allowed) { showToast('Administrators only', 'error'); return; }
   INBOX.mode = mode;
   const isAsk = mode === 'ask';
@@ -9857,6 +9844,26 @@ function showSaveModal(thenTopics) {
 
 function closeSaveModal() {
   document.getElementById('saveTestModal').classList.remove('active');
+}
+
+// One shared server-side admin check (admin_accounts row for the signed-in user). The in-flight/positive
+// result is reused so the highlighter and inbox buttons do not each repeat the session + database round trips.
+let _adminCheck = null;
+function checkAdminAccount(force) {
+  if (_adminCheck && !force) return _adminCheck;
+  const run = (async () => {
+    try {
+      const uid = await getSignedInUserId();
+      if (!uid) return false;
+      const { data, error } = await withTimeout(
+        db.from('admin_accounts').select('auth_user_id').eq('auth_user_id', uid).maybeSingle(),
+        6000, 'Admin check timed out');
+      return !error && !!data && data.auth_user_id === uid;
+    } catch (e) { return false; }
+  })();
+  _adminCheck = run;
+  run.then(ok => { if (!ok && _adminCheck === run) _adminCheck = null; });
+  return run;
 }
 
 // Saved tests are private: the database only returns rows owned by the signed-in Supabase user.
@@ -12521,7 +12528,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Auth gate & role detection ─────────────────────────────────────────
   initSessionRole();
   // Role-gated UI waits for the (fast) ARNOMA admin check so admins get their tools
-  detectArnomaAdmin().finally(() => { applySessionRole(); verifyHighlighterAccess(); verifyInboxAccess(); resolveSessionDisplayName(); });
+  verifyHighlighterAccess();
+  verifyInboxAccess();
+  detectArnomaAdmin().finally(() => { applySessionRole(); resolveSessionDisplayName(); });
 
   // Initialize Supabase first
   initializeSupabase();
