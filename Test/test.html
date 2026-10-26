@@ -3497,6 +3497,29 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
 /* Footer */
 #subjectModal .modal-footer { background: linear-gradient(0deg, rgba(201,168,76,0.04), transparent); }
 
+
+/* Saved-test topic pills with an expandable "+N more" */
+.session-topic-pill {
+  display: inline-flex; align-items: center;
+  background: rgba(201,168,76,0.09); border: 1px solid rgba(201,168,76,0.22);
+  color: #c9a84c; padding: 3px 9px; border-radius: 100px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.1px;
+  white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+}
+.session-extra-pill { display: none; }
+.session-topics-box.expanded .session-extra-pill { display: inline-flex; }
+.session-topics-box.expanded { max-height: 220px; overflow-y: auto; align-items: flex-start; }
+.session-more-toggle {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(201,168,76,0.28);
+  color: var(--gold-primary); padding: 3px 9px; border-radius: 100px;
+  font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 700;
+  transition: background 0.15s, border-color 0.15s;
+}
+.session-more-toggle:hover { background: rgba(201,168,76,0.14); border-color: var(--gold-primary); }
+.session-more-toggle svg { transition: transform 0.2s; }
+.session-topics-box.expanded .session-more-toggle svg { transform: rotate(180deg); }
+
 /* Study-note link beside a topic, and the empty-topic label */
 .topic-note-link {
   flex-shrink: 0;
@@ -8037,6 +8060,15 @@ function selectAllTopicsForSubject(subjectId, select) {
   updateSubjectStats();
 }
 
+// Expand / collapse the full topic list on a saved-test card
+function toggleSessionTopics(btn) {
+  const box = btn.closest('.session-topics-box');
+  if (!box) return;
+  const open = box.classList.toggle('expanded');
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  btn.firstChild.textContent = open ? 'Show less' : btn.dataset.more;
+}
+
 // Select / deselect every subject currently shown (respects the search filter)
 function toggleAllSubjects(checked) {
   document.querySelectorAll('#subjectList .subject-row:not(.search-hidden)').forEach(row => {
@@ -10659,12 +10691,15 @@ async function loadSavedSessions() {
       const visibleTopics = topicNames.slice(0, MAX_PILLS);
       const overflowCount = topicNames.length - visibleTopics.length;
 
-      const topicPillsHtml = visibleTopics.length
-        ? visibleTopics.map(name =>
-            `<span style="display:inline-flex;align-items:center;background:rgba(201,168,76,0.09);border:1px solid rgba(201,168,76,0.22);color:#c9a84c;padding:3px 9px;border-radius:100px;font-size:11px;font-weight:600;letter-spacing:0.1px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis" title="${name}">${name}</span>`
-          ).join('')
+      const pillHtml = (name, extra) => {
+        const safe = escapeHtml(name);
+        return `<span class="session-topic-pill${extra ? ' session-extra-pill' : ''}" title="${safe}">${safe}</span>`;
+      };
+      const topicPillsHtml = topicNames.length
+        ? visibleTopics.map(name => pillHtml(name, false)).join('')
+          + topicNames.slice(MAX_PILLS).map(name => pillHtml(name, true)).join('')
           + (overflowCount > 0
-            ? `<span style="display:inline-flex;align-items:center;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.10);color:#64748b;padding:3px 9px;border-radius:100px;font-size:11px;font-weight:600">+${overflowCount} more</span>`
+            ? `<button type="button" class="session-more-toggle" onclick="event.stopPropagation();toggleSessionTopics(this)" aria-expanded="false" data-more="+${overflowCount} more">+${overflowCount} more<svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></button>`
             : '')
         : `<span style="font-size:11.5px;color:#475569;font-style:italic">All topics</span>`;
 
@@ -10726,7 +10761,7 @@ async function loadSavedSessions() {
           </div>
 
           <!-- Topics / subjects pills -->
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:16px">
+          <div class="session-topics-box" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:10px 12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:10px;margin-bottom:16px">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             ${topicPillsHtml}
           </div>
