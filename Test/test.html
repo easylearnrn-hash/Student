@@ -3454,6 +3454,46 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
 }
 #subjectModal .topic-empty-label { width: 104px; text-align: center; margin-left: auto; font-size: 10.5px; letter-spacing: 0.3px; opacity: 0.7; }
 
+/* Select all subjects bar */
+.select-all-subjects {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 18px;
+  margin-bottom: 10px;
+  border: 1.5px solid rgba(201,168,76,0.28);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(201,168,76,0.09), rgba(2,6,23,0.35));
+  cursor: pointer; user-select: none;
+  transition: border-color 0.18s, background 0.18s;
+}
+.select-all-subjects:hover { border-color: rgba(201,168,76,0.55); }
+.select-all-subjects input[type=checkbox] { width: 18px; height: 18px; flex-shrink: 0; cursor: pointer; margin: 0; }
+.select-all-subjects-label {
+  font-size: 11px; font-weight: 800; letter-spacing: 1.4px; text-transform: uppercase; color: var(--gold-primary);
+}
+.select-all-subjects-meta {
+  margin-left: auto; font-size: 11.5px; font-weight: 600; color: #94a3b8; font-variant-numeric: tabular-nums;
+}
+#subjectModal .select-all-subjects input[type=checkbox],
+#subjectModal .subject-header input[type=checkbox],
+#subjectModal .topic-row input[type=checkbox] { position: relative; }
+#subjectModal .select-all-subjects input[type=checkbox] {
+  -webkit-appearance: none; appearance: none;
+  border: 1.5px solid rgba(201,168,76,0.45); border-radius: 5px;
+  background: rgba(2,6,23,0.55) center / 72% no-repeat;
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+#subjectModal .select-all-subjects input[type=checkbox]:hover { border-color: var(--gold-primary); box-shadow: 0 0 0 3px rgba(201,168,76,0.12); }
+#subjectModal .select-all-subjects input[type=checkbox]:checked {
+  background-color: var(--gold-primary); border-color: var(--gold-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230b1020' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+}
+/* Partial selection shows a gold dash */
+#subjectModal .select-all-subjects input[type=checkbox]:indeterminate,
+#subjectModal .subject-header input[type=checkbox]:indeterminate {
+  background-color: rgba(201,168,76,0.18); border-color: var(--gold-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c9a84c' stroke-width='3.4' stroke-linecap='round'%3E%3Cline x1='6' y1='12' x2='18' y2='12'/%3E%3C/svg%3E");
+}
+
 /* Footer */
 #subjectModal .modal-footer { background: linear-gradient(0deg, rgba(201,168,76,0.04), transparent); }
 
@@ -4513,6 +4553,11 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
     </div>
 
     <div class="modal-body" style="max-height:58vh;overflow-y:auto;padding:20px 32px">
+      <label class="select-all-subjects" id="selectAllSubjectsBar">
+        <input type="checkbox" id="selectAllSubjectsCb" onchange="toggleAllSubjects(this.checked)">
+        <span class="select-all-subjects-label">Select all subjects</span>
+        <span class="select-all-subjects-meta" id="selectAllSubjectsMeta"></span>
+      </label>
       <div id="subjectList"></div>
       <div id="subjectNoResults">
         <span class="no-results-icon">
@@ -7992,6 +8037,28 @@ function selectAllTopicsForSubject(subjectId, select) {
   updateSubjectStats();
 }
 
+// Select / deselect every subject currently shown (respects the search filter)
+function toggleAllSubjects(checked) {
+  document.querySelectorAll('#subjectList .subject-row:not(.search-hidden)').forEach(row => {
+    const id = row.id.replace('subject-row-', '');
+    selectAllTopicsForSubject(id, checked);
+  });
+  clearSubjectModalWarning();
+  updateSubjectStats();
+}
+
+function syncSelectAllSubjects() {
+  const cb = document.getElementById('selectAllSubjectsCb');
+  const meta = document.getElementById('selectAllSubjectsMeta');
+  if (!cb) return;
+  const cbs = [...document.querySelectorAll('#subjectList .subject-row:not(.search-hidden) .subject-header input[type=checkbox]')];
+  const full = cbs.filter(c => c.checked).length;
+  const partial = cbs.some(c => c.indeterminate);
+  cb.checked = cbs.length > 0 && full === cbs.length;
+  cb.indeterminate = !cb.checked && (full > 0 || partial);
+  if (meta) meta.textContent = cbs.length ? `${full} of ${cbs.length} selected` : '';
+}
+
 // Toggle a single topic checkbox and sync the parent subject state
 function toggleTopicInline(topicId, subjectId, forceChecked) {
   const cb  = document.getElementById(`topic-cb-${topicId}`);
@@ -8136,6 +8203,7 @@ function setFooterWords(subjects, topics) {
 function updateSubjectStats() {
   const sCount = selectedSubjects.size;
   const tCount = selectedTopics.size;
+  syncSelectAllSubjects();
 
   // Hidden spans (kept for any other JS that reads them)
   document.getElementById('selectedSubjectsCount').textContent = sCount;
@@ -8693,6 +8761,7 @@ function filterSubjectSearch(query) {
   });
 
   if (noResults) noResults.style.display = anyVisible ? 'none' : 'block';
+  syncSelectAllSubjects();
 }
 
 function clearSubjectSearch() {
