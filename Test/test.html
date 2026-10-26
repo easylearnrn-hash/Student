@@ -5343,6 +5343,7 @@ async function resolveSessionDisplayName() {
 
     SESSION_ROLE.userName = name;
     renderSessionIdentityPill();
+    if (document.getElementById('testTitleBtn')) renderTestTitle();
     if (!SESSION_ROLE.isTeacher) {
       const ccName = document.querySelector('#coldCallPanel .cc-name-text');
       if (ccName) ccName.textContent = name;
@@ -6219,7 +6220,8 @@ const TEST_CONFIG = {
   categoryFilter: null, // Optional: filter questions by category
   selectedTopicIds: [],   // Topic UUIDs chosen by the user
   selectedTopicNames: [], // Human-readable names — persisted so title works after resume
-  selectedGroups: []      // [{ subject, topics: [names] }] — shown in the "Your Test" dropdown
+  selectedGroups: [],     // [{ subject, topics: [names] }] — shown in the title dropdown
+  testNumber: null        // this student's running test number ("Anna Test #3")
 };
 
 // Feature flags — set false for DB tables/RPCs that don't exist yet
@@ -8360,6 +8362,7 @@ async function confirmTestSetup() {
 }
 
 async function launchTestFromSelection() {
+  TEST_CONFIG.testNumber = null; // a new test gets the next number
   // User is actively starting a NEW test based on the current modal selection.
   // Don't allow a previously-saved session (possibly for different topics like Cranial Nerves)
   // to bleed into this run.
@@ -8817,15 +8820,63 @@ async function resumeTest(saved) {
 // DISPLAY TITLE (TEST + TOPIC)
 // ============================================
 
-// Header title: "Your Test" with a dropdown listing the selected subjects and topics.
+// Header title: "{First name} Test #N" with a dropdown listing the selected subjects and topics.
+function studentFirstName() {
+  const full = String(SESSION_ROLE.userName || sessionStorage.getItem('userName') || localStorage.getItem('userName') || '').trim();
+  const first = full.split(/\s+/)[0] || '';
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : '';
+}
+
+// Next number for this student: one more than the highest of their completed tests, saved tests and
+// this device's own counter, so numbers keep increasing and are shared across computers.
+let _testNumberInFlight = false;
+async function computeNextTestNumber() {
+  let highest = 0;
+  let uid = null;
+  try { uid = await getSignedInUserId(); } catch (e) { /* offline */ }
+  const counterKey = 'arnoma:test-counter:' + (uid || getOwnerId());
+  try { highest = Number(localStorage.getItem(counterKey)) || 0; } catch (e) { /* storage unavailable */ }
+  if (uid && db) {
+    try {
+      const done = await withTimeout(
+        db.from('test_grade_history').select('id', { count: 'exact' })
+          .or(`auth_user_id.eq.${uid},owner_id.eq.${getOwnerId()}`)
+          .or('topics.is.null,topics.neq.Cold Call Session')
+          .limit(1),
+        6000, 'History count timed out');
+      if (!done.error && done.count != null) highest = Math.max(highest, done.count);
+    } catch (e) { console.warn('Test count skipped:', e && e.message); }
+    try {
+      const saved = await withTimeout(db.from('saved_test_sessions').select('test_config'), 6000, 'Saved tests timed out');
+      if (!saved.error) (saved.data || []).forEach(r => {
+        let cfg = r.test_config || {};
+        if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch (e) { cfg = {}; } }
+        highest = Math.max(highest, Number(cfg.testNumber) || 0);
+      });
+    } catch (e) { console.warn('Saved test numbers skipped:', e && e.message); }
+  }
+  const next = highest + 1;
+  try { localStorage.setItem(counterKey, String(next)); } catch (e) { /* storage unavailable */ }
+  return next;
+}
+
 function renderTestTitle() {
   const el = document.getElementById('testTitle');
   if (!el) return;
+  const name = studentFirstName() || 'Your';
+  const label = `${name} Test${TEST_CONFIG.testNumber ? ' #' + TEST_CONFIG.testNumber : ''}`;
   el.innerHTML = `
     <button type="button" class="title-menu-btn" id="testTitleBtn" aria-haspopup="true" aria-expanded="false" onclick="toggleTestTitleMenu(event)" title="Show the subjects and topics in this test">
-      <span>Your Test</span>
+      <span>${escapeHtml(label)}</span>
       <svg class="title-menu-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
     </button>`;
+  // A running test without a number yet (new test, or an older saved one) gets the next number
+  if (!TEST_CONFIG.testNumber && testState.startTime && !_testNumberInFlight) {
+    _testNumberInFlight = true;
+    computeNextTestNumber()
+      .then(n => { if (!TEST_CONFIG.testNumber && testState.startTime) TEST_CONFIG.testNumber = n; })
+      .finally(() => { _testNumberInFlight = false; renderTestTitle(); });
+  }
 }
 
 async function ensureSelectedGroups() {
@@ -9961,6 +10012,7 @@ function leaveTestEnd() {
 // Clears the finished/abandoned run so the next test starts completely fresh.
 function resetTestRunState() {
   closeTestTitleMenu();
+  TEST_CONFIG.testNumber = null;
   if (testState.timerInterval) { clearInterval(testState.timerInterval); testState.timerInterval = null; }
   window.removeEventListener('beforeunload', handleBeforeUnload);
   window.removeEventListener('pagehide', handleBeforeUnload, { capture: true });
@@ -10085,6 +10137,7 @@ function buildSavedSessionPayload(sessionName) {
       selectedTopicIds: TEST_CONFIG.selectedTopicIds || [],
       selectedTopicNames: TEST_CONFIG.selectedTopicNames || [],
       selectedGroups: TEST_CONFIG.selectedGroups || [],
+      testNumber: TEST_CONFIG.testNumber || null,
       categoryFilter: TEST_CONFIG.categoryFilter || null,
       questionCount: TEST_CONFIG.questionCount || null,
       shuffleQuestions: TEST_CONFIG.shuffleQuestions,
@@ -10620,6 +10673,7 @@ async function loadSavedSession(sessionId) {
   const parsedConfig = parseSessionField(session.test_config, {});
   TEST_CONFIG.timeLimitMinutes = null; // older saves had no timer
   TEST_CONFIG.selectedGroups = [];     // older saves: rebuilt from the topic ids when the dropdown opens
+  TEST_CONFIG.testNumber = null;       // older saves are numbered when resumed
   Object.assign(TEST_CONFIG, parsedConfig || {});
 
   // Regenerate the exact shuffle seed used when the session started.
