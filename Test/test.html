@@ -8841,6 +8841,18 @@ function closeSaveModal() {
   document.getElementById('saveTestModal').classList.remove('active');
 }
 
+// Saved tests are private: the database only returns rows owned by the signed-in Supabase user.
+// This returns that user's id, or null when nobody is signed in.
+async function getSignedInUserId() {
+  if (!db && !initializeSupabase()) return null;
+  try {
+    const { data } = await withTimeout(db.auth.getSession(), 6000, 'Session check timed out');
+    return (data && data.session && data.session.user && data.session.user.id) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // ── SAVE FOR LATER — Supabase only ───────────────────────────────────────
 // Nothing is written to this device. Supabase stores exactly: which questions were chosen, their
 // order, the order of each question's answer choices, the answers, flags, the current position and
@@ -8921,6 +8933,8 @@ async function saveTestSession() {
     if (!db && !initializeSupabase()) throw new Error('db_unavailable');
     // Refresh the owner header before writing so row-level security matches this user
     refreshSupabaseOwner();
+    // A saved test belongs to the signed-in account; without a sign-in nothing can be stored
+    if (!(await getSignedInUserId())) throw new Error('not_signed_in');
 
     const upsert = payload => withTimeout(
       db.from('saved_test_sessions')
@@ -8960,6 +8974,7 @@ async function saveTestSession() {
     if (isRlsBlocked) reason = 'the database refused the save (permissions). Please sign out, sign in again and retry.';
     else if (isMissingTable) reason = 'the saved-tests table is missing in Supabase (run ADD-SAVED-TEST-SESSIONS-TABLE.sql).';
     else if (isNetworkFailure(error) || msg === 'db_unavailable') reason = 'no connection to Supabase. Check your internet and press Save again.';
+    else if (msg === 'not_signed_in') reason = 'you are not signed in. Sign in again (this test stays open) and press Save again.';
     else if (msg === 'save_not_confirmed') reason = 'Supabase did not confirm the save. Press Save again.';
     else reason = msg || 'unknown error.';
     console.error('Save for later failed:', error);
@@ -9003,11 +9018,18 @@ async function loadSavedSessions() {
     // Refresh owner header so RLS recognises this user
     refreshSupabaseOwner();
 
+    // Not signed in = no saved tests to show (the database would return nothing anyway)
+    if (!(await getSignedInUserId())) {
+      const c = document.getElementById('savedSessionsContainer');
+      if (c) c.style.display = 'none';
+      return;
+    }
+
+    // No owner filter on purpose: row-level security returns ONLY this account's saved tests
     const { data: savedSessions, error } = await withTimeout(
       db
         .from('saved_test_sessions')
         .select('*')
-        .eq('student_id', getOwnerId())
         .order('updated_at', { ascending: false }),
       6000,
       'Loading saved sessions timed out'
@@ -9222,6 +9244,14 @@ async function loadSavedSession(sessionId) {
       .eq('id', sessionId)
       .single();
     
+    // Defence in depth on top of the database rule: never open a saved test that is not this account's
+    const _uid = session ? await getSignedInUserId() : null;
+    if (session && (!_uid || (session.owner_auth_id && session.owner_auth_id !== _uid))) {
+      _hideRlo();
+      showToast('This saved test does not belong to your account.', 'error');
+      return;
+    }
+
     if (error || !session) {
       console.error('Error loading session:', error);
       _hideRlo();
@@ -9578,8 +9608,7 @@ async function deleteSavedSession(sessionId, event) {
     const { error } = await db
       .from('saved_test_sessions')
       .delete()
-      .eq('id', sessionId)
-      .eq('student_id', getOwnerId());  // safety: can only delete own rows
+      .eq('id', sessionId);  // the database only lets you delete your own rows
     
     if (error) {
       console.error('Error deleting session:', error);
@@ -9627,10 +9656,10 @@ async function loadSavedTestsInModal() {
       }
     }
     
+    // Row-level security returns ONLY the signed-in account's own saved tests
     const { data: savedSessions, error } = await db
       .from('saved_test_sessions')
       .select('*')
-      .eq('student_id', getOwnerId())
       .order('updated_at', { ascending: false });
     
     if (error) {
