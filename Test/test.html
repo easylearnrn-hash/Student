@@ -542,6 +542,44 @@ body{
   overflow: hidden;
 }
 
+.title-menu-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: none; border: none; padding: 4px 6px; margin: -4px -6px;
+  border-radius: 8px; cursor: pointer;
+  font: inherit; letter-spacing: inherit; color: inherit;
+  transition: background 0.15s, color 0.15s;
+}
+.title-menu-btn:hover { background: rgba(201,168,76,0.10); color: var(--gold-light, #e6c870); }
+.title-menu-chev { color: var(--gold-primary); transition: transform 0.18s; flex-shrink: 0; }
+.title-menu-btn.open .title-menu-chev { transform: rotate(180deg); }
+.title-menu {
+  position: fixed; z-index: 4000;
+  min-width: 300px; max-width: min(460px, calc(100vw - 24px)); max-height: min(70vh, 560px);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: 6px 0 10px;
+  background: var(--navy-primary, #0f172a);
+  border: 1px solid rgba(201,168,76,0.28);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.55), 0 0 0 1px rgba(201,168,76,0.05) inset;
+  font-family: 'Inter', sans-serif;
+  scrollbar-width: thin; scrollbar-color: rgba(201,168,76,0.3) transparent;
+}
+.title-menu-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 18px 10px; font-size: 10px; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold-primary); border-bottom: 1px solid rgba(255,255,255,0.07); }
+.title-menu-head span { font-weight: 700; letter-spacing: 0.04em; text-transform: none; color: #94a3b8; font-size: 11px; }
+.title-menu-group { padding: 12px 18px 0; }
+.title-menu-subject { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; font-weight: 800; color: #f1f5f9; margin-bottom: 6px; }
+.title-menu-subject span { min-width: 22px; padding: 1px 8px; border-radius: 99px; background: rgba(201,168,76,0.16); color: var(--gold-primary); font-size: 11px; font-weight: 800; text-align: center; }
+.title-menu-group ul { list-style: none; margin: 0 0 6px; padding: 0 0 0 12px; border-left: 2px solid rgba(201,168,76,0.25); }
+.title-menu-group li { padding: 5px 0 5px 10px; font-size: 13px; font-weight: 500; line-height: 1.45; color: #cbd5e1; font-family: 'Inter', sans-serif; letter-spacing: 0; white-space: normal; }
+.title-menu-empty { padding: 18px; font-size: 13px; color: #94a3b8; }
+body.invert-read .title-menu { background: #ffffff; border-color: #a8832a; box-shadow: 0 16px 40px rgba(15,23,42,0.25); }
+body.invert-read .title-menu-head { color: #6b4e0a; border-bottom-color: #cbd5e1; }
+body.invert-read .title-menu-head span { color: #475569; }
+body.invert-read .title-menu-subject { color: #0f172a; }
+body.invert-read .title-menu-subject span { background: #fdf3d0; color: #6b4e0a; }
+body.invert-read .title-menu-group li { color: #1e293b; }
+body.invert-read .title-menu-group ul { border-left-color: #a8832a; }
+body.invert-read .title-menu-btn:hover { background: #fdf3d0; color: #6b4e0a; }
 .test-title {
   font-family: 'Playfair Display', serif;
   font-size: 18px;
@@ -6180,7 +6218,8 @@ const TEST_CONFIG = {
   testId: null, // Will be loaded from Supabase or URL parameter
   categoryFilter: null, // Optional: filter questions by category
   selectedTopicIds: [],   // Topic UUIDs chosen by the user
-  selectedTopicNames: []  // Human-readable names — persisted so title works after resume
+  selectedTopicNames: [], // Human-readable names — persisted so title works after resume
+  selectedGroups: []      // [{ subject, topics: [names] }] — shown in the "Your Test" dropdown
 };
 
 // Feature flags — set false for DB tables/RPCs that don't exist yet
@@ -7402,6 +7441,22 @@ function buildTopicRows(allTopics, counts, notes) {
 }
 
 // Selected rows -> every topic id whose questions belong to them (empty siblings add nothing).
+// Selected topic rows grouped under their subject (for the "Your Test" dropdown in the header).
+function buildSelectedGroups(rowIds) {
+  const bySubject = new Map();
+  (rowIds || []).forEach(id => {
+    const t = availableTopics.find(x => x.id === id);
+    if (!t) return;
+    const subj = (allSubjects || []).find(x => x.id === t.subject_id);
+    if (!bySubject.has(t.subject_id)) {
+      bySubject.set(t.subject_id, { subject: subj ? subj.name : 'Other', order: subj ? (subj.display_order || 0) : 9999, topics: [] });
+    }
+    const g = bySubject.get(t.subject_id);
+    if (!g.topics.includes(t.name)) g.topics.push(t.name);
+  });
+  return Array.from(bySubject.values()).sort((a, b) => a.order - b.order).map(g => ({ subject: g.subject, topics: g.topics }));
+}
+
 function expandSelectedTopicIds(ids) {
   const sib = window._topicSiblings || new Map();
   const counts = window._cachedTopicCounts || {};
@@ -8079,6 +8134,7 @@ async function startFromSubjectModal() {
   TEST_CONFIG.selectedTopicNames = Array.from(selectedTopics)
     .map(id => availableTopics.find(t => t.id === id)?.name)
     .filter(Boolean);
+  TEST_CONFIG.selectedGroups = buildSelectedGroups(Array.from(selectedTopics));
 
   // ── Topic question-count validation ──────────────────────────────────────
   // Use the cached count map (built when the modal opened) to determine which
@@ -8110,6 +8166,7 @@ async function startFromSubjectModal() {
     TEST_CONFIG.selectedTopicNames = filledTopicIds
       .map(id => availableTopics.find(t => t.id === id)?.name)
       .filter(Boolean);
+    TEST_CONFIG.selectedGroups = buildSelectedGroups(filledTopicIds);
     showToast(
       `${emptyTopicIds.length} topic${emptyTopicIds.length !== 1 ? 's' : ''} skipped (no questions yet)`,
       'info'
@@ -8656,7 +8713,7 @@ async function initializeNewTest() {
   }
   
   // Initialize UI
-  document.getElementById('testTitle').textContent = getDisplayTestTitle();
+  renderTestTitle();
   applyLanguagePicker();
   initializeTimer();
   renderQuestionNavigator();
@@ -8747,7 +8804,7 @@ async function resumeTest(saved) {
     console.log('🌐 Bilingual snapshot rebuilt on resume');
   }
   
-  document.getElementById('testTitle').textContent = getDisplayTestTitle();
+  renderTestTitle();
   applyLanguagePicker();
   initializeTimer();
   renderQuestionNavigator();
@@ -8759,6 +8816,85 @@ async function resumeTest(saved) {
 // ============================================
 // DISPLAY TITLE (TEST + TOPIC)
 // ============================================
+
+// Header title: "Your Test" with a dropdown listing the selected subjects and topics.
+function renderTestTitle() {
+  const el = document.getElementById('testTitle');
+  if (!el) return;
+  el.innerHTML = `
+    <button type="button" class="title-menu-btn" id="testTitleBtn" aria-haspopup="true" aria-expanded="false" onclick="toggleTestTitleMenu(event)" title="Show the subjects and topics in this test">
+      <span>Your Test</span>
+      <svg class="title-menu-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>`;
+}
+
+async function ensureSelectedGroups() {
+  if (TEST_CONFIG.selectedGroups && TEST_CONFIG.selectedGroups.length) return TEST_CONFIG.selectedGroups;
+  const ids = TEST_CONFIG.selectedTopicIds || [];
+  try {
+    if (ids.length && (db || initializeSupabase())) {
+      const [t, sub] = await Promise.all([
+        db.from('test_topics').select('id,name,subject_id').in('id', ids),
+        window._cachedSubjects ? Promise.resolve({ data: window._cachedSubjects }) : db.from('test_subjects').select('id,name,display_order')
+      ]);
+      if (!t.error && t.data && t.data.length) {
+        const subjects = (sub && sub.data) || [];
+        const by = new Map();
+        t.data.forEach(row => {
+          const sj = subjects.find(x => x.id === row.subject_id);
+          if (!by.has(row.subject_id)) by.set(row.subject_id, { subject: sj ? sj.name : 'Other', order: sj ? (sj.display_order || 0) : 9999, topics: [] });
+          const g = by.get(row.subject_id);
+          if (!g.topics.includes(row.name)) g.topics.push(row.name);
+        });
+        TEST_CONFIG.selectedGroups = Array.from(by.values()).sort((a, b) => a.order - b.order).map(g => ({ subject: g.subject, topics: g.topics }));
+        return TEST_CONFIG.selectedGroups;
+      }
+    }
+  } catch (e) { console.warn('Could not load subjects for the title menu:', e && e.message); }
+  const names = TEST_CONFIG.selectedTopicNames || [];
+  return names.length ? [{ subject: '', topics: names }] : [];
+}
+
+function closeTestTitleMenu() {
+  const menu = document.getElementById('testTitleMenu');
+  if (menu) menu.remove();
+  const btn = document.getElementById('testTitleBtn');
+  if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('open'); }
+}
+
+async function toggleTestTitleMenu(ev) {
+  if (ev) ev.stopPropagation();
+  if (document.getElementById('testTitleMenu')) { closeTestTitleMenu(); return; }
+  const btn = document.getElementById('testTitleBtn');
+  if (!btn) return;
+  const groups = await ensureSelectedGroups();
+  if (document.getElementById('testTitleMenu')) return;
+
+  const topicCount = groups.reduce((n, g) => n + g.topics.length, 0);
+  const menu = document.createElement('div');
+  menu.id = 'testTitleMenu';
+  menu.className = 'title-menu';
+  menu.setAttribute('role', 'menu');
+  menu.innerHTML = `
+    <div class="title-menu-head">Selected subjects &amp; topics<span>${topicCount} topic${topicCount !== 1 ? 's' : ''}</span></div>
+    ${groups.length ? groups.map(g => `
+      <div class="title-menu-group">
+        ${g.subject ? `<div class="title-menu-subject">${escapeHtml(g.subject)}<span>${g.topics.length}</span></div>` : ''}
+        <ul>${g.topics.map(t => `<li>${escapeHtml(t)}</li>`).join('')}</ul>
+      </div>`).join('') : '<div class="title-menu-empty">No topics selected.</div>'}`;
+  document.body.appendChild(menu);
+  const r = btn.getBoundingClientRect();
+  menu.style.top = Math.round(r.bottom + 10) + 'px';
+  menu.style.left = Math.max(12, Math.min(Math.round(r.left), window.innerWidth - menu.offsetWidth - 12)) + 'px';
+  btn.setAttribute('aria-expanded', 'true');
+  btn.classList.add('open');
+}
+
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('testTitleMenu');
+  if (menu && !menu.contains(e.target) && !e.target.closest('#testTitleBtn')) closeTestTitleMenu();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTestTitleMenu(); });
 
 function getDisplayTestTitle() {
   // Use the stored topic names (set at selection time + persisted in localStorage).
@@ -9824,6 +9960,7 @@ function leaveTestEnd() {
 
 // Clears the finished/abandoned run so the next test starts completely fresh.
 function resetTestRunState() {
+  closeTestTitleMenu();
   if (testState.timerInterval) { clearInterval(testState.timerInterval); testState.timerInterval = null; }
   window.removeEventListener('beforeunload', handleBeforeUnload);
   window.removeEventListener('pagehide', handleBeforeUnload, { capture: true });
@@ -9947,6 +10084,7 @@ function buildSavedSessionPayload(sessionName) {
       testId: TEST_CONFIG.testId,
       selectedTopicIds: TEST_CONFIG.selectedTopicIds || [],
       selectedTopicNames: TEST_CONFIG.selectedTopicNames || [],
+      selectedGroups: TEST_CONFIG.selectedGroups || [],
       categoryFilter: TEST_CONFIG.categoryFilter || null,
       questionCount: TEST_CONFIG.questionCount || null,
       shuffleQuestions: TEST_CONFIG.shuffleQuestions,
@@ -10481,6 +10619,7 @@ async function loadSavedSession(sessionId) {
   // Restore test config
   const parsedConfig = parseSessionField(session.test_config, {});
   TEST_CONFIG.timeLimitMinutes = null; // older saves had no timer
+  TEST_CONFIG.selectedGroups = [];     // older saves: rebuilt from the topic ids when the dropdown opens
   Object.assign(TEST_CONFIG, parsedConfig || {});
 
   // Regenerate the exact shuffle seed used when the session started.
@@ -10523,7 +10662,7 @@ async function loadSavedSession(sessionId) {
     console.log('🌐 Bilingual snapshot rebuilt from saved questions');
   }
   attachNoteLinks(testState.questions);
-  document.getElementById('testTitle').textContent = getDisplayTestTitle();
+  renderTestTitle();
   applyLanguagePicker();
     
     // Show test container
@@ -11029,7 +11168,7 @@ async function submitColdCallGrades() {
    const gradePayloads = [];
 
    // Title and topic info
-   const title = document.getElementById('testTitle') ? document.getElementById('testTitle').textContent || 'Cold Call Session' : 'Teacher Cold Call';
+   const title = document.getElementById('testTitle') ? (getDisplayTestTitle() || 'Cold Call Session') : 'Teacher Cold Call';
    
    // Loop through all answered students and compute their A-F
    for (const [studentId, stats] of coldCallState.analytics.entries()) {
