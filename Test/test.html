@@ -4003,6 +4003,22 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
 }
 .gh-modal-close:hover { background: rgba(255,255,255,0.1); color: #e2e8f0; }
 
+/* Tests / Cold calls switch */
+.gh-tabs { display: flex; gap: 10px; padding: 16px 28px 0; flex-shrink: 0; }
+.gh-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 18px; border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.03);
+  color: #94a3b8;
+  font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.2px;
+  cursor: pointer; transition: all 0.15s;
+}
+.gh-tab:hover { border-color: rgba(201,168,76,0.45); color: #e2e8f0; }
+.gh-tab.active { background: rgba(201,168,76,0.14); border-color: var(--gold-primary, #c9a84c); color: var(--gold-primary, #c9a84c); }
+.gh-tab-count { min-width: 20px; padding: 1px 7px; border-radius: 99px; background: rgba(255,255,255,0.08); font-size: 11px; font-weight: 800; text-align: center; }
+.gh-tab.active .gh-tab-count { background: rgba(201,168,76,0.25); }
+
 /* Search bar */
 .gh-modal-search-wrap {
   padding: 16px 28px 0;
@@ -5137,6 +5153,9 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
       </div>
       <button class="gh-modal-close" onclick="closeGradeHistoryModal()" aria-label="Close">&times;</button>
     </div>
+
+    <!-- Tests / Cold calls -->
+    <div class="gh-tabs" id="gradeModalTabs" role="tablist" style="display:none"></div>
 
     <!-- Search -->
     <div class="gh-modal-search-wrap">
@@ -12168,7 +12187,8 @@ async function saveTestGrade(results) {
       .order('taken_at', { ascending: false });
 
     if (fetchErr) throw fetchErr;
-    return history || [];
+    // Cold-call sessions are not tests the student took; they stay out of the student's grade history
+    return (history || []).filter(r => !isColdCallRow(r));
   } catch (e) {
     console.error('saveTestGrade error:', e);
     return null;
@@ -12259,6 +12279,33 @@ function toggleGradesCard() {
 
 // ─── Teacher: open grade history modal for ALL students ───────
 let _allGradeHistory = [];
+let _gradeTab = 'tests'; // 'tests' | 'cold'
+
+// Cold-call sessions are saved in the same table as tests; they are told apart by their title/topic.
+function isColdCallRow(r) {
+  return (r.topics || '') === 'Cold Call Session' || /^cold call:/i.test(r.test_title || '');
+}
+function _gradeRowsForTab() {
+  return _allGradeHistory.filter(r => (_gradeTab === 'cold') === isColdCallRow(r));
+}
+function renderGradeTabs() {
+  const el = document.getElementById('gradeModalTabs');
+  if (!el) return;
+  const cold = _allGradeHistory.filter(isColdCallRow).length;
+  const tests = _allGradeHistory.length - cold;
+  el.style.display = 'flex';
+  el.innerHTML = `
+    <button type="button" class="gh-tab${_gradeTab === 'tests' ? ' active' : ''}" role="tab" onclick="setGradeTab('tests')">Tests <span class="gh-tab-count">${tests}</span></button>
+    <button type="button" class="gh-tab${_gradeTab === 'cold' ? ' active' : ''}" role="tab" onclick="setGradeTab('cold')">Cold calls <span class="gh-tab-count">${cold}</span></button>`;
+}
+function setGradeTab(tab) {
+  _gradeTab = tab === 'cold' ? 'cold' : 'tests';
+  const search = document.getElementById('gradeModalSearch');
+  if (search) search.value = '';
+  renderGradeTabs();
+  renderGradeModalTable(_gradeRowsForTab());
+}
+
 async function openGradeHistoryModal() {
   const modal = document.getElementById('gradeHistoryModal');
   if (!modal) return;
@@ -12315,7 +12362,9 @@ async function openGradeHistoryModal() {
       return;
     }
 
-    renderGradeModalTable(_allGradeHistory);
+    _gradeTab = 'tests';
+    renderGradeTabs();
+    renderGradeModalTable(_gradeRowsForTab());
   } catch(e) {
     console.error('openGradeHistoryModal error:', e);
     body.innerHTML = `
@@ -12328,8 +12377,9 @@ async function openGradeHistoryModal() {
   }
 }function filterGradeModalTable() {
   const q = (document.getElementById('gradeModalSearch')?.value || '').toLowerCase().trim();
-  if (!q) { renderGradeModalTable(_allGradeHistory); return; }
-  renderGradeModalTable(_allGradeHistory.filter(r =>
+  const tabRows = _gradeRowsForTab();
+  if (!q) { renderGradeModalTable(tabRows); return; }
+  renderGradeModalTable(tabRows.filter(r =>
     (r.student_name || '').toLowerCase().includes(q) ||
     (r.student_email || '').toLowerCase().includes(q) ||
     (r.owner_id || '').toLowerCase().includes(q)
@@ -12363,8 +12413,19 @@ function _buildStudentMap(rows) {
 function renderGradeModalTable(rows) {
   const body = document.getElementById('gradeModalBody');
   const subtitle = document.getElementById('gradeModalSubtitle');
+  if (_gradeTab === 'cold') { renderColdCallRoster(rows); return; }
 
   if (!rows || rows.length === 0) {
+    if (!(document.getElementById('gradeModalSearch')?.value || '').trim()) {
+      body.innerHTML = `
+        <div class="gh-empty-state">
+          <div class="gh-empty-icon">📋</div>
+          <div>No quiz attempts recorded yet.</div>
+          <div style="font-size:12px;color:#334155">Students who complete a test will appear here.</div>
+        </div>`;
+      if (subtitle) subtitle.textContent = 'No test records';
+      return;
+    }
     body.innerHTML = `
       <div class="gh-empty-state">
         <div class="gh-empty-icon">🔍</div>
@@ -12425,9 +12486,10 @@ function renderGradeModalTable(rows) {
 
 // ─── View 2: Student detail drill-down ───────────────────────────────────────
 function showGradeDetail(studentKey) {
+  if (_gradeTab === 'cold') { showColdCallDetail(studentKey); return; }
   const body = document.getElementById('gradeModalBody');
   const subtitle = document.getElementById('gradeModalSubtitle');
-  const byStudent = _buildStudentMap(_allGradeHistory);
+  const byStudent = _buildStudentMap(_gradeRowsForTab());
   const student = byStudent[studentKey];
   if (!student) return;
 
@@ -12461,7 +12523,7 @@ function showGradeDetail(studentKey) {
   });
 
   body.innerHTML = `
-    <button class="gh-detail-back" onclick="renderGradeModalTable(_allGradeHistory)">
+    <button class="gh-detail-back" onclick="renderGradeModalTable(_gradeRowsForTab())">
       ‹ All Students
     </button>
     <div class="gh-detail-header">
@@ -12498,6 +12560,107 @@ function showGradeDetail(studentKey) {
     </table>`;
 
   if (subtitle) subtitle.textContent = `${student.rows.length} attempt${student.rows.length !== 1 ? 's' : ''} · Avg ${avg}% · Best ${best}%`;
+}
+
+// ─── Cold calls: separate from tests, shown as correct / answered per session ───
+function _coldTotals(rows) {
+  const correct = rows.reduce((n, r) => n + (r.correct_count || 0), 0);
+  const total = rows.reduce((n, r) => n + (r.total_questions || 0), 0);
+  return { correct, total, pct: total ? Math.round((correct / total) * 100) : 0 };
+}
+function _coldTitle(r) {
+  return String(r.test_title || 'Cold call').replace(/^cold call:\s*/i, '') || 'Cold call';
+}
+
+function renderColdCallRoster(rows) {
+  const body = document.getElementById('gradeModalBody');
+  const subtitle = document.getElementById('gradeModalSubtitle');
+  if (!rows || rows.length === 0) {
+    const searching = !!(document.getElementById('gradeModalSearch')?.value || '').trim();
+    body.innerHTML = `
+      <div class="gh-empty-state">
+        <div class="gh-empty-icon">${searching ? '🔍' : '📞'}</div>
+        <div>${searching ? 'No matching students found.' : 'No cold calls recorded yet.'}</div>
+        ${searching ? '' : '<div style="font-size:12px;color:#334155">Cold-call results appear here after you submit a cold-call session.</div>'}
+      </div>`;
+    if (subtitle) subtitle.textContent = searching ? 'No results' : 'No cold calls';
+    return;
+  }
+  const students = Object.values(_buildStudentMap(rows)).sort((a, b) =>
+    new Date(b.rows[0].taken_at).getTime() - new Date(a.rows[0].taken_at).getTime());
+  if (subtitle) subtitle.textContent = `${students.length} student${students.length !== 1 ? 's' : ''} · ${rows.length} cold-call session${rows.length !== 1 ? 's' : ''}`;
+
+  body.innerHTML = students.map(st => {
+    const t = _coldTotals(st.rows);
+    const safeKey = JSON.stringify(st.key).replace(/"/g, '&quot;');
+    const last = new Date(st.rows[0].taken_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const chips = st.rows.slice(0, 6).map(r => {
+      const pct = r.total_questions ? Math.round((r.correct_count || 0) / r.total_questions * 100) : 0;
+      return `<span class="gh-attempt-chip ${pct >= 70 ? 'pass' : 'fail'}" title="${escapeHtml(_coldTitle(r))}">${r.correct_count || 0}/${r.total_questions || 0}</span>`;
+    }).join('');
+    const more = st.rows.length > 6 ? `<span class="gh-attempt-more">+${st.rows.length - 6} more</span>` : '';
+    return `
+      <div class="gh-student-card" onclick="showGradeDetail(${safeKey})" role="button" tabindex="0"
+           onkeydown="if(event.key==='Enter'||event.key===' ')showGradeDetail(${safeKey})">
+        <div class="grade-avg-letter" style="width:42px;height:42px;font-size:19px;border-radius:10px;flex-shrink:0;background:rgba(201,168,76,0.12);color:var(--gold-primary,#c9a84c)">📞</div>
+        <div class="gh-student-card-info">
+          <div class="gh-student-name">${escapeHtml(st.name)}</div>
+          <div class="gh-student-meta">
+            ${escapeHtml(st.email)}&ensp;·&ensp;${st.rows.length} cold call${st.rows.length !== 1 ? 's' : ''}&ensp;·&ensp;${t.correct}/${t.total} correct (${t.pct}%)&ensp;·&ensp;Last: ${last}
+          </div>
+          <div class="gh-attempt-chips">${chips}${more}</div>
+        </div>
+        <span class="gh-student-chevron">›</span>
+      </div>`;
+  }).join('');
+}
+
+function showColdCallDetail(studentKey) {
+  const body = document.getElementById('gradeModalBody');
+  const subtitle = document.getElementById('gradeModalSubtitle');
+  const st = _buildStudentMap(_gradeRowsForTab())[studentKey];
+  if (!st) return;
+  const t = _coldTotals(st.rows);
+  const fmt = iso => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const fmtTime = iso => new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const rowsHtml = st.rows.map(r => {
+    const pct = r.total_questions ? Math.round((r.correct_count || 0) / r.total_questions * 100) : 0;
+    return `
+      <tr>
+        <td>
+          <div style="font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#e2e8f0">${escapeHtml(_coldTitle(r))}</div>
+          <div style="font-family:'Inter',sans-serif;font-size:10px;color:#475569;margin-top:2px">Cold call</div>
+        </td>
+        <td style="white-space:nowrap;font-family:'Inter',sans-serif">
+          <div style="font-size:12px;color:#94a3b8">${fmt(r.taken_at)}</div>
+          <div style="font-size:10px;color:#475569">${fmtTime(r.taken_at)}</div>
+        </td>
+        <td style="text-align:center;font-family:'Inter',sans-serif">
+          <div style="font-size:14px;font-weight:800;color:${pct >= 70 ? '#34d399' : '#f87171'}">${r.correct_count || 0}/${r.total_questions || 0}</div>
+          <div style="font-size:10px;color:#475569">${pct}%</div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  body.innerHTML = `
+    <button class="gh-detail-back" onclick="renderGradeModalTable(_gradeRowsForTab())">‹ All Students</button>
+    <div class="gh-detail-header">
+      <div class="grade-avg-letter" style="width:46px;height:46px;font-size:22px;border-radius:10px;flex-shrink:0;background:rgba(201,168,76,0.12);color:var(--gold-primary,#c9a84c)">📞</div>
+      <div style="flex:1;min-width:0">
+        <div class="gh-detail-student-name">${escapeHtml(st.name)}</div>
+        <div class="gh-detail-student-email">${escapeHtml(st.email)}</div>
+      </div>
+    </div>
+    <div class="gh-detail-stats">
+      <div class="gh-detail-stat"><div class="gh-detail-stat-label">Cold calls</div><div class="gh-detail-stat-value">${st.rows.length}</div></div>
+      <div class="gh-detail-stat"><div class="gh-detail-stat-label">Correct</div><div class="gh-detail-stat-value">${t.correct}/${t.total}</div></div>
+      <div class="gh-detail-stat"><div class="gh-detail-stat-label">Accuracy</div><div class="gh-detail-stat-value" style="color:${t.pct >= 70 ? '#34d399' : '#f87171'}">${t.pct}%</div></div>
+    </div>
+    <table class="grade-history-table">
+      <thead><tr><th>Session</th><th>Date &amp; Time</th><th style="text-align:center">Result</th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>`;
+  if (subtitle) subtitle.textContent = `${st.rows.length} cold call${st.rows.length !== 1 ? 's' : ''} · ${t.correct}/${t.total} correct`;
 }
 
 function closeGradeHistoryModal() {
