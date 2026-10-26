@@ -11423,11 +11423,13 @@ function showReview() {
   
   const container = document.getElementById('reviewContainer');
   const frag = document.createDocumentFragment();
-  const details = window.testResults.details;
-  const count = s => details.filter(d => d.status === s).length;
-  const nCorrect = count('correct');
-  const nIncorrect = count('incorrect');
-  const nSkipped = details.length - nCorrect - nIncorrect;
+  // Only questions the student actually answered (right or wrong) are reviewed.
+  // Skipped / unanswered / out-of-time questions are never shown, and keep their original question numbers.
+  const answeredDetails = window.testResults.details
+    .map((d, i) => ({ d, number: i + 1 }))
+    .filter(x => x.d.status === 'correct' || x.d.status === 'incorrect');
+  const nCorrect = answeredDetails.filter(x => x.d.status === 'correct').length;
+  const nIncorrect = answeredDetails.length - nCorrect;
 
   const head = document.createElement('div');
   head.className = 'review-head';
@@ -11436,15 +11438,22 @@ function showReview() {
     <h2 class="review-title">Answer <span>Review</span></h2>
     <div class="results-rule"><span class="results-rule-diamond"></span></div>
     <div class="review-summary">
-      <span class="review-summary-item"><strong>${details.length}</strong> Questions</span>
+      <span class="review-summary-item"><strong>${answeredDetails.length}</strong> Answered</span>
       <span class="review-summary-item is-correct"><strong>${nCorrect}</strong> Correct</span>
       <span class="review-summary-item is-incorrect"><strong>${nIncorrect}</strong> Incorrect</span>
-      <span class="review-summary-item is-skipped"><strong>${nSkipped}</strong> Skipped</span>
     </div>
   `;
   frag.appendChild(head);
+
+  if (answeredDetails.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'review-question';
+    empty.style.textAlign = 'center';
+    empty.innerHTML = '<div class="review-stem" style="margin:0">There are no answered questions to review. Only questions you answered appear here.</div>';
+    frag.appendChild(empty);
+  }
   
-  details.forEach((detail, index) => {
+  answeredDetails.forEach(({ d: detail, number }) => {
     const q = detail.question;
     const div = document.createElement('div');
     div.className = 'review-question';
@@ -11462,7 +11471,7 @@ function showReview() {
     
     let html = `
       <div class="review-header">
-        <div class="review-qnum">Question <strong>${String(index + 1).padStart(2, '0')}</strong></div>
+        <div class="review-qnum">Question <strong>${String(number).padStart(2, '0')}</strong></div>
         ${statusBadge}
       </div>
       <div class="review-stem">${escapeHtml(q.stem)}</div>
