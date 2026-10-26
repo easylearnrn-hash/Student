@@ -6548,47 +6548,23 @@ function showNoTranslationAlert() {
 }
 
 let saveTimer = null;
-function saveToLocalStorage() {
-  // Debounce to avoid repeated sync writes during rapid interactions
-  if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    const saveData = {
-      sessionId: testState.sessionId,
-      shuffleSeed: testState.shuffleSeed,
-      currentIndex: testState.currentIndex,
-      answers: testState.answers,
-      answerStatus: testState.answerStatus,
-      flagged: Array.from(testState.flagged),
-      startTime: testState.startTime,
-      questionIds: testState.questions.map(q => q.id),
-      testId: TEST_CONFIG.testId,
-      selectedTopicIds: TEST_CONFIG.selectedTopicIds || [],
-      selectedTopicNames: TEST_CONFIG.selectedTopicNames || []
-    };
-    // Key is scoped per user so in-progress sessions never bleed between accounts
-    try {
-      localStorage.setItem('acnhs_test_session_' + getOwnerId(), JSON.stringify(saveData));
-    } catch (e) {
-      console.warn('Failed to save session to localStorage, possibly quota exceeded:', e);
-    }
-  }, 120);
-}
+// Tests are never stored on this device: saved tests live only in Supabase (see saveTestSession).
+// These stay as no-ops/cleaners so older call sites keep working and any leftover local copy is removed.
+function saveToLocalStorage() { /* intentionally does nothing */ }
 
 function loadFromLocalStorage() {
-  const saved = localStorage.getItem('acnhs_test_session_' + getOwnerId());
-  if (saved) {
-    try {
-      return JSON.parse(saved);
-    } catch (e) {
-      return null;
-    }
-  }
+  clearLocalStorage();
   return null;
 }
 
 function clearLocalStorage() {
-  localStorage.removeItem('acnhs_test_session_' + getOwnerId());
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.indexOf('acnhs_test_session_') === 0)
+      .forEach(k => localStorage.removeItem(k));
+  } catch (e) { /* storage unavailable */ }
 }
+clearLocalStorage();
 
 function formatTime(seconds) {
   const mins = Math.floor(seconds / 60);
@@ -7924,6 +7900,7 @@ function isEnglishSubject() {
 
 async function initializeNewTest() {
   clearLocalStorage();
+  testState.savedSessionDbId = null;
   setLoadingStatus('Preparing session...');
   
   testState.sessionId = generateSessionId();
@@ -8180,25 +8157,7 @@ function _autoSavePartialAttemptBeacon() {
       );
     }
 
-    // ── 2. Always flush localStorage state synchronously (no debounce) ──────
-    // Skip the debounced timer — write immediately so the in-progress session
-    // is up-to-date if the user returns to resume.
-    const saveData = {
-      sessionId:         testState.sessionId,
-      shuffleSeed:       testState.shuffleSeed,
-      currentIndex:      testState.currentIndex,
-      answers:           testState.answers,
-      answerStatus:      testState.answerStatus,
-      flagged:           Array.from(testState.flagged),
-      startTime:         testState.startTime,
-      questionIds:       testState.questions.map(q => q.id),
-      testId:            TEST_CONFIG.testId,
-      selectedTopicIds:  TEST_CONFIG.selectedTopicIds || [],
-      selectedTopicNames: TEST_CONFIG.selectedTopicNames || []
-    };
-    try {
-      localStorage.setItem('acnhs_test_session_' + ownerId, JSON.stringify(saveData));
-    } catch(e) { /* quota — ignore */ }
+    // (No local copy is written: a test is only ever saved to Supabase through "Save for Later".)
 
   } catch(err) {
     // Never throw in beforeunload — just log
@@ -8882,12 +8841,74 @@ function closeSaveModal() {
   document.getElementById('saveTestModal').classList.remove('active');
 }
 
+// ── SAVE FOR LATER — Supabase only ───────────────────────────────────────
+// Nothing is written to this device. Supabase stores exactly: which questions were chosen, their
+// order, the order of each question's answer choices, the answers, flags, the current position and
+// the elapsed time. The row stays in Supabase until the whole test is submitted.
+function buildSavedSessionPayload(sessionName) {
+  const isAnswered = a => Array.isArray(a) ? a.length > 0 : (a !== null && a !== undefined && a !== '');
+  const totalQuestions = testState.questions.length;
+  const answeredCount = testState.questions.filter(q => isAnswered(testState.answers[q.id])).length;
+  const idNum = Number(TEST_CONFIG.testId);
+  const testIdColumn = (TEST_CONFIG.testId !== null && TEST_CONFIG.testId !== '' && Number.isInteger(idNum)) ? idNum : null;
+
+  return {
+    ...(testState.savedSessionDbId ? { id: testState.savedSessionDbId } : {}),
+    session_name: sessionName,
+    student_id: getOwnerId(),
+    test_id: testIdColumn,
+    session_id: testState.sessionId,
+    current_question_index: testState.currentIndex,
+    answers: testState.answers,
+    answer_status: testState.answerStatus,
+    flagged_questions: Array.from(testState.flagged),
+    // Question order = array order. option_order = the exact order this question's answer choices are shown in.
+    questions: testState.questions.map(q => ({
+      id: q.id,
+      topic_id: q.topic_id || null,
+      option_order: Array.isArray(q.options) ? q.options.map(o => (o && o.id != null) ? String(o.id) : null) : null
+    })),
+    test_config: {
+      testId: TEST_CONFIG.testId,
+      selectedTopicIds: TEST_CONFIG.selectedTopicIds || [],
+      selectedTopicNames: TEST_CONFIG.selectedTopicNames || [],
+      categoryFilter: TEST_CONFIG.categoryFilter || null,
+      questionCount: TEST_CONFIG.questionCount || null,
+      shuffleQuestions: TEST_CONFIG.shuffleQuestions,
+      shuffleOptions: TEST_CONFIG.shuffleOptions,
+      elapsedMs: Math.max(0, Date.now() - testState.startTime)
+    },
+    start_time: new Date(testState.startTime).toISOString(),
+    shuffle_seed: String(testState.shuffleSeed),
+    total_questions: totalQuestions,
+    answered_questions: answeredCount,
+    progress_percent: totalQuestions ? Math.round((answeredCount / totalQuestions) * 100) : 0,
+    session_snapshot_en: null,
+    session_snapshot_hy: null
+  };
+}
+
+function leaveTestAfterSave() {
+  if (testState.timerInterval) { clearInterval(testState.timerInterval); testState.timerInterval = null; }
+  window.removeEventListener('beforeunload', handleBeforeUnload);
+  window.removeEventListener('pagehide', handleBeforeUnload, { capture: true });
+  document.removeEventListener('visibilitychange', _onVisibilityChange);
+  document.getElementById('testContainer').style.display = 'none';
+  document.getElementById('startScreen').style.display = 'flex';
+}
+
 async function saveTestSession() {
   const sessionName = document.getElementById('saveSessionName').value.trim();
   const saveBtn = document.querySelector('#saveTestModal .btn-primary');
-  
+  const saveBtnHtml = saveBtn ? saveBtn.innerHTML : '';
+  const restoreBtn = () => { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = saveBtnHtml; } };
+
   if (!sessionName) {
     showToast('Please enter a session name', 'warning');
+    return;
+  }
+  if (!testState.questions || !testState.questions.length) {
+    showToast('There is no test to save yet.', 'warning');
     return;
   }
 
@@ -8896,133 +8917,78 @@ async function saveTestSession() {
     saveBtn.textContent = 'Saving...';
   }
 
-  // Always persist to localStorage immediately — this is the guaranteed fallback
-  saveToLocalStorage();
-
-  // file:// origin: Supabase is blocked by TLS/CORS — skip cloud entirely
-  if (window.location.protocol === 'file:') {
-    closeSaveModal();
-    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save & Exit'; }
-    document.getElementById('testContainer').style.display = 'none';
-    document.getElementById('startScreen').style.display = 'flex';
-    showToast('Saved locally. Open via localhost:8000 to enable cloud sync.', 'warning');
-    return;
-  }
-
-  // Helper: attempt the Supabase cloud save with a hard timeout
-  const trySaveToCloud = async () => {
-    if (!db) {
-      if (!initializeSupabase()) throw new Error('db_unavailable');
-    }
-
-    // Always refresh the owner header before writing — ensures RLS passes
-    // even if the email wasn't available when the client was first built.
+  try {
+    if (!db && !initializeSupabase()) throw new Error('db_unavailable');
+    // Refresh the owner header before writing so row-level security matches this user
     refreshSupabaseOwner();
 
-    const answeredCount = Object.keys(testState.answers).length;
-    const totalQuestions = testState.questions.length;
-    const progressPercent = Math.round((answeredCount / totalQuestions) * 100);
-
-    const sessionData = {
-      ...(testState.savedSessionDbId ? { id: testState.savedSessionDbId } : {}),
-      session_name: sessionName,
-      student_id: getOwnerId(),
-      test_id: TEST_CONFIG.testId,
-      session_id: testState.sessionId,
-      current_question_index: testState.currentIndex,
-      answers: testState.answers,
-      answer_status: testState.answerStatus,
-      flagged_questions: Array.from(testState.flagged),
-      // ── SLIM PAYLOAD: omit questions + snapshots from cloud saves ──────
-      // questions are reloaded from test_questions on resume (they're in the DB).
-      // snapshots are rebuilt from questions in buildBilingualSnapshot().
-      // Sending them here could be 500KB+ and causes timeouts / row-size errors.
-      questions: testState.questions.map(q => ({ id: q.id, topic_id: q.topic_id || null })),
-      test_config: {
-        testId: TEST_CONFIG.testId,
-        selectedTopicIds: TEST_CONFIG.selectedTopicIds || [],
-        selectedTopicNames: TEST_CONFIG.selectedTopicNames || [],
-        categoryFilter: TEST_CONFIG.categoryFilter || null,
-        questionCount: TEST_CONFIG.questionCount || null,
-        shuffleQuestions: TEST_CONFIG.shuffleQuestions,
-        shuffleOptions: TEST_CONFIG.shuffleOptions
-      },
-      start_time: new Date(testState.startTime).toISOString(),
-      shuffle_seed: testState.shuffleSeed,
-      total_questions: totalQuestions,
-      answered_questions: answeredCount,
-      progress_percent: progressPercent,
-      session_snapshot_en: null,
-      session_snapshot_hy: null
-    };
-
-    // Raise timeout to 12s — Supabase cold-starts can take 3–5s
-    const upsertPromise = db
-      .from('saved_test_sessions')
-      .upsert([sessionData], { onConflict: 'id' })
-      .select('id')
-      .single();
-
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('network_timeout')), 12000)
+    const upsert = payload => withTimeout(
+      db.from('saved_test_sessions')
+        .upsert([payload], { onConflict: 'id' })
+        .select('id, questions')
+        .single(),
+      15000,
+      'network_timeout'
     );
 
-    const { data, error } = await Promise.race([upsertPromise, timeoutPromise]);
-
+    let sessionData = buildSavedSessionPayload(sessionName);
+    let { data, error } = await upsert(sessionData);
+    // test_id has a foreign key to tests(id); the full test_config below keeps the real test id either way
+    if (error && (error.code === '23503' || error.code === '22P02') && sessionData.test_id !== null) {
+      sessionData = { ...sessionData, test_id: null };
+      ({ data, error } = await upsert(sessionData));
+    }
     if (error) throw error;
-    return data;
-  };
 
-  try {
-    const data = await trySaveToCloud();
-
-    if (data && data.id) {
-      testState.savedSessionDbId = data.id;
+    // Only report success once Supabase confirms it holds every question we sent
+    const stored = typeof data?.questions === 'string' ? JSON.parse(data.questions) : data?.questions;
+    if (!data || !data.id || !Array.isArray(stored) || stored.length !== sessionData.questions.length) {
+      throw new Error('save_not_confirmed');
     }
 
+    testState.savedSessionDbId = data.id;
     closeSaveModal();
-    showToast('Test saved successfully! You can resume it anytime.', 'success');
-    
-    // Return to start screen immediately (no delay)
-    document.getElementById('testContainer').style.display = 'none';
-    document.getElementById('startScreen').style.display = 'flex';
+    restoreBtn();
+    leaveTestAfterSave();
+    showToast('Test saved. Continue it anytime from "Load Saved Test" until you submit it.', 'success');
     loadSavedSessions();
-    if (saveBtn) {
-      saveBtn.disabled = false;
-      saveBtn.textContent = 'Save & Exit';
-    }
-    
   } catch (error) {
-    const msg = String(error.message || '');
-    const isNetworkError = isNetworkFailure(error) || error.message === 'db_unavailable';
-    const isMissingTable = msg.includes('saved_test_sessions') || error.code === '42P01';
-    const isRlsBlocked = error.code === '42501' || msg.toLowerCase().includes('row-level security');
-    const ownerId = getOwnerId();
-
-    if (isNetworkError) {
-      // Session is already in localStorage — just close and report
-      console.warn('Cloud save unavailable (network/TLS). Session preserved in localStorage.');
-      closeSaveModal();
-      showToast('Saved locally — cloud sync unavailable. Your progress is safe.', 'warning');
-    } else if (isRlsBlocked) {
-      console.error('RLS blocked save for owner:', ownerId, error);
-      closeSaveModal();
-      showToast(`Cloud save blocked (RLS). Owner: ${ownerId}. Please log out/in and try again.`, 'error');
-    } else if (isMissingTable) {
-      console.error('saved_test_sessions table missing:', error);
-      closeSaveModal();
-      showToast('Saved locally. (Cloud table missing — run ADD-SAVED-TEST-SESSIONS-TABLE.sql)', 'warning');
-    } else {
-      console.error('Error saving test session:', error);
-      showToast('Cloud save failed. Your progress was saved locally.', 'warning');
-      closeSaveModal();
-    }
-
-    if (saveBtn) {
-      saveBtn.disabled = false;
-      saveBtn.textContent = 'Save & Exit';
-    }
+    const msg = String(error && error.message || '');
+    const isRlsBlocked = error && (error.code === '42501' || msg.toLowerCase().includes('row-level security'));
+    const isMissingTable = error && (error.code === '42P01' || msg.includes('saved_test_sessions'));
+    let reason;
+    if (isRlsBlocked) reason = 'the database refused the save (permissions). Please sign out, sign in again and retry.';
+    else if (isMissingTable) reason = 'the saved-tests table is missing in Supabase (run ADD-SAVED-TEST-SESSIONS-TABLE.sql).';
+    else if (isNetworkFailure(error) || msg === 'db_unavailable') reason = 'no connection to Supabase. Check your internet and press Save again.';
+    else if (msg === 'save_not_confirmed') reason = 'Supabase did not confirm the save. Press Save again.';
+    else reason = msg || 'unknown error.';
+    console.error('Save for later failed:', error);
+    // The test stays open and nothing is written locally, so the student can simply try again
+    showToast(`Test NOT saved — ${reason}`, 'error');
+    restoreBtn();
   }
+}
+
+// Called when the whole test has been submitted: the saved copy is no longer needed, so it is
+// removed from Supabase. Retries a few times so a brief network drop does not leave it behind.
+async function discardSavedSessionAfterSubmit() {
+  const id = testState.savedSessionDbId;
+  if (!id) return;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      if (!db && !initializeSupabase()) throw new Error('db_unavailable');
+      const { error } = await db.from('saved_test_sessions').delete().eq('id', id);
+      if (!error) {
+        if (testState.savedSessionDbId === id) testState.savedSessionDbId = null;
+        return;
+      }
+      console.warn('Removing saved session failed:', error.message);
+    } catch (e) {
+      console.warn('Removing saved session failed:', e && e.message);
+    }
+    await new Promise(r => setTimeout(r, 1500 * attempt));
+  }
+  console.error('Could not remove saved session after submit:', id);
 }
 
 async function loadSavedSessions() {
@@ -9042,7 +9008,7 @@ async function loadSavedSessions() {
         .from('saved_test_sessions')
         .select('*')
         .eq('student_id', getOwnerId())
-        .order('created_at', { ascending: false }),
+        .order('updated_at', { ascending: false }),
       6000,
       'Loading saved sessions timed out'
     );
@@ -9081,7 +9047,7 @@ async function loadSavedSessions() {
     listContainer.innerHTML = '';
     
     savedSessions.forEach((session, idx) => {
-      const savedDate = new Date(session.saved_at);
+      const savedDate = new Date(session.updated_at || session.created_at);
       const progress = session.progress_percent || 0;
       const answered = session.answered_questions || 0;
       const total = session.total_questions || 0;
@@ -9164,7 +9130,7 @@ async function loadSavedSessions() {
               <!-- Session index badge + name -->
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
                 <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:7px;background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.28);font-family:'Inter',sans-serif;font-size:11px;font-weight:800;color:#c9a84c;flex-shrink:0">${idx + 1}</span>
-                <h4 style="font-family:'Playfair Display',serif;font-size:16px;font-weight:700;color:#f1f5f9;margin:0;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${session.session_name}</h4>
+                <h4 style="font-family:'Playfair Display',serif;font-size:16px;font-weight:700;color:#f1f5f9;margin:0;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(session.session_name)}</h4>
               </div>
               <!-- Date line -->
               <div style="display:flex;align-items:center;gap:6px;padding-left:36px">
@@ -9304,9 +9270,12 @@ async function loadSavedSession(sessionId) {
       // Extract all question IDs from the stubs, filtering out non-UUID stubs like the disclaimer
       // and any null/undefined/malformed values that would cause a 400 Bad Request from Supabase
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      // Question ids are UUIDs or plain integers depending on the question bank; accept both
+      const isFetchableId = id => (typeof id === 'number' && Number.isFinite(id)) ||
+        (typeof id === 'string' && (UUID_RE.test(id) || /^\d+$/.test(id)));
       const questionIdsToFetch = testState.questions
         .map(q => q && q.id)
-        .filter(id => id && id !== 'english-disclaimer-q0' && UUID_RE.test(id));
+        .filter(id => id !== null && id !== undefined && id !== 'english-disclaimer-q0' && isFetchableId(id));
 
       console.log(`[Resume] Stubs loaded: ${testState.questions.length}, Valid UUIDs to fetch: ${questionIdsToFetch.length}`);
       
@@ -9379,7 +9348,20 @@ async function loadSavedSession(sessionId) {
         if (stub.id === 'english-disclaimer-q0') {
           return buildEnglishDisclaimerQuestion();
         }
-        return fullQMap[stub.id]; // may be undefined if DB didn't return that question
+        const full = fullQMap[stub.id]; // may be undefined if DB didn't return that question
+        if (!full) return full;
+        // Restore the exact answer-choice order that was on screen when the test was saved
+        if (Array.isArray(stub.option_order) && Array.isArray(full.options) && full.options.length) {
+          const byId = new Map(full.options.map(o => [String(o.id), o]));
+          const ordered = [];
+          stub.option_order.forEach(id => {
+            const o = byId.get(String(id));
+            if (o) { ordered.push(o); byId.delete(String(id)); }
+          });
+          byId.forEach(o => ordered.push(o)); // a choice added after the save goes last
+          return { ...full, options: ordered, _optionsRestored: true };
+        }
+        return full;
       });
 
       // Log any stubs that didn't resolve so we can diagnose RLS / deleted-question issues
@@ -9409,15 +9391,20 @@ async function loadSavedSession(sessionId) {
   // Regenerate the exact shuffle seed used when the session started.
   // Prefer the stored seed (saved since the shuffle_seed column was added) so that
   // option order is perfectly reproduced even if selectedTopicIds order ever differs.
-  testState.shuffleSeed = session.shuffle_seed != null
-    ? session.shuffle_seed
+  testState.shuffleSeed = session.shuffle_seed != null && Number.isFinite(Number(session.shuffle_seed))
+    ? Number(session.shuffle_seed)
     : deriveShuffleSeed(TEST_CONFIG.testId, TEST_CONFIG.selectedTopicIds);
+
+  // Continue the clock from the time already spent, not from when the test first started
+  if (parsedConfig && Number.isFinite(Number(parsedConfig.elapsedMs))) {
+    testState.startTime = Date.now() - Number(parsedConfig.elapsedMs);
+  }
 
   // Re-apply options shuffling so the snapshot builds correctly
   if (testState.questions && testState.questions.length > 0) {
     testState.questions = testState.questions.map(q => {
-      // If the question is a full object (not just a stub)
-      if (q.options) {
+      // Questions with a saved answer-choice order keep it exactly; older saves fall back to the seeded shuffle
+      if (q.options && !q._optionsRestored) {
         return {
           ...q,
           options: shuffleArray(q.options, optionShuffleSeed(q))
@@ -9440,6 +9427,8 @@ async function loadSavedSession(sessionId) {
     testState.snapshot = buildBilingualSnapshot(testState.questions);
     console.log('🌐 Bilingual snapshot rebuilt from saved questions');
   }
+  attachNoteLinks(testState.questions);
+  document.getElementById('testTitle').textContent = getDisplayTestTitle();
   applyLanguagePicker();
     
     // Show test container
@@ -9642,7 +9631,7 @@ async function loadSavedTestsInModal() {
       .from('saved_test_sessions')
       .select('*')
       .eq('student_id', getOwnerId())
-      .order('created_at', { ascending: false });
+      .order('updated_at', { ascending: false });
     
     if (error) {
       console.error('Error loading sessions:', error);
@@ -9732,7 +9721,7 @@ async function loadSavedTestsInModal() {
     // Show saved database sessions
     if (hasSaved) {
       savedSessions.forEach((session) => {
-        const savedDate = new Date(session.saved_at);
+        const savedDate = new Date(session.updated_at || session.created_at);
         const progress = session.progress_percent || 0;
         
         const card = document.createElement('div');
@@ -9743,7 +9732,7 @@ async function loadSavedTestsInModal() {
         card.innerHTML = `
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
             <div style="min-width:0;">
-              <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;">${session.session_name}</div>
+              <div style="font-size:14px;font-weight:700;color:#f1f5f9;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;">${escapeHtml(session.session_name)}</div>
               <div style="font-size:11.5px;color:var(--text-muted);">Saved ${savedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${savedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div>
             </div>
             <button onclick="deleteSavedSession('${session.id}', event)"
@@ -9915,6 +9904,7 @@ function submitTest(autoSubmit = false) {
     submitColdCallGrades().then(() => {
         // Clear local cache just in case
         clearLocalStorage();
+        discardSavedSessionAfterSubmit();
     });
   } else {
     // Standard single-user submission
@@ -9934,6 +9924,7 @@ function submitTest(autoSubmit = false) {
     displayResults(results);
     
     clearLocalStorage();
+    discardSavedSessionAfterSubmit();
     
     if (autoSubmit) {
       showToast('Test auto-submitted due to time limit', 'info');
