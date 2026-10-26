@@ -5262,19 +5262,17 @@ function initSessionRole() {
 async function detectArnomaAdmin() {
   if (!SESSION_ROLE.isLoggedIn || SESSION_ROLE.isTeacher) return;
   try {
-    const client = initSupabase();
-    if (!client) return;
-    const { data: sessionData } = await withTimeout(client.auth.getSession(), 4000, 'Session check timed out');
-    const user = sessionData && sessionData.session && sessionData.session.user;
-    if (!user) return;
-    const { data, error } = await withTimeout(
-      client.from('admin_accounts').select('auth_user_id').eq('auth_user_id', user.id).maybeSingle(),
-      4000, 'Admin check timed out'
-    );
-    if (error || !data) return;
+    // Reuses the admin check already running since page load (no extra round trips)
+    const ok = await checkAdminAccount();
+    if (!ok) return;
     SESSION_ROLE.isTeacher = true;
     SESSION_ROLE.userRole = 'admin';
-    if (!SESSION_ROLE.userName && user.email) SESSION_ROLE.userName = user.email.split('@')[0];
+    if (!SESSION_ROLE.userName) {
+      const client = initSupabase();
+      const { data: sessionData } = client ? await client.auth.getSession() : { data: null };
+      const user = sessionData && sessionData.session && sessionData.session.user;
+      if (user && user.email) SESSION_ROLE.userName = user.email.split('@')[0];
+    }
   } catch (e) {
     console.warn('detectArnomaAdmin skipped:', e && e.message);
   }
@@ -9867,6 +9865,20 @@ function closeSaveModal() {
 
 // One shared server-side admin check (admin_accounts row for the signed-in user). The in-flight/positive
 // result is reused so the highlighter and inbox buttons do not each repeat the session + database round trips.
+function adminHintValid() {
+  try {
+    const tok = JSON.parse(localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token') || 'null');
+    const uid = tok && tok.user && tok.user.id;
+    return !!uid && localStorage.getItem('arnoma:admin-uid') === uid;
+  } catch (e) { return false; }
+}
+function showAdminStartButtons(on) {
+  ['teacherGradesBtn', 'askInboxBtn', 'flagInboxBtn'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.style.display = on ? 'inline-flex' : 'none';
+  });
+}
+
 let _adminCheck = null;
 function checkAdminAccount(force) {
   if (_adminCheck && !force) return _adminCheck;
@@ -9877,7 +9889,14 @@ function checkAdminAccount(force) {
       const { data, error } = await withTimeout(
         db.from('admin_accounts').select('auth_user_id').eq('auth_user_id', uid).maybeSingle(),
         6000, 'Admin check timed out');
-      return !error && !!data && data.auth_user_id === uid;
+      const ok = !error && !!data && data.auth_user_id === uid;
+      // Remember the verified admin on this device so the admin buttons can show instantly next time.
+      // It only controls what is displayed early; the server check above always has the last word.
+      try {
+        if (ok) localStorage.setItem('arnoma:admin-uid', uid);
+        else if (!error) localStorage.removeItem('arnoma:admin-uid');
+      } catch (e) { /* storage unavailable */ }
+      return ok;
     } catch (e) { return false; }
   })();
   _adminCheck = run;
@@ -12690,10 +12709,15 @@ function escapeHtml(str) {
 document.addEventListener('DOMContentLoaded', () => {
   // ── Auth gate & role detection ─────────────────────────────────────────
   initSessionRole();
-  // Role-gated UI waits for the (fast) ARNOMA admin check so admins get their tools
+  // A previously verified admin sees the admin buttons immediately; the server check below confirms or hides them
+  if (adminHintValid()) showAdminStartButtons(true);
   verifyHighlighterAccess();
   verifyInboxAccess();
-  detectArnomaAdmin().finally(() => { applySessionRole(); resolveSessionDisplayName(); });
+  detectArnomaAdmin().finally(() => {
+    applySessionRole();
+    if (!SESSION_ROLE.isTeacher) showAdminStartButtons(false);
+    resolveSessionDisplayName();
+  });
 
   // Initialize Supabase first
   initializeSupabase();
