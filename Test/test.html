@@ -5261,6 +5261,42 @@ async function detectArnomaAdmin() {
   }
 }
 
+// The login page stores the display name, but a student can reach this page without passing through it
+// (e.g. an already signed-in portal session). Then look the real name up from the student's own record.
+async function resolveSessionDisplayName() {
+  if (SESSION_ROLE.userName) return;
+  try {
+    const client = initSupabase();
+    if (!client) return;
+    const { data: sessionData } = await withTimeout(client.auth.getSession(), 5000, 'Session check timed out');
+    const user = sessionData && sessionData.session && sessionData.session.user;
+    if (!user) return;
+
+    let name = '';
+    const byId = await withTimeout(client.from('students').select('name').eq('auth_user_id', user.id).limit(1), 5000, 'Name lookup timed out');
+    if (!byId.error && byId.data && byId.data[0] && byId.data[0].name) name = byId.data[0].name;
+    if (!name && user.email) {
+      const byEmail = await withTimeout(client.from('students').select('name').ilike('email', user.email).limit(1), 5000, 'Name lookup timed out');
+      if (!byEmail.error && byEmail.data && byEmail.data[0] && byEmail.data[0].name) name = byEmail.data[0].name;
+    }
+    if (!name) {
+      const meta = user.user_metadata || {};
+      name = meta.full_name || meta.name || '';
+    }
+    name = String(name || '').trim();
+    if (!name) return;
+
+    SESSION_ROLE.userName = name;
+    renderSessionIdentityPill();
+    if (!SESSION_ROLE.isTeacher) {
+      const ccName = document.querySelector('#coldCallPanel .cc-name-text');
+      if (ccName) ccName.textContent = name;
+    }
+  } catch (e) {
+    console.warn('Name lookup skipped:', e && e.message);
+  }
+}
+
 // Leave the test: close the portal's test window when embedded, otherwise go to the ARNOMA home page
 function exitTestToPortal() {
   try {
@@ -5390,6 +5426,10 @@ function applySessionRole() {
     }
   }
 
+  renderSessionIdentityPill();
+}
+
+function renderSessionIdentityPill() {
   // ── User identity pill ─────────────────────────────────────────────────
   const pill    = document.getElementById('sessionUserPill');
   const avatar  = document.getElementById('sessionUserAvatar');
@@ -12481,7 +12521,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Auth gate & role detection ─────────────────────────────────────────
   initSessionRole();
   // Role-gated UI waits for the (fast) ARNOMA admin check so admins get their tools
-  detectArnomaAdmin().finally(() => { applySessionRole(); verifyHighlighterAccess(); verifyInboxAccess(); });
+  detectArnomaAdmin().finally(() => { applySessionRole(); verifyHighlighterAccess(); verifyInboxAccess(); resolveSessionDisplayName(); });
 
   // Initialize Supabase first
   initializeSupabase();
