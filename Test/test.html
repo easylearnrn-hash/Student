@@ -1801,7 +1801,15 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
   border-color: rgba(201,168,76,0.5);
   color: var(--gold-light);
 }
-.setup-segment { display: flex; gap: 8px; }
+#testSetupModal .modal-content.setup-modal { max-height: calc(100vh - 40px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(201,168,76,0.3) transparent; }
+.setup-timer-block { margin: 26px 0 28px; }
+.setup-timer-block .setup-chips { gap: 12px; margin-top: 14px; }
+.setup-custom-time { display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+.setup-custom-time label { font-size: 13px; font-weight: 600; color: #94a3b8; }
+.setup-custom-time .setup-input { width: 110px; padding: 9px 12px; font-size: 14px; text-align: center; }
+.setup-custom-time span { font-size: 13px; font-weight: 600; color: #94a3b8; }
+.setup-seg:focus-visible, .setup-chip:focus-visible { outline: 2px solid rgba(201,168,76,0.7); outline-offset: 2px; }
+.setup-segment { display: flex; gap: 12px; }
 .setup-seg {
   flex: 1;
   font-family: 'Inter', sans-serif;
@@ -4752,7 +4760,8 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
       <div class="setup-chips" id="setupChips"></div>
       <div class="setup-hint" id="setupHint">Leave blank to include every available question. Questions are distributed evenly across the selected topics.</div>
 
-      <div class="setup-field-label" style="margin-top:22px">Timer</div>
+      <div class="setup-timer-block">
+      <div class="setup-field-label">Timer</div>
       <div class="setup-segment" id="setupTimerMode" role="group" aria-label="Timer">
         <button type="button" class="setup-seg active" data-mode="none" onclick="setSetupTimerMode('none')">No timer</button>
         <button type="button" class="setup-seg" data-mode="timed" onclick="setSetupTimerMode('timed')">Timed test</button>
@@ -4765,6 +4774,13 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
           <button type="button" class="setup-chip" data-minutes="90" onclick="setSetupTimerMinutes(90)">90 min</button>
           <button type="button" class="setup-chip" data-minutes="180" onclick="setSetupTimerMinutes(180)">180 min</button>
         </div>
+        <div class="setup-custom-time">
+          <label for="setupCustomMinutes">Or enter your own</label>
+          <input type="number" id="setupCustomMinutes" class="setup-input" min="1" max="600" step="1" inputmode="numeric" placeholder="e.g. 45"
+            oninput="onSetupCustomMinutes()" onkeydown="if(event.key==='Enter'){event.preventDefault();confirmTestSetup();}">
+          <span>minutes</span>
+        </div>
+      </div>
       </div>
 
       <label class="setup-toggle">
@@ -8174,6 +8190,8 @@ let _setupTimerMinutes = null;
 function setSetupTimerMode(mode) {
   _setupTimerMode = mode === 'timed' ? 'timed' : 'none';
   if (_setupTimerMode === 'none') _setupTimerMinutes = null;
+  const customInput = document.getElementById('setupCustomMinutes');
+  if (customInput && _setupTimerMode === 'none') { customInput.value = ''; customInput.classList.remove('invalid'); }
   document.querySelectorAll('#setupTimerMode .setup-seg').forEach(b => b.classList.toggle('active', b.dataset.mode === _setupTimerMode));
   const opts = document.getElementById('setupTimerOptions');
   if (opts) opts.style.display = _setupTimerMode === 'timed' ? 'block' : 'none';
@@ -8182,6 +8200,19 @@ function setSetupTimerMode(mode) {
 
 function setSetupTimerMinutes(minutes) {
   _setupTimerMinutes = Number(minutes) || null;
+  const custom = document.getElementById('setupCustomMinutes');
+  if (custom) { custom.value = ''; custom.classList.remove('invalid'); }
+  renderSetupTimerChips();
+}
+
+// Custom length in whole minutes (1–600)
+function onSetupCustomMinutes() {
+  const input = document.getElementById('setupCustomMinutes');
+  const raw = input.value.trim();
+  const n = Number(raw);
+  const valid = raw !== '' && Number.isInteger(n) && n >= 1 && n <= 600;
+  _setupTimerMinutes = valid ? n : null;
+  input.classList.toggle('invalid', raw !== '' && !valid);
   renderSetupTimerChips();
 }
 
@@ -8205,7 +8236,9 @@ async function confirmTestSetup() {
   }
   if (_setupTimerMode === 'timed' && !_setupTimerMinutes) {
     document.getElementById('setupTimerChips')?.classList.add('need-choice');
-    showToast('Choose how long the timed test should run', 'warning');
+    const custom = document.getElementById('setupCustomMinutes');
+    if (custom && custom.value.trim() !== '') custom.classList.add('invalid');
+    showToast('Choose a time, or enter your own from 1 to 600 minutes', 'warning');
     return;
   }
   TEST_CONFIG.timeLimitMinutes = _setupTimerMode === 'timed' ? _setupTimerMinutes : null;
