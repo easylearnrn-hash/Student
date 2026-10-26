@@ -7121,66 +7121,38 @@ async function loadNoteCatalog() {
 }
 
 // Notes live at /Notes/... and this page at /Test/, so the stored repo path is made page-relative.
-function buildNoteUrl(notePath, anchorText) {
+// With a question, the link carries it to the note (in the #fragment, never sent to a server): the note
+// page (Notes/js/note-guard.js) then finds the passage that explains THAT question, scrolls to it and
+// highlights it.
+function noteFocusFragment(question, anchorText) {
+  try {
+    if (!question) return '';
+    const clip = (t, n) => String(t || '').replace(/\s+/g, ' ').trim().slice(0, n);
+    const ids = Array.isArray(question.correct) ? question.correct.map(String) : [String(question.correct)];
+    const correct = (question.options || [])
+      .filter(o => ids.includes(String(o.id)))
+      .map(o => clip(o.text, 220))
+      .slice(0, 4);
+    const payload = { s: clip(question.stem, 600), c: correct, r: clip(question.rationale, 600), a: anchorText ? clip(anchorText, 240) : null };
+    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    return '#acnhs-focus=' + b64;
+  } catch (e) { return ''; }
+}
+
+function buildNoteUrl(notePath, anchorText, question) {
   if (!notePath) return null;
   let url = '../' + String(notePath).split('/').map(encodeURIComponent).join('/');
   const name = SESSION_ROLE.userName || sessionStorage.getItem('userName') || localStorage.getItem('userName');
   if (name) url += '?studentName=' + encodeURIComponent(name);
+  const focus = noteFocusFragment(question, anchorText);
+  if (focus) return url + focus;
   if (anchorText) {
-    // Text fragment: lets supporting browsers scroll to and highlight the supporting passage.
+    // Fallback text fragment: lets supporting browsers scroll to and highlight the supporting passage.
     const words = String(anchorText).replace(/\s+/g, ' ').trim().split(' ').slice(0, 8).join(' ');
     if (words.length >= 8) url += '#:~:text=' + encodeURIComponent(words).replace(/-/g, '%2D');
   }
   return url;
-}
-
-// Collapse topics so students see one row per study note, labelled with the note's exact title.
-// A topic is shown when it has a note OR holds questions (so questions are never hidden), and
-// topics that point at the same note are merged into one row whose pool is all of them.
-function buildTopicRows(allTopics, counts, notes) {
-  if (!notes || notes.size === 0) {
-    return { rows: (allTopics || []).map(t => ({ ...t, _groupIds: [t.id] })), siblings: new Map() };
-  }
-  const groups = new Map();
-  (allTopics || []).forEach(t => {
-    const note = t.note_id ? notes.get(t.note_id) : null;
-    const n = counts[t.id] || 0;
-    if (!note && n === 0) return; // not in the notes and no questions: nothing to practise
-    const key = note ? `${t.subject_id}|${t.note_id}` : `solo|${t.id}`;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push({ topic: t, note, n });
-  });
-  const rows = [];
-  const siblings = new Map();
-  groups.forEach(members => {
-    members.sort((a, b) => (b.n - a.n) || ((a.topic.display_order || 0) - (b.topic.display_order || 0)) || String(a.topic.name).localeCompare(String(b.topic.name)));
-    const lead = members[0];
-    const note = lead.note;
-    const ids = members.map(m => m.topic.id);
-    rows.push({
-      ...lead.topic,
-      name: note ? note.title : lead.topic.name,
-      _origName: lead.topic.name,
-      _aliases: members.map(m => m.topic.name),
-      _notePath: note ? note.path : null,
-      _groupIds: ids
-    });
-    siblings.set(lead.topic.id, ids);
-  });
-  rows.sort((a, b) => (a.display_order || 0) - (b.display_order || 0) || String(a.name).localeCompare(String(b.name)));
-  return { rows, siblings };
-}
-
-// Selected rows -> every topic id whose questions belong to them (empty siblings add nothing).
-function expandSelectedTopicIds(ids) {
-  const sib = window._topicSiblings || new Map();
-  const counts = window._cachedTopicCounts || {};
-  const out = new Set();
-  (ids || []).forEach(id => {
-    out.add(id);
-    (sib.get(id) || []).forEach(s => { if (s === id || (counts[s] || 0) > 0) out.add(s); });
-  });
-  return Array.from(out);
 }
 
 // Look up each question's primary note. Runs in the background; a failure only means no "Study"
@@ -7273,7 +7245,7 @@ function topicNoteSlotHtml(notePath, openPaths) {
 function noteLinkHtml(question) {
   const n = question && window._questionNotes ? window._questionNotes.get(String(question.id)) : null;
   if (!n) return '';
-  const href = buildNoteUrl(n.path, n.anchor);
+  const href = buildNoteUrl(n.path, n.anchor, question);
   if (!href) return '';
   const access = noteAccessState(n.path);
   if (access === 'unknown') return '';
