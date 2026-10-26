@@ -1801,6 +1801,27 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
   border-color: rgba(201,168,76,0.5);
   color: var(--gold-light);
 }
+.setup-segment { display: flex; gap: 8px; }
+.setup-seg {
+  flex: 1;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(201,168,76,0.22);
+  background: rgba(201,168,76,0.05);
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.setup-seg:hover { border-color: rgba(201,168,76,0.55); }
+.setup-seg.active {
+  background: rgba(201,168,76,0.16);
+  border-color: var(--gold-primary);
+  color: var(--gold-primary);
+}
+.setup-chips.need-choice .setup-chip { border-color: var(--error); }
 .setup-chip.active {
   background: rgba(201,168,76,0.16);
   border-color: var(--gold-primary);
@@ -4731,6 +4752,21 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
       <div class="setup-chips" id="setupChips"></div>
       <div class="setup-hint" id="setupHint">Leave blank to include every available question. Questions are distributed evenly across the selected topics.</div>
 
+      <div class="setup-field-label" style="margin-top:22px">Timer</div>
+      <div class="setup-segment" id="setupTimerMode" role="group" aria-label="Timer">
+        <button type="button" class="setup-seg active" data-mode="none" onclick="setSetupTimerMode('none')">No timer</button>
+        <button type="button" class="setup-seg" data-mode="timed" onclick="setSetupTimerMode('timed')">Timed test</button>
+      </div>
+      <div id="setupTimerOptions" style="display:none">
+        <div class="setup-hint" style="margin-top:12px">How long should the test run? It submits automatically when time is up.</div>
+        <div class="setup-chips" id="setupTimerChips">
+          <button type="button" class="setup-chip" data-minutes="30" onclick="setSetupTimerMinutes(30)">30 min</button>
+          <button type="button" class="setup-chip" data-minutes="60" onclick="setSetupTimerMinutes(60)">60 min</button>
+          <button type="button" class="setup-chip" data-minutes="90" onclick="setSetupTimerMinutes(90)">90 min</button>
+          <button type="button" class="setup-chip" data-minutes="180" onclick="setSetupTimerMinutes(180)">180 min</button>
+        </div>
+      </div>
+
       <label class="setup-toggle">
         <input type="checkbox" id="mixQAToggle" checked autocomplete="off" onchange="toggleMixQA()">
         <div>
@@ -6058,6 +6094,7 @@ function copyStudentUrl() {
 const TEST_CONFIG = {
   testTitle: "Nursing Fundamentals - Midterm Exam",
   durationMinutes: 60,
+  timeLimitMinutes: null, // null = no timer (default); 30 / 60 / 90 / 180 when the student picks a timed test
   shuffleQuestions: true, // Default: enabled (the student can turn it off in the test setup)
   shuffleOptions: true,   // Always true: answer choices are never shown in their stored order
   showBackButton: true,
@@ -8043,6 +8080,8 @@ async function openTestSetupModal() {
   // Shuffle is on by default every time the setup opens
   const shuffleToggle = document.getElementById('mixQAToggle');
   if (shuffleToggle) shuffleToggle.checked = true;
+  // No timer unless the student chooses a timed test
+  setSetupTimerMode('none');
   renderSetupAvailable();
   modal.classList.add('active');
   setTimeout(() => input && input.focus(), 50);
@@ -8128,6 +8167,31 @@ function onSetupLimitInput() {
   return result;
 }
 
+// Timer choice in the test setup: no timer by default; minutes are only asked for a timed test.
+let _setupTimerMode = 'none';
+let _setupTimerMinutes = null;
+
+function setSetupTimerMode(mode) {
+  _setupTimerMode = mode === 'timed' ? 'timed' : 'none';
+  if (_setupTimerMode === 'none') _setupTimerMinutes = null;
+  document.querySelectorAll('#setupTimerMode .setup-seg').forEach(b => b.classList.toggle('active', b.dataset.mode === _setupTimerMode));
+  const opts = document.getElementById('setupTimerOptions');
+  if (opts) opts.style.display = _setupTimerMode === 'timed' ? 'block' : 'none';
+  renderSetupTimerChips();
+}
+
+function setSetupTimerMinutes(minutes) {
+  _setupTimerMinutes = Number(minutes) || null;
+  renderSetupTimerChips();
+}
+
+function renderSetupTimerChips() {
+  const wrap = document.getElementById('setupTimerChips');
+  if (!wrap) return;
+  wrap.classList.remove('need-choice');
+  wrap.querySelectorAll('.setup-chip').forEach(c => c.classList.toggle('active', Number(c.dataset.minutes) === _setupTimerMinutes));
+}
+
 function closeTestSetupModal() {
   _setupCountRequest++;
   document.getElementById('testSetupModal').classList.remove('active');
@@ -8139,6 +8203,12 @@ async function confirmTestSetup() {
     document.getElementById('questionCountLimit')?.focus();
     return;
   }
+  if (_setupTimerMode === 'timed' && !_setupTimerMinutes) {
+    document.getElementById('setupTimerChips')?.classList.add('need-choice');
+    showToast('Choose how long the timed test should run', 'warning');
+    return;
+  }
+  TEST_CONFIG.timeLimitMinutes = _setupTimerMode === 'timed' ? _setupTimerMinutes : null;
   const mixQAToggle = document.getElementById('mixQAToggle');
   TEST_CONFIG.shuffleQuestions = mixQAToggle ? mixQAToggle.checked : true;
   TEST_CONFIG.shuffleOptions   = true; // answer choices are always shuffled
@@ -8706,35 +8776,38 @@ function _onVisibilityChange() {
 
 function initializeTimer() {
   if (testState.timerInterval) clearInterval(testState.timerInterval);
+  const timerEl = document.getElementById('timer');
+  const minutes = Number(TEST_CONFIG.timeLimitMinutes) || 0;
 
-  if (SESSION_ROLE.isTeacher) {
-    const timerEl = document.getElementById('timer');
+  // Default: no timer at all
+  if (!minutes) {
     if (timerEl) timerEl.style.display = 'none';
     return;
   }
-  const durationSeconds = TEST_CONFIG.durationMinutes * 60;
-  
-  testState.timerInterval = setInterval(() => {
+  if (timerEl) { timerEl.style.display = ''; timerEl.classList.remove('warning'); }
+  const durationSeconds = minutes * 60;
+
+  const tick = () => {
     const elapsed = Math.floor((Date.now() - testState.startTime) / 1000);
     const remaining = durationSeconds - elapsed;
-    
+
     if (remaining <= 0) {
       clearInterval(testState.timerInterval);
       showToast('Time\'s up! Submitting test...', 'warning');
       setTimeout(() => submitTest(true), 2000);
       return;
     }
-    
-    const timerEl = document.getElementById('timer');
+
+    const el = document.getElementById('timer');
     const displayEl = document.getElementById('timerDisplay');
-    if (!timerEl || !displayEl) return; // DOM may not be present (e.g. after submit)
+    if (!el || !displayEl) return; // DOM may not be present (e.g. after submit)
     displayEl.textContent = formatTime(remaining);
-    
+
     // Warning state in last 5 minutes
-    if (remaining <= 300) {
-      timerEl.classList.add('warning');
-    }
-  }, 1000);
+    if (remaining <= 300) el.classList.add('warning');
+  };
+  tick();
+  testState.timerInterval = setInterval(tick, 1000);
 }
 
 // ============================================
@@ -9760,6 +9833,7 @@ function buildSavedSessionPayload(sessionName) {
       questionCount: TEST_CONFIG.questionCount || null,
       shuffleQuestions: TEST_CONFIG.shuffleQuestions,
       shuffleOptions: TEST_CONFIG.shuffleOptions,
+      timeLimitMinutes: TEST_CONFIG.timeLimitMinutes || null,
       elapsedMs: Math.max(0, Date.now() - testState.startTime)
     },
     start_time: new Date(testState.startTime).toISOString(),
@@ -10288,6 +10362,7 @@ async function loadSavedSession(sessionId) {
 
   // Restore test config
   const parsedConfig = parseSessionField(session.test_config, {});
+  TEST_CONFIG.timeLimitMinutes = null; // older saves had no timer
   Object.assign(TEST_CONFIG, parsedConfig || {});
 
   // Regenerate the exact shuffle seed used when the session started.
@@ -10344,10 +10419,8 @@ async function loadSavedSession(sessionId) {
     renderQuestion();
     renderQuestionNavigator();
     
-    // Start timer if configured (only if it has a duration, some are infinite)
-    if (TEST_CONFIG.durationMinutes > 0) {
-      initializeTimer();
-    }
+    // Shows the countdown only for a timed test; hides the timer otherwise
+    initializeTimer();
     
     showToast('Test resumed successfully!', 'success');
     
