@@ -1203,24 +1203,17 @@ body[data-zoom="large"] .question-type-badge {
   box-shadow: 0 8px 32px rgba(0,0,0,0.2);
   display: flex;
   flex-direction: column;
-  /* Height follows the window (not the zoom level) so Back/Next/Submit stay on screen */
+  /* The box grows with its content so the whole question, options and explanation are always visible */
   min-height: 460px;
-  height: clamp(460px, calc(100vh - 140px), 780px);
-  overflow: hidden;
+  height: auto;
 }
 
-/* The stem + options area scrolls inside the fixed panel */
 .question-panel-scrollable {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--navy-border) transparent;
+  flex: 1 0 auto;
   display: flex;
   flex-direction: column;
   padding-right: 4px;
   padding-bottom: 8px;
-  min-height: 0; /* required for flex children to shrink & scroll */
 }
 .question-panel-scrollable::-webkit-scrollbar { width: 4px; }
 .question-panel-scrollable::-webkit-scrollbar-track { background: transparent; }
@@ -2616,8 +2609,8 @@ body[data-zoom="large"] .question-type-badge {
   
   .question-panel {
     padding: 20px;
-    min-height: 780px;
-    height: 780px;
+    min-height: 0;
+    height: auto;
   }
   
   .start-content h1 {
@@ -7153,6 +7146,55 @@ function buildNoteUrl(notePath, anchorText, question) {
     if (words.length >= 8) url += '#:~:text=' + encodeURIComponent(words).replace(/-/g, '%2D');
   }
   return url;
+}
+
+// Collapse topics so students see one row per study note, labelled with the note's exact title.
+// A topic is shown when it has a note OR holds questions (so questions are never hidden), and
+// topics that point at the same note are merged into one row whose pool is all of them.
+function buildTopicRows(allTopics, counts, notes) {
+  if (!notes || notes.size === 0) {
+    return { rows: (allTopics || []).map(t => ({ ...t, _groupIds: [t.id] })), siblings: new Map() };
+  }
+  const groups = new Map();
+  (allTopics || []).forEach(t => {
+    const note = t.note_id ? notes.get(t.note_id) : null;
+    const n = counts[t.id] || 0;
+    if (!note && n === 0) return; // not in the notes and no questions: nothing to practise
+    const key = note ? `${t.subject_id}|${t.note_id}` : `solo|${t.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ topic: t, note, n });
+  });
+  const rows = [];
+  const siblings = new Map();
+  groups.forEach(members => {
+    members.sort((a, b) => (b.n - a.n) || ((a.topic.display_order || 0) - (b.topic.display_order || 0)) || String(a.topic.name).localeCompare(String(b.topic.name)));
+    const lead = members[0];
+    const note = lead.note;
+    const ids = members.map(m => m.topic.id);
+    rows.push({
+      ...lead.topic,
+      name: note ? note.title : lead.topic.name,
+      _origName: lead.topic.name,
+      _aliases: members.map(m => m.topic.name),
+      _notePath: note ? note.path : null,
+      _groupIds: ids
+    });
+    siblings.set(lead.topic.id, ids);
+  });
+  rows.sort((a, b) => (a.display_order || 0) - (b.display_order || 0) || String(a.name).localeCompare(String(b.name)));
+  return { rows, siblings };
+}
+
+// Selected rows -> every topic id whose questions belong to them (empty siblings add nothing).
+function expandSelectedTopicIds(ids) {
+  const sib = window._topicSiblings || new Map();
+  const counts = window._cachedTopicCounts || {};
+  const out = new Set();
+  (ids || []).forEach(id => {
+    out.add(id);
+    (sib.get(id) || []).forEach(s => { if (s === id || (counts[s] || 0) > 0) out.add(s); });
+  });
+  return Array.from(out);
 }
 
 // Look up each question's primary note. Runs in the background; a failure only means no "Study"
