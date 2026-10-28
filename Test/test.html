@@ -1439,6 +1439,8 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
   -webkit-tap-highlight-color: transparent;
 }
 .option { touch-action: manipulation; } /* no double-tap zoom on an answer; scrolling still works */
+/* Safari zooms the whole page when a text field under 16px gets focus (search, question count, notes to the teacher) */
+@media (pointer: coarse) { input[type="text"], input[type="number"], textarea { font-size: 16px !important; } }
 /* While a press is in progress nothing on the page may start a selection (a finger that drifts off the row) */
 body.option-pressing, body.option-pressing * {
   -webkit-user-select: none !important;
@@ -6077,7 +6079,7 @@ async function sendSessionHeartbeat() {
 // Start heartbeat interval (teacher only)
 function startSessionHeartbeat() {
   if (!TEACHER_MODE.enabled) return;
-  
+  clearInterval(TEACHER_MODE.heartbeatInterval);
   TEACHER_MODE.heartbeatInterval = setInterval(() => {
     sendSessionHeartbeat();
   }, 30000); // Every 30 seconds
@@ -6535,6 +6537,7 @@ let testState = {
   startTime: null,
   endTime: null,
   timerInterval: null,
+  timeUpTimeout: null,
   sessionId: null,
   shuffleSeed: null,
   testConfig: null,
@@ -7080,6 +7083,14 @@ setTimeout(rotationFlush, 4000); // send anything a previous visit could not
 const QUESTION_COLUMNS = 'id, test_id, question_stem, question_stem_hy, options, options_hy, correct_answer, is_multiple_choice, rationale, rationale_hy, category, display_order, points, is_active, topic_id';
 
 // One question row from the database -> the object the test runs on
+// correct_answer is a JSON array string, an array, or a single id; a malformed value must not break loading the whole test
+function parseCorrectAnswer(raw) {
+  if (typeof raw === 'string' && raw.trim().startsWith('[')) {
+    try { return JSON.parse(raw); } catch (e) { return []; }
+  }
+  return (Array.isArray(raw) ? raw : [raw]).filter(Boolean);
+}
+
 function parseQuestionRow(q) {
   return {
     id: q.id,
@@ -7088,7 +7099,7 @@ function parseQuestionRow(q) {
     stem_hy: q.question_stem_hy || null,
     options: q.options, // Already parsed by Supabase
     options_hy: q.options_hy || null, // Armenian options (same id keys, translated text)
-    correct: (typeof q.correct_answer === 'string' && q.correct_answer.trim().startsWith('[')) ? JSON.parse(q.correct_answer) : (Array.isArray(q.correct_answer) ? q.correct_answer : [q.correct_answer]).filter(Boolean),
+    correct: parseCorrectAnswer(q.correct_answer),
     multi: q.is_multiple_choice,
     rationale: q.rationale,
     rationale_hy: q.rationale_hy || null,
@@ -9529,6 +9540,7 @@ function studentFirstName() {
 // Next number for this student: one more than the highest of their completed tests, saved tests and
 // this device's own counter, so numbers keep increasing and are shared across computers.
 let _testNumberInFlight = false;
+let _testNumberPromise = null;
 async function computeNextTestNumber() {
   let highest = 0;
   let uid = null;
@@ -9577,8 +9589,9 @@ function renderTestTitle() {
   // A running test without a number yet (new test, or an older saved one) gets the next number
   if (!TEST_CONFIG.testNumber && testState.startTime && !_testNumberInFlight) {
     _testNumberInFlight = true;
-    computeNextTestNumber()
+    _testNumberPromise = computeNextTestNumber()
       .then(n => { if (!TEST_CONFIG.testNumber && testState.startTime) TEST_CONFIG.testNumber = n; })
+      .catch(() => {})
       .finally(() => { _testNumberInFlight = false; renderTestTitle(); });
   }
 }
@@ -9771,7 +9784,8 @@ function initializeTimer() {
     if (remaining <= 0) {
       clearInterval(testState.timerInterval);
       showToast('Time\'s up! Submitting test...', 'warning');
-      setTimeout(() => submitTest(true), 2000);
+      clearTimeout(testState.timeUpTimeout);
+      testState.timeUpTimeout = setTimeout(() => { if (testState.startTime && !testState.endTime) submitTest(true); }, 2000);
       return;
     }
 
@@ -10822,6 +10836,7 @@ function resetTestRunState() {
   TEST_CONFIG.testNumber = null;
   TEST_CONFIG.openedAt = null;
   if (testState.timerInterval) { clearInterval(testState.timerInterval); testState.timerInterval = null; }
+  clearTimeout(testState.timeUpTimeout);
   window.removeEventListener('beforeunload', handleBeforeUnload);
   window.removeEventListener('pagehide', handleBeforeUnload, { capture: true });
   document.removeEventListener('visibilitychange', _onVisibilityChange);
@@ -11090,6 +11105,11 @@ async function ongoingWrite() {
     if (!(await getSignedInUserId())) throw new Error('not_signed_in');
 
     const first = !testState.savedSessionDbId;
+    // The first copy is named after the test number, which is still being worked out right after a test starts
+    if (first && !testState.savedSessionName && !TEST_CONFIG.testNumber && _testNumberInFlight && _testNumberPromise) {
+      await _testNumberPromise;
+      if (testState.sessionId !== run || !ongoingTracking()) return;
+    }
     if (first) testState.savedSessionDbId = newRowId();
     const id = testState.savedSessionDbId;
     const name = testState.savedSessionName || (testState.savedSessionName = testTitleLabel());
@@ -11740,7 +11760,7 @@ async function loadSavedSessionInner(sessionId) {
   testState.sessionId = session.session_id;
   testState.savedSessionDbId = session.id;
   testState.savedSessionName = session.session_name || null;
-    testState.currentIndex = session.current_question_index;
+    testState.currentIndex = Math.max(0, parseInt(session.current_question_index, 10) || 0);
   testState.answers = parsedAnswers || {};
   testState.answerStatus = parsedAnswerStatus || {};
     testState.flagged = new Set(parsedFlagged || []);
@@ -11793,7 +11813,7 @@ async function loadSavedSessionInner(sessionId) {
           stem_hy: q.question_stem_hy || null,
           options: q.options,
           options_hy: q.options_hy || null,
-          correct: (typeof q.correct_answer === 'string' && q.correct_answer.trim().startsWith('[')) ? JSON.parse(q.correct_answer) : (Array.isArray(q.correct_answer) ? q.correct_answer : [q.correct_answer]).filter(Boolean),
+          correct: parseCorrectAnswer(q.correct_answer),
           multi: q.is_multiple_choice,
           rationale: q.rationale,
           rationale_hy: q.rationale_hy || null,
@@ -12364,6 +12384,7 @@ function submitTest(autoSubmit = false) {
   
   testState.endTime = Date.now();
   clearInterval(testState.timerInterval);
+  clearTimeout(testState.timeUpTimeout);
   window.removeEventListener('beforeunload', handleBeforeUnload);
   window.removeEventListener('pagehide', handleBeforeUnload, { capture: true });
   document.removeEventListener('visibilitychange', _onVisibilityChange);
@@ -12376,10 +12397,17 @@ function submitTest(autoSubmit = false) {
 
   if (isTeacherColdCall) {
     // Generate multi-student gradebook and hide normal result renders
-    submitColdCallGrades().then(() => {
-        // Clear local cache just in case
-        clearLocalStorage();
-        discardSavedSessionAfterSubmit();
+    submitColdCallGrades().then(saved => {
+      if (!saved) {
+        // Keep the session so the teacher can press Submit again
+        testState.endTime = null;
+        const container = document.getElementById('testContainer');
+        if (container) container.style.display = 'block';
+        return;
+      }
+      // Clear local cache just in case
+      clearLocalStorage();
+      discardSavedSessionAfterSubmit();
     });
   } else {
     // Standard single-user submission
@@ -12454,10 +12482,12 @@ async function submitColdCallGrades() {
      
      // Special UI render for teachers
      renderColdCallResults(gradePayloads);
+     return true;
 
    } catch(e) {
      console.error("Failed storing cold call grades", e);
      showToast("Failed to save Cold Call Grades", "error");
+     return false;
    }
 }
 
@@ -12501,7 +12531,7 @@ function renderColdCallResults(grades) {
          html += `
           <div style="display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: var(--bg-white); border-radius: 8px; border: 1px solid var(--border-color); box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
             <div style="display: flex; flex-direction: column;">
-               <span style="font-weight: 600; color: var(--navy-primary); font-size: 1.1rem;">${g.student_name}</span>
+               <span style="font-weight: 600; color: var(--navy-primary); font-size: 1.1rem;">${escapeHtml(g.student_name || '')}</span>
                <span style="font-size: 0.85rem; color: var(--text-light); margin-top: 0.2rem;">${g.correct_count} Correct, ${g.incorrect_count} Incorrect</span>
             </div>
             <div style="display: flex; align-items: center; gap: 1rem;">
