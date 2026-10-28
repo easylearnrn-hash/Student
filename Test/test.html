@@ -4864,7 +4864,7 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
               <polyline points="9 18 15 12 9 6"/>
             </svg>
           </button>
-          <button class="btn-secondary" onclick="showSaveModal()" style="background:rgba(201,168,76,0.08);border-color:rgba(201,168,76,0.35);color:var(--gold-primary)">
+          <button class="btn-secondary" id="saveForLaterBtn" onclick="saveForLater()" style="background:rgba(201,168,76,0.08);border-color:rgba(201,168,76,0.35);color:var(--gold-primary)">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="display:inline;margin-right:6px">
               <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
               <polyline points="17 21 17 13 7 13 7 21"/>
@@ -10748,7 +10748,7 @@ document.addEventListener('keydown', (e) => {
 
 function leaveTestSaveAndTopics() {
   closeLeaveTestModal();
-  showSaveModal(true); // the normal save dialog; after a confirmed save the topic picker opens
+  saveForLater(true); // saves (asking for a name only if it was never saved); after a confirmed save the topic picker opens
 }
 
 function leaveTestSubmit() {
@@ -10960,9 +10960,23 @@ function leaveTestAfterSave() {
   if (toTopics) showSubjectSelection();
 }
 
-async function saveTestSession() {
-  const sessionName = document.getElementById('saveSessionName').value.trim();
-  const saveBtn = document.querySelector('#saveTestModal .btn-primary');
+// "Save for Later": a test that already has a saved copy is updated straight away with its existing
+// name (no name box); a test that was never saved still asks for a name first.
+function saveForLater(thenTopics) {
+  if (testState.savedSessionDbId && testState.savedSessionName) {
+    _saveThenTopics = thenTopics === true;
+    return saveTestSession(true);
+  }
+  showSaveModal(thenTopics);
+}
+
+async function saveTestSession(quick) {
+  const sessionName = quick === true
+    ? String(testState.savedSessionName || '').trim()
+    : document.getElementById('saveSessionName').value.trim();
+  const saveBtn = quick === true
+    ? document.getElementById('saveForLaterBtn')
+    : document.querySelector('#saveTestModal .btn-primary');
   const saveBtnHtml = saveBtn ? saveBtn.innerHTML : '';
   const restoreBtn = () => { if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = saveBtnHtml; } };
 
@@ -10976,6 +10990,7 @@ async function saveTestSession() {
   }
 
   if (saveBtn) {
+    if (saveBtn.disabled) return; // a save is already running
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving...';
   }
@@ -11013,7 +11028,7 @@ async function saveTestSession() {
 
     testState.savedSessionDbId = data.id;
     testState.savedSessionName = sessionName;
-    closeSaveModal();
+    if (quick !== true) closeSaveModal();
     restoreBtn();
     if (_saveThenTopics) {
       // "Save and go to topics" from the leave dialog: the student asked to leave
