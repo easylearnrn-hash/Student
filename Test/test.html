@@ -6676,7 +6676,8 @@ async function addMoreQuestions(count = 10) {
       TEST_CONFIG.testId,
       TEST_CONFIG.categoryFilter,
       null,          // no limit — we need the full pool to pick from
-      topicIds
+      topicIds,
+      { rotate: true } // least-shown first for this student
     );
 
     // 3. Keep only questions not already loaded
@@ -6773,7 +6774,121 @@ async function addMoreQuestions(count = 10) {
   }
 }
 
-async function loadQuestions(testId, categoryFilter = null, questionCount = null, topicIds = null) {
+// ─────────────────────────────────────────────────────────────────
+// PER-STUDENT QUESTION ROTATION
+// The time each question was last shown to a signed-in person is kept in student_question_history.
+// When a test is built, each topic's questions are taken longest-ago-shown first (never-shown ones
+// first, random among equals), so a question is not repeated for that person until every other
+// question in its topic has been shown since.
+// Only questions that were actually DISPLAYED count; a test that is left early does not use up
+// the questions it never showed.
+// ─────────────────────────────────────────────────────────────────
+const ROTATION = { uid: null, shownKeys: new Set(), timer: null, flushing: null };
+const ROTATION_QUEUE_KEY = 'arnoma:rotation-pending';
+
+function rotationReadQueue() {
+  try { return JSON.parse(localStorage.getItem(ROTATION_QUEUE_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+function rotationWriteQueue(queue) {
+  try {
+    if (Object.keys(queue).length) localStorage.setItem(ROTATION_QUEUE_KEY, JSON.stringify(queue));
+    else localStorage.removeItem(ROTATION_QUEUE_KEY);
+  } catch (e) { /* storage unavailable: the question is still counted for this page visit */ }
+}
+
+async function rotationUid() {
+  if (ROTATION.uid) return ROTATION.uid;
+  try {
+    if (!db && !initializeSupabase()) return null;
+    const { data } = await withTimeout(db.auth.getSession(), 6000, 'Session check timed out');
+    ROTATION.uid = (data && data.session && data.session.user && data.session.user.id) || null;
+  } catch (e) { ROTATION.uid = null; }
+  return ROTATION.uid;
+}
+
+// Called whenever a question is put on screen; the first display in a test session counts once.
+function rotationMarkShown(q) {
+  try {
+    const idNum = Number(q && q.id);
+    const session = String(testState.sessionId || '');
+    if (!q || q.isDisclaimer || !Number.isInteger(idNum) || !session) return;
+    const key = session + '|' + idNum;
+    if (ROTATION.shownKeys.has(key)) return;
+    ROTATION.shownKeys.add(key);
+    const queue = rotationReadQueue();
+    const entry = queue[session] || (queue[session] = { uid: ROTATION.uid || null, ids: [] });
+    if (!entry.ids.includes(idNum)) entry.ids.push(idNum);
+    rotationWriteQueue(queue);
+    clearTimeout(ROTATION.timer);
+    ROTATION.timer = setTimeout(rotationFlush, 1500);
+  } catch (e) { /* never interrupt the test for bookkeeping */ }
+}
+
+// Sends the queued displays to the database. Failed sends stay queued and are retried later.
+function rotationFlush() {
+  if (ROTATION.flushing) return ROTATION.flushing;
+  const run = (async () => {
+    try {
+      if (!Object.keys(rotationReadQueue()).length) return;
+      const uid = await rotationUid();
+      if (!uid) return;
+      for (const session of Object.keys(rotationReadQueue())) {
+        const entry = rotationReadQueue()[session];
+        if (!entry) continue;
+        if (entry.uid && entry.uid !== uid) { // queued by someone else on this device
+          const q = rotationReadQueue(); delete q[session]; rotationWriteQueue(q);
+          continue;
+        }
+        const ids = (entry.ids || []).slice();
+        if (ids.length) {
+          const { error } = await db.rpc('record_questions_shown', { p_ids: ids, p_session: session });
+          if (error) { console.warn('[rotation] could not record shown questions yet:', error.message); continue; }
+        }
+        const q = rotationReadQueue();
+        if (q[session]) {
+          q[session].ids = q[session].ids.filter(i => !ids.includes(i));
+          if (!q[session].ids.length) delete q[session];
+          rotationWriteQueue(q);
+        }
+      }
+    } catch (e) {
+      console.warn('[rotation] flush failed:', e && e.message);
+    }
+  })();
+  ROTATION.flushing = run;
+  run.then(() => { if (ROTATION.flushing === run) ROTATION.flushing = null; });
+  return run;
+}
+
+// { questionId: lastShownEpochSeconds } for this person, or null when it cannot be read (signed out, offline, ...)
+async function rotationLoadLastShown(ids) {
+  try {
+    const uid = await rotationUid();
+    if (!uid) return null;
+    await rotationFlush(); // include what the previous test just displayed
+    const nums = (ids || []).map(Number).filter(Number.isInteger);
+    const { data, error } = await withTimeout(db.rpc('get_question_last_shown', { p_ids: nums }), 10000, 'Question history timed out');
+    if (error) throw error;
+    return (data && typeof data === 'object') ? data : {};
+  } catch (e) {
+    console.warn('[rotation] history unavailable, selecting without it:', e && e.message);
+    return null;
+  }
+}
+
+// Never shown first, then longest ago shown; random among equals. The later per-topic grouping keeps
+// this order inside each topic.
+function rotationSort(questions, lastShown) {
+  const tie = new Map(questions.map(q => [q.id, Math.random()]));
+  const when = q => (lastShown[q.id] != null ? Number(lastShown[q.id]) : -1);
+  questions.sort((a, b) => (when(a) - when(b)) || (tie.get(a.id) - tie.get(b.id)));
+}
+
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') rotationFlush(); });
+window.addEventListener('pagehide', () => { rotationFlush(); });
+setTimeout(rotationFlush, 4000); // send anything a previous visit could not
+
+async function loadQuestions(testId, categoryFilter = null, questionCount = null, topicIds = null, options = {}) {
   try {
     setLoadingStatus('Querying question bank...');
     // When topic IDs are provided (multi-subject system), skip the test_id filter —
@@ -6860,6 +6975,17 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
       console.warn('Could not fetch question history, ignoring:', e);
     }
     
+    // Per-student rotation: only when a selection is actually being made (a limit below the pool size,
+    // or "add more questions"); a test that takes every question keeps its normal order.
+    if (useTopicSystem && (options.rotate === true || (questionCount && questionCount > 0 && questions.length > questionCount))) {
+      setLoadingStatus('Choosing questions you have seen least...');
+      const lastShown = await rotationLoadLastShown(questions.map(q => q.id));
+      if (lastShown) {
+        rotationSort(questions, lastShown);
+        console.log(`[rotation] ${questions.filter(q => lastShown[q.id] == null).length} of ${questions.length} questions not yet shown to this student`);
+      }
+    }
+
     // Apply question count limit AFTER fetching, distributing evenly across topics
     let finalQuestions = [];
     if (questionCount && questionCount > 0 && questions.length > questionCount) {
@@ -9575,6 +9701,8 @@ function renderQuestion() {
     document.getElementById('questionNumber').textContent = 'Error';
     return;
   }
+
+  rotationMarkShown(baseQuestion);
 
   // ── LANGUAGE-AWARE QUESTION RESOLUTION ─────────────────────────────────
   
