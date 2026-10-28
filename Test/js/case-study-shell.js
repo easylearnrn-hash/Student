@@ -218,6 +218,68 @@ body.invert-read #csRevealModal .rv-col h4{color:#7a5a12}
 body.invert-read #csRevealModal .rv-why{background:#f8efd6;border-color:#d9c28a}
 body.invert-read #csRevealModal .rv-why-t{color:#7a5a12}
 body.invert-read #csRevealModal .rv-why li{color:#1d2740}
+/* Highlighter (admins only), full screen and language picker: same look as test.html */
+.hl-btn{display:flex;align-items:center;justify-content:center;width:38px;height:37px;padding:0;background:rgba(255,255,255,.05);border:1.5px solid rgba(255,255,255,.12);border-radius:10px;color:#94a3b8;cursor:pointer;transition:all .15s;flex-shrink:0}
+.hl-btn:hover{background:rgba(255,255,255,.07);color:#f1f5f9}
+.hl-btn.active{background:linear-gradient(135deg,rgba(201,168,76,.22),rgba(201,168,76,.10));border-color:rgba(201,168,76,.45);color:var(--gold-primary)}
+.fs-btn .fs-exit{display:none}.fs-btn.active .fs-enter{display:none}.fs-btn.active .fs-exit{display:block}
+.lang-picker{display:flex;align-items:center;gap:4px;padding:4px;background:rgba(255,255,255,.05);border:1.5px solid rgba(255,255,255,.12);border-radius:10px}
+.lang-btn{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:7px;border:none;background:transparent;cursor:pointer;font-size:12px;font-weight:700;color:#94a3b8;letter-spacing:.4px;transition:all .15s;white-space:nowrap;font-family:'Inter',sans-serif}
+.lang-btn:hover:not(:disabled){background:rgba(255,255,255,.07);color:#f1f5f9}
+.lang-btn.active{background:linear-gradient(135deg,rgba(201,168,76,.22),rgba(201,168,76,.10));border:1px solid rgba(201,168,76,.45);color:var(--gold-primary)}
+mark.cs-hl{background:#fde047;color:#0f172a;border-radius:3px;padding:0 1px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+body.cs-hl-on #itemPanel,body.cs-hl-on #chartBody{cursor:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M9 11l-6 6v3h9l3-3' fill='%23fde047' stroke='%230f172a' stroke-width='1.6' stroke-linejoin='round'/><path d='M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4' fill='%23fde047' stroke='%230f172a' stroke-width='1.6' stroke-linejoin='round'/></svg>") 2 22,text}
+body.cs-hl-on :is(#itemPanel .opt,#itemPanel .opt *,#itemPanel .matrix,#itemPanel .matrix *,#itemPanel select,#itemPanel button){cursor:pointer}
+
+/* Answer options are tapped or held, never text-selected (Safari needs the -webkit- forms); the rest of the case stays selectable */
+.opt,.opt *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+.opt{position:relative;touch-action:manipulation}
+body.opt-pressing,body.opt-pressing *{-webkit-user-select:none!important;user-select:none!important;-webkit-touch-callout:none!important}
+/* Press and hold an option for half a second to cross it out as wrong; hold again to bring it back */
+.opt.holding::before{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(90deg,rgba(239,68,68,.20),rgba(239,68,68,.06));transform-origin:left center;animation:csOptHold .5s linear forwards;pointer-events:none}
+@keyframes csOptHold{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.opt.eliminated:not(.ok):not(.bad):not(.miss){background:rgba(2,6,23,.35);border-color:rgba(239,68,68,.32)}
+.opt.eliminated:not(.ok):not(.bad):not(.miss) > span:not(.tag){color:#64748b}
+.opt.eliminated:not(.ok):not(.bad):not(.miss)::after{content:"";position:absolute;left:8px;right:8px;top:50%;height:2px;margin-top:-1px;border-radius:2px;background:linear-gradient(90deg,rgba(239,68,68,.15),rgba(239,68,68,.9) 6%,rgba(239,68,68,.9) 94%,rgba(239,68,68,.15));transform-origin:left center;animation:csOptScratch .3s ease-out;pointer-events:none}
+@keyframes csOptScratch{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+
+/* Ask the instructor */
+.cs-item-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ask-instructor-btn{display:inline-flex;align-items:center;gap:7px;padding:6px 14px;border-radius:8px;border:1.5px solid rgba(201,168,76,.4);background:rgba(201,168,76,.08);color:var(--gold-primary);font-family:'Inter',sans-serif;font-size:12.5px;font-weight:700;letter-spacing:.2px;cursor:pointer;transition:all .15s;flex-shrink:0}
+.ask-instructor-btn:hover{background:rgba(201,168,76,.16);border-color:rgba(201,168,76,.75)}
+#csAskModal{position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto}
+#csAskModal .ask-box{background:#0f172a;border:1px solid #334155;border-radius:16px;max-width:560px;width:100%;padding:22px 26px}
+#csAskModal .ask-eyebrow{font-size:10px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase;color:var(--gold-primary)}
+#csAskModal h2{font-family:'Playfair Display',serif;font-size:22px;color:#f1f5f9;margin:4px 0 4px}
+#csAskModal .ask-sub{font-size:12.5px;color:#94a3b8;margin-bottom:14px}
+#csAskModal .ask-quote{margin:0 0 14px;padding:12px 14px;border-radius:10px;border:1px solid rgba(201,168,76,.22);background:rgba(201,168,76,.05);font-size:13.5px;line-height:1.55;color:#cbd5e1;max-height:150px;overflow-y:auto}
+#csAskModal .ask-quote b{display:block;margin-bottom:4px;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold-primary)}
+#csAskModal textarea{width:100%;min-height:130px;resize:vertical;padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04);color:#e2e8f0;font-family:'Inter',sans-serif;font-size:15px;line-height:1.55;outline:none;transition:border-color .15s}
+#csAskModal textarea:focus{border-color:rgba(201,168,76,.55)}
+#csAskModal .ask-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:14px}
+#csAskModal .ask-btn{padding:10px 20px;border-radius:10px;font-family:'Inter',sans-serif;font-size:13.5px;font-weight:800;letter-spacing:.2px;cursor:pointer;border:1.5px solid rgba(201,168,76,.4);background:rgba(201,168,76,.1);color:var(--gold-primary);transition:all .15s}
+#csAskModal .ask-btn:hover{background:rgba(201,168,76,.18);border-color:rgba(201,168,76,.75)}
+#csAskModal .ask-btn:disabled{opacity:.5;cursor:not-allowed}
+#csAskModal .ask-btn.ghost{background:transparent;border-color:rgba(255,255,255,.15);color:#94a3b8}
+#csToast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:10001;padding:11px 20px;border-radius:10px;background:#0f172a;border:1px solid rgba(201,168,76,.5);color:#f1f5f9;font-size:13.5px;font-weight:600;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+#csToast.err{border-color:rgba(239,68,68,.6)}
+
+body.invert-read .hl-btn,body.invert-read .lang-picker{background:#fbf6ea;border-color:#d9c99a;color:#3a3523}
+body.invert-read .lang-btn{color:#5b5440}
+body.invert-read .hl-btn:hover,body.invert-read .lang-btn:hover:not(:disabled){background:#f3e9cd;border-color:#c9a84c;color:#3a2e0b}
+body.invert-read .hl-btn.active,body.invert-read .lang-btn.active{background:linear-gradient(135deg,#ecd58a,#d6b45a);border:1px solid #b08d2e;color:#2b2106}
+body.invert-read .opt.eliminated:not(.ok):not(.bad):not(.miss){background:#f1f5f9;border-color:#fca5a5}
+body.invert-read .opt.eliminated:not(.ok):not(.bad):not(.miss) > span:not(.tag){color:#64748b}
+body.invert-read .opt.eliminated:not(.ok):not(.bad):not(.miss)::after{background:linear-gradient(90deg,rgba(185,28,28,.2),#b91c1c 6%,#b91c1c 94%,rgba(185,28,28,.2))}
+body.invert-read .opt.holding::before{background:linear-gradient(90deg,rgba(185,28,28,.18),rgba(185,28,28,.05))}
+body.invert-read .ask-instructor-btn{background:#fdf3d0;color:#6b4e0a;border-color:#a8832a}
+body.invert-read #csAskModal{background:rgba(48,38,14,.55)}
+body.invert-read #csAskModal .ask-box{background:#fffdf8;border-color:#d9c99a}
+body.invert-read #csAskModal h2{color:#0f172a}
+body.invert-read #csAskModal .ask-sub,body.invert-read #csAskModal .ask-quote{color:#4b4636}
+body.invert-read #csAskModal textarea{background:#fff;color:#0f172a;border-color:#cdbd93}
+body.invert-read #csAskModal .ask-btn.ghost{color:#3a3523;border-color:#cdbd93}
+body.invert-read #csToast{background:#fffdf8;color:#0f172a}
 `;
 
   var textFormatter = null; // set only while building the answer key so long forms show there too
@@ -357,6 +419,438 @@ body.invert-read #csRevealModal .rv-why li{color:#1d2740}
     document.body.appendChild(m);
   }
 
+
+  /* ==========================================================================================
+     Features shared with test.html: scratch-out of answer options, highlighter (admins only),
+     full screen and "Ask the instructor". Everything below works on the page's own markup:
+       #itemPanel (the item), #chartBody (the client chart), .opt (answer option rows),
+       .step-chip (item label), .fb (feedback, present once an item is submitted).
+     ========================================================================================== */
+  var CFG = {};
+  var byId = function (id) { return document.getElementById(id); };
+  var currentKey = function () {
+    try { return String(typeof CFG.getItemKey === 'function' ? CFG.getItemKey() : 0); } catch (e) { return '0'; }
+  };
+  var isSubmitted = function () { return !!document.querySelector('#itemPanel .fb'); };
+
+  function toast(msg, isErr) {
+    var old = byId('csToast'); if (old) old.remove();
+    var t = document.createElement('div');
+    t.id = 'csToast'; t.className = isErr ? 'err' : ''; t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function () { if (t.parentNode) t.remove(); }, 3500);
+  }
+  function clearTextSelection() {
+    var sel = window.getSelection && window.getSelection();
+    if (sel && sel.rangeCount) sel.removeAllRanges();
+  }
+
+  /* ---------- scratch out an answer option (press and hold 0.5 s; hold again to restore) ---------- */
+  var OPT_HOLD_MS = 500;
+  var elim = {}; // item key -> indexes of the options crossed out
+  var press = null, pressRelease = null;
+
+  function optList() { return Array.prototype.slice.call(document.querySelectorAll('#itemPanel .opt')); }
+  function setOptEliminated(opt, on) {
+    var key = currentKey(), idx = optList().indexOf(opt);
+    if (idx < 0) return;
+    var list = (elim[key] || []).filter(function (i) { return i !== idx; });
+    if (on) list.push(idx);
+    if (list.length) elim[key] = list; else delete elim[key];
+    opt.classList.toggle('eliminated', on);
+  }
+  function reapplyEliminated() {
+    var list = elim[currentKey()] || [];
+    optList().forEach(function (o, i) { o.classList.toggle('eliminated', list.indexOf(i) !== -1); });
+  }
+  function endPress() {
+    clearTimeout(pressRelease);
+    // keep the no-selection guard a moment past the release: iPad can start a selection as the finger lifts
+    pressRelease = setTimeout(function () { document.body.classList.remove('opt-pressing'); }, 350);
+  }
+  function cancelPress() {
+    if (!press) return;
+    clearTimeout(press.timer);
+    press.opt.classList.remove('holding');
+    if (press.opt._longPressed) { var o = press.opt; setTimeout(function () { o._longPressed = false; }, 600); }
+    press = null;
+    endPress();
+  }
+  function initScratch() {
+    document.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      var opt = e.target.closest && e.target.closest('#itemPanel .opt');
+      if (!opt || isSubmitted()) return;
+      cancelPress();
+      opt._longPressed = false;
+      clearTimeout(pressRelease);
+      document.body.classList.add('opt-pressing');
+      clearTextSelection();
+      opt.classList.add('holding');
+      press = { opt: opt, x: e.clientX, y: e.clientY, timer: setTimeout(function () {
+        var o = press && press.opt; if (!o) return;
+        o.classList.remove('holding');
+        o._longPressed = true;
+        clearTextSelection();
+        var nowOn = !o.classList.contains('eliminated');
+        setOptEliminated(o, nowOn);
+        var input = o.querySelector('input');
+        if (nowOn && input && input.checked) {
+          input.checked = false;
+          input.dispatchEvent(new Event('change', { bubbles: true })); // the page updates its Submit button and counters
+        }
+        if (navigator.vibrate) navigator.vibrate(15);
+      }, OPT_HOLD_MS) };
+    });
+    document.addEventListener('pointermove', function (e) {
+      if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) cancelPress();
+    });
+    ['pointerup', 'pointercancel'].forEach(function (t) { document.addEventListener(t, cancelPress); });
+    // The click that ends a long press only crossed the option out; a normal click on a crossed-out option brings it back and selects it
+    document.addEventListener('click', function (e) {
+      var opt = e.target.closest && e.target.closest('#itemPanel .opt');
+      if (!opt) return;
+      if (opt._longPressed) { opt._longPressed = false; e.preventDefault(); e.stopPropagation(); return; }
+      if (opt.classList.contains('eliminated')) setOptEliminated(opt, false);
+    }, true);
+    document.addEventListener('contextmenu', function (e) {
+      var opt = e.target.closest && e.target.closest('#itemPanel .opt');
+      if (opt && (press || opt._longPressed)) e.preventDefault();
+    });
+    // Safari can still begin a selection through this event even with user-select off
+    document.addEventListener('selectstart', function (e) {
+      var el = e.target && (e.target.nodeType === 3 ? e.target.parentElement : e.target);
+      if (document.body.classList.contains('opt-pressing') || (el && el.closest && el.closest('.opt'))) e.preventDefault();
+    });
+  }
+
+  /* ---------- highlighter (admins only): all text except the answer options ---------- */
+  var HL = { allowed: false, on: false, store: {} }; // store: region key -> [{s, e, t}] (character offsets + the text, to re-find it)
+  var HL_SKIP = '.opt,.matrix,select,option,button,.btn,input,textarea,.actions,.counter';
+
+  function hlRegions() {
+    return [
+      { el: byId('itemPanel'), key: function () { return 'item:' + currentKey(); } },
+      { el: byId('chartBody'), key: function () { var t = document.querySelector('#tabs .tab.active'); return 'chart:' + (t && t.dataset.tab || ''); } }
+    ].filter(function (r) { return r.el; });
+  }
+  function hlSkipped(node, root) {
+    var el = node.nodeType === 3 ? node.parentElement : node;
+    while (el && el !== root) { if (el.matches && el.matches(HL_SKIP)) return true; el = el.parentElement; }
+    return false;
+  }
+  function hlNodes(root) {
+    var out = [], pos = 0, n;
+    var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: function (t) {
+      return hlSkipped(t, root) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+    } });
+    while ((n = w.nextNode())) { out.push({ node: n, start: pos, end: pos + n.nodeValue.length }); pos += n.nodeValue.length; }
+    return out;
+  }
+  function hlText(nodes) { return nodes.map(function (n) { return n.node.nodeValue; }).join(''); }
+  function hlOffset(nodes, node, offset) {
+    var r = document.createRange(); r.setStart(node, offset); r.collapse(true);
+    var pos = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      if (nodes[i].node === node) return nodes[i].start + offset;
+      if (r.comparePoint(nodes[i].node, nodes[i].node.length) <= 0) pos = nodes[i].end; else break;
+    }
+    return pos;
+  }
+  function hlRange(nodes, s, e) {
+    var a = null, b = null;
+    nodes.forEach(function (n) { if (!a && s >= n.start && s <= n.end) a = n; if (e >= n.start && e <= n.end) b = n; });
+    if (!a || !b) return null;
+    var r = document.createRange(); r.setStart(a.node, s - a.start); r.setEnd(b.node, e - b.start);
+    return r;
+  }
+  function hlAdd(list, s, e) {
+    var out = [], ns = s, ne = e;
+    list.forEach(function (x) { if (x[1] < ns || x[0] > ne) out.push(x); else { ns = Math.min(ns, x[0]); ne = Math.max(ne, x[1]); } });
+    out.push([ns, ne]);
+    return out.sort(function (x, y) { return x[0] - y[0]; });
+  }
+  function hlSubtract(list, s, e) {
+    var out = [];
+    list.forEach(function (x) {
+      if (x[1] <= s || x[0] >= e) { out.push(x); return; }
+      if (x[0] < s) out.push([x[0], s]);
+      if (x[1] > e) out.push([e, x[1]]);
+    });
+    return out;
+  }
+  function hlCovers(list, s, e) { return list.some(function (x) { return x[0] <= s && x[1] >= e; }); }
+  // The stored ranges that still match the text (moved if the text shifted, dropped if it is gone)
+  function hlList(key, text) {
+    return (HL.store[key] || []).map(function (en) {
+      if (text.slice(en.s, en.e) === en.t) return [en.s, en.e];
+      var i = text.indexOf(en.t);
+      return i >= 0 ? [i, i + en.t.length] : null;
+    }).filter(Boolean);
+  }
+  function hlSave(key, list, text) {
+    if (list.length) HL.store[key] = list.map(function (x) { return { s: x[0], e: x[1], t: text.slice(x[0], x[1]) }; });
+    else delete HL.store[key];
+  }
+  function hlUnwrap(root) {
+    root.querySelectorAll('mark.cs-hl').forEach(function (m) { m.replaceWith.apply(m, m.childNodes); });
+    root.normalize();
+  }
+  function hlPaint(region) {
+    var root = region.el;
+    hlUnwrap(root);
+    if (!HL.allowed) return;
+    var nodes = hlNodes(root), text = hlText(nodes);
+    var ranges = hlList(region.key(), text);
+    if (!ranges.length) return;
+    nodes.forEach(function (n) {
+      ranges.map(function (x) { return [Math.max(x[0], n.start) - n.start, Math.min(x[1], n.end) - n.start]; })
+        .filter(function (x) { return x[1] > x[0] && n.node.nodeValue.slice(x[0], x[1]).trim() !== ''; }) // never a highlight on empty gaps between blocks
+        .sort(function (x, y) { return y[0] - x[0]; }) // last piece first so earlier offsets stay valid
+        .forEach(function (x) {
+          var r = document.createRange(); r.setStart(n.node, x[0]); r.setEnd(n.node, x[1]);
+          var m = document.createElement('mark'); m.className = 'cs-hl';
+          r.surroundContents(m);
+        });
+    });
+  }
+  function hlWordAt(text, i) {
+    var isWord = function (c) { return /[\p{L}\p{N}'’\-]/u.test(c); };
+    if (i < 0 || i >= text.length || !isWord(text[i])) return null;
+    var s = i, e = i + 1;
+    while (s > 0 && isWord(text[s - 1])) s--;
+    while (e < text.length && isWord(text[e])) e++;
+    return [s, e];
+  }
+  function hlCaretAt(x, y) {
+    if (document.caretPositionFromPoint) { var p = document.caretPositionFromPoint(x, y); return p ? { node: p.offsetNode, offset: p.offset } : null; }
+    if (document.caretRangeFromPoint) { var r = document.caretRangeFromPoint(x, y); return r ? { node: r.startContainer, offset: r.startOffset } : null; }
+    return null;
+  }
+  function onHighlightPointerUp(e) {
+    if (!HL.allowed || !HL.on) return;
+    var region = hlRegions().filter(function (r) { return r.el.contains(e.target); })[0];
+    var sel = window.getSelection();
+    var dragged = sel && !sel.isCollapsed && sel.rangeCount;
+    if (!region) {
+      if (!dragged) return;
+      var rg0 = sel.getRangeAt(0);
+      region = hlRegions().filter(function (r) { return r.el.contains(rg0.startContainer) && r.el.contains(rg0.endContainer); })[0];
+      if (!region) return;
+    }
+    var root = region.el, key = region.key();
+    var nodes = hlNodes(root), text = hlText(nodes);
+    var list = hlList(key, text);
+    if (dragged) {
+      var r = sel.getRangeAt(0);
+      if (!root.contains(r.startContainer) || !root.contains(r.endContainer)) return;
+      var s = hlOffset(nodes, r.startContainer, r.startOffset), en = hlOffset(nodes, r.endContainer, r.endOffset);
+      while (s < en && /\s/.test(text[s])) s++;
+      while (en > s && /\s/.test(text[en - 1])) en--;
+      sel.removeAllRanges();
+      if (en <= s) return;
+      list = hlAdd(list, s, en);
+    } else {
+      // Plain click: toggle the word under the pointer (never inside the answer options)
+      if (hlSkipped(e.target, root)) return;
+      var caret = hlCaretAt(e.clientX, e.clientY);
+      if (!caret || !root.contains(caret.node) || hlSkipped(caret.node, root)) return;
+      // The word is found inside the clicked piece of text, so neighbouring elements (a clock time next to a bold label) never merge into it
+      var entry = nodes.filter(function (n) { return n.node === caret.node; })[0];
+      if (!entry) return;
+      var local = hlWordAt(entry.node.nodeValue, caret.offset) || hlWordAt(entry.node.nodeValue, caret.offset - 1);
+      if (!local) return;
+      var word = [entry.start + local[0], entry.start + local[1]];
+      var wr = hlRange(nodes, word[0], word[1]);
+      var onWord = wr && Array.prototype.some.call(wr.getClientRects(), function (b) {
+        return e.clientX >= b.left - 2 && e.clientX <= b.right + 2 && e.clientY >= b.top - 2 && e.clientY <= b.bottom + 2;
+      });
+      if (!onWord) return;
+      list = hlCovers(list, word[0], word[1]) ? hlSubtract(list, word[0], word[1]) : hlAdd(list, word[0], word[1]);
+    }
+    hlSave(key, list, text);
+    applying = true; hlPaint(region); flushRecords(); applying = false;
+  }
+  function setHighlighter(on) {
+    HL.on = !!on && HL.allowed;
+    var b = byId('csHighlightBtn');
+    if (b) { b.classList.toggle('active', HL.on); b.setAttribute('aria-pressed', HL.on ? 'true' : 'false'); }
+    document.body.classList.toggle('cs-hl-on', HL.on);
+  }
+  function setHighlighterAllowed(ok) {
+    HL.allowed = !!ok;
+    var b = byId('csHighlightBtn');
+    if (b) b.style.display = ok ? 'flex' : 'none';
+    if (!ok) setHighlighter(false);
+    scheduleRefresh();
+  }
+
+  /* ---------- full screen ---------- */
+  var fsEl = function (d) { return d.fullscreenElement || d.webkitFullscreenElement || null; };
+  var parentFs = null; // last state reported by test.html (when it hosts this page and cannot be read directly)
+  function fsHost() { // the document that goes full screen: test.html when embedded, otherwise this page
+    if (window.parent !== window) { try { void window.parent.document.body; return window.parent.document; } catch (e) { return null; } }
+    return document;
+  }
+  function fsOn() {
+    var h = fsHost();
+    return h ? !!fsEl(h) : !!parentFs;
+  }
+  function syncFsButton() {
+    var b = byId('csFsBtn'); if (!b) return;
+    var on = fsOn(), h = fsHost();
+    var supported = h ? !!(h.fullscreenEnabled || h.webkitFullscreenEnabled) : true;
+    b.style.display = supported ? '' : 'none';
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    b.title = on ? 'Exit full screen' : 'Full screen';
+    b.setAttribute('aria-label', b.title);
+  }
+  function syncFsSoon() { syncFsButton(); setTimeout(syncFsButton, 250); setTimeout(syncFsButton, 800); }
+  function toggleFullscreen() {
+    var h = fsHost();
+    if (!h) { window.parent.postMessage({ type: 'case-study-fullscreen' }, '*'); return; }
+    if (fsEl(h)) {
+      var exit = h.exitFullscreen || h.webkitExitFullscreen;
+      if (exit) Promise.resolve(exit.call(h)).catch(function () {}).then(syncFsSoon);
+      return;
+    }
+    var root = h.documentElement, enter = root.requestFullscreen || root.webkitRequestFullscreen;
+    if (!enter) return;
+    Promise.resolve(enter.call(root)).catch(function () { toast('Full screen is not available in this browser', true); }).then(syncFsSoon);
+  }
+
+  /* ---------- Ask the instructor ---------- */
+  function askSnapshot() {
+    var it = CFG.items && CFG.items[Number(currentKey())];
+    var title = CFG.title || 'Case study';
+    if (!it) {
+      var p = document.querySelector('#itemPanel .prompt');
+      return { question_text: (title + ' — ' + (p ? p.textContent : '')).slice(0, 4000), options: [], correct_answer: '', topic_name: title };
+    }
+    var options = [];
+    if (it.type === 'sata') options = it.options.map(function (t, i) { return { text: String(t).slice(0, 1000), correct: it.correct.indexOf(i) !== -1 }; });
+    else if (it.type === 'bowtie') {
+      ['actions', 'params'].forEach(function (k) { it[k].opts.forEach(function (t, i) { options.push({ text: String(t).slice(0, 1000), correct: it[k].correct.indexOf(i) !== -1 }); }); });
+      it.condition.opts.forEach(function (t, i) { options.push({ text: String(t).slice(0, 1000), correct: it.condition.correct === i }); });
+    }
+    var correct = options.filter(function (o) { return o.correct; }).map(function (o) { return o.text; }).join(' | ');
+    return {
+      question_text: (title + ' — ' + it.step + ': ' + it.prompt).slice(0, 4000),
+      options: options,
+      correct_answer: (correct || keyText(it)).slice(0, 2000),
+      topic_name: title.slice(0, 500)
+    };
+  }
+  function closeAsk() { var m = byId('csAskModal'); if (m) m.remove(); }
+  function openAsk() {
+    closeAsk();
+    var snap = askSnapshot();
+    var m = document.createElement('div');
+    m.id = 'csAskModal'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true');
+    m.innerHTML = '<div class="ask-box"><div class="ask-eyebrow">Ask the instructor</div><h2>What would you like to ask?</h2>' +
+      '<div class="ask-sub">Your instructor will see this question together with the one you are on.</div>' +
+      '<div class="ask-quote"><b>About this question</b><span></span></div>' +
+      '<textarea maxlength="1500" placeholder="Type your question here…"></textarea>' +
+      '<div class="ask-actions"><button class="ask-btn ghost" type="button" data-act="cancel">Cancel</button><button class="ask-btn" type="button" data-act="send">Send to instructor</button></div></div>';
+    m.querySelector('.ask-quote span').textContent = snap.question_text;
+    var ta = m.querySelector('textarea');
+    m.addEventListener('click', function (e) { if (e.target === m || (e.target.dataset && e.target.dataset.act === 'cancel')) closeAsk(); });
+    m.addEventListener('keydown', function (e) { if (e.key === 'Escape') { e.stopPropagation(); closeAsk(); } });
+    m.querySelector('[data-act="send"]').onclick = function () { sendAsk(snap, ta, this); };
+    document.body.appendChild(m);
+    setTimeout(function () { ta.focus(); }, 50);
+  }
+  async function getClient() {
+    if (!window.supabase) await loadScript(BASE + 'supabase.min.js');
+    if (typeof window.initSupabase !== 'function') await loadScript(BASE + 'supabase-config.js');
+    return window.initSupabase();
+  }
+  async function sendAsk(snap, ta, btn) {
+    var message = ta.value.trim();
+    if (!message) { ta.focus(); toast('Please type your question first'); return; }
+    btn.disabled = true;
+    try {
+      var client = await getClient();
+      if (!client) throw new Error('No connection');
+      var sd = await withTimeout(client.auth.getSession(), 6000);
+      var user = sd && sd.data && sd.data.session && sd.data.session.user;
+      if (!user) { toast('Please sign in to send a question to your instructor', true); btn.disabled = false; return; }
+      var who = CFG.identity ? CFG.identity() : { name: user.email };
+      var res = await withTimeout(client.from('teacher_questions').insert({
+        question_id: null, question_text: snap.question_text, options: snap.options, correct_answer: snap.correct_answer, topic_name: snap.topic_name,
+        message: message.slice(0, 1500), student_name: String(who.name || user.email || 'Student').slice(0, 200),
+        student_email: user.email || '', owner_auth_id: user.id
+      }), 12000);
+      if (res.error) throw res.error;
+      closeAsk();
+      toast('Sent. Your instructor will see your question.');
+    } catch (err) {
+      console.warn('Ask the instructor failed:', err && err.message);
+      toast('Could not send your question. Please try again.', true);
+      btn.disabled = false;
+    }
+  }
+  function ensureAskButton() {
+    var panel = byId('itemPanel');
+    if (!panel || panel.querySelector('.cs-item-top') || panel.querySelector('.result-head')) return;
+    var chip = panel.querySelector('.step-chip');
+    if (!chip) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'cs-item-top';
+    chip.parentNode.insertBefore(wrap, chip);
+    wrap.appendChild(chip);
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'ask-instructor-btn'; b.title = 'Send this question to your instructor';
+    b.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>Ask the instructor</span>';
+    b.onclick = openAsk;
+    wrap.appendChild(b);
+  }
+
+  /* ---------- keep everything in step with the page's re-renders ---------- */
+  var applying = false, refreshTimer = null, observers = [];
+  function flushRecords() { observers.forEach(function (o) { o.takeRecords(); }); }
+  function refresh() {
+    refreshTimer = null;
+    applying = true;
+    try {
+      ensureAskButton();
+      reapplyEliminated();
+      hlRegions().forEach(hlPaint);
+    } finally {
+      flushRecords();
+      applying = false;
+    }
+  }
+  function scheduleRefresh() {
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(refresh, 0);
+  }
+  function initFeatures(opts, identityFn) {
+    CFG = opts || {};
+    CFG.identity = identityFn;
+    initScratch();
+    var fsBtn = byId('csFsBtn');
+    if (fsBtn) fsBtn.onclick = toggleFullscreen;
+    var hlBtn = byId('csHighlightBtn');
+    if (hlBtn) hlBtn.onclick = function () { if (HL.allowed) setHighlighter(!HL.on); };
+    document.addEventListener('pointerup', onHighlightPointerUp);
+    document.addEventListener('fullscreenchange', syncFsButton);
+    document.addEventListener('webkitfullscreenchange', syncFsButton);
+    window.addEventListener('resize', syncFsButton);
+    window.addEventListener('message', function (e) {
+      if (e.source === window.parent && e.data && e.data.type === 'fullscreen-state') { parentFs = !!e.data.on; syncFsButton(); }
+    });
+    syncFsButton();
+    ['itemPanel', 'chartBody'].forEach(function (id) {
+      var el = byId(id); if (!el) return;
+      var o = new MutationObserver(function () { if (!applying) scheduleRefresh(); });
+      o.observe(el, { childList: true, subtree: true, characterData: true });
+      observers.push(o);
+    });
+    refresh();
+  }
+
   function mount(opts) {
     if (!ROLE.isLoggedIn) { window.location.replace('../index.html'); return null; }
     var style = document.createElement('style');
@@ -384,8 +878,17 @@ body.invert-read #csRevealModal .rv-why li{color:#1d2740}
             '<button class="zoom-btn" data-size="medium" title="Medium text" type="button">A</button>' +
             '<button class="zoom-btn" data-size="large" title="Large text" type="button">A</button>' +
           '</div>' +
+          '<button class="hl-btn" id="csHighlightBtn" type="button" style="display:none" aria-pressed="false" title="Highlighter — click or drag over words to highlight them (not the answer options)">' +
+            '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l-6 6v3h9l3-3"/><path d="M22 12l-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg></button>' +
           '<button class="invert-btn" id="csInvertBtn" type="button" title="Invert colors (bright background, dark text)" aria-pressed="false">' +
             '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg><span>Invert</span></button>' +
+          '<button class="invert-btn fs-btn" id="csFsBtn" type="button" title="Full screen" aria-label="Full screen" aria-pressed="false">' +
+            '<svg class="fs-enter" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>' +
+            '<svg class="fs-exit" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg></button>' +
+          '<div class="lang-picker" id="csLangPicker" title="Switch language / Փոխել լեզուն">' +
+            '<button class="lang-btn active" type="button" title="English"><svg class="lang-flag" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/></svg><span>EN</span></button>' +
+            '<button class="lang-btn" type="button" disabled style="opacity:.35;cursor:not-allowed" title="Հայերեն թարգմանություն դեռ հասանելի չէ"><svg class="lang-flag" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/></svg><span>ՀԱՅ</span></button>' +
+          '</div>' +
           '<span id="csRevealSlot"></span>' +
         '</div>' +
       '</div>';
@@ -396,10 +899,11 @@ body.invert-read #csRevealModal .rv-why li{color:#1d2740}
     if (opts.embedded) {
       var exit = function () { if (opts.onExit) opts.onExit(); };
       document.getElementById('csExitBtn').onclick = exit;
-      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !document.getElementById('csRevealModal')) exit(); });
+      document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !document.getElementById('csRevealModal') && !document.getElementById('csAskModal')) exit(); });
     }
     setZoom(localStorage.getItem('acnhs_test_zoom') || 'small');
     setInvert(localStorage.getItem('acnhs_test_invert') === '1');
+    initFeatures(opts, identity);
 
     // Student view first; the admin-only controls are added only once admin status is confirmed
     function applyRole() {
@@ -417,6 +921,7 @@ body.invert-read #csRevealModal .rv-why li{color:#1d2740}
       roleEl.style.color = color;
       pill.style.background = teacher ? 'rgba(201,168,76,0.07)' : 'rgba(56,189,248,0.07)';
       pill.style.border = '1px solid ' + (teacher ? 'rgba(201,168,76,0.22)' : 'rgba(56,189,248,0.18)');
+      setHighlighterAllowed(teacher);
       var slot = document.getElementById('csRevealSlot');
       slot.innerHTML = '';
       if (teacher) {
@@ -460,6 +965,8 @@ body.invert-read #csRevealModal .rv-why li{color:#1d2740}
         if (changed) { applyRole(); notifyRole(); }
         return ok;
       },
+      // Clear cross-outs and highlights (used by "Try again")
+      resetMarks: function () { elim = {}; HL.store = {}; scheduleRefresh(); },
       setProgress: function (cur, total) { document.getElementById('csProgress').textContent = cur + ' / ' + total; },
       setFlagged: function (on) { document.getElementById('csFlagBtn').classList.toggle('flagged', !!on); },
       startTimer: startTimer,
