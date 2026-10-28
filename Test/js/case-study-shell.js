@@ -506,12 +506,12 @@ body.invert-read #csToast{background:#fffdf8;color:#0f172a}
       if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) cancelPress();
     });
     ['pointerup', 'pointercancel'].forEach(function (t) { document.addEventListener(t, cancelPress); });
-    // The click that ends a long press only crossed the option out; a normal click on a crossed-out option brings it back and selects it
+    // The click that ends a long press only crossed the option out; a normal click on a crossed-out option only takes the cross-out away (it does not select it)
     document.addEventListener('click', function (e) {
       var opt = e.target.closest && e.target.closest('#itemPanel .opt');
       if (!opt) return;
       if (opt._longPressed) { opt._longPressed = false; e.preventDefault(); e.stopPropagation(); return; }
-      if (opt.classList.contains('eliminated')) setOptEliminated(opt, false);
+      if (opt.classList.contains('eliminated')) { setOptEliminated(opt, false); e.preventDefault(); e.stopPropagation(); }
     }, true);
     document.addEventListener('contextmenu', function (e) {
       var opt = e.target.closest && e.target.closest('#itemPanel .opt');
