@@ -6520,7 +6520,7 @@ const TEST_CONFIG = {
 // to prevent 404 network errors in the browser console.
 const FEATURES = {
   testAttempts: false,          // flip to true once test_attempts table is created
-  topicCountsRpc: false         // flip to true once get_topic_question_counts RPC is created
+  topicCountsRpc: true          // get_topic_question_counts (Test/ADD-TOPIC-COUNTS-RPC.sql); falls back to a paged select if it errors
 };
 
 // ============================================
@@ -7122,10 +7122,13 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
       throw new Error('No questions found for the selected topics');
     }
 
-    const buildQuery = () => {
+    // A test that uses only part of the pool first reads just id/topic/order of every candidate,
+    // picks the questions, and then downloads the text of the chosen ones only.
+    const lean = useTopicSystem && questionCount > 0;
+    const buildQuery = (columns = QUESTION_COLUMNS) => {
       let query = db
         .from('test_questions')
-        .select(QUESTION_COLUMNS)
+        .select(columns)
         .eq('is_active', true)
         .order('display_order', { ascending: true })
         .order('id', { ascending: true });
@@ -7145,11 +7148,17 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
 
     // Paged: a single query is capped at 1000 rows by the server, which would silently
     // drop questions whenever a selection spans more than 1000.
-    const questions = await withTimeout(
-      fetchAllRows(buildQuery),
+    let leanRows = lean;
+    let questions = await withTimeout(
+      fetchAllRows(() => buildQuery(lean ? 'id, topic_id, display_order' : QUESTION_COLUMNS)),
       20000,
       'Loading questions timed out'
     );
+    // Everything is used anyway, so there is nothing to choose: load the full rows in one go
+    if (leanRows && questions.length <= questionCount) {
+      leanRows = false;
+      questions = await withTimeout(fetchAllRows(() => buildQuery()), 20000, 'Loading questions timed out');
+    }
     
     if (!questions || questions.length === 0) {
       throw new Error('No questions found for the selected topics');
@@ -7246,6 +7255,14 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
       finalQuestions = questions;
     }
     
+    if (leanRows) {
+      setLoadingStatus('Loading your questions...');
+      const { rows, error: rowsError } = await fetchQuestionRowsByIds(finalQuestions.map(q => q.id));
+      if (rowsError) throw rowsError;
+      finalQuestions = finalQuestions.map(q => rows.get(String(q.id))).filter(Boolean);
+      if (!finalQuestions.length) throw new Error('No questions found for the selected topics');
+    }
+
     console.log(`✓ Loaded ${finalQuestions.length} questions${topicIds ? ` from ${topicIds.length} topic(s)` : categoryFilter ? ` from ${categoryFilter}` : ''}${questionCount ? ` (limited to ${questionCount})` : ''}`);
     
     // Parse JSON fields (options, correct_answer)
@@ -8266,7 +8283,7 @@ async function loadTopicQuestionCounts() {
       console.warn('[Topic Counts] fallback query failed:', fallbackError);
     }
   }
-  window._cachedTopicCounts = topicQuestionCounts;
+  if (Object.keys(topicQuestionCounts).length) window._cachedTopicCounts = topicQuestionCounts; // an empty result is not worth remembering
   return topicQuestionCounts;
 }
 
@@ -11443,6 +11460,27 @@ function refreshSavedListIfVisible() {
   loadSavedSessions();
 }
 setInterval(refreshSavedListIfVisible, 30000);
+
+// While the start screen sits idle, load what the topic picker needs so "Start New Test" opens at once.
+// Only once signed in: before that the data would come back empty and be remembered that way.
+async function warmSubjectPicker() {
+  try {
+    if (document.visibilityState !== 'visible' || window._cachedSubjects) return;
+    if (!db && !initializeSupabase()) return;
+    if (!(await getSignedInUserId())) return;
+    const [subjects, topics] = await Promise.all([
+      db.from('test_subjects').select('*').eq('is_active', true).order('display_order'),
+      db.from('test_topics').select('*').or('status.eq.published,status.is.null').order('subject_id').order('display_order'),
+      loadTopicQuestionCounts(),
+      loadNoteCatalog()
+    ]);
+    if (!subjects.error && !topics.error && !window._cachedSubjects) {
+      window._cachedSubjects = subjects.data;
+      window._cachedTopics = topics.data;
+    }
+  } catch (e) { /* the picker loads everything itself when opened */ }
+}
+setTimeout(warmSubjectPicker, 2500);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshSavedListIfVisible(); });
 
 async function loadSavedSessions() {
