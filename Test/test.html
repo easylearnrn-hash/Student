@@ -7509,6 +7509,8 @@ function toggleFullscreen() {
 
 function syncFullscreenButtons() {
   const on = !!currentFullscreenElement();
+  const csFrame = document.getElementById('caseStudyFrame');
+  if (csFrame && csFrame.contentWindow) csFrame.contentWindow.postMessage({ type: 'fullscreen-state', on }, '*');
   const supported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
   document.querySelectorAll('.fs-btn').forEach(btn => {
     btn.style.display = supported ? '' : 'none';
@@ -8642,6 +8644,7 @@ function openCaseStudy() {
   ov.id = 'caseStudyOverlay';
   ov.innerHTML = `<iframe id="caseStudyFrame" title="Case study" src="${CASE_STUDY.url}?embedded=1"></iframe>`;
   document.body.appendChild(ov);
+  document.getElementById('caseStudyFrame').addEventListener('load', syncFullscreenButtons); // tell the case study if the page is already full screen
   document.body.style.overflow = 'hidden';
   document.getElementById('subjectModal').classList.add('hidden');
 }
@@ -8656,7 +8659,10 @@ function closeCaseStudy() {
 
 window.addEventListener('message', (e) => {
   const frame = document.getElementById('caseStudyFrame');
-  if (frame && e.source === frame.contentWindow && e.data && e.data.type === 'case-study-exit') closeCaseStudy();
+  if (!frame || e.source !== frame.contentWindow || !e.data) return;
+  if (e.data.type === 'case-study-exit') closeCaseStudy();
+  // The case study's Full screen button: this page is the one that goes full screen
+  if (e.data.type === 'case-study-fullscreen') toggleFullscreen();
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCaseStudy(); });
 
