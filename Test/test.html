@@ -6526,6 +6526,8 @@ let testState = {
   studentId: null,
   savedSessionDbId: null,
   savedSessionName: null,
+  ongoingEligible: false, // administrators: a new test that will get an "ongoing" copy in Supabase
+  isOngoingRow: false,    // the saved row of this test is an ongoing (automatic) one
   // ── Bilingual session snapshot ────────────────────────────────────────
   // Built once at session creation, never changes.
   // snapshot.en  — array of {id,stem,options,correct,rationale,multi,points,category}
@@ -6823,6 +6825,7 @@ function appendQuestionsToTest(picks) {
 // written from the live test, which already holds everything saved earlier. Calls queue up in order
 // and each one writes the latest list, so quick repeated additions cannot lose or duplicate questions.
 function syncQuestionsToSavedSession() {
+  if (testState.isOngoingRow || testState.ongoingEligible) { ongoingMarkDirty(true); return Promise.resolve(null); }
   const sessionId = testState.savedSessionDbId;
   if (!sessionId) return Promise.resolve(null);
   ADD_QUESTIONS.syncDirty = true;
@@ -7805,7 +7808,8 @@ function showNoTranslationAlert() {
 let saveTimer = null;
 // Tests are never stored on this device: saved tests live only in Supabase (see saveTestSession).
 // These stay as no-ops/cleaners so older call sites keep working and any leftover local copy is removed.
-function saveToLocalStorage() { /* intentionally does nothing */ }
+// Nothing is written to this device. This is the "something changed" signal: administrators' ongoing tests listen to it.
+function saveToLocalStorage() { ongoingMarkDirty(); }
 
 function loadFromLocalStorage() {
   clearLocalStorage();
@@ -9401,6 +9405,7 @@ async function initializeNewTest() {
   renderQuestionNavigator();
   renderQuestion();
   saveToLocalStorage();
+  ongoingBegin();
   
   showToast('Test started. Good luck!', 'success');
 }
@@ -9889,6 +9894,7 @@ function renderQuestion() {
 
   rotationMarkShown(baseQuestion);
   scheduleAddBatchPrepare();
+  ongoingMarkDirty();
 
   // ── LANGUAGE-AWARE QUESTION RESOLUTION ─────────────────────────────────
   
@@ -10108,6 +10114,7 @@ function setOptionEliminated(questionId, optionId, div, on) {
   if (on) list.push(optionId);
   if (list.length) testState.eliminated[questionId] = list; else delete testState.eliminated[questionId];
   div.classList.toggle('eliminated', on);
+  ongoingMarkDirty();
 }
 
 function clearTextSelection() {
@@ -10814,6 +10821,7 @@ function resetTestRunState() {
   clearTimeout(ADD_QUESTIONS.prepTimer);
   ADD_QUESTIONS.ready = null;
   ADD_QUESTIONS.failedSig = null;
+  ongoingReset();
   testState.savedSessionDbId = null;
   testState.savedSessionName = null;
   testState.snapshot = { en: null, hy: null };
@@ -10823,6 +10831,7 @@ function resetTestRunState() {
 
 // Back to the start screen with the topic picker open (no grade is recorded).
 function leaveTestToTopics() {
+  ongoingEnd(); // ending an ongoing test removes its copy (the saved row of a test that was explicitly saved stays)
   resetTestRunState();
   document.getElementById('testContainer').style.display = 'none';
   const loading = document.getElementById('loadingScreen'); if (loading) loading.style.display = 'none';
@@ -10903,7 +10912,7 @@ async function getSignedInUserId() {
 // Nothing is written to this device. Supabase stores exactly: which questions were chosen, their
 // order, the order of each question's answer choices, the answers, flags, the current position and
 // the elapsed time. The row stays in Supabase until the whole test is submitted.
-function buildSavedSessionPayload(sessionName) {
+function buildSavedSessionPayload(sessionName, extraConfig) {
   const isAnswered = a => Array.isArray(a) ? a.length > 0 : (a !== null && a !== undefined && a !== '');
   const totalQuestions = testState.questions.length;
   const answeredCount = testState.questions.filter(q => isAnswered(testState.answers[q.id])).length;
@@ -10939,7 +10948,8 @@ function buildSavedSessionPayload(sessionName) {
       shuffleOptions: TEST_CONFIG.shuffleOptions,
       timeLimitMinutes: TEST_CONFIG.timeLimitMinutes || null,
       elapsedMs: Math.max(0, Date.now() - testState.startTime),
-      eliminated: testState.eliminated || {}
+      eliminated: testState.eliminated || {},
+      ...(extraConfig || {})
     },
     start_time: new Date(testState.startTime).toISOString(),
     shuffle_seed: String(testState.shuffleSeed),
@@ -10960,10 +10970,186 @@ function leaveTestAfterSave() {
   if (toTopics) showSubjectSelection();
 }
 
+// ── ONGOING TEST (administrators only) ────────────────────────────────────
+// A test an administrator is taking is copied to Supabase as they go (a saved-test row flagged
+// test_config.ongoing). From any other device it then shows at the top of "Saved Sessions" as an ongoing
+// test, and opening it gives exactly this test: same questions in the same order, the same order of every
+// question's answer choices, answers, flags, crossed-out choices, position and time.
+// One device runs a test at a time: every update only goes through while this device is still the one
+// named in the row (test_config.device). Opening the test elsewhere takes it over; this device is then told
+// and stops updating it. Pressing Save for Later turns the ongoing copy into a normal saved test (same row);
+// ending the test removes it. Students never get an ongoing copy.
+let DEVICE_ID = (() => {
+  try {
+    let d = localStorage.getItem('arnoma:device-id');
+    if (!d) {
+      d = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'dev-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+      localStorage.setItem('arnoma:device-id', d);
+    }
+    return d;
+  } catch (e) { return 'dev-' + Math.random().toString(36).slice(2); }
+})();
+
+function deviceLabel() {
+  const ua = navigator.userAgent || '';
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad';
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/Android/.test(ua)) return 'Android';
+  if (/Macintosh|Mac OS X/.test(ua)) return 'Mac';
+  if (/Windows/.test(ua)) return 'Windows PC';
+  return 'another device';
+}
+
+const ONGOING = { timer: null, maxTimer: null, dirty: false, stopped: false, created: false, claim: false, admin: null, chain: Promise.resolve(), told: false };
+
+function newRowId() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+}
+const ongoingTracking = () => !ONGOING.stopped && (testState.isOngoingRow || testState.ongoingEligible) && testState.questions.length > 0;
+function ongoingAdminOk() {
+  if (!ONGOING.admin) ONGOING.admin = checkAdminAccount().catch(() => false);
+  return ONGOING.admin;
+}
+
+// A new test starts: from here on, changes are copied to Supabase (administrators only; checked before the first write)
+function ongoingBegin() {
+  if (TEACHER_MODE.isStudent && !TEACHER_MODE.enabled) return; // following an instructor's live session
+  Object.assign(ONGOING, { dirty: false, stopped: false, created: false, claim: false, admin: null, told: false });
+  testState.ongoingEligible = true;
+  testState.isOngoingRow = false;
+  ongoingMarkDirty();
+}
+
+// A test that is open on this device was saved as ongoing elsewhere: take it over
+function ongoingAdopt() {
+  clearTimeout(ONGOING.timer); clearTimeout(ONGOING.maxTimer); ONGOING.maxTimer = null;
+  Object.assign(ONGOING, { dirty: false, stopped: false, created: true, claim: true, admin: null, told: false });
+  testState.ongoingEligible = false;
+  testState.isOngoingRow = false;
+  ongoingAdminOk().then(ok => {
+    if (!ok || !testState.savedSessionDbId) return;
+    testState.isOngoingRow = true;
+    ongoingMarkDirty(true); // the first write names this device as the one running the test
+  });
+}
+
+function ongoingMarkDirty(now) {
+  if (!ongoingTracking()) return;
+  ONGOING.dirty = true;
+  if (now) { ongoingFlush(); return; }
+  clearTimeout(ONGOING.timer);
+  ONGOING.timer = setTimeout(ongoingFlush, 1800);
+  if (!ONGOING.maxTimer) ONGOING.maxTimer = setTimeout(() => { ONGOING.maxTimer = null; ongoingFlush(); }, 12000);
+}
+
+function ongoingFlush() {
+  clearTimeout(ONGOING.timer); clearTimeout(ONGOING.maxTimer); ONGOING.maxTimer = null;
+  ONGOING.chain = ONGOING.chain.then(ongoingWrite, ongoingWrite);
+  return ONGOING.chain;
+}
+
+function ongoingLost(rowExists) {
+  ONGOING.stopped = true;
+  testState.isOngoingRow = false;
+  testState.ongoingEligible = false;
+  // Never write over the other device's copy: a later Save for Later here makes its own, separate saved test
+  testState.savedSessionDbId = null;
+  testState.savedSessionName = null;
+  if (!ONGOING.told) {
+    ONGOING.told = true;
+    showToast(rowExists
+      ? 'This test was opened on another device, so it is no longer updated from this one.'
+      : 'This test was finished or deleted on another device, so it is no longer saved from this one.', 'warning');
+  }
+}
+
+async function ongoingWrite() {
+  if (!ONGOING.dirty || !ongoingTracking()) return;
+  ONGOING.dirty = false;
+  const run = testState.sessionId;
+  try {
+    if (!(await ongoingAdminOk())) { ONGOING.stopped = true; testState.ongoingEligible = false; return; }
+    if (testState.sessionId !== run || !ongoingTracking()) return;
+    if (!db && !initializeSupabase()) throw new Error('db_unavailable');
+    if (!(await getSignedInUserId())) throw new Error('not_signed_in');
+
+    const first = !testState.savedSessionDbId;
+    if (first) testState.savedSessionDbId = newRowId();
+    const id = testState.savedSessionDbId;
+    const name = testState.savedSessionName || (testState.savedSessionName = testTitleLabel());
+    testState.isOngoingRow = true; // set before the request, so End Test during it still removes the copy
+    testState.ongoingEligible = false;
+    const payload = buildSavedSessionPayload(name, { ongoing: true, device: DEVICE_ID, deviceName: deviceLabel() });
+
+    if (!ONGOING.created) {
+      const attempt = row => withTimeout(db.from('saved_test_sessions').upsert([row], { onConflict: 'id' }).select('id').single(), 15000, 'network_timeout');
+      let { error } = await attempt(payload);
+      // test_id has a foreign key to tests(id); the full test_config keeps the real test id either way
+      if (error && (error.code === '23503' || error.code === '22P02') && payload.test_id !== null) ({ error } = await attempt({ ...payload, test_id: null }));
+      if (error) throw error;
+      ONGOING.created = true;
+      return;
+    }
+
+    const { id: _id, session_name: _name, ...changes } = payload; // a rename done elsewhere is never reverted
+    let q = db.from('saved_test_sessions').update(changes).eq('id', id);
+    if (!ONGOING.claim) q = q.eq('test_config->>device', DEVICE_ID);
+    let { data, error } = await withTimeout(q.select('id').maybeSingle(), 15000, 'network_timeout');
+    if (error && (error.code === '23503' || error.code === '22P02') && changes.test_id !== null) {
+      let q2 = db.from('saved_test_sessions').update({ ...changes, test_id: null }).eq('id', id);
+      if (!ONGOING.claim) q2 = q2.eq('test_config->>device', DEVICE_ID);
+      ({ data, error } = await withTimeout(q2.select('id').maybeSingle(), 15000, 'network_timeout'));
+    }
+    if (error) throw error;
+    if (!data) { // nothing matched: another device took the test over, or it was deleted / submitted there
+      const { data: row } = await withTimeout(db.from('saved_test_sessions').select('id').eq('id', id).maybeSingle(), 10000, 'network_timeout');
+      ongoingLost(!!row);
+      return;
+    }
+    ONGOING.claim = false;
+  } catch (e) {
+    console.warn('[ongoing] could not update the ongoing copy yet:', e && e.message);
+    if (ongoingTracking()) { ONGOING.dirty = true; clearTimeout(ONGOING.timer); ONGOING.timer = setTimeout(ongoingFlush, 8000); }
+  }
+}
+
+// Stops automatic updates (a test submitted, or an explicit save in progress)
+function ongoingStop() {
+  clearTimeout(ONGOING.timer); clearTimeout(ONGOING.maxTimer); ONGOING.maxTimer = null;
+  ONGOING.stopped = true; ONGOING.dirty = false;
+}
+function ongoingPause() { ongoingStop(); }
+function ongoingResume() { ONGOING.stopped = false; ongoingMarkDirty(); }
+function ongoingReset() {
+  ongoingStop();
+  ONGOING.stopped = false; ONGOING.created = false; ONGOING.claim = false; ONGOING.admin = null; ONGOING.told = false;
+  testState.ongoingEligible = false;
+  testState.isOngoingRow = false;
+}
+
+// End Test: the ongoing copy goes away, but only while this device still owns it
+function ongoingEnd() {
+  const id = testState.savedSessionDbId;
+  const owned = testState.isOngoingRow;
+  ongoingStop();
+  if (!id || !owned) return Promise.resolve();
+  ONGOING.chain = ONGOING.chain.then(async () => {
+    try {
+      if (!db && !initializeSupabase()) return;
+      await db.from('saved_test_sessions').delete().eq('id', id).eq('test_config->>device', DEVICE_ID);
+    } catch (e) { console.warn('[ongoing] could not remove the ongoing copy:', e && e.message); }
+  });
+  return ONGOING.chain;
+}
+
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && ONGOING.dirty) ongoingFlush(); });
+window.addEventListener('pagehide', () => { if (ONGOING.dirty) ongoingFlush(); });
+
 // "Save for Later": a test that already has a saved copy is updated straight away with its existing
 // name (no name box); a test that was never saved still asks for a name first.
 function saveForLater(thenTopics) {
-  if (testState.savedSessionDbId && testState.savedSessionName) {
+  if (testState.savedSessionDbId && testState.savedSessionName && !testState.isOngoingRow && !testState.ongoingEligible) {
     _saveThenTopics = thenTopics === true;
     return saveTestSession(true);
   }
@@ -10994,6 +11180,10 @@ async function saveTestSession(quick) {
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving...';
   }
+
+  // An ongoing test becomes a normal saved test in the SAME row: automatic updates pause while this save runs
+  const wasOngoing = testState.isOngoingRow || testState.ongoingEligible;
+  if (wasOngoing) { ongoingPause(); await ONGOING.chain; }
 
   try {
     if (!db && !initializeSupabase()) throw new Error('db_unavailable');
@@ -11028,6 +11218,8 @@ async function saveTestSession(quick) {
 
     testState.savedSessionDbId = data.id;
     testState.savedSessionName = sessionName;
+    testState.isOngoingRow = false;
+    testState.ongoingEligible = false;
     if (quick !== true) closeSaveModal();
     restoreBtn();
     if (_saveThenTopics) {
@@ -11055,6 +11247,7 @@ async function saveTestSession(quick) {
     // The test stays open and nothing is written locally, so the student can simply try again
     showToast(`Test NOT saved — ${reason}`, 'error');
     restoreBtn();
+    if (wasOngoing && (testState.isOngoingRow || testState.ongoingEligible)) ongoingResume();
   }
 }
 
@@ -11063,6 +11256,7 @@ async function saveTestSession(quick) {
 async function discardSavedSessionAfterSubmit() {
   const id = testState.savedSessionDbId;
   if (!id) return;
+  ongoingStop();
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       if (!db && !initializeSupabase()) throw new Error('db_unavailable');
@@ -11140,6 +11334,82 @@ function renameSavedSession(id, ev) {
 
 const RENAME_BTN_ICON = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 
+// ── Saved-test speed ──────────────────────────────────────────────────────
+// Question bodies are fetched once, in parallel batches, and kept for a few minutes. The start screen
+// warms this up as soon as the list of saved tests is shown, so opening one only needs its own row.
+const SAVED_Q_CACHE = new Map(); // String(id) -> { row, at }
+const SAVED_Q_CACHE_MS = 10 * 60 * 1000;
+const SAVED_Q_BATCH = 100;
+
+async function fetchQuestionRowsByIds(ids) {
+  const now = Date.now();
+  const rows = new Map();
+  const missing = [];
+  [...new Set((ids || []).map(String))].forEach(id => {
+    const hit = SAVED_Q_CACHE.get(id);
+    if (hit && now - hit.at < SAVED_Q_CACHE_MS) rows.set(id, hit.row); else missing.push(id);
+  });
+  if (missing.length) {
+    const batches = [];
+    for (let i = 0; i < missing.length; i += SAVED_Q_BATCH) batches.push(missing.slice(i, i + SAVED_Q_BATCH));
+    const results = await Promise.all(batches.map(batch => withTimeout(
+      db.from('test_questions').select(QUESTION_COLUMNS).in('id', batch),
+      25000, 'Loading the questions timed out')));
+    const failed = results.find(r => r.error);
+    if (failed) return { rows, error: failed.error };
+    results.forEach(r => (r.data || []).forEach(row => {
+      SAVED_Q_CACHE.set(String(row.id), { row, at: now });
+      rows.set(String(row.id), row);
+    }));
+  }
+  return { rows, error: null };
+}
+
+function savedSessionQuestionIds(session) {
+  let qs = session && session.questions;
+  if (typeof qs === 'string') { try { qs = JSON.parse(qs); } catch (e) { qs = []; } }
+  return (Array.isArray(qs) ? qs : []).map(q => q && q.id)
+    .filter(id => id != null && id !== 'english-disclaimer-q0' && /^(\d+|[0-9a-f-]{36})$/i.test(String(id)));
+}
+
+function prefetchSavedSessionQuestions(sessions) {
+  const run = () => {
+    const ids = [];
+    (sessions || []).slice(0, 6).forEach(sess => ids.push(...savedSessionQuestionIds(sess)));
+    if (!ids.length || !db) return;
+    fetchQuestionRowsByIds(ids.slice(0, 400)).catch(() => {});
+  };
+  if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2000 }); else setTimeout(run, 300);
+}
+
+function sessionConfig(session) {
+  let c = session && session.test_config;
+  if (typeof c === 'string') { try { c = JSON.parse(c); } catch (e) { c = null; } }
+  return c || {};
+}
+// Only administrators see ongoing tests as such (the flag is only ever written for them)
+function isOngoingSession(session) { return window._isAdminUser === true && sessionConfig(session).ongoing === true; }
+function timeAgo(d) {
+  const sec = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (sec < 90) return 'just now';
+  const m = Math.round(sec / 60);
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  const days = Math.round(h / 24);
+  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+}
+
+// Administrators: an ongoing test started on another device appears without reloading the page
+function refreshSavedListIfVisible() {
+  if (window._isAdminUser !== true || document.visibilityState !== 'visible') return;
+  const start = document.getElementById('startScreen');
+  if (!start || getComputedStyle(start).display === 'none') return;
+  loadSavedSessions();
+}
+setInterval(refreshSavedListIfVisible, 30000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshSavedListIfVisible(); });
+
 async function loadSavedSessions() {
   try {
     if (!db) {
@@ -11158,6 +11428,9 @@ async function loadSavedSessions() {
       if (c) c.style.display = 'none';
       return;
     }
+
+    // The administrator check runs alongside the list request (ongoing tests are shown to administrators only)
+    const adminPromise = checkAdminAccount().catch(() => false);
 
     // No owner filter on purpose: row-level security returns ONLY this account's saved tests
     const { data: savedSessions, error } = await withTimeout(
@@ -11196,17 +11469,35 @@ async function loadSavedSessions() {
     
     if (!savedSessions || savedSessions.length === 0) {
       container.style.display = 'none';
+      window._savedListSig = null;
+      window._isAdminUser = await adminPromise;
       return;
     }
+
+    window._isAdminUser = await adminPromise;
+    // Ongoing tests first; everything else stays newest first
+    const sessionsToShow = [...savedSessions].sort((a, b) => Number(isOngoingSession(b)) - Number(isOngoingSession(a)));
+    const listSig = sessionsToShow.map(x => `${x.id}:${x.updated_at}:${x.session_name}`).join('|') + '|' + window._isAdminUser;
+    if (window._savedListSig === listSig && listContainer.childElementCount) { container.style.display = 'block'; return; } // nothing changed
+    window._savedListSig = listSig;
     
     container.style.display = 'block';
     listContainer.innerHTML = '';
+    prefetchSavedSessionQuestions(sessionsToShow);
     
-    savedSessions.forEach((session, idx) => {
+    sessionsToShow.forEach((session, idx) => {
       const savedDate = savedSessionOpenedDate(session);
       const progress = session.progress_percent || 0;
       const answered = session.answered_questions || 0;
       const total = session.total_questions || 0;
+      const ongoing = isOngoingSession(session);
+      const rowCfg = sessionConfig(session);
+      const lastActive = new Date(session.updated_at || Date.now());
+      const liveNow = ongoing && (Date.now() - lastActive.getTime()) < 3 * 60 * 1000;
+      const ongoingHtml = ongoing
+        ? `<span style="display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:2px 10px;border-radius:100px;background:rgba(16,185,129,0.14);border:1px solid rgba(52,211,153,0.45);color:#6ee7b7;font-size:10px;font-weight:800;letter-spacing:0.8px">${liveNow ? '<i style="width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 6px #34d399"></i>' : ''}ONGOING</span>` +
+          `<span style="font-size:12px;color:#94a3b8;font-weight:600">${rowCfg.device === DEVICE_ID ? 'This device' : escapeHtml(rowCfg.deviceName || 'Another device')} · ${timeAgo(lastActive)}</span>`
+        : '';
 
       // Format date elegantly
       const dateStr = savedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
@@ -11281,8 +11572,8 @@ async function loadSavedSessions() {
 
       card.setAttribute('data-session-card', session.id);
       card.innerHTML = `
-        <!-- Gold top accent line -->
-        <div style="height:2px;background:linear-gradient(90deg,transparent 0%,rgba(201,168,76,0.6) 40%,rgba(201,168,76,0.6) 60%,transparent 100%)"></div>
+        <!-- Top accent line (green for an ongoing test) -->
+        <div style="height:2px;background:${ongoing ? 'linear-gradient(90deg,transparent 0%,rgba(52,211,153,0.75) 40%,rgba(52,211,153,0.75) 60%,transparent 100%)' : 'linear-gradient(90deg,transparent 0%,rgba(201,168,76,0.6) 40%,rgba(201,168,76,0.6) 60%,transparent 100%)'}"></div>
 
         <div style="padding:20px 22px 22px">
           <!-- Header row -->
@@ -11297,9 +11588,9 @@ async function loadSavedSessions() {
                   onmouseover="this.style.background='rgba(201,168,76,0.14)';this.style.borderColor='rgba(201,168,76,0.6)'" onmouseout="this.style.background='transparent';this.style.borderColor='rgba(201,168,76,0.25)'">${RENAME_BTN_ICON}</button>
               </div>
               <!-- Date line -->
-              <div style="display:flex;align-items:center;gap:6px;padding-left:36px">
+              <div style="display:flex;align-items:center;gap:6px;padding-left:36px;flex-wrap:wrap">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                <span style="font-size:12px;color:#64748b;font-weight:500;letter-spacing:0.1px">${dateStr} &middot; ${timeStr}</span>
+                <span style="font-size:12px;color:#64748b;font-weight:500;letter-spacing:0.1px">${dateStr} &middot; ${timeStr}</span>${ongoingHtml}
               </div>
             </div>
 
@@ -11344,7 +11635,7 @@ async function loadSavedSessions() {
             onmouseover="this.style.transform='translateY(-1px)';this.style.boxShadow='0 6px 20px rgba(201,168,76,0.40)'"
             onmouseout="this.style.transform='translateY(0)';this.style.boxShadow='0 2px 12px rgba(201,168,76,0.25)'">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-            Continue Examination
+            ${ongoing ? 'Continue Ongoing Test' : 'Continue Examination'}
           </button>
         </div>
       `;
@@ -11357,7 +11648,14 @@ async function loadSavedSessions() {
   }
 }
 
+let _resumeInFlight = false;
 async function loadSavedSession(sessionId) {
+  if (_resumeInFlight) return; // a second click while the first is still opening must not start another load
+  _resumeInFlight = true;
+  try { return await loadSavedSessionInner(sessionId); } finally { _resumeInFlight = false; }
+}
+
+async function loadSavedSessionInner(sessionId) {
   // Show the full-screen resume overlay immediately — before any async work
   const rlo = document.getElementById('resumeLoadOverlay');
   if (rlo) rlo.classList.add('visible');
@@ -11380,14 +11678,14 @@ async function loadSavedSession(sessionId) {
     // We intentionally do NOT filter by student_id here because in Private Browsing or
     // after a page refresh, the locally-derived anon ID may differ from the saved one,
     // which would cause a false "Session not found" error.
-    const { data: session, error } = await db
-      .from('saved_test_sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .single();
+    // The row and the signed-in check run side by side
+    const [{ data: session, error }, _signedInUid] = await Promise.all([
+      withTimeout(db.from('saved_test_sessions').select('*').eq('id', sessionId).single(), 20000, 'Loading the saved test timed out'),
+      getSignedInUserId()
+    ]);
     
     // Defence in depth on top of the database rule: never open a saved test that is not this account's
-    const _uid = session ? await getSignedInUserId() : null;
+    const _uid = session ? _signedInUid : null;
     if (session && (!_uid || (session.owner_auth_id && session.owner_auth_id !== _uid))) {
       _hideRlo();
       showToast('This saved test does not belong to your account.', 'error');
@@ -11456,36 +11754,12 @@ async function loadSavedSession(sessionId) {
       let qError = null;
 
       if (questionIdsToFetch.length > 0) {
-        // Use the student_id that was saved WITH the session (not re-derived) so that
-        // RLS headers always match what the row was originally written under.
-        // This is critical for Private Browsing / file:// where localStorage is reset.
-        const sessionOwnerId = session.student_id || getOwnerId();
-        if (typeof setSupabaseOwnerHeader === 'function') {
-          setSupabaseOwnerHeader(sessionOwnerId);
-          db = initSupabase();
-        }
-
-        // Fetch full question data from DB in batches of 100 to avoid URL length limits
-        // (Supabase .in() sends IDs as query params — 1000 UUIDs will exceed the limit and 400)
-        const BATCH_SIZE = 100;
-        let allFetched = [];
-
-        for (let i = 0; i < questionIdsToFetch.length; i += BATCH_SIZE) {
-          const batch = questionIdsToFetch.slice(i, i + BATCH_SIZE);
-          const result = await db
-            .from('test_questions')
-            .select('id, test_id, question_stem, question_stem_hy, options, options_hy, correct_answer, is_multiple_choice, rationale, rationale_hy, category, display_order, points, topic_id')
-            .in('id', batch);
-
-          if (result.error) {
-            qError = result.error;
-            break;
-          }
-          allFetched = allFetched.concat(result.data || []);
-        }
-
-        fullQuestionsList = allFetched;
-        console.log(`[Resume] DB returned ${fullQuestionsList.length} questions from ${questionIdsToFetch.length} IDs`, qError ? `Error: ${JSON.stringify(qError)}` : 'OK');
+        // Question bodies come from the cache when the start screen already fetched them; the rest are
+        // read in parallel batches. Reading questions does not depend on the owner header, so the client is left alone.
+        const fetched = await fetchQuestionRowsByIds(questionIdsToFetch);
+        qError = fetched.error;
+        fullQuestionsList = Array.from(fetched.rows.values());
+        console.log(`[Resume] ${fullQuestionsList.length} questions for ${questionIdsToFetch.length} IDs`, qError ? `Error: ${JSON.stringify(qError)}` : 'OK');
       }
 
       if (qError) {
@@ -11566,6 +11840,8 @@ async function loadSavedSession(sessionId) {
   Object.assign(TEST_CONFIG, parsedConfig || {});
   testState.eliminated = (parsedConfig && parsedConfig.eliminated && typeof parsedConfig.eliminated === 'object') ? parsedConfig.eliminated : {};
   delete TEST_CONFIG.eliminated;
+  const resumedOngoing = !!(parsedConfig && parsedConfig.ongoing === true);
+  ['ongoing', 'device', 'deviceName'].forEach(k => delete TEST_CONFIG[k]);
 
   // Regenerate the exact shuffle seed used when the session started.
   // Prefer the stored seed (saved since the shuffle_seed column was added) so that
@@ -11623,6 +11899,10 @@ async function loadSavedSession(sessionId) {
     
     // Shows the countdown only for a timed test; hides the timer otherwise
     initializeTimer();
+
+    // An ongoing test (an administrator's test being taken on another device) is taken over by this device
+    ongoingReset();
+    if (resumedOngoing) ongoingAdopt();
     
     showToast('Test resumed successfully!', 'success');
     
@@ -11913,7 +12193,7 @@ async function loadSavedTestsInModal() {
                 <div data-session-name="${session.id}" style="text-align:left;font-size:15px;font-weight:700;color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px;min-width:0;">${escapeHtml(session.session_name)}</div>
                 <button type="button" onclick="renameSavedSession('${session.id}', event)" title="Rename this saved test" aria-label="Rename this saved test" style="flex-shrink:0;background:transparent;border:1px solid rgba(201,168,76,0.25);color:#c9a84c;width:24px;height:24px;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;">${RENAME_BTN_ICON}</button>
               </div>
-              <div style="font-size:11.5px;color:var(--text-muted);">Opened ${savedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${savedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div>
+              <div style="font-size:11.5px;color:var(--text-muted);">${isOngoingSession(session) ? '<b style="color:#6ee7b7;letter-spacing:0.6px;font-size:10px">ONGOING</b> · ' : ''}Opened ${savedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · ${savedDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div>
             </div>
             <button onclick="deleteSavedSession('${session.id}', event)"
               style="flex-shrink:0;background:rgba(239,68,68,0.08);border:1.5px solid rgba(239,68,68,0.25);color:#f87171;padding:5px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;transition:all 0.15s;"
@@ -13832,11 +14112,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Defer loadSavedSessions until the browser is idle — it's not needed
   // before the user can see and interact with the page, so don't block
   // the initial render with a Supabase round-trip.
-  if ('requestIdleCallback' in window) {
-    requestIdleCallback(() => loadSavedSessions(), { timeout: 3000 });
-  } else {
-    setTimeout(() => loadSavedSessions(), 800);
-  }
+  // Right after the first paint (the request does not block rendering). Safari has no requestIdleCallback and used to wait 0.8 s.
+  setTimeout(() => loadSavedSessions(), 0);
 
   // Deep link from a note page (?note=<note_id>): open the picker with that note's topic preselected.
   if (new URLSearchParams(window.location.search).get('note')) {
