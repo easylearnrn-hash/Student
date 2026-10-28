@@ -1426,6 +1426,22 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
   opacity: 0.7;
 }
 
+/* Answer rows are tapped or held, never text-selected. Safari (iPad / iPhone) only honours the -webkit- forms,
+   and without them a long press starts a text selection with handles. The question text stays selectable. */
+.option, .option * {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.option { touch-action: manipulation; } /* no double-tap zoom on an answer; scrolling still works */
+/* While a press is in progress nothing on the page may start a selection (a finger that drifts off the row) */
+body.option-pressing, body.option-pressing * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  -webkit-touch-callout: none !important;
+}
+
 /* Press-and-hold (1 s) crosses an answer out as wrong; hold again to bring it back */
 .option.holding::before {
   content: "";
@@ -10083,22 +10099,44 @@ function setOptionEliminated(questionId, optionId, div, on) {
   div.classList.toggle('eliminated', on);
 }
 
+function clearTextSelection() {
+  const sel = window.getSelection && window.getSelection();
+  if (sel && sel.rangeCount) sel.removeAllRanges();
+}
+
+// Safari can still begin a selection through this event even with user-select off; stop it while an answer is pressed
+document.addEventListener('selectstart', (e) => {
+  const el = e.target && (e.target.nodeType === 3 ? e.target.parentElement : e.target);
+  if (document.body.classList.contains('option-pressing') || (el && el.closest && el.closest('.option'))) e.preventDefault();
+});
+
 function attachOptionLongPress(div, input, question, optionId) {
-  let timer = null, startX = 0, startY = 0;
+  let timer = null, startX = 0, startY = 0, releaseTimer = null;
+  const endPress = () => {
+    clearTimeout(releaseTimer);
+    // keep the no-selection guard a moment past the release: iPad can start a selection as the finger lifts
+    releaseTimer = setTimeout(() => document.body.classList.remove('option-pressing'), 350);
+  };
   const cancel = () => {
     if (timer) { clearTimeout(timer); timer = null; }
     div.classList.remove('holding');
+    endPress();
+    if (div._longPressed) setTimeout(() => { div._longPressed = false; }, 600);
   };
   div.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || div.classList.contains('disabled') || input.disabled) return;
     if (e.target.closest('.option-check-btn')) return;
     div._longPressed = false;
     startX = e.clientX; startY = e.clientY;
+    clearTimeout(releaseTimer);
+    document.body.classList.add('option-pressing');
+    clearTextSelection();
     div.classList.add('holding');
     timer = setTimeout(() => {
       timer = null;
       div.classList.remove('holding');
       div._longPressed = true;
+      clearTextSelection();
       const nowOn = !div.classList.contains('eliminated');
       setOptionEliminated(question.id, optionId, div, nowOn);
       if (nowOn && input.checked) {
