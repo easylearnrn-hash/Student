@@ -5687,6 +5687,10 @@ function applySessionRole() {
     // Students: remove the reveal button entirely
     revealBtn.remove();
 
+    // Students can add questions to their own test (not when following an instructor's live session)
+    const studentAddBtn = document.getElementById('addQuestionsBtn');
+    if (studentAddBtn && !(TEACHER_MODE.isStudent && !TEACHER_MODE.enabled)) studentAddBtn.style.display = 'block';
+
     // Students: replace cold call panel with a read-only name card
     if (coldCallPanel) {
       // Resolve the student's own display name
@@ -6641,135 +6645,281 @@ async function loadTestConfiguration(testId) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-// ADD MORE QUESTIONS  (teacher-only)
-// Fetches 10 more questions from the same topic pool, excluding
-// any question already loaded in the current session.
+// ADD MORE QUESTIONS  (students and administrators)
+// Adds questions to the running test from the topics that were originally selected:
+//   - spread across those topics so every topic stays as evenly represented as possible,
+//   - taken per topic in the student's rotation order (never shown first, then longest ago shown),
+//   - never a question that is already in the test,
+//   - saved straight into the test's saved session when it has one.
+// Only the candidate ids and the few rows that are added are downloaded (not the whole question
+// pool), and the next batch is prepared in the background so the button answers immediately.
 // ─────────────────────────────────────────────────────────────────
-async function addMoreQuestions(count = 10) {
-  if (!SESSION_ROLE.isTeacher) {
-    console.warn('[addMoreQuestions] Blocked — SESSION_ROLE.isTeacher is false');
-    showToast('Teacher access required.', 'warning');
-    return;
+const ADD_QUESTIONS_BATCH = 10;
+const ADD_QUESTIONS_COOLDOWN_MS = 800; // a double-click adds one batch, not two
+const ADD_QUESTIONS = { busy: false, lastDoneAt: 0, ready: null, preparing: null, preparingSig: null, failedSig: null, prepTimer: null,
+                        syncChain: Promise.resolve(), syncDirty: false };
+
+// Students watching a teacher's live class session follow the teacher's question list instead
+function canAddQuestions() {
+  return !(TEACHER_MODE.isStudent && !TEACHER_MODE.enabled);
+}
+
+function addQuestionsContext() {
+  const raw = TEST_CONFIG.selectedTopicIds;
+  const topicIds = (raw && raw.length > 0) ? raw.slice() : null;
+  const existingIds = (testState.questions || []).map(q => Number(q.id)).filter(Number.isInteger);
+  return { topicIds, existingIds, sig: `${testState.sessionId}|${(topicIds || []).join(',')}|${existingIds.join(',')}` };
+}
+
+// Gives each new question to the topic that currently has the fewest questions in the test
+// (random among equals), taking that topic's candidates in rotation order.
+function allocateAcrossTopics(candidates, current, count) {
+  const topics = Object.keys(candidates || {}).filter(t => Array.isArray(candidates[t]) && candidates[t].length);
+  const load = {}, cursor = {};
+  topics.forEach(t => { load[t] = Number(current && current[t]) || 0; cursor[t] = 0; });
+  const picks = [];
+  while (picks.length < count) {
+    let best = null, bestLoad = Infinity, ties = 0;
+    for (const t of topics) {
+      if (cursor[t] >= candidates[t].length) continue;
+      if (load[t] < bestLoad) { best = t; bestLoad = load[t]; ties = 1; }
+      else if (load[t] === bestLoad && Math.random() < 1 / ++ties) best = t;
+    }
+    if (best === null) break;
+    picks.push(candidates[best][cursor[best]++]);
+    load[best] += 1;
+  }
+  return picks;
+}
+
+// Two small requests: candidate ids (server-side rotation + exclusion), then just the chosen rows.
+// Returns the parsed questions (possibly none when the topics are used up) or throws if unavailable.
+async function fetchQuestionBatch(ctx, count) {
+  if (!db && !initializeSupabase()) throw new Error('db_unavailable');
+  await rotationFlush(); // so questions displayed a moment ago count in the rotation
+  const { data, error } = await withTimeout(
+    db.rpc('get_question_add_candidates', { p_topic_ids: ctx.topicIds, p_exclude: ctx.existingIds, p_per_topic: count }),
+    12000, 'Question lookup timed out');
+  if (error) throw error;
+  const pickIds = allocateAcrossTopics(data && data.candidates, data && data.current, count);
+  if (!pickIds.length) return [];
+  const { data: rows, error: rowsError } = await withTimeout(
+    db.from('test_questions').select(QUESTION_COLUMNS).in('id', pickIds).eq('is_active', true),
+    12000, 'Loading questions timed out');
+  if (rowsError) throw rowsError;
+  const byId = new Map((rows || []).map(r => [Number(r.id), r]));
+  return pickIds.map(id => byId.get(Number(id))).filter(Boolean).map(parseQuestionRow);
+}
+
+// Safety net (offline function, legacy tests without topics): the original, slower approach
+async function legacyPickQuestions(ctx, count) {
+  const existing = new Set(ctx.existingIds.map(String));
+  const pool = await loadQuestions(TEST_CONFIG.testId, TEST_CONFIG.categoryFilter, null, ctx.topicIds, { rotate: true });
+  const available = pool.filter(q => !existing.has(String(q.id)));
+  if (!ctx.topicIds) return available.slice(0, count);
+  const groups = {};
+  available.forEach(q => { (groups[q.topic_id] = groups[q.topic_id] || []).push(q); });
+  const keys = Object.keys(groups).sort(() => Math.random() - 0.5);
+  const picks = [];
+  let remaining = Math.min(count, available.length);
+  while (remaining > 0) {
+    const active = keys.filter(k => groups[k].length > 0);
+    if (!active.length) break;
+    const share = Math.max(1, Math.floor(remaining / active.length));
+    for (let i = 0; i < active.length && remaining > 0; i++) {
+      const take = Math.min(share, groups[active[i]].length, remaining);
+      picks.push(...groups[active[i]].splice(0, take));
+      remaining -= take;
+    }
+  }
+  return picks;
+}
+
+// Background: line up the next batch so the next click needs no network at all
+function prepareNextAddBatch() {
+  if (!canAddQuestions() || !testState.questions || !testState.questions.length) return null;
+  const ctx = addQuestionsContext();
+  if (!ctx.topicIds) return null;
+  if (ADD_QUESTIONS.ready && ADD_QUESTIONS.ready.sig === ctx.sig) return null;
+  if (ADD_QUESTIONS.preparing && ADD_QUESTIONS.preparingSig === ctx.sig) return ADD_QUESTIONS.preparing;
+  if (ADD_QUESTIONS.failedSig === ctx.sig) return null;
+  const p = fetchQuestionBatch(ctx, ADD_QUESTIONS_BATCH)
+    .then(picks => { ADD_QUESTIONS.ready = { sig: ctx.sig, picks }; return picks; })
+    .catch(e => { ADD_QUESTIONS.failedSig = ctx.sig; console.warn('[add questions] could not prepare the next batch:', e && e.message); return null; });
+  ADD_QUESTIONS.preparing = p;
+  ADD_QUESTIONS.preparingSig = ctx.sig;
+  p.then(() => { if (ADD_QUESTIONS.preparing === p) { ADD_QUESTIONS.preparing = null; ADD_QUESTIONS.preparingSig = null; } });
+  return p;
+}
+
+function scheduleAddBatchPrepare() {
+  const ctx = addQuestionsContext();
+  if (!ctx.topicIds || (ADD_QUESTIONS.ready && ADD_QUESTIONS.ready.sig === ctx.sig) || ADD_QUESTIONS.failedSig === ctx.sig) return;
+  clearTimeout(ADD_QUESTIONS.prepTimer);
+  ADD_QUESTIONS.prepTimer = setTimeout(prepareNextAddBatch, 1200);
+}
+
+// "Question 3 of 20" and the progress counter, right away
+function refreshQuestionCounters() {
+  const label = document.getElementById('questionNumber');
+  if (label && testState.questions.length) label.textContent = `Question ${testState.currentIndex + 1} of ${testState.questions.length}`;
+  renderQuestionNavigator();
+}
+
+function appendQuestionsToTest(picks) {
+  const fresh = picks.map(q => ({ ...q, options: q.options ? shuffleArray(q.options, optionShuffleSeed(q)) : [] }));
+  testState.questions.push(...fresh);
+
+  // Extend the bilingual snapshot instead of rebuilding it for every question in the test
+  const sub = buildBilingualSnapshot(fresh);
+  const snap = testState.snapshot;
+  if (snap && snap.en && snap.en.length === testState.questions.length - fresh.length && !!snap.hy === !!sub.hy) {
+    snap.en = snap.en.concat(sub.en);
+    if (snap.hy && sub.hy) snap.hy = snap.hy.concat(sub.hy);
+  } else {
+    testState.snapshot = buildBilingualSnapshot(testState.questions);
   }
 
+  // New questions start unanswered. Delete (not null / a status string): a truthy value would trigger
+  // renderQuestion's "already checked" branch and show a false "Incorrect" banner.
+  fresh.forEach(q => {
+    delete testState.answers[q.id];
+    delete testState.answerStatus[q.id];
+  });
+
+  // Rebuild the question grid once for the new total
+  const grid = document.getElementById('questionGrid');
+  if (grid) {
+    grid.dataset.built = '';
+    delete grid.dataset.btnHeight;
+  }
+  attachNoteLinks(fresh);
+  return fresh;
+}
+
+// The test was started from (or has been saved as) a saved session: write the new question list into
+// that same row right away. Only that row is updated, never a new one; answers, flags and progress are
+// written from the live test, which already holds everything saved earlier. Calls queue up in order
+// and each one writes the latest list, so quick repeated additions cannot lose or duplicate questions.
+function syncQuestionsToSavedSession() {
+  const sessionId = testState.savedSessionDbId;
+  if (!sessionId) return Promise.resolve(null);
+  ADD_QUESTIONS.syncDirty = true;
+  ADD_QUESTIONS.syncChain = ADD_QUESTIONS.syncChain.then(async () => {
+    if (!ADD_QUESTIONS.syncDirty) return true; // a later call already wrote the newest list
+    // The test was closed or replaced in the meantime: never write another test's state into this session
+    if (testState.savedSessionDbId !== sessionId || !testState.questions.length) return null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      if (testState.savedSessionDbId !== sessionId || !testState.questions.length) return null;
+      ADD_QUESTIONS.syncDirty = false;
+      try {
+        if (!db && !initializeSupabase()) throw new Error('db_unavailable');
+        refreshSupabaseOwner();
+        const full = buildSavedSessionPayload(testState.savedSessionName || '');
+        const update = {
+          questions: full.questions,
+          total_questions: full.total_questions,
+          answered_questions: full.answered_questions,
+          progress_percent: full.progress_percent,
+          current_question_index: full.current_question_index,
+          answers: full.answers,
+          answer_status: full.answer_status,
+          flagged_questions: full.flagged_questions,
+          test_config: full.test_config
+        };
+        const { data, error } = await withTimeout(
+          db.from('saved_test_sessions').update(update).eq('id', sessionId).select('id, total_questions').single(),
+          15000, 'network_timeout');
+        if (error) throw error;
+        if (!data || Number(data.total_questions) !== update.total_questions) throw new Error('save_not_confirmed');
+        return true;
+      } catch (e) {
+        console.warn(`[add questions] saved-test update attempt ${attempt} failed:`, e && e.message);
+        ADD_QUESTIONS.syncDirty = true;
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1500 * attempt));
+      }
+    }
+    return false;
+  });
+  return ADD_QUESTIONS.syncChain;
+}
+
+async function addMoreQuestions(count = ADD_QUESTIONS_BATCH) {
+  if (!canAddQuestions()) {
+    showToast('Questions follow your instructor\'s live session here.', 'warning');
+    return;
+  }
+  // A click while an addition is running, or right after one finished, must not add a second batch
+  if (ADD_QUESTIONS.busy || Date.now() - ADD_QUESTIONS.lastDoneAt < ADD_QUESTIONS_COOLDOWN_MS) return;
+  ADD_QUESTIONS.busy = true;
+
   const btn = document.getElementById('addQuestionsBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+  if (btn) btn.disabled = true;
 
   try {
-    // 1. Build a set of IDs already in the session
-    const existingIds = new Set((testState.questions || []).map(q => q.id));
+    const ctx = addQuestionsContext();
+    let picks = null;
+    let usedPrepared = false;
 
-    // 2. Re-fetch the full pool using the same topic / test config
-    // Fix: treat empty array same as null — empty array is truthy but means "no topics selected"
-    const rawTopicIds = TEST_CONFIG.selectedTopicIds;
-    const topicIds = (rawTopicIds && rawTopicIds.length > 0) ? rawTopicIds : null;
+    if (ctx.topicIds) {
+      if (count === ADD_QUESTIONS_BATCH) {
+        if (ADD_QUESTIONS.preparing && ADD_QUESTIONS.preparingSig === ctx.sig) {
+          if (btn) btn.textContent = 'Adding…';
+          await ADD_QUESTIONS.preparing;
+        }
+        if (ADD_QUESTIONS.ready && ADD_QUESTIONS.ready.sig === ctx.sig) { picks = ADD_QUESTIONS.ready.picks; usedPrepared = true; }
+      }
+      ADD_QUESTIONS.ready = null;
+      ADD_QUESTIONS.failedSig = null;
+    }
 
-    console.log('[addMoreQuestions] Config:', {
-      testId: TEST_CONFIG.testId,
-      categoryFilter: TEST_CONFIG.categoryFilter,
-      topicIds,
-      existing: existingIds.size
-    });
+    const lookUp = async () => {
+      if (btn) btn.textContent = 'Adding…';
+      if (ctx.topicIds) {
+        try { return await fetchQuestionBatch(ctx, count); }
+        catch (e) { console.warn('[add questions] fast lookup unavailable, using the full pool:', e && e.message); }
+      }
+      return await legacyPickQuestions(ctx, count);
+    };
+    if (picks === null) picks = await lookUp();
 
-    // Pass null for questionCount so we get every available question
-    const pool = await loadQuestions(
-      TEST_CONFIG.testId,
-      TEST_CONFIG.categoryFilter,
-      null,          // no limit — we need the full pool to pick from
-      topicIds,
-      { rotate: true } // least-shown first for this student
-    );
+    // Never add a question the test already holds (also guards against a stale prepared batch)
+    const have = new Set(testState.questions.map(q => String(q.id)));
+    const cleaned = [];
+    picks.forEach(q => { if (!have.has(String(q.id))) { have.add(String(q.id)); cleaned.push(q); } });
+    picks = cleaned;
+    if (!picks.length && usedPrepared) picks = (await lookUp()).filter(q => !have.has(String(q.id)));
 
-    // 3. Keep only questions not already loaded
-    const available = pool.filter(q => !existingIds.has(q.id));
-
-    if (available.length === 0) {
-      showToast('No more questions available in this topic set.', 'info');
+    if (!picks.length) {
+      showToast('No more questions available in the selected topics.', 'info');
       return;
     }
 
-    // 4. Even topic distribution — same logic as loadQuestions()
-    const useTopicSystem = topicIds && topicIds.length > 0;
-    let picks = [];
+    const added = appendQuestionsToTest(picks);
+    refreshQuestionCounters();
+    showToast(`${added.length} question${added.length !== 1 ? 's' : ''} added!`, 'success');
+    console.log(`✓ addMoreQuestions: appended ${added.length} questions (total now ${testState.questions.length})`);
 
-    if (useTopicSystem) {
-      // Group by topic_id
-      const groups = {};
-      available.forEach(q => {
-        if (!groups[q.topic_id]) groups[q.topic_id] = [];
-        groups[q.topic_id].push(q);
-      });
-
-      const topicKeys = Object.keys(groups);
-      topicKeys.sort(() => Math.random() - 0.5); // randomise remainder allocation
-
-      let remaining = Math.min(count, available.length);
-      while (remaining > 0) {
-        const activeTopics = topicKeys.filter(t => groups[t].length > 0);
-        if (activeTopics.length === 0) break;
-
-        let share = Math.floor(remaining / activeTopics.length);
-        if (share === 0) share = 1;
-
-        for (let i = 0; i < activeTopics.length && remaining > 0; i++) {
-          const tid = activeTopics[i];
-          const toTake = Math.min(share, groups[tid].length, remaining);
-          picks.push(...groups[tid].splice(0, toTake));
-          remaining -= toTake;
-        }
+    // Background work: keep the saved test in step and line up the next batch
+    syncQuestionsToSavedSession().then(ok => {
+      if (ok === false && testState.savedSessionDbId) {
+        showToast('Questions added. Your saved test could not be updated yet — press Save for Later to keep them.', 'warning');
       }
-    } else {
-      picks = available.slice(0, Math.min(count, available.length));
-    }
-
-    // 5. Always shuffle the answer choices
-    picks = picks.map(q => ({
-      ...q,
-      options: q.options ? shuffleArray(q.options, optionShuffleSeed(q)) : []
-    }));
-
-    // 6. Append to session state
-    testState.questions.push(...picks);
-    attachNoteLinks(picks);
-
-    // 7. Rebuild the bilingual snapshot to include new questions
-    testState.snapshot = buildBilingualSnapshot(testState.questions);
-
-    // 8. Reset answer/status slots for new questions — always overwrite,
-    //    even if the question ID was previously answered in this session
-    //    (stale entries from the existing question set cause "pre-answered" bug).
-    //    Use delete (not 'unanswered') — a truthy string would trigger renderQuestion's
-    //    existingStatus branch and show a false "Incorrect" feedback banner.
-    picks.forEach(q => {
-      testState.answers[q.id] = null;
-      delete testState.answerStatus[q.id];
     });
-
-    // 9. Force navigator to rebuild (clear the "already built" cache flag and height cache)
-    const grid = document.getElementById('questionGrid');
-    if (grid) {
-      grid.dataset.built = '';
-      delete grid.dataset.btnHeight; // stale height causes wrong scroll after row count changes
-    }
-
-    renderQuestionNavigator();
-
-    const actualCount = picks.length;
-    showToast(`${actualCount} question${actualCount !== 1 ? 's' : ''} added!`, 'success');
-    console.log(`✓ addMoreQuestions: appended ${actualCount} questions (total now ${testState.questions.length})`);
-
+    prepareNextAddBatch();
   } catch (err) {
     console.error('addMoreQuestions error:', err);
-    // "No questions found" means the pool is exhausted — show friendly message
     if (err && err.message && err.message.includes('No questions found')) {
-      showToast('No more questions available in this topic set.', 'info');
+      showToast('No more questions available in the selected topics.', 'info');
     } else {
       showToast(`Failed to add questions: ${err?.message || 'Unknown error'}`, 'error');
     }
   } finally {
+    ADD_QUESTIONS.busy = false;
+    ADD_QUESTIONS.lastDoneAt = Date.now();
     if (btn) {
-      btn.disabled = false;
-      btn.textContent = '+ Add 10 More Questions';
+      btn.textContent = `+ Add ${ADD_QUESTIONS_BATCH} More Questions`;
+      setTimeout(() => { btn.disabled = false; }, ADD_QUESTIONS_COOLDOWN_MS);
     }
   }
 }
@@ -6888,6 +7038,27 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 window.addEventListener('pagehide', () => { rotationFlush(); });
 setTimeout(rotationFlush, 4000); // send anything a previous visit could not
 
+const QUESTION_COLUMNS = 'id, test_id, question_stem, question_stem_hy, options, options_hy, correct_answer, is_multiple_choice, rationale, rationale_hy, category, display_order, points, is_active, topic_id';
+
+// One question row from the database -> the object the test runs on
+function parseQuestionRow(q) {
+  return {
+    id: q.id,
+    topic_id: q.topic_id || null,
+    stem: q.question_stem,
+    stem_hy: q.question_stem_hy || null,
+    options: q.options, // Already parsed by Supabase
+    options_hy: q.options_hy || null, // Armenian options (same id keys, translated text)
+    correct: (typeof q.correct_answer === 'string' && q.correct_answer.trim().startsWith('[')) ? JSON.parse(q.correct_answer) : (Array.isArray(q.correct_answer) ? q.correct_answer : [q.correct_answer]).filter(Boolean),
+    multi: q.is_multiple_choice,
+    rationale: q.rationale,
+    rationale_hy: q.rationale_hy || null,
+    category: q.category,
+    points: q.points || 1,
+    displayOrder: q.display_order
+  };
+}
+
 async function loadQuestions(testId, categoryFilter = null, questionCount = null, topicIds = null, options = {}) {
   try {
     setLoadingStatus('Querying question bank...');
@@ -6904,7 +7075,7 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
     const buildQuery = () => {
       let query = db
         .from('test_questions')
-        .select('id, test_id, question_stem, question_stem_hy, options, options_hy, correct_answer, is_multiple_choice, rationale, rationale_hy, category, display_order, points, is_active, topic_id')
+        .select(QUESTION_COLUMNS)
         .eq('is_active', true)
         .order('display_order', { ascending: true })
         .order('id', { ascending: true });
@@ -7028,20 +7199,7 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
     console.log(`✓ Loaded ${finalQuestions.length} questions${topicIds ? ` from ${topicIds.length} topic(s)` : categoryFilter ? ` from ${categoryFilter}` : ''}${questionCount ? ` (limited to ${questionCount})` : ''}`);
     
     // Parse JSON fields (options, correct_answer)
-    const parsedQuestions = finalQuestions.map(q => ({
-      id: q.id,
-      stem: q.question_stem,
-      stem_hy: q.question_stem_hy || null,
-      options: q.options, // Already parsed by Supabase
-      options_hy: q.options_hy || null, // Armenian options (same id keys, translated text)
-      correct: (typeof q.correct_answer === 'string' && q.correct_answer.trim().startsWith('[')) ? JSON.parse(q.correct_answer) : (Array.isArray(q.correct_answer) ? q.correct_answer : [q.correct_answer]).filter(Boolean),
-      multi: q.is_multiple_choice,
-      rationale: q.rationale,
-      rationale_hy: q.rationale_hy || null,
-      category: q.category,
-      points: q.points || 1,
-      displayOrder: q.display_order
-    }));
+    const parsedQuestions = finalQuestions.map(parseQuestionRow);
     
     return parsedQuestions;
   } catch (error) {
@@ -9676,7 +9834,7 @@ function _renderQuestionNavigatorImpl() {
   
   // Update progress
   if (progressText) {
-    const answered = Object.keys(testState.answers).length;
+    const answered = Object.values(testState.answers).filter(a => Array.isArray(a) ? a.length > 0 : (a !== null && a !== undefined && a !== '')).length;
     progressText.textContent = `${answered} / ${totalQuestions}`;
   }
 }
@@ -9703,6 +9861,7 @@ function renderQuestion() {
   }
 
   rotationMarkShown(baseQuestion);
+  scheduleAddBatchPrepare();
 
   // ── LANGUAGE-AWARE QUESTION RESOLUTION ─────────────────────────────────
   
@@ -10603,6 +10762,9 @@ function resetTestRunState() {
   testState.currentIndex = 0;
   testState.startTime = null;
   testState.endTime = null;
+  clearTimeout(ADD_QUESTIONS.prepTimer);
+  ADD_QUESTIONS.ready = null;
+  ADD_QUESTIONS.failedSig = null;
   testState.savedSessionDbId = null;
   testState.savedSessionName = null;
   testState.snapshot = { en: null, hy: null };
