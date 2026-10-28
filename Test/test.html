@@ -980,6 +980,11 @@ body.invert-read .option.correct .option-letter { background: #15803d; border-co
 body.invert-read .option.incorrect { background: #fee2e2; border-color: #b91c1c; }
 body.invert-read .option.incorrect .option-letter { background: #b91c1c; border-color: #b91c1c; color: #ffffff; }
 
+body.invert-read .option.eliminated { background: #f1f5f9; border-color: #fca5a5; }
+body.invert-read .option.eliminated .option-text { color: #64748b; }
+body.invert-read .option.eliminated::after { background: linear-gradient(90deg, rgba(185,28,28,0.2), #b91c1c 6%, #b91c1c 94%, rgba(185,28,28,0.2)); }
+body.invert-read .option.holding::before { background: linear-gradient(90deg, rgba(185,28,28,0.18), rgba(185,28,28,0.05)); }
+
 body.invert-read .btn-secondary { background: #f1f5f9; color: #0f172a; border-color: #64748b; }
 body.invert-read .btn-secondary:hover { background: #fdf3d0; border-color: #a8832a; color: #6b4e0a; }
 body.invert-read .btn-danger { color: #b91c1c; border-color: #b91c1c; }
@@ -1414,6 +1419,39 @@ body.invert-read .ask-instructor-btn { background: #fdf3d0; color: #6b4e0a; bord
   pointer-events: none;
   opacity: 0.7;
 }
+
+/* Press-and-hold (1 s) crosses an answer out as wrong; hold again to bring it back */
+.option.holding::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(239,68,68,0.20), rgba(239,68,68,0.06));
+  transform-origin: left center;
+  animation: optionHoldSweep 1s linear forwards;
+  pointer-events: none;
+}
+@keyframes optionHoldSweep { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.option.eliminated {
+  background: rgba(2,6,23,0.35);
+  border-color: rgba(239,68,68,0.32);
+  box-shadow: none;
+}
+.option.eliminated .option-text { color: #64748b; }
+.option.eliminated .option-letter { opacity: 0.5; }
+.option.eliminated::after {
+  content: "";
+  position: absolute;
+  left: 8px; right: 8px; top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, rgba(239,68,68,0.15), rgba(239,68,68,0.9) 6%, rgba(239,68,68,0.9) 94%, rgba(239,68,68,0.15));
+  transform-origin: left center;
+  animation: optionScratchIn 0.3s ease-out;
+  pointer-events: none;
+}
+@keyframes optionScratchIn { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
 .option input[type="radio"],
 .option input[type="checkbox"] {
@@ -6436,6 +6474,7 @@ let testState = {
   currentIndex: 0,
   answers: {},
   answerStatus: {},
+  eliminated: {}, // questionId -> option ids the student crossed out (press and hold)
   flagged: new Set(),
   startTime: null,
   endTime: null,
@@ -9566,6 +9605,10 @@ function renderQuestion() {
     }
     
     input.onchange = () => handleAnswerChange(question.id, question.multi);
+
+    const isCrossedOut = !testState.answerStatus[question.id] &&
+      (testState.eliminated[question.id] || []).includes(String(option.id));
+    if (isCrossedOut) div.classList.add('eliminated');
     
     // Letter badge (A, B, C, D …)
     const letterSpan = document.createElement('span');
@@ -9584,9 +9627,15 @@ function renderQuestion() {
     // Make the entire row clickable — toggle the hidden input directly.
     // Avoid double-fire: if the click landed ON the input itself, the browser
     // already toggled it, so we do nothing extra.
+    attachOptionLongPress(div, input, question, String(option.id));
+
     div.addEventListener('click', (e) => {
       // Ignore clicks on the inline Check Answer button
       if (e.target.closest('.option-check-btn')) return;
+      // The click that ends a long press only crossed the option out
+      if (div._longPressed) { div._longPressed = false; return; }
+      // A normal click on a crossed-out option changes your mind: it comes back and is selected
+      if (div.classList.contains('eliminated')) setOptionEliminated(question.id, String(option.id), div, false);
       // Ignore clicks directly on the input (browser already handled it)
       if (e.target === input) return;
       // Clicking the already-selected answer (before it's checked) deselects it.
@@ -9641,7 +9690,7 @@ function renderQuestion() {
         const optionId = String(input.value);
         opt.classList.add('disabled');
         input.disabled = true;
-        opt.classList.remove('selected');
+        opt.classList.remove('selected', 'eliminated');
         if (question.correct.map(String).includes(optionId)) {
           opt.classList.add('correct');
         } else if (input.checked) {
@@ -9675,6 +9724,48 @@ function renderQuestion() {
   }
   
   renderQuestionNavigator();
+}
+
+// Crossed-out answers: press and hold an option for 1 second to mark it wrong (hold again to undo)
+const OPTION_HOLD_MS = 1000;
+
+function setOptionEliminated(questionId, optionId, div, on) {
+  const list = (testState.eliminated[questionId] || []).filter(id => id !== optionId);
+  if (on) list.push(optionId);
+  if (list.length) testState.eliminated[questionId] = list; else delete testState.eliminated[questionId];
+  div.classList.toggle('eliminated', on);
+}
+
+function attachOptionLongPress(div, input, question, optionId) {
+  let timer = null, startX = 0, startY = 0;
+  const cancel = () => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    div.classList.remove('holding');
+  };
+  div.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || div.classList.contains('disabled') || input.disabled) return;
+    if (e.target.closest('.option-check-btn')) return;
+    div._longPressed = false;
+    startX = e.clientX; startY = e.clientY;
+    div.classList.add('holding');
+    timer = setTimeout(() => {
+      timer = null;
+      div.classList.remove('holding');
+      div._longPressed = true;
+      const nowOn = !div.classList.contains('eliminated');
+      setOptionEliminated(question.id, optionId, div, nowOn);
+      if (nowOn && input.checked) {
+        input.checked = false;
+        handleAnswerChange(question.id, question.multi);
+      }
+      if (navigator.vibrate) navigator.vibrate(15);
+    }, OPTION_HOLD_MS);
+  });
+  div.addEventListener('pointermove', (e) => {
+    if (timer && Math.hypot(e.clientX - startX, e.clientY - startY) > 10) cancel();
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => div.addEventListener(t, cancel));
+  div.addEventListener('contextmenu', (e) => { if (timer || div._longPressed) e.preventDefault(); });
 }
 
 function handleAnswerChange(questionId, isMulti) {
@@ -9842,7 +9933,7 @@ function checkAnswer() {
     input.disabled = true;
     
     // Remove selected class first
-    opt.classList.remove('selected');
+    opt.classList.remove('selected', 'eliminated', 'holding');
     
     // Add correct/incorrect classes
     if (question.correct.map(String).includes(optionId)) {
@@ -10319,6 +10410,7 @@ function resetTestRunState() {
   testState.questions = [];
   testState.answers = {};
   testState.answerStatus = {};
+  testState.eliminated = {};
   testState.flagged = new Set();
   testState.currentIndex = 0;
   testState.startTime = null;
@@ -10447,7 +10539,8 @@ function buildSavedSessionPayload(sessionName) {
       shuffleQuestions: TEST_CONFIG.shuffleQuestions,
       shuffleOptions: TEST_CONFIG.shuffleOptions,
       timeLimitMinutes: TEST_CONFIG.timeLimitMinutes || null,
-      elapsedMs: Math.max(0, Date.now() - testState.startTime)
+      elapsedMs: Math.max(0, Date.now() - testState.startTime),
+      eliminated: testState.eliminated || {}
     },
     start_time: new Date(testState.startTime).toISOString(),
     shuffle_seed: String(testState.shuffleSeed),
@@ -11050,6 +11143,8 @@ async function loadSavedSession(sessionId) {
   TEST_CONFIG.testNumber = null;       // older saves are numbered when resumed
   TEST_CONFIG.openedAt = null;
   Object.assign(TEST_CONFIG, parsedConfig || {});
+  testState.eliminated = (parsedConfig && parsedConfig.eliminated && typeof parsedConfig.eliminated === 'object') ? parsedConfig.eliminated : {};
+  delete TEST_CONFIG.eliminated;
 
   // Regenerate the exact shuffle seed used when the session started.
   // Prefer the stored seed (saved since the shuffle_seed column was added) so that
