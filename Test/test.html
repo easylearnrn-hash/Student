@@ -929,6 +929,12 @@ mark.q-hl {
   color: var(--gold-primary);
 }
 
+/* ── FULL SCREEN toggle ── */
+.fs-btn .fs-exit { display: none; }
+.fs-btn.active .fs-enter { display: none; }
+.fs-btn.active .fs-exit { display: block; }
+.fs-btn.fs-floating { position: absolute; top: 18px; right: 18px; z-index: 5; padding: 10px; }
+
 /* Bright background + dark text: explicit crisp light palette (not a filter, which washed everything out). */
 body.invert-read .test-container { background: #ffffff; }
 body.invert-read .test-container::before { display: none; }
@@ -4515,6 +4521,10 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
 
 <!-- START SCREEN -->
 <div class="start-screen" id="startScreen">
+  <button class="invert-btn fs-btn fs-floating" type="button" onclick="toggleFullscreen()" title="Full screen" aria-label="Full screen" aria-pressed="false">
+    <svg class="fs-enter" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+          <svg class="fs-exit" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+  </button>
   <div class="start-content">
 
     <!-- Seal / Logo -->
@@ -4743,6 +4753,12 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
         <button class="invert-btn" id="invertBtn" onclick="toggleInvert()" title="Invert colors (bright background, dark text)" aria-pressed="false">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></svg>
           <span>Invert</span>
+        </button>
+
+        <!-- FULL SCREEN -->
+        <button class="invert-btn fs-btn" type="button" onclick="toggleFullscreen()" title="Full screen" aria-label="Full screen" aria-pressed="false">
+          <svg class="fs-enter" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+          <svg class="fs-exit" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
         </button>
 
         <!-- LANGUAGE PICKER — visible to all users once a test session is active -->
@@ -7164,6 +7180,50 @@ function toggleInvert() {
 (function initInvert() {
   setInvert(localStorage.getItem('acnhs_test_invert') === '1');
 })();
+
+// ── FULL SCREEN ───────────────────────────────────────────────────────────
+// Lets the page fill the whole screen so other browser tabs and the address bar are out of sight.
+// Must be started by a click (browser rule); Esc or the same button leaves it.
+function currentFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function toggleFullscreen() {
+  if (currentFullscreenElement()) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) Promise.resolve(exit.call(document)).catch(() => {}).then(syncFullscreenSoon);
+    return;
+  }
+  const root = document.documentElement;
+  const enter = root.requestFullscreen || root.webkitRequestFullscreen;
+  if (!enter) return;
+  Promise.resolve(enter.call(root)).catch(() => {
+    if (typeof showToast === 'function') showToast('Full screen is not available in this browser', 'warning');
+  }).then(syncFullscreenSoon);
+}
+
+function syncFullscreenButtons() {
+  const on = !!currentFullscreenElement();
+  const supported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  document.querySelectorAll('.fs-btn').forEach(btn => {
+    btn.style.display = supported ? '' : 'none';
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const label = on ? 'Exit full screen' : 'Full screen';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+  });
+}
+// Some browsers report the new state a moment after the request settles (or skip the change event).
+function syncFullscreenSoon() {
+  syncFullscreenButtons();
+  setTimeout(syncFullscreenButtons, 250);
+  setTimeout(syncFullscreenButtons, 800);
+}
+document.addEventListener('fullscreenchange', syncFullscreenButtons);
+document.addEventListener('webkitfullscreenchange', syncFullscreenButtons);
+window.addEventListener('resize', syncFullscreenButtons);
+syncFullscreenButtons();
 
 // ── HIGHLIGHTER (administrators only) ─────────────────────────────────────
 // With the highlighter on, a click highlights the word under the cursor (click it again to remove it)
