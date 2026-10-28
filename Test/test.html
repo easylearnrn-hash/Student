@@ -11195,8 +11195,48 @@ function ongoingEnd() {
   return ONGOING.chain;
 }
 
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && ONGOING.dirty) ongoingFlush(); });
-window.addEventListener('pagehide', () => { if (ONGOING.dirty) ongoingFlush(); });
+// An ongoing test only exists while its page is open.
+//  - Closing the page removes the copy (best effort: a request that survives the page closing).
+//  - While open, the page touches the row every 45 s; a row that stopped being touched (page closed without
+//    a chance to say so, device asleep) is hidden from the list after 4 minutes and deleted after 6 hours.
+const ONGOING_BEAT_MS = 45 * 1000;
+const ONGOING_LIVE_MS = 4 * 60 * 1000;
+const ONGOING_DELETE_MS = 6 * 60 * 60 * 1000;
+
+function ongoingDropOnClose() {
+  const id = testState.savedSessionDbId;
+  if (!id || !testState.isOngoingRow || ONGOING.stopped) return;
+  try {
+    const tok = JSON.parse(localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token') || 'null');
+    if (!tok || !tok.access_token) return;
+    const url = `${SUPABASE_CONFIG.url}/rest/v1/saved_test_sessions?id=eq.${encodeURIComponent(id)}`
+      + `&test_config->>device=eq.${encodeURIComponent(DEVICE_ID)}&test_config->>ongoing=eq.true`;
+    fetch(url, { method: 'DELETE', keepalive: true, headers: { apikey: SUPABASE_CONFIG.anonKey, Authorization: 'Bearer ' + tok.access_token } }).catch(() => {});
+  } catch (e) { /* closing anyway */ }
+}
+
+function ongoingBeat() {
+  const id = testState.savedSessionDbId;
+  if (!id || !testState.isOngoingRow || !ONGOING.created || ONGOING.stopped) return;
+  ONGOING.chain = ONGOING.chain.then(async () => {
+    try {
+      if (!db && !initializeSupabase()) return;
+      let q = db.from('saved_test_sessions').update({ updated_at: new Date().toISOString() }).eq('id', id);
+      if (!ONGOING.claim) q = q.eq('test_config->>device', DEVICE_ID);
+      await withTimeout(q, 10000, 'network_timeout');
+    } catch (e) { /* the next beat tries again */ }
+  });
+}
+setInterval(ongoingBeat, ONGOING_BEAT_MS);
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { if (ONGOING.dirty && ONGOING.created) ongoingFlush(); }
+  else ongoingBeat();
+});
+window.addEventListener('pagehide', (e) => {
+  if (e.persisted) { if (ONGOING.dirty && ONGOING.created) ongoingFlush(); return; } // may come back from the back/forward cache
+  ongoingDropOnClose();
+});
 
 // "Save for Later": a test that already has a saved copy is updated straight away with its existing
 // name (no name box); a test that was never saved still asks for a name first.
@@ -11441,6 +11481,22 @@ function sessionConfig(session) {
 }
 // Only administrators see ongoing tests as such (the flag is only ever written for them)
 function isOngoingSession(session) { return window._isAdminUser === true && sessionConfig(session).ongoing === true; }
+
+// An ongoing test whose page stopped reporting in (closed, device asleep) is not shown; a long-dead one is removed
+function withoutStaleOngoing(sessions) {
+  if (window._isAdminUser !== true || !Array.isArray(sessions)) return sessions;
+  const now = Date.now();
+  const dead = [];
+  const shown = sessions.filter(s => {
+    if (sessionConfig(s).ongoing !== true) return true;
+    const age = now - new Date(s.updated_at).getTime();
+    if (!(age > ONGOING_LIVE_MS)) return true;
+    if (age > ONGOING_DELETE_MS) dead.push(s.id);
+    return false;
+  });
+  if (dead.length && db) db.from('saved_test_sessions').delete().in('id', dead).eq('test_config->>ongoing', 'true').then(() => {}, () => {});
+  return shown;
+}
 function timeAgo(d) {
   const sec = Math.max(0, (Date.now() - d.getTime()) / 1000);
   if (sec < 90) return 'just now';
@@ -11506,7 +11562,7 @@ async function loadSavedSessions() {
     const adminPromise = checkAdminAccount().catch(() => false);
 
     // No owner filter on purpose: row-level security returns ONLY this account's saved tests
-    const { data: savedSessions, error } = await withTimeout(
+    const { data: rawSessions, error } = await withTimeout(
       db
         .from('saved_test_sessions')
         .select('*')
@@ -11534,6 +11590,9 @@ async function loadSavedSessions() {
       return;
     }
     
+    window._isAdminUser = await adminPromise;
+    const savedSessions = withoutStaleOngoing(rawSessions);
+
     const container = document.getElementById('savedSessionsContainer');
     const listContainer = document.getElementById('savedSessionsList');
 
@@ -12157,10 +12216,12 @@ async function loadSavedTestsInModal() {
     }
     
     // Row-level security returns ONLY the signed-in account's own saved tests
-    const { data: savedSessions, error } = await db
+    const { data: allSavedSessions, error } = await db
       .from('saved_test_sessions')
       .select('*')
       .order('updated_at', { ascending: false });
+    if (window._isAdminUser === undefined) window._isAdminUser = await checkAdminAccount().catch(() => false);
+    const savedSessions = withoutStaleOngoing(allSavedSessions);
     
     if (error) {
       console.error('Error loading sessions:', error);
