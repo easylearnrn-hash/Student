@@ -268,9 +268,9 @@ body.invert-read .hl-btn,body.invert-read .lang-picker{background:#fbf6ea;border
 body.invert-read .lang-btn{color:#5b5440}
 body.invert-read .hl-btn:hover,body.invert-read .lang-btn:hover:not(:disabled){background:#f3e9cd;border-color:#c9a84c;color:#3a2e0b}
 body.invert-read .hl-btn.active,body.invert-read .lang-btn.active{background:linear-gradient(135deg,#ecd58a,#d6b45a);border:1px solid #b08d2e;color:#2b2106}
-body.invert-read .opt.eliminated:not(.ok):not(.bad):not(.miss){background:#f1f5f9;border-color:#fca5a5}
-body.invert-read .opt.eliminated:not(.ok):not(.bad):not(.miss) > span:not(.tag){color:#64748b}
-body.invert-read .opt.eliminated:not(.ok):not(.bad):not(.miss)::after{background:linear-gradient(90deg,rgba(185,28,28,.2),#b91c1c 6%,#b91c1c 94%,rgba(185,28,28,.2))}
+body.invert-read .opt.eliminated:not(.ok):not(.bad):not(.miss){background:#fde8e8;border-color:#ef8f8f}
+body.invert-read .opt.eliminated:not(.ok):not(.bad):not(.miss) > span:not(.tag){color:#8a5757}
+body.invert-read .opt.eliminated:not(.ok):not(.bad):not(.miss)::after{background:linear-gradient(90deg,rgba(200,30,30,.25),#c81e1e 6%,#c81e1e 94%,rgba(200,30,30,.25))}
 body.invert-read .opt.holding::before{background:linear-gradient(90deg,rgba(185,28,28,.18),rgba(185,28,28,.05))}
 body.invert-read .ask-instructor-btn{background:#fdf3d0;color:#6b4e0a;border-color:#a8832a}
 body.invert-read #csAskModal{background:rgba(48,38,14,.55)}
