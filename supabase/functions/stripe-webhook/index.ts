@@ -165,12 +165,19 @@ serve(async (req: Request) => {
     const {
       arnoma_student_id: student_id,
       invoice_ref,
-      for_class,
-      for_class_dates,
-      for_class_groups,
       class_group,
       subtotal_dollars,
     } = pi.metadata ?? {};
+    // create-payment-intent splits values over Stripe's 500-char metadata limit into key, key_2, key_3…
+    const joinChunks = (key: string): string => {
+      const md = (pi.metadata ?? {}) as Record<string, string | undefined>;
+      let out = md[key] ?? '';
+      for (let i = 2; md[`${key}_${i}`] !== undefined; i += 1) out += md[`${key}_${i}`];
+      return out;
+    };
+    const for_class = joinChunks('for_class');
+    const for_class_dates = joinChunks('for_class_dates');
+    const for_class_groups = joinChunks('for_class_groups');
     const subtotalValue = parseFloat(String(subtotal_dollars ?? ''));
     const amountDollars = Number.isFinite(subtotalValue) && subtotalValue > 0
       ? subtotalValue
