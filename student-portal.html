@@ -12928,6 +12928,41 @@
 
         const normalizeGroupForAccess = (value) => canonicalizeGroupCode(value) || String(value || '').replace(/Group\s*/i, '').trim().toUpperCase();
 
+        // Start the queries that don't depend on the one-time-class rows now, so they run in
+        // parallel with that query instead of waiting a full network round trip behind it.
+        const earlyStudentPermQuery = Promise.resolve(
+          supabaseClient
+            .from('student_note_permissions')
+            .select('id, note_id, is_accessible, class_date, group_name, student_id')
+            .eq('student_id', studentId)
+        );
+        const earlyFreeIndividualQuery = Promise.resolve(
+          supabaseClient
+            .from('note_free_access')
+            .select('note_id, access_type, group_letter, student_id, class_date')
+            .eq('student_id', studentId)
+        );
+        const earlyPaymentsQuery = ensurePaymentsData().catch((err) => {
+          console.error('❌ Failed loading payments in materials flow:', err);
+          return currentPayments || [];
+        });
+        const earlyVideoMapQuery = Promise.resolve(
+          supabaseClient
+            .from('portal_settings')
+            .select('setting_key, setting_value')
+            .like('setting_key', 'html_video:%')
+        )
+          .then(({ data }) => {
+            const map = {};
+            (data || []).forEach(row => {
+              const path = row.setting_key.replace('html_video:', '');
+              const val = row.setting_value;
+              map[path] = (typeof val === 'string') ? val : (val?.url || '');
+            });
+            return map;
+          })
+          .catch(() => ({}));
+
         const { data: oneTimeRows, error: oneTimeRowsError } = await supabaseClient
           .from('payment_records')
           .select('date,status,amount,payment_method,notes,class_group')
@@ -12993,11 +13028,8 @@
         if (DEBUG_MODE) debugLog('🔍 Querying student_note_permissions with:', { studentId, studentGroup, groupNameCandidates, paidOneTimeGroupDates: Object.fromEntries(Array.from(paidOneTimeGroupDates.entries()).map(([group, dates]) => [group, Array.from(dates)])) });
 
         const [studentPermRes, groupPermRes, freeIndividualRes, freeGroupRes, paymentDataResult, noteVideoResult] = await Promise.all([
-          // 1. Student-specific permissions (accessible + blocked)
-          supabaseClient
-            .from('student_note_permissions')
-            .select('id, note_id, is_accessible, class_date, group_name, student_id')
-            .eq('student_id', studentId),
+          // 1. Student-specific permissions (accessible + blocked) — started early above
+          earlyStudentPermQuery,
 
           // 2. Group-level permissions — filtered by group_name at the DB level to cut payload
           groupNameCandidates.length > 0
@@ -13009,11 +13041,8 @@
                 .in('group_name', groupNameCandidates)
             : Promise.resolve({ data: [], error: null }),
 
-          // 3. Individual free-access grants
-          supabaseClient
-            .from('note_free_access')
-            .select('note_id, access_type, group_letter, student_id, class_date')
-            .eq('student_id', studentId),
+          // 3. Individual free-access grants — started early above
+          earlyFreeIndividualQuery,
 
           // 4. Group free-access grants
           groupFreeAccessCandidates.length > 0
@@ -13024,27 +13053,11 @@
                 .in('group_letter', groupFreeAccessCandidates)
             : Promise.resolve({ data: [], error: null }),
 
-          // 5. Payment data — fetched in parallel, not before
-          ensurePaymentsData().catch((err) => {
-            console.error('❌ Failed loading payments in materials flow:', err);
-            return currentPayments || [];
-          }),
+          // 5. Payment data — started early above
+          earlyPaymentsQuery,
 
-          // 6. Note video URLs from portal_settings
-          supabaseClient
-            .from('portal_settings')
-            .select('setting_key, setting_value')
-            .like('setting_key', 'html_video:%')
-            .then(({ data }) => {
-              const map = {};
-              (data || []).forEach(row => {
-                const path = row.setting_key.replace('html_video:', '');
-                const val = row.setting_value;
-                map[path] = (typeof val === 'string') ? val : (val?.url || '');
-              });
-              return map;
-            })
-            .catch(() => ({}))
+          // 6. Note video URLs from portal_settings — started early above
+          earlyVideoMapQuery
         ]);
 
         // Build note path → video URL lookup (available in card builder below)
@@ -15034,7 +15047,6 @@
     }
     
     async function loadSystemsProgress() {
-      const loadStartTime = Date.now(); // Track when loading started
       
       if (DEBUG_MODE) debugLog('🎯 loadSystemsProgress() called');
       
@@ -15283,26 +15295,12 @@
           return b.progress - a.progress;
         });
 
-        // Calculate elapsed time and ensure minimum loading with render buffer
-        const elapsedTime = Date.now() - loadStartTime;
-        const minLoadingTime = 800; // Reduced from 3200ms to 800ms for faster load
-        const remainingTime = Math.max(0, minLoadingTime - elapsedTime);
-        // Wait for remaining time before rendering
-        await new Promise(resolve => setTimeout(resolve, remainingTime));
-        
-        // Render carousel once
+        // No artificial minimum delay: render as soon as the data is ready.
         renderSystemsCarousel();
         updateSystemNotifications();
         
       } catch (error) {
         console.error('❌ Error loading systems:', error);
-        
-        // Even on error, use faster minimum loading time
-        const elapsedTime = Date.now() - loadStartTime;
-        const minLoadingTime = 800;
-        const remainingTime = Math.max(0, minLoadingTime - elapsedTime);
-        
-        await new Promise(resolve => setTimeout(resolve, remainingTime));
         
         carousel.innerHTML = '<div class="system-card" style="min-height:140px;justify-content:center;align-items:center;">Failed to load systems</div>';
         // CRITICAL: Show carousel even on error (otherwise it stays hidden forever)
