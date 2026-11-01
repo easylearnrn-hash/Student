@@ -476,6 +476,84 @@
       cursor: pointer;
     }
 
+    /* Every note card in the grid is the same compact size, whatever it contains (posted/free
+       badges, long titles, long file sizes): title on top, meta on one line, actions pinned to the
+       bottom. Nothing in the card is allowed to wrap onto an extra row. */
+    .notes-grid .note-card {
+      display: flex;
+      flex-direction: column;
+      height: 122px;
+      padding: 12px 14px;
+    }
+
+    .notes-grid .note-card .note-header {
+      flex: 1 1 auto;
+      min-height: 0;
+      margin-bottom: 6px;
+      overflow: hidden;
+    }
+
+    .notes-grid .note-card .note-title {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      min-width: 0;
+      line-height: 1.35;
+    }
+
+    .notes-grid .note-card .note-meta {
+      flex: none;
+      flex-wrap: nowrap;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .note-open-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 6px;
+      flex: none;
+    }
+
+    .note-open-row > * { flex-shrink: 0; }
+
+    .note-status-badges {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 1 1 auto;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .note-status-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: var(--font-sans);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+      flex: 0 1 auto;
+    }
+
+    .note-status-badge.free {
+      background: rgba(196,164,95,0.18);
+      border: 1px solid rgba(196,164,95,0.38);
+      color: #d4b87a;
+    }
+
+    .note-status-badge.posted {
+      background: rgba(196,164,95,0.10);
+      border: 1px solid rgba(196,164,95,0.26);
+      color: #c4a45f;
+    }
+
     .note-card:hover {
       transform: translateY(-2px);
       border-color: rgba(196, 164, 95, 0.35);
@@ -539,12 +617,6 @@
       font-size: 11px;
       color: var(--text-faint);
       letter-spacing: 0.2px;
-    }
-
-    .note-open-row {
-      display: flex;
-      justify-content: flex-start;
-      margin-top: 10px;
     }
 
     .note-open-btn {
@@ -4609,16 +4681,29 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
         return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       };
 
-      // Build status badges
+      // Build status badges (kept short so they fit the bottom row; full date is in the tooltip
+      // and in the date line of the card)
+      const shortBadgeDate = (dateStr, dropYear = false) => {
+        if (!dateStr) return '';
+        const full = formatDate(dateStr);
+        return full.replace(dropYear ? /,\s*\d{4}$/ : new RegExp(`,\\s*${new Date().getFullYear()}$`), '');
+      };
       let statusBadges = '';
-      if (hasFreeAccess && (freeAccessGrant?.class_date || freeAccessGrant?.created_at)) {
+      const showFreeBadge = hasFreeAccess && (freeAccessGrant?.class_date || freeAccessGrant?.created_at);
+      const showPostedBadge = isAccessible && (permission?.class_date || permission?.created_at);
+      // When a note is both FREE and Posted there isn't room for the words or the year too:
+      // keep icon + day (the full date is in the tooltip and in the card's date line).
+      const bothBadges = !!(showFreeBadge && showPostedBadge);
+      const badgeWord = (word) => bothBadges ? '' : `${word} `;
+      if (showFreeBadge) {
         const freeBadgeDate = freeAccessGrant?.class_date || freeAccessGrant?.created_at;
-        statusBadges += `<div style="display: inline-block; padding: 2px 8px; background: rgba(196,164,95,0.18); border: 1px solid rgba(196,164,95,0.38); border-radius: 6px; font-size: 11px; font-weight: 700; color: #d4b87a; margin-top: 4px; margin-right: 6px; font-family: var(--font-sans);">🆓 FREE (${formatDate(freeBadgeDate)})</div>`;
+        statusBadges += `<div class="note-status-badge free" title="FREE (${formatDate(freeBadgeDate)})">🆓 ${badgeWord('FREE')}${shortBadgeDate(freeBadgeDate, bothBadges)}</div>`;
       }
-      if (isAccessible && (permission?.class_date || permission?.created_at)) {
+      if (showPostedBadge) {
         const openedBadgeDate = permission?.class_date || permission?.created_at;
-        statusBadges += `<div style="display: inline-block; padding: 2px 8px; background: rgba(196,164,95,0.10); border: 1px solid rgba(196,164,95,0.26); border-radius: 6px; font-size: 11px; font-weight: 700; color: #c4a45f; margin-top: 4px; font-family: var(--font-sans);">👁️ Posted (${formatDate(openedBadgeDate)})</div>`;
+        statusBadges += `<div class="note-status-badge posted" title="Posted (${formatDate(openedBadgeDate)})">👁️ ${badgeWord('Posted')}${shortBadgeDate(openedBadgeDate, bothBadges)}</div>`;
       }
+      const noteTitleAttr = String(note.title || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
       return `
         <div class="note-card ${isVisible ? 'accessible' : ''}" data-note-id="${note.id}" onclick="toggleNoteSelection(${note.id}, event)" style="cursor: pointer;">
@@ -4633,9 +4718,8 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
                 style="width: 18px; height: 18px; margin-top: 2px; cursor: pointer; flex-shrink: 0;"
               >
             </label>
-            <div style="flex: 1;">
-              <div class="note-title">${note.title}</div>
-              ${statusBadges}
+            <div style="flex: 1; min-width: 0;">
+              <div class="note-title" title="${noteTitleAttr}">${note.title}</div>
             </div>
             <div class="access-badge ${isVisible ? 'accessible' : 'restricted'}">
               ${isVisible ? '✓ Visible' : '✕ Hidden'}
@@ -4668,7 +4752,10 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
             })()}</span>
             <span>${note.requires_payment ? '🔒 Paid' : '🔓 Free'}</span>
             <span>📦 ${formatFileSize(note.file_size)}</span>
-            
+          </div>
+          <div class="note-open-row">
+            <button type="button" class="note-open-btn" onclick="openNoteInNewWindow(${note.id}, event)" title="Open this note in a new window">↗ Open</button>
+            <div class="note-status-badges">${statusBadges}</div>
             <span onclick="toggleNoteAccessDropdown(${note.id}, event, this)" 
                   style="cursor:pointer; background: rgba(139,92,246,0.20); color: #c4b5fd; padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(139,92,246,0.45); display: inline-flex; align-items: center; gap: 5px; transition: all 0.18s; margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: 0.2px; box-shadow: 0 2px 6px rgba(139,92,246,0.15);"
                   onmouseover="this.style.background='rgba(139,92,246,0.35)';this.style.transform='translateY(-1px)';this.style.boxShadow='0 4px 12px rgba(139,92,246,0.3)'"
@@ -4676,9 +4763,6 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
                   title="Manage individual student access — click to open">
               👤 Access <span style="font-size: 9px; opacity:0.7;">▼</span>
             </span>
-          </div>
-          <div class="note-open-row">
-            <button type="button" class="note-open-btn" onclick="openNoteInNewWindow(${note.id}, event)" title="Open this note in a new window">↗ Open</button>
           </div>
         </div>
       `;
