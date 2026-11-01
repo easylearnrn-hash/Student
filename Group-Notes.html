@@ -2636,16 +2636,36 @@
       return (title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     }
 
+    // One-time lookup index over the catalog. getNoteDisplaySystem / canonicalCatalogKey run for
+    // every note × every system on each render, so they must be O(1) (they used to rescan the whole
+    // catalog, and re-derived the alias key inside that scan, which made rendering take seconds).
+    let _catalogIndex = null;
+    function getCatalogIndex() {
+      if (!_catalogIndex) {
+        const byKey = new Map();       // normalized title -> first catalog item with that title
+        const aliasToKey = new Map();  // normalized alias -> normalized title of the item that lists it
+        ADMIN_HTML_NOTES_CATALOG.forEach(n => {
+          const key = normalizeCatalogTitle(n.title);
+          if (!byKey.has(key)) byKey.set(key, n);
+          (n.aliases || []).forEach(a => {
+            const aliasKey = normalizeCatalogTitle(a);
+            if (!aliasToKey.has(aliasKey)) aliasToKey.set(aliasKey, key);
+          });
+        });
+        _catalogIndex = { byKey, aliasToKey };
+      }
+      return _catalogIndex;
+    }
+
     // A catalog item may list `aliases`: other saved titles of the SAME note. They are treated as
     // one note, so Group Notes shows a single entry no matter which of the names is saved.
     function canonicalCatalogKey(title) {
       const key = normalizeCatalogTitle(title);
-      const item = ADMIN_HTML_NOTES_CATALOG.find(n => (n.aliases || []).some(a => normalizeCatalogTitle(a) === key));
-      return item ? normalizeCatalogTitle(item.title) : key;
+      return getCatalogIndex().aliasToKey.get(key) || key;
     }
 
     function getNoteDisplaySystem(note) {
-      const catalogItem = ADMIN_HTML_NOTES_CATALOG.find(n => normalizeCatalogTitle(n.title) === canonicalCatalogKey(note?.title));
+      const catalogItem = getCatalogIndex().byKey.get(canonicalCatalogKey(note?.title));
       return catalogItem?.displaySystem || note?.system || note?.system_category || note?.category || 'Unknown';
     }
 
@@ -2824,29 +2844,57 @@
         const container = document.getElementById('systemsContainer');
         if (container) container.innerHTML = '<div class="loading"><div class="spinner"></div><div>Loading systems and notes...</div></div>';
 
-        // 🚀 PERFORMANCE: Run loadActiveGroups (tab visibility) and data fetch in PARALLEL.
-        // loadActiveGroups only touches tab UI; it does not affect what data is fetched.
-        // loadData(skipRender=true) fetches & caches all data without rendering.
-        // Both finish together → then we set the requested group and render once.
-        await Promise.all([
-          loadActiveGroups(),
-          loadData(false, true)   // fetch + cache only, no render yet
-        ]);
-
-        // Apply ?group= URL param after active groups are known
+        // Apply ?group= BEFORE fetching so the ongoing-system lookup is done for the group that
+        // is actually shown (it used to run for Group A and then again for the requested group).
+        let normalizedRequestedGroup = null;
         if (requestedGroup) {
-          const normalizedGroup = requestedGroup.startsWith('Group ')
+          normalizedRequestedGroup = requestedGroup.startsWith('Group ')
             ? requestedGroup
             : `Group ${requestedGroup}`;
-          currentGroup = normalizedGroup;
+          currentGroup = normalizedRequestedGroup;
+        }
 
+        // Paint immediately from the last loaded data (if any); fresh data is fetched behind it.
+        const { data: { session: gnSession } } = await supabaseClient.auth.getSession();
+        gnSnapshotKey = gnSession?.user?.id ? `arnoma:groupnotes:snapshot:v1:${gnSession.user.id}` : null;
+        const snapshot = loadGroupNotesSnapshot();
+        let paintedFromSnapshot = false;
+        let snapshotSignature = null;
+        if (snapshot) {
+          allNotes = snapshot.notes;
+          permissions = snapshot.permissions;
+          freeAccessGrants = snapshot.freeAccess;
+          paintedFromSnapshot = true;
+          snapshotSignature = groupNotesDataSignature();
+        }
+
+        // Start the real fetch FIRST so the network runs while the snapshot is being painted
+        // (painting used to block the requests from even starting).
+        // 🚀 PERFORMANCE: loadActiveGroups (tab visibility) and the data fetch run in PARALLEL.
+        // loadData(skipRender=true) fetches & caches all data without rendering; it is forced so
+        // the snapshot never masks fresh data.
+        const freshDataPromise = Promise.all([
+          loadActiveGroups(),
+          loadData(paintedFromSnapshot, true)
+        ]);
+        // A failed fetch must not become an unhandled rejection while the snapshot is painting.
+        freshDataPromise.catch(() => {});
+
+        if (paintedFromSnapshot) await renderSystems();
+
+        await freshDataPromise;
+
+        if (normalizedRequestedGroup) {
           document.querySelectorAll('.group-tab').forEach(tab => {
             tab.classList.toggle('active', tab.dataset.group === currentGroup);
           });
         }
 
-        // Single render pass with all data already in memory
-        await renderSystems();
+        // Render with fresh data. When the screen was already painted from the snapshot, skip
+        // the re-render if nothing changed so the page doesn't flicker or reset under the admin.
+        if (!paintedFromSnapshot || groupNotesDataSignature() !== snapshotSignature) {
+          await renderSystems();
+        }
       } catch (error) {
         console.error('Init error:', error);
         alert('Failed to initialize: ' + error.message);
@@ -2942,26 +2990,83 @@
     
     // applyFilter: optional fn(query) => query to add .eq/.is/.not etc. before pagination
     async function fetchAll(table, selectStr, orderByObj = null, applyFilter = null) {
-      let allData = [];
-      let offset = 0;
       const batchSize = 1000;
-      while (true) {
+      const pagesPerWave = 3; // pages requested at the same time once the first page proves there is more
+      const fetchPage = async (pageIndex) => {
+        const offset = pageIndex * batchSize;
         let query = supabaseClient.from(table).select(selectStr).range(offset, offset + batchSize - 1);
         if (applyFilter) query = applyFilter(query);
         if (orderByObj) {
           query = query.order(orderByObj.col, { ascending: orderByObj.asc });
+          // Unique tiebreaker: with ties on the sort column, pages can overlap or skip rows.
+          query = query.order('id', { ascending: true });
         } else {
           // CRITICAL: Without an explicit order, Postgres/Supabase pagination can randomly skip records!
           query = query.order('id', { ascending: true });
         }
         const { data, error } = await query;
         if (error) throw error;
-        if (!data || data.length === 0) break;
-        allData.push(...data);
-        if (data.length < batchSize) break;
-        offset += batchSize;
+        return data || [];
+      };
+
+      const allData = [];
+      let nextPage = 0;
+      // Wave 0 is a single request so small tables cost exactly one round trip; later waves
+      // run their pages in parallel instead of one after another.
+      let waveSize = 1;
+      while (true) {
+        const pages = await Promise.all(
+          Array.from({ length: waveSize }, (_, i) => fetchPage(nextPage + i))
+        );
+        let reachedEnd = false;
+        for (const rows of pages) {
+          allData.push(...rows);
+          if (rows.length < batchSize) { reachedEnd = true; break; }
+        }
+        if (reachedEnd) break;
+        nextPage += waveSize;
+        waveSize = pagesPerWave;
       }
       return allData;
+    }
+
+    // ===== PERSISTED SNAPSHOT (stale-while-revalidate) =====
+    // The page is reloaded from scratch every time the manager is opened, so the in-memory cache
+    // never survives. Keeping the last loaded notes/permissions/free-access lets the manager
+    // paint immediately on the next open while fresh data is fetched behind it.
+    const GN_SNAPSHOT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+    let gnSnapshotKey = null;
+
+    function loadGroupNotesSnapshot() {
+      if (!gnSnapshotKey) return null;
+      try {
+        const raw = localStorage.getItem(gnSnapshotKey);
+        if (!raw) return null;
+        const snap = JSON.parse(raw);
+        if (!snap || !Array.isArray(snap.notes) || !Array.isArray(snap.permissions) || !Array.isArray(snap.freeAccess)) return null;
+        if (Date.now() - (snap.ts || 0) > GN_SNAPSHOT_MAX_AGE_MS) return null;
+        return snap;
+      } catch (_) { return null; }
+    }
+
+    function saveGroupNotesSnapshot() {
+      if (!gnSnapshotKey) return;
+      try {
+        localStorage.setItem(gnSnapshotKey, JSON.stringify({
+          ts: Date.now(),
+          notes: allNotes,
+          permissions: permissions,
+          freeAccess: freeAccessGrants
+        }));
+      } catch (_) { /* storage full or unavailable — the snapshot is only an optimisation */ }
+    }
+
+    function clearGroupNotesSnapshot() {
+      try { if (gnSnapshotKey) localStorage.removeItem(gnSnapshotKey); } catch (_) {}
+    }
+
+    function groupNotesDataSignature() {
+      return JSON.stringify([allNotes, permissions, freeAccessGrants]);
     }
 
     // ===== LOAD DATA =====
@@ -2983,6 +3088,9 @@
 
         // 🚀 PERFORMANCE: Parallel fetches if any data missing from cache
         if (!notesCache || !permsCache || !freeAccessCache) {
+          // The "ongoing system" lookup is independent of the data queries, so start it now
+          // instead of paying a separate round trip after they finish.
+          const ongoingPrewarm = getOngoingSystemName();
           const [notesResult, permsResult, freeAccessResult] = await Promise.all([
             // Fetch notes — skip soft-deleted rows (deleted=false only)
             notesCache ? Promise.resolve({ data: notesCache, error: null }) :
@@ -3031,13 +3139,16 @@
           if (!notesCache) setCachedData('notes', allNotes);
           if (!permsCache) setCachedData('permissions', permissions);
           if (!freeAccessCache) setCachedData('freeAccess', freeAccessGrants);
+          // Only persist a complete, error-free load (a failed free-access fetch would save an empty list).
+          if (!freeAccessResult.error) saveGroupNotesSnapshot();
+          await ongoingPrewarm;
         } else {
           allNotes = filterToHtmlCatalog(notesCache);
           permissions = permsCache;
           freeAccessGrants = freeAccessCache;
         }
 
-        // 🚀 PRE-WARM ongoing system cache so renderSystems() doesn't block on a DB query
+        // Pre-warm the ongoing-system cache so renderSystems() doesn't block on a DB query
         await getOngoingSystemName();
 
         if (!skipRender) await renderSystems();
@@ -5185,6 +5296,7 @@ function renderNoteCard(note, permissionsMap, freeAccessMap) {
     async function logout() {
       const confirmed = await customConfirm('Logout', 'Are you sure you want to logout?');
       if (!confirmed) return;
+      clearGroupNotesSnapshot();
       supabaseClient.auth.signOut();
       window.location.href = 'index.html';
     }
