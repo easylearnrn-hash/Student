@@ -1,4 +1,16 @@
 -- ============================================================
+-- ⚠️ TESTED ON PRODUCTION 2026-11-01 — DOES NOT FIX THE SLOWNESS. DO NOT RUN EXPECTING A SPEED-UP.
+--   Applied, A/B timed with the portal's real queries as a real student, then rolled back:
+--     student_notes (85 rows)   6.3 s  ->  6.2 s   (no change)
+--     other note queries        unchanged;  admin DB time ~10% better (0.72 s -> 0.65 s)
+--   Row-level access was identical before/after for 25 sampled principals (admin, anon, 23 students),
+--   so it is safe, just pointless. The cause is NOT these three policies. It is that every student-side
+--   subquery scans `students` once per row (hundreds of times), and the `students` table's own access
+--   rules call the VOLATILE plpgsql function is_arnoma_admin() several times per row. Fixing that means
+--   changing the policies/function on `students` (and likely `payment_records`), not this file.
+--   Restore the original policies with FIX-ONE-TIME-CROSS-GROUP-NOTE-ACCESS.sql if this was ever applied.
+-- ============================================================
+-- ============================================================
 -- PERF FIX: student_notes / student_note_permissions / note_free_access
 --           SELECT policies are slow (3-5 s per portal load).
 --
