@@ -32,6 +32,15 @@ function formatClassDate(dateStr: string): string {
   }
 }
 
+const METADATA_CHUNK_SIZE = 480;
+
+function setChunkedMetadata(body: URLSearchParams, key: string, value: string): void {
+  const chunks = value.length > 0 ? value.match(new RegExp(`[\\s\\S]{1,${METADATA_CHUNK_SIZE}}`, 'g')) ?? [''] : [''];
+  chunks.forEach((chunk, i) => {
+    body.set(`metadata[${i === 0 ? key : `${key}_${i + 1}`}]`, chunk);
+  });
+}
+
 /** Find or create a Stripe Customer keyed by our internal student_id.
  *  Returns the Stripe customer ID string, or null on failure. */
 async function findOrCreateStripeCustomer(
@@ -217,9 +226,6 @@ serve(async (req: Request) => {
     'metadata[group_name]'            : group_name       || '',
     'metadata[invoice_ref]'           : invoice_ref      || '',
     'metadata[payment_date]'          : paymentDate,
-    'metadata[for_class]'             : for_class        || '',
-    'metadata[for_class_dates]'       : classDatesArr.join(','),
-    'metadata[for_class_groups]'      : classGroupsArr.join(','),
     'metadata[class_count]'           : String(classDatesArr.length || 1),
     'metadata[subtotal_dollars]'      : Number.isFinite(subtotal_dollars) ? String(subtotal_dollars) : '',
     'metadata[tax_dollars]'           : Number.isFinite(tax_dollars) ? String(tax_dollars) : '',
@@ -228,6 +234,12 @@ serve(async (req: Request) => {
     // than the student's own home group (Calendar-NEW cross-group add).
     'metadata[class_group]'           : class_group      || classGroupsArr[0] || '',
   });
+
+  // Stripe rejects metadata values over 500 chars, which broke payments for students with many
+  // unpaid classes. Long lists are split into key, key_2, key_3… (stripe-webhook re-joins them).
+  setChunkedMetadata(stripeBody, 'for_class', for_class || '');
+  setChunkedMetadata(stripeBody, 'for_class_dates', classDatesArr.join(','));
+  setChunkedMetadata(stripeBody, 'for_class_groups', classGroupsArr.join(','));
 
   if (stripeCustomerId) {
     stripeBody.set('customer', stripeCustomerId);

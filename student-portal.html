@@ -9308,14 +9308,20 @@
           return status !== 'absent' && status !== 'ignored' && method !== 'ignored';
         });
         const isGroupPaid = !!groupPaymentRecord;
+        // An absence (student_absences, keyed by date) always wins over unpaid — same as the home-group loop.
+        const isGroupAbsent = !isGroupPaid && absentDates.has(date);
         crossGroupClasses.push({
           date,
           group,
           amount: pricePerClass,
           paid: isGroupPaid,
+          absent: isGroupAbsent,
           paymentMethod: groupPaymentRecord ? String(groupPaymentRecord.payment_method || '').toLowerCase() : ''
         });
-        if (isGroupPaid) {
+        if (isGroupAbsent) {
+          if (!absentClasses.some(c => c.date === date)) absentClasses.push({ date, amount: 0, status: 'absent', group });
+          debugLog(`🟡 ${date}: ABSENT (Group ${group}, one-time)`);
+        } else if (isGroupPaid) {
           debugLog(`🟢 ${date}: PAID (Group ${group}, one-time)`);
         } else {
           unpaidClasses.push({ date, amount: pricePerClass, group });
@@ -9817,6 +9823,8 @@
         const classDate = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
         if (cg.paid) {
           allEntries.push({ date: classDate, type: 'paid', amount: cg.amount, statusText: 'Paid', statusClass: 'paid', paymentMethod: cg.paymentMethod || '', group: cg.group });
+        } else if (cg.absent) {
+          allEntries.push({ date: classDate, isoDate: cg.date, type: 'absent', amount: cg.amount, statusText: 'Absent', statusClass: 'absent', group: cg.group, crossGroup: true });
         } else {
           allEntries.push({ date: classDate, type: 'unpaid', amount: cg.amount, statusText: 'Unpaid', statusClass: 'unpaid', group: cg.group });
         }
@@ -9888,7 +9896,8 @@
           item.style.cursor = 'pointer';
           const _iso = entry.isoDate;
           const _price = entry.amount || (window.currentStudent ? getStudentClassPrice(window.currentStudent) : 50);
-          item.addEventListener('click', () => openAbsenceInfoModal(_iso, _price));
+          const _grp = entry.crossGroup ? (entry.group || '') : '';
+          item.addEventListener('click', () => openAbsenceInfoModal(_iso, _price, true, _grp));
         }
         
         const dateStr = `${monthNames[entry.date.getMonth()]} ${entry.date.getDate()}, ${entry.date.getFullYear()}`;
@@ -16624,9 +16633,11 @@
     // ── ABSENCE INFO POPUP ──────────────────────────────────────────────────
     let _absenceInfoDate = null; // YYYY-MM-DD of the tapped absent class
     let _absenceInfoPrice = 0;   // price per class for that session
+    let _absenceInfoGroup = '';  // target group for cross-group one-time classes ('' = home group)
 
-    function openAbsenceInfoModal(isoDate, price, isAbsent = true) {
+    function openAbsenceInfoModal(isoDate, price, isAbsent = true, classGroup = '') {
       _absenceInfoDate = isoDate;
+      _absenceInfoGroup = classGroup || '';
       _absenceInfoPrice = price || (window.currentStudent ? getStudentClassPrice(window.currentStudent) : 50);
       const modal = document.getElementById('absenceInfoModal');
       if (!modal) return;
@@ -16663,9 +16674,11 @@
       // Capture date/price BEFORE closing (closeAbsenceInfoModal must not clear them)
       const isoDate = _absenceInfoDate;
       const price   = _absenceInfoPrice;
+      const classGroup = _absenceInfoGroup;
       closeAbsenceInfoModal();
       _absenceInfoDate  = null;
       _absenceInfoPrice = 0;
+      _absenceInfoGroup = '';
 
       const student = window.currentStudent;
       if (!student || !isoDate) { openPaymentModal(); return; }
@@ -16674,6 +16687,18 @@
 
       // Look up notes posted for this group on this class date, then open payment with titles
       const openPaymentWithNotes = (noteTitles) => {
+        // Register a payment session so the success message from payment.html is accepted;
+        // without it the portal ignores the success event and never confirms/refreshes.
+        const paymentSessionToken = createPaymentSessionToken();
+        window._lastStripeClassDates = [isoDate];
+        window._lastStripeClassGroups = [classGroup];
+        window._arnomaPaymentSession = {
+          token: paymentSessionToken,
+          studentId: String(student.id || ''),
+          expectedAmount: Number(amount || 0),
+          expectedUnitKeys: [stripeUnitKey(isoDate, classGroup)],
+          createdAt: Date.now(),
+        };
         const params = new URLSearchParams({
           student_name    : student.name    || '',
           student_id      : String(student.id || ''),
@@ -16684,6 +16709,9 @@
           invoice_ref     : `absent-${student.id}-${isoDate}`,
           for_class       : isoDate,
           for_class_dates : JSON.stringify([isoDate]),
+          for_class_groups: JSON.stringify([classGroup]),
+          class_group     : classGroup,
+          payment_session_token: paymentSessionToken,
         });
         if (noteTitles && noteTitles.length > 0) {
           params.set('note_titles', JSON.stringify(noteTitles));
