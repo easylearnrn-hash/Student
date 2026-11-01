@@ -21,6 +21,11 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   
+  <!-- Warm up connections used on the critical path (data) and by Pay Now (Stripe) -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://zlvnxvrzotamhpezqedr.supabase.co">
+  <link rel="preconnect" href="https://js.stripe.com">
+
   <!-- Supabase SDK -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
@@ -8921,7 +8926,29 @@
   *                 (excused rows treated as paid), plus credit_payments by applied_class_date
   *  - unpaid     → scheduled date where: !hasPayment && !isAbsent
      */
-    async function calculateUnpaidFromSchedule(student, payments, groupScheduleData) {
+    // Page load used to run this full set of queries twice back-to-back (loadPaymentHistory, then
+    // updatePaymentUI). Share one in-flight/recent result for a few seconds; Pay Now passes
+    // { fresh: true } so the amount charged is always re-verified against the database.
+    const _unpaidCalcCache = { key: null, at: 0, promise: null };
+    function calculateUnpaidFromSchedule(student, payments, groupScheduleData, opts = {}) {
+      const key = [
+        student && student.id,
+        groupScheduleData && groupScheduleData.schedule,
+        JSON.stringify((groupScheduleData && groupScheduleData.one_time_schedules) || [])
+      ].join('|');
+      const now = Date.now();
+      if (!opts.fresh && _unpaidCalcCache.promise && _unpaidCalcCache.key === key && now - _unpaidCalcCache.at < 8000) {
+        return _unpaidCalcCache.promise;
+      }
+      const promise = _calculateUnpaidFromScheduleImpl(student, payments, groupScheduleData);
+      _unpaidCalcCache.key = key;
+      _unpaidCalcCache.at = now;
+      _unpaidCalcCache.promise = promise;
+      promise.catch(() => { if (_unpaidCalcCache.promise === promise) _unpaidCalcCache.promise = null; });
+      return promise;
+    }
+
+    async function _calculateUnpaidFromScheduleImpl(student, payments, groupScheduleData) {
       const studentGroup = student.group_name || student.group_letter || student.group;
 
       const pricePerClass = getStudentClassPrice(student);
@@ -10648,6 +10675,7 @@
 
     // Force reload payments data (clears cache)
     async function refreshPaymentsData() {
+      _unpaidCalcCache.promise = null;
       // Clear payment cache to force fresh data
       clearDataCache('payments-');
       
@@ -16592,7 +16620,22 @@
       allow="payment *; publickey-credentials-get *"
       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
       title="ARNOMA Secure Payment"
+      onload="var l=document.getElementById('arnomaPaymentLoading');if(l)l.style.display='none';"
     ></iframe>
+    <div id="arnomaPaymentLoading" style="
+      display: none;
+      position: absolute;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 100000;
+      color: #c9a84c;
+      font-family: 'Inter', sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+    ">Preparing secure payment…</div>
   </div>
 
   <script>
@@ -16835,6 +16878,14 @@
         return;
       }
 
+      // Open the overlay right away so Pay Now gives instant feedback while the balance is
+      // re-verified below (that re-check is a network round trip).
+      const _earlyOverlay = document.getElementById('arnomaPaymentModalOverlay');
+      const _earlyLoader = document.getElementById('arnomaPaymentLoading');
+      if (_earlyLoader) _earlyLoader.style.display = 'flex';
+      _earlyOverlay.style.display = 'flex';
+      document.body.style.overflow = 'hidden';
+
       // Re-fetch using the same debt engine as the portal UI so the amount passed to
       // payment.html stays identical to what the student sees on the portal cards.
       let unpaidDates = buildPaymentBillingUnits().map(u => u.date);
@@ -16850,7 +16901,7 @@
           }
         }
 
-        const freshResult = await calculateUnpaidFromSchedule(student, [], scheduleData || {});
+        const freshResult = await calculateUnpaidFromSchedule(student, [], scheduleData || {}, { fresh: true });
         const rawUnpaidClasses = freshResult.unpaidClasses || [];
         window.currentUnpaidClasses = rawUnpaidClasses.map(c => c.date);
         window.currentUnpaidClassGroupList = rawUnpaidClasses.map(c => c.group || '');
@@ -16867,6 +16918,8 @@
       } catch (_) { /* fall back to cached list and amount */ }
 
       if (freshAmount <= 0) {
+        _earlyOverlay.style.display = 'none';
+        document.body.style.overflow = '';
         if (typeof customAlert === 'function') {
           customAlert('No Balance Due', 'You have no unpaid balance at this time.');
         }
