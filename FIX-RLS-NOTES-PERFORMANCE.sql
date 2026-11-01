@@ -1,5 +1,9 @@
 -- ============================================================
--- ⚠️ TESTED ON PRODUCTION 2026-11-01 — DOES NOT FIX THE SLOWNESS. DO NOT RUN EXPECTING A SPEED-UP.
+-- ⚠️ TESTED ON PRODUCTION 2026-11-01 — THIS FILE DOES NOT FIX THE SLOWNESS. DO NOT RUN IT.
+--   THE REAL FIX WAS APPLIED INSTEAD: see APPLIED-WRAP-IS-ARNOMA-ADMIN-POLICIES.sql
+--   (restore with RESTORE-NOTES-POLICIES-ORIGINAL.sql). Result: student_notes DB time 3.1 s -> 0.25 s,
+--   same rows visible/updatable for every principal tested.
+--   (Original finding for this file:)
 --   Applied, A/B timed with the portal's real queries as a real student, then rolled back:
 --     student_notes (85 rows)   6.3 s  ->  6.2 s   (no change)
 --     other note queries        unchanged;  admin DB time ~10% better (0.72 s -> 0.65 s)
