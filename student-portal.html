@@ -1149,6 +1149,25 @@
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.32), 0 0 22px rgba(232, 200, 110, 0.07);
     }
 
+    .profile-badge-card.silver {
+      background: linear-gradient(135deg, rgba(214, 222, 236, 0.15) 0%, rgba(160, 172, 192, 0.05) 55%, rgba(14, 12, 6, 0.55) 100%);
+      border-color: rgba(205, 214, 228, 0.36);
+      border-top-color: rgba(228, 234, 244, 0.75);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.32), 0 0 22px rgba(205, 214, 228, 0.06);
+    }
+
+    .profile-badge-card.platinum {
+      background: linear-gradient(135deg, rgba(190, 226, 250, 0.17) 0%, rgba(140, 180, 210, 0.06) 55%, rgba(14, 12, 6, 0.55) 100%);
+      border-color: rgba(190, 224, 248, 0.42);
+      border-top-color: rgba(214, 238, 255, 0.85);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.32), 0 0 26px rgba(170, 215, 245, 0.10);
+    }
+
+    .profile-badge-card.silver .profile-badge-tier { color: rgba(218, 226, 240, 0.88); }
+    .profile-badge-card.platinum .profile-badge-tier { color: rgba(196, 232, 255, 0.92); }
+    .profile-badge-card.silver .profile-badge-date { color: rgba(190, 200, 216, 0.6); }
+    .profile-badge-card.platinum .profile-badge-date { color: rgba(170, 205, 228, 0.65); }
+
     .profile-badge-medal {
       flex-shrink: 0;
       width: 54px;
@@ -10590,8 +10609,52 @@
       }
     }
 
-    // Recognition badges awarded by the admin: portal_settings key "student_badge:<student id>",
-    // value { badges: [{ tier, title, note, awarded_at }] }. Nothing is shown when there is no row.
+    // Recognition badges on My Profile. Two sources, both optional:
+    //  1) Awarded by the admin: portal_settings "student_badge:<student id>" = { badges: [{ tier, title, note, awarded_at }] }.
+    //  2) Earned automatically by flagging questions in the practice tests: questions flagged in the last 7 days
+    //     (1+ silver, 3+ gold, 5+ platinum). The badge stays on the profile until 7 days after the latest flag.
+    //     A flag the admin dismissed is remembered in portal_settings "student_flag_credits:<student id>" so it still counts.
+    const FLAG_BADGE_DAYS = 7;
+    const PROFILE_BADGE_PALETTE = {
+      silver:   { stops: ['#f4f7fb', '#c3ccd8', '#8a95a6'], rim: '#eef2f8', ink: 'rgba(70,82,100,0.55)', star: '#ffffff' },
+      gold:     { stops: ['#f6e3a1', '#d9b44a', '#a8832f'], rim: '#f6e3a1', ink: 'rgba(120,86,20,0.55)', star: '#fff6d6' },
+      platinum: { stops: ['#f1fbff', '#b9d9ec', '#7fa3bd'], rim: '#e6f6ff', ink: 'rgba(48,86,112,0.55)', star: '#ffffff' }
+    };
+    const PROFILE_BADGE_RANK = { platinum: 3, gold: 2, silver: 1 };
+
+    async function getFlagBadge(student) {
+      let authId = student.auth_user_id;
+      if (!authId) {
+        const { data: sess } = await supabaseClient.auth.getSession();
+        authId = sess && sess.session && sess.session.user ? sess.session.user.id : null;
+      }
+      const since = Date.now() - FLAG_BADGE_DAYS * 86400000;
+      const [flagsRes, creditRes] = await Promise.all([
+        authId
+          ? supabaseClient.from('question_flags').select('question_id, created_at').eq('owner_auth_id', authId).gte('created_at', new Date(since).toISOString())
+          : Promise.resolve({ data: [] }),
+        supabaseClient.from('portal_settings').select('setting_value').eq('setting_key', `student_flag_credits:${student.id}`).maybeSingle()
+      ]);
+      const flagged = new Map(); // question id -> time it was flagged
+      (flagsRes.data || []).forEach(r => flagged.set(Number(r.question_id), Date.parse(r.created_at)));
+      const credits = (creditRes.data && creditRes.data.setting_value && creditRes.data.setting_value.items) || [];
+      credits.forEach(i => {
+        const t = Date.parse(i.at);
+        if (t >= since && !flagged.has(Number(i.q))) flagged.set(Number(i.q), t);
+      });
+      const n = flagged.size;
+      if (!n) return null;
+      const latest = Math.max(...flagged.values());
+      const tier = n >= 5 ? 'platinum' : (n >= 3 ? 'gold' : 'silver');
+      const plural = n === 1 ? 'question' : 'questions';
+      const note = tier === 'silver'
+        ? `Thank you for flagging ${n} ${plural} and helping keep the question bank accurate.`
+        : (tier === 'gold'
+          ? `Thank you for flagging ${n} questions this week. Your sharp eye is making the question bank better.`
+          : `Thank you for flagging ${n} questions this week. An outstanding contribution to refining the question bank.`);
+      return { tier, title: 'Question Reviewer', note, expires_at: latest + FLAG_BADGE_DAYS * 86400000 };
+    }
+
     async function loadProfileBadges(student) {
       const section = document.getElementById('profileBadgeSection');
       if (!section) return;
@@ -10599,22 +10662,25 @@
       section.textContent = '';
       if (!student || student.id == null) return;
       try {
-        const { data, error } = await supabaseClient
-          .from('portal_settings')
-          .select('setting_value')
-          .eq('setting_key', `student_badge:${student.id}`)
-          .maybeSingle();
-        if (error || !data || !data.setting_value) return;
-        const badges = Array.isArray(data.setting_value.badges) ? data.setting_value.badges : [];
+        const [manualRes, flagBadge] = await Promise.all([
+          supabaseClient.from('portal_settings').select('setting_value').eq('setting_key', `student_badge:${student.id}`).maybeSingle(),
+          getFlagBadge(student).catch(() => null)
+        ]);
+        const manual = manualRes.data && manualRes.data.setting_value && Array.isArray(manualRes.data.setting_value.badges)
+          ? manualRes.data.setting_value.badges : [];
+        const badges = manual.concat(flagBadge ? [flagBadge] : [])
+          .sort((a, b) => (PROFILE_BADGE_RANK[b.tier] || 0) - (PROFILE_BADGE_RANK[a.tier] || 0));
         if (!badges.length) return;
         const currentId = (window.currentStudent || currentStudent || {}).id;
         if (currentId !== student.id) return; // modal now belongs to another student (impersonation switch)
         badges.forEach(b => {
+          const pal = PROFILE_BADGE_PALETTE[b.tier] || PROFILE_BADGE_PALETTE.gold;
+          const gid = `pbGrad-${b.tier || 'gold'}`;
           const card = document.createElement('div');
-          card.className = 'profile-badge-card';
+          card.className = `profile-badge-card ${PROFILE_BADGE_PALETTE[b.tier] ? b.tier : 'gold'}`;
           const medal = document.createElement('div');
           medal.className = 'profile-badge-medal';
-          medal.innerHTML = '<svg viewBox="0 0 64 64" width="54" height="54" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="pbGold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6e3a1"/><stop offset="0.5" stop-color="#d9b44a"/><stop offset="1" stop-color="#a8832f"/></linearGradient></defs><path d="M20 4h10l4 14-9 4z" fill="#8f2f3b"/><path d="M44 4H34l-4 14 9 4z" fill="#b5424f"/><circle cx="32" cy="38" r="20" fill="url(#pbGold)" stroke="#f6e3a1" stroke-width="1.5"/><circle cx="32" cy="38" r="15.5" fill="none" stroke="rgba(120,86,20,0.55)" stroke-width="1.2"/><path d="M32 27l3.4 7 7.6 1.1-5.5 5.4 1.3 7.6L32 44.5 25.2 48l1.3-7.6L21 35.1l7.6-1.1z" fill="#fff6d6" stroke="rgba(120,86,20,0.6)" stroke-width="0.8" stroke-linejoin="round"/></svg>';
+          medal.innerHTML = `<svg viewBox="0 0 64 64" width="54" height="54" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${pal.stops[0]}"/><stop offset="0.5" stop-color="${pal.stops[1]}"/><stop offset="1" stop-color="${pal.stops[2]}"/></linearGradient></defs><path d="M20 4h10l4 14-9 4z" fill="#8f2f3b"/><path d="M44 4H34l-4 14 9 4z" fill="#b5424f"/><circle cx="32" cy="38" r="20" fill="url(#${gid})" stroke="${pal.rim}" stroke-width="1.5"/><circle cx="32" cy="38" r="15.5" fill="none" stroke="${pal.ink}" stroke-width="1.2"/><path d="M32 27l3.4 7 7.6 1.1-5.5 5.4 1.3 7.6L32 44.5 25.2 48l1.3-7.6L21 35.1l7.6-1.1z" fill="${pal.star}" stroke="${pal.ink}" stroke-width="0.8" stroke-linejoin="round"/></svg>`;
           const text = document.createElement('div');
           text.className = 'profile-badge-text';
           const tier = document.createElement('div');
@@ -10638,6 +10704,11 @@
               date.textContent = `Awarded ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
               text.appendChild(date);
             }
+          } else if (b.expires_at) {
+            const date = document.createElement('div');
+            date.className = 'profile-badge-date';
+            date.textContent = `Shown until ${new Date(b.expires_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+            text.appendChild(date);
           }
           card.append(medal, text);
           section.appendChild(card);

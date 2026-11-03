@@ -10729,8 +10729,30 @@ async function inboxDeleteAsk(id, btn) {
   await renderTeacherInbox(); refreshInboxBadges();
 }
 
+// A student's profile badge counts the questions they flagged in the last 7 days. Dismissing a flag deletes the row,
+// so each flagger's credit is saved first (portal_settings "student_flag_credits:<student id>"); it never blocks the dismiss.
+async function creditFlaggersBeforeDismiss(questionId) {
+  try {
+    const { data: flags } = await db.from('question_flags').select('owner_auth_id, created_at').eq('question_id', questionId);
+    if (!flags || !flags.length) return;
+    const { data: studs } = await db.from('students').select('id, auth_user_id').in('auth_user_id', [...new Set(flags.map(f => f.owner_auth_id))]);
+    const cutoff = Date.now() - 8 * 86400000;
+    for (const s of (studs || [])) {
+      const flag = flags.find(f => f.owner_auth_id === s.auth_user_id);
+      if (!flag || Date.parse(flag.created_at) < cutoff) continue;
+      const key = `student_flag_credits:${s.id}`;
+      const { data: row } = await db.from('portal_settings').select('setting_value').eq('setting_key', key).maybeSingle();
+      const items = ((row && row.setting_value && row.setting_value.items) || [])
+        .filter(i => Number(i.q) !== Number(questionId) && Date.parse(i.at) >= cutoff);
+      items.push({ q: Number(questionId), at: flag.created_at });
+      await db.from('portal_settings').upsert({ setting_key: key, setting_value: { items }, updated_by: 'flag-credit' }, { onConflict: 'setting_key' });
+    }
+  } catch (e) { console.warn('Flag credit not saved:', e && e.message); }
+}
+
 async function inboxDismissFlags(questionId, btn) {
   if (!inboxArmed(btn, 'Click again to dismiss')) return;
+  await creditFlaggersBeforeDismiss(questionId);
   const { error } = await db.from('question_flags').delete().eq('question_id', questionId);
   if (error) { showToast('Could not dismiss', 'error'); return; }
   await renderTeacherInbox(); refreshInboxBadges();
