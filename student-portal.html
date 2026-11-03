@@ -1128,6 +1128,72 @@
       word-break: break-word;
       line-height: 1.5;
     }
+
+    /* Recognition badges (profile) */
+    .profile-badge-section {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    .profile-badge-card {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px 18px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, rgba(232, 200, 110, 0.16) 0%, rgba(196, 164, 95, 0.06) 55%, rgba(14, 12, 6, 0.55) 100%);
+      border: 1px solid rgba(232, 200, 110, 0.38);
+      border-top: 2px solid rgba(232, 200, 110, 0.75);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.32), 0 0 22px rgba(232, 200, 110, 0.07);
+    }
+
+    .profile-badge-medal {
+      flex-shrink: 0;
+      width: 54px;
+      height: 54px;
+      filter: drop-shadow(0 2px 8px rgba(232, 200, 110, 0.35));
+    }
+
+    .profile-badge-text {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .profile-badge-tier {
+      font-family: var(--font-sans);
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(232, 200, 110, 0.85);
+    }
+
+    .profile-badge-title {
+      font-family: var(--font-sans);
+      font-size: 15.5px;
+      font-weight: 700;
+      color: rgba(245, 240, 232, 0.96);
+      margin-top: 2px;
+      line-height: 1.3;
+    }
+
+    .profile-badge-note {
+      font-family: var(--font-sans);
+      font-size: 12.5px;
+      font-weight: 400;
+      color: rgba(245, 240, 232, 0.72);
+      margin-top: 6px;
+      line-height: 1.55;
+    }
+
+    .profile-badge-date {
+      font-family: var(--font-sans);
+      font-size: 10.5px;
+      color: rgba(196, 164, 95, 0.55);
+      margin-top: 6px;
+    }
     
     .game-modal {
       position: fixed;
@@ -5692,6 +5758,7 @@
         </button>
       </div>
       <div class="profile-modal-content">
+        <div class="profile-badge-section" id="profileBadgeSection" style="display:none;"></div>
         <div class="profile-modal-section">
           <div class="profile-modal-row">
             <span class="profile-modal-label">
@@ -10514,11 +10581,70 @@
       }
       
       modal.showModal();
+      loadProfileBadges(student);
       
       // Close account dropdown when opening profile modal
       const accountDropdown = document.querySelector('.account-dropdown');
       if (accountDropdown) {
         accountDropdown.classList.remove('open');
+      }
+    }
+
+    // Recognition badges awarded by the admin: portal_settings key "student_badge:<student id>",
+    // value { badges: [{ tier, title, note, awarded_at }] }. Nothing is shown when there is no row.
+    async function loadProfileBadges(student) {
+      const section = document.getElementById('profileBadgeSection');
+      if (!section) return;
+      section.style.display = 'none';
+      section.textContent = '';
+      if (!student || student.id == null) return;
+      try {
+        const { data, error } = await supabaseClient
+          .from('portal_settings')
+          .select('setting_value')
+          .eq('setting_key', `student_badge:${student.id}`)
+          .maybeSingle();
+        if (error || !data || !data.setting_value) return;
+        const badges = Array.isArray(data.setting_value.badges) ? data.setting_value.badges : [];
+        if (!badges.length) return;
+        const currentId = (window.currentStudent || currentStudent || {}).id;
+        if (currentId !== student.id) return; // modal now belongs to another student (impersonation switch)
+        badges.forEach(b => {
+          const card = document.createElement('div');
+          card.className = 'profile-badge-card';
+          const medal = document.createElement('div');
+          medal.className = 'profile-badge-medal';
+          medal.innerHTML = '<svg viewBox="0 0 64 64" width="54" height="54" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><linearGradient id="pbGold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6e3a1"/><stop offset="0.5" stop-color="#d9b44a"/><stop offset="1" stop-color="#a8832f"/></linearGradient></defs><path d="M20 4h10l4 14-9 4z" fill="#8f2f3b"/><path d="M44 4H34l-4 14 9 4z" fill="#b5424f"/><circle cx="32" cy="38" r="20" fill="url(#pbGold)" stroke="#f6e3a1" stroke-width="1.5"/><circle cx="32" cy="38" r="15.5" fill="none" stroke="rgba(120,86,20,0.55)" stroke-width="1.2"/><path d="M32 27l3.4 7 7.6 1.1-5.5 5.4 1.3 7.6L32 44.5 25.2 48l1.3-7.6L21 35.1l7.6-1.1z" fill="#fff6d6" stroke="rgba(120,86,20,0.6)" stroke-width="0.8" stroke-linejoin="round"/></svg>';
+          const text = document.createElement('div');
+          text.className = 'profile-badge-text';
+          const tier = document.createElement('div');
+          tier.className = 'profile-badge-tier';
+          tier.textContent = (b.tier ? String(b.tier) + ' badge' : 'Badge');
+          const title = document.createElement('div');
+          title.className = 'profile-badge-title';
+          title.textContent = b.title || '';
+          text.append(tier, title);
+          if (b.note) {
+            const note = document.createElement('div');
+            note.className = 'profile-badge-note';
+            note.textContent = b.note;
+            text.appendChild(note);
+          }
+          if (b.awarded_at) {
+            const d = new Date(`${b.awarded_at}T12:00:00`);
+            if (!isNaN(d)) {
+              const date = document.createElement('div');
+              date.className = 'profile-badge-date';
+              date.textContent = `Awarded ${d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+              text.appendChild(date);
+            }
+          }
+          card.append(medal, text);
+          section.appendChild(card);
+        });
+        if (section.childElementCount) section.style.display = 'flex';
+      } catch (e) {
+        debugLog('Profile badge load skipped:', e);
       }
     }
     
