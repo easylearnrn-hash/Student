@@ -1137,6 +1137,10 @@
       margin-bottom: 18px;
     }
 
+    .profile-badge-section.dashboard-badges {
+      margin: 24px 0 0;
+    }
+
     .profile-badge-card {
       display: flex;
       align-items: center;
@@ -5431,6 +5435,7 @@
           <div class="group-schedule" id="groupScheduleDisplay">
             <div class="schedule-empty">Loading schedule...</div>
           </div>
+          <div class="profile-badge-section dashboard-badges" id="dashboardBadgeSection" style="display:none;"></div>
         </div>
 
         <!-- 2. PAYMENT HISTORY -->
@@ -10656,10 +10661,10 @@
     }
 
     async function loadProfileBadges(student) {
-      const section = document.getElementById('profileBadgeSection');
-      if (!section) return;
-      section.style.display = 'none';
-      section.textContent = '';
+      // Badges show on the dashboard (Your Schedule card) and at the top of My Profile.
+      const sections = ['dashboardBadgeSection', 'profileBadgeSection'].map(id => document.getElementById(id)).filter(Boolean);
+      if (!sections.length) return;
+      sections.forEach(s => { s.style.display = 'none'; s.textContent = ''; });
       if (!student || student.id == null) return;
       try {
         const [manualRes, flagBadge] = await Promise.all([
@@ -10673,7 +10678,7 @@
         if (!badges.length) return;
         const currentId = (window.currentStudent || currentStudent || {}).id;
         if (currentId !== student.id) return; // modal now belongs to another student (impersonation switch)
-        badges.forEach(b => {
+        sections.forEach(section => badges.forEach(b => {
           const pal = PROFILE_BADGE_PALETTE[b.tier] || PROFILE_BADGE_PALETTE.gold;
           const gid = `pbGrad-${b.tier || 'gold'}`;
           const card = document.createElement('div');
@@ -10712,8 +10717,8 @@
           }
           card.append(medal, text);
           section.appendChild(card);
-        });
-        if (section.childElementCount) section.style.display = 'flex';
+        }));
+        sections.forEach(s => { if (s.childElementCount) s.style.display = 'flex'; });
       } catch (e) {
         debugLog('Profile badge load skipped:', e);
       }
@@ -16443,6 +16448,7 @@
         // The IIFE has an early exit for impersonation, so we must call it here
         await loadPortalData();
         _hideBootLoader(); // Content is ready — remove the boot screen
+        loadProfileBadges(currentStudent); // not awaited: badges appear on the dashboard when ready
         
         // Check if admin chat mode - hide portal content and show only forum
         if (currentStudent && currentStudent.isAdminChatMode) {
