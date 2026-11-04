@@ -5102,6 +5102,15 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
       <div class="setup-hint" id="setupHint">Leave blank to include every available question. Questions are distributed evenly across the selected topics.</div>
 
       <div class="setup-timer-block">
+        <div class="setup-field-label">Question type</div>
+        <div class="setup-segment" id="setupQuestionType" role="group" aria-label="Question type">
+          <button type="button" class="setup-seg active" data-type="mixed" onclick="setSetupQuestionType('mixed')">Mixed</button>
+          <button type="button" class="setup-seg" data-type="sata" onclick="setSetupQuestionType('sata')">Select all that apply only</button>
+        </div>
+        <div class="setup-timer-hint" id="setupQuestionTypeHint">Single-answer and select-all-that-apply questions together.</div>
+      </div>
+
+      <div class="setup-timer-block">
         <div class="setup-field-label">Timer</div>
         <div class="setup-segment" id="setupTimerMode" role="group" aria-label="Timer">
           <button type="button" class="setup-seg active" data-mode="none" onclick="setSetupTimerMode('none')">No timer</button>
@@ -6513,6 +6522,7 @@ const TEST_CONFIG = {
   passingScorePercent: 70,
   testId: null, // Will be loaded from Supabase or URL parameter
   categoryFilter: null, // Optional: filter questions by category
+  questionType: 'mixed',  // 'mixed' = every question; 'sata' = only "Select all that apply" questions
   selectedTopicIds: [],   // Topic UUIDs chosen by the user
   selectedTopicNames: [], // Human-readable names — persisted so title works after resume
   selectedGroups: [],     // [{ subject, topics: [names] }] — shown in the title dropdown
@@ -6741,6 +6751,9 @@ function allocateAcrossTopics(candidates, current, count) {
 // Returns the parsed questions (possibly none when the topics are used up) or throws if unavailable.
 async function fetchQuestionBatch(ctx, count) {
   if (!db && !initializeSupabase()) throw new Error('db_unavailable');
+  // The fast server-side candidate lookup cannot filter by question type, so a select-all-that-apply
+  // test draws its extra questions from the (type-filtered) pool instead.
+  if (TEST_CONFIG.questionType === 'sata') return legacyPickQuestions(ctx, count);
   await rotationFlush(); // so questions displayed a moment ago count in the rotation
   const { data, error } = await withTimeout(
     db.rpc('get_question_add_candidates', { p_topic_ids: ctx.topicIds, p_exclude: ctx.existingIds, p_per_topic: count }),
@@ -7137,6 +7150,9 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
         .order('display_order', { ascending: true })
         .order('id', { ascending: true });
 
+      // Select-all-that-apply only: every such question has is_multiple_choice = true
+      if (TEST_CONFIG.questionType === 'sata') query = query.eq('is_multiple_choice', true);
+
       if (useTopicSystem) {
         // Topic-based: filter by topic_id only (works across all subjects/test_ids)
         query = query.in('topic_id', topicIds);
@@ -7165,7 +7181,9 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
     }
     
     if (!questions || questions.length === 0) {
-      throw new Error('No questions found for the selected topics');
+      throw new Error(TEST_CONFIG.questionType === 'sata'
+        ? 'No select-all-that-apply questions found for the selected topics'
+        : 'No questions found for the selected topics');
     }
     
     try {
@@ -8927,18 +8945,55 @@ async function openTestSetupModal() {
   // Shuffle is on by default every time the setup opens
   const shuffleToggle = document.getElementById('mixQAToggle');
   if (shuffleToggle) shuffleToggle.checked = true;
+  // Mixed questions unless the student picks select-all-that-apply only
+  _setupQuestionType = 'mixed';
+  syncSetupQuestionTypeUi();
   // No timer unless the student chooses a timed test
   setSetupTimerMode('none');
   renderSetupAvailable();
   modal.classList.add('active');
   setTimeout(() => input && input.focus(), 50);
 
+  refreshSetupCount();
+}
+
+// Question type chosen in the test setup: 'mixed' (default) or 'sata' (select all that apply only).
+let _setupQuestionType = 'mixed';
+
+function syncSetupQuestionTypeUi() {
+  document.querySelectorAll('#setupQuestionType .setup-seg').forEach(b => b.classList.toggle('active', b.dataset.type === _setupQuestionType));
+  const hint = document.getElementById('setupQuestionTypeHint');
+  if (hint) hint.textContent = _setupQuestionType === 'sata'
+    ? 'Only "Select all that apply" questions from your chosen topics.'
+    : 'Single-answer and select-all-that-apply questions together.';
+}
+
+function setSetupQuestionType(type) {
+  _setupQuestionType = type === 'sata' ? 'sata' : 'mixed';
+  syncSetupQuestionTypeUi();
+  refreshSetupCount();
+}
+
+// Exact count of questions available for the current topics and question type
+async function refreshSetupCount() {
+  const topicIds = TEST_CONFIG.selectedTopicIds || [];
+  const sata = _setupQuestionType === 'sata';
+  if (sata) {
+    _setupAvailableCount = null; // no cached per-topic estimate for this type; the exact count follows
+  } else {
+    const counts = window._cachedTopicCounts || {};
+    _setupAvailableCount = topicIds.reduce((sum, id) => sum + (counts[id] || 0), 0) || null;
+  }
+  renderSetupAvailable();
+
   const req = ++_setupCountRequest;
   try {
-    const { count, error } = await db.from('test_questions')
+    let query = db.from('test_questions')
       .select('*', { count: 'exact', head: true })
       .eq('is_active', true)
       .in('topic_id', topicIds);
+    if (sata) query = query.eq('is_multiple_choice', true);
+    const { count, error } = await query;
     if (req !== _setupCountRequest) return;
     if (!error && count != null) {
       _setupAvailableCount = count;
@@ -9010,7 +9065,13 @@ function onSetupLimitInput() {
     chip.classList.toggle('active', chip.dataset.value === raw);
   });
   const startBtn = document.getElementById('setupStartBtn');
-  if (startBtn) startBtn.disabled = result === false;
+  if (startBtn) startBtn.disabled = result === false || n === 0;
+  if (n === 0 && hint && !error) {
+    hint.classList.add('error');
+    hint.textContent = _setupQuestionType === 'sata'
+      ? 'Your selected topics have no "Select all that apply" questions. Choose Mixed or pick other topics.'
+      : 'Your selected topics have no questions yet.';
+  }
   return result;
 }
 
@@ -9083,6 +9144,7 @@ async function confirmTestSetup() {
   const mixQAToggle = document.getElementById('mixQAToggle');
   TEST_CONFIG.shuffleQuestions = mixQAToggle ? mixQAToggle.checked : true;
   TEST_CONFIG.shuffleOptions   = true; // answer choices are always shuffled
+  TEST_CONFIG.questionType     = _setupQuestionType === 'sata' ? 'sata' : 'mixed';
   TEST_CONFIG.questionCount    = limit;
   closeTestSetupModal();
   await launchTestFromSelection();
@@ -11017,7 +11079,7 @@ function buildSavedSessionPayload(sessionName, extraConfig) {
       openedAt: TEST_CONFIG.openedAt || null,
       categoryFilter: TEST_CONFIG.categoryFilter || null,
       questionCount: TEST_CONFIG.questionCount || null,
-      shuffleQuestions: TEST_CONFIG.shuffleQuestions,
+      questionType: TEST_CONFIG.questionType === 'sata' ? 'sata' : 'mixed',
       shuffleOptions: TEST_CONFIG.shuffleOptions,
       timeLimitMinutes: TEST_CONFIG.timeLimitMinutes || null,
       elapsedMs: Math.max(0, Date.now() - testState.startTime),
@@ -11992,6 +12054,7 @@ async function loadSavedSessionInner(sessionId) {
   // Restore test config
   const parsedConfig = parseSessionField(session.test_config, {});
   TEST_CONFIG.timeLimitMinutes = null; // older saves had no timer
+  TEST_CONFIG.questionType = 'mixed';  // older saves: every question type
   TEST_CONFIG.selectedGroups = [];     // older saves: rebuilt from the topic ids when the dropdown opens
   TEST_CONFIG.testNumber = null;       // older saves are numbered when resumed
   TEST_CONFIG.openedAt = null;
