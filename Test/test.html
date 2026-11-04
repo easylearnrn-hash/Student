@@ -2050,6 +2050,39 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
   line-height: 1.4;
 }
 .submit-summary-item { min-width: 0; }
+
+/* Compact layout for the test-setup pop-up only (the submit dialog keeps its own spacing) */
+#testSetupModal .submit-modal-body { padding: 20px 24px 18px; }
+#testSetupModal .submit-modal-head { gap: 12px; margin-bottom: 12px; }
+#testSetupModal .submit-modal-icon { width: 38px; height: 38px; border-radius: 11px; }
+#testSetupModal .submit-modal-icon svg { width: 18px; height: 18px; }
+#testSetupModal .submit-modal-eyebrow { margin-bottom: 2px; }
+#testSetupModal .modal-content.submit-modal h2 { font-size: 18px; }
+#testSetupModal .setup-available { padding: 10px 14px; gap: 12px; margin-bottom: 12px; border-radius: 10px; }
+#testSetupModal .setup-available-value { font-size: 26px; }
+#testSetupModal .setup-available-title { font-size: 12.5px; }
+#testSetupModal .setup-available-sub { font-size: 11px; margin-top: 1px; }
+#testSetupModal .setup-field-label { margin-bottom: 6px; font-size: 9.5px; }
+#testSetupModal .setup-input { padding: 9px 14px; font-size: 14px; border-radius: 9px; }
+#testSetupModal .setup-chips { gap: 6px; margin-top: 7px; }
+#testSetupModal .setup-chip { padding: 4px 11px; font-size: 11.5px; }
+#testSetupModal .setup-hint { margin: 6px 0 10px; font-size: 11px; line-height: 1.4; }
+#testSetupModal .setup-timer-block { margin: 10px 0 10px; }
+#testSetupModal .setup-segment { padding: 3px; gap: 3px; border-radius: 10px; }
+#testSetupModal .setup-seg { padding: 6px 8px; font-size: 12px; border-radius: 8px; white-space: nowrap; }
+#testSetupModal .setup-timer-hint { margin: 6px 0 0; font-size: 11px; line-height: 1.4; }
+#testSetupModal .setup-duration { margin-top: 8px; padding: 10px 12px; }
+#testSetupModal .setup-tiles { gap: 6px; margin-top: 7px; }
+#testSetupModal .setup-tile { padding: 6px 4px; }
+#testSetupModal .setup-tile-num { font-size: 17px; }
+#testSetupModal .setup-or { margin: 8px 0 7px; }
+#testSetupModal .setup-custom-field .setup-input { padding: 7px 84px 7px 14px; font-size: 14px; }
+#testSetupModal .setup-custom-note { margin-top: 4px; font-size: 10.5px; }
+#testSetupModal .setup-toggle { padding: 9px 13px; margin: 10px 0 12px; gap: 12px; border-radius: 10px; }
+#testSetupModal .setup-toggle-title { font-size: 13px; }
+#testSetupModal .setup-toggle-sub { font-size: 11px; margin-top: 1px; line-height: 1.3; }
+#testSetupModal .submit-modal-cancel,
+#testSetupModal .submit-modal-confirm { padding: 9px 14px; font-size: 13.5px; }
 @media (max-width: 480px) {
   .submit-modal-body { padding: 26px 22px 22px; }
   .submit-summary-label { letter-spacing: 0.8px; font-size: 9px; gap: 5px; }
@@ -5105,7 +5138,8 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
         <div class="setup-field-label">Question type</div>
         <div class="setup-segment" id="setupQuestionType" role="group" aria-label="Question type">
           <button type="button" class="setup-seg active" data-type="mixed" onclick="setSetupQuestionType('mixed')">Mixed</button>
-          <button type="button" class="setup-seg" data-type="sata" onclick="setSetupQuestionType('sata')">Select all that apply only</button>
+          <button type="button" class="setup-seg" data-type="sata" onclick="setSetupQuestionType('sata')">Select all that apply</button>
+          <button type="button" class="setup-seg" data-type="missed" onclick="setSetupQuestionType('missed')">Missed before</button>
         </div>
         <div class="setup-timer-hint" id="setupQuestionTypeHint">Single-answer and select-all-that-apply questions together.</div>
       </div>
@@ -5141,7 +5175,7 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
         <input type="checkbox" id="mixQAToggle" checked autocomplete="off" onchange="toggleMixQA()">
         <div>
           <span class="setup-toggle-title">Shuffle Questions</span>
-          <span class="setup-toggle-sub">Randomize the question order for this session. Answer choices are always shuffled.</span>
+          <span class="setup-toggle-sub">Randomize the question order. Answer choices are always shuffled.</span>
         </div>
       </label>
 
@@ -6522,7 +6556,7 @@ const TEST_CONFIG = {
   passingScorePercent: 70,
   testId: null, // Will be loaded from Supabase or URL parameter
   categoryFilter: null, // Optional: filter questions by category
-  questionType: 'mixed',  // 'mixed' = every question; 'sata' = only "Select all that apply" questions
+  questionType: 'mixed',  // 'mixed' = every question; 'sata' = only "Select all that apply"; 'missed' = ones the student got wrong before
   selectedTopicIds: [],   // Topic UUIDs chosen by the user
   selectedTopicNames: [], // Human-readable names — persisted so title works after resume
   selectedGroups: [],     // [{ subject, topics: [names] }] — shown in the title dropdown
@@ -6751,9 +6785,9 @@ function allocateAcrossTopics(candidates, current, count) {
 // Returns the parsed questions (possibly none when the topics are used up) or throws if unavailable.
 async function fetchQuestionBatch(ctx, count) {
   if (!db && !initializeSupabase()) throw new Error('db_unavailable');
-  // The fast server-side candidate lookup cannot filter by question type, so a select-all-that-apply
-  // test draws its extra questions from the (type-filtered) pool instead.
-  if (TEST_CONFIG.questionType === 'sata') return legacyPickQuestions(ctx, count);
+  // The fast server-side candidate lookup cannot filter by question type, so select-all-that-apply and
+  // missed-before tests draw their extra questions from the (type-filtered) pool instead.
+  if (TEST_CONFIG.questionType === 'sata' || TEST_CONFIG.questionType === 'missed') return legacyPickQuestions(ctx, count);
   await rotationFlush(); // so questions displayed a moment ago count in the rotation
   const { data, error } = await withTimeout(
     db.rpc('get_question_add_candidates', { p_topic_ids: ctx.topicIds, p_exclude: ctx.existingIds, p_per_topic: count }),
@@ -7108,6 +7142,67 @@ function parseCorrectAnswer(raw) {
   return (Array.isArray(raw) ? raw : [raw]).filter(Boolean);
 }
 
+// ── Questions this student answered wrong before ("Missed before" in the test setup) ──────────────
+// Built from the student's own graded tests (test_grade_history). Each graded test keeps the answers the
+// student gave; they are compared with the current answer key using the same rule as scoring (the chosen
+// answers must match the key exactly). Only the LATEST attempt of each question counts, so a question
+// answered correctly on a later test drops off the list. Skipped questions are not "answered wrong".
+const MISSED_CACHE_MS = 60 * 1000;
+let _missedCache = null; // { uid, at, map: Map(question id -> topic id) }
+
+async function loadMissedQuestions(force) {
+  if (!db && !initializeSupabase()) return new Map();
+  const { data: sess } = await db.auth.getSession();
+  const uid = sess && sess.session && sess.session.user ? sess.session.user.id : null;
+  if (!uid) return new Map();
+  if (!force && _missedCache && _missedCache.uid === uid && Date.now() - _missedCache.at < MISSED_CACHE_MS) return _missedCache.map;
+
+  // Newest 100 graded tests, newest first, so the first time a question appears is its latest attempt
+  const { data: history, error } = await db.from('test_grade_history')
+    .select('taken_at, answered_snapshot')
+    .eq('auth_user_id', uid)
+    .order('taken_at', { ascending: false })
+    .limit(100);
+  if (error) throw error;
+
+  const latest = new Map(); // question id -> Set of answer ids the student chose last time
+  (history || []).forEach(row => {
+    (Array.isArray(row.answered_snapshot) ? row.answered_snapshot : []).forEach(entry => {
+      if (!entry || entry.id == null || latest.has(entry.id)) return;
+      latest.set(entry.id, new Set((entry.answers || []).map(a => String(a && a.id))));
+    });
+  });
+
+  const map = new Map();
+  const ids = [...latest.keys()];
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += 150) chunks.push(ids.slice(i, i + 150));
+  const keyRows = (await Promise.all(chunks.map(async chunk => {
+    const { data, error: keyError } = await db.from('test_questions')
+      .select('id, topic_id, correct_answer, is_active')
+      .in('id', chunk);
+    if (keyError) throw keyError;
+    return data || [];
+  }))).flat();
+  keyRows.forEach(k => {
+    if (!k.is_active || !k.topic_id) return;
+    const correct = new Set(parseCorrectAnswer(k.correct_answer).map(String));
+    const chosen = latest.get(k.id);
+    const right = chosen && correct.size === chosen.size && [...correct].every(id => chosen.has(id));
+    if (!right) map.set(k.id, k.topic_id);
+  });
+
+  _missedCache = { uid, at: Date.now(), map };
+  return map;
+}
+
+// Missed question ids that fall inside the given topics
+async function getMissedIdsForTopics(topicIds) {
+  const wanted = new Set(topicIds || []);
+  const map = await loadMissedQuestions(false);
+  return [...map].filter(([, topicId]) => wanted.has(topicId)).map(([id]) => id);
+}
+
 function parseQuestionRow(q) {
   return {
     id: q.id,
@@ -7142,7 +7237,18 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
     // A test that uses only part of the pool first reads just id/topic/order of every candidate,
     // picks the questions, and then downloads the text of the chosen ones only.
     const lean = useTopicSystem && questionCount > 0;
-    const buildQuery = (columns = QUESTION_COLUMNS) => {
+    // 'mixed' (default), 'sata' (select all that apply only) or 'missed' (questions this student got wrong
+    // before). Resuming a saved test passes 'mixed' so its saved questions are never filtered out.
+    const qType = (options && options.questionType) || TEST_CONFIG.questionType;
+    // Missed-before: only the student's still-missed questions in the chosen topics, fetched in id chunks
+    let missedChunks = null;
+    if (qType === 'missed' && useTopicSystem) {
+      const missedIds = await getMissedIdsForTopics(topicIds);
+      if (!missedIds.length) throw new Error('You have no missed questions in the selected topics yet');
+      missedChunks = [];
+      for (let i = 0; i < missedIds.length; i += 200) missedChunks.push(missedIds.slice(i, i + 200));
+    }
+    const buildQuery = (columns = QUESTION_COLUMNS, idChunk = null) => {
       let query = db
         .from('test_questions')
         .select(columns)
@@ -7151,7 +7257,8 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
         .order('id', { ascending: true });
 
       // Select-all-that-apply only: every such question has is_multiple_choice = true
-      if (TEST_CONFIG.questionType === 'sata') query = query.eq('is_multiple_choice', true);
+      if (qType === 'sata') query = query.eq('is_multiple_choice', true);
+      if (idChunk) query = query.in('id', idChunk);
 
       if (useTopicSystem) {
         // Topic-based: filter by topic_id only (works across all subjects/test_ids)
@@ -7165,23 +7272,26 @@ async function loadQuestions(testId, categoryFilter = null, questionCount = null
       }
       return query;
     };
+    const fetchPool = async (columns) => missedChunks
+      ? (await Promise.all(missedChunks.map(chunk => fetchAllRows(() => buildQuery(columns, chunk))))).flat()
+      : fetchAllRows(() => buildQuery(columns));
 
     // Paged: a single query is capped at 1000 rows by the server, which would silently
     // drop questions whenever a selection spans more than 1000.
     let leanRows = lean;
     let questions = await withTimeout(
-      fetchAllRows(() => buildQuery(lean ? 'id, topic_id, display_order' : QUESTION_COLUMNS)),
+      fetchPool(lean ? 'id, topic_id, display_order' : QUESTION_COLUMNS),
       20000,
       'Loading questions timed out'
     );
     // Everything is used anyway, so there is nothing to choose: load the full rows in one go
     if (leanRows && questions.length <= questionCount) {
       leanRows = false;
-      questions = await withTimeout(fetchAllRows(() => buildQuery()), 20000, 'Loading questions timed out');
+      questions = await withTimeout(fetchPool(QUESTION_COLUMNS), 20000, 'Loading questions timed out');
     }
     
     if (!questions || questions.length === 0) {
-      throw new Error(TEST_CONFIG.questionType === 'sata'
+      throw new Error(qType === 'sata'
         ? 'No select-all-that-apply questions found for the selected topics'
         : 'No questions found for the selected topics');
     }
@@ -8957,19 +9067,22 @@ async function openTestSetupModal() {
   refreshSetupCount();
 }
 
-// Question type chosen in the test setup: 'mixed' (default) or 'sata' (select all that apply only).
+// Question type chosen in the test setup: 'mixed' (default), 'sata' (select all that apply only)
+// or 'missed' (only questions this student answered wrong in past tests).
 let _setupQuestionType = 'mixed';
 
 function syncSetupQuestionTypeUi() {
   document.querySelectorAll('#setupQuestionType .setup-seg').forEach(b => b.classList.toggle('active', b.dataset.type === _setupQuestionType));
   const hint = document.getElementById('setupQuestionTypeHint');
   if (hint) hint.textContent = _setupQuestionType === 'sata'
-    ? 'Only "Select all that apply" questions from your chosen topics.'
-    : 'Single-answer and select-all-that-apply questions together.';
+    ? 'Only "Select all that apply" questions from your topics.'
+    : _setupQuestionType === 'missed'
+      ? 'Only questions you answered wrong on a past test and have not got right since.'
+      : 'Single-answer and select-all-that-apply questions together.';
 }
 
 function setSetupQuestionType(type) {
-  _setupQuestionType = type === 'sata' ? 'sata' : 'mixed';
+  _setupQuestionType = (type === 'sata' || type === 'missed') ? type : 'mixed';
   syncSetupQuestionTypeUi();
   refreshSetupCount();
 }
@@ -8977,22 +9090,31 @@ function setSetupQuestionType(type) {
 // Exact count of questions available for the current topics and question type
 async function refreshSetupCount() {
   const topicIds = TEST_CONFIG.selectedTopicIds || [];
-  const sata = _setupQuestionType === 'sata';
-  if (sata) {
-    _setupAvailableCount = null; // no cached per-topic estimate for this type; the exact count follows
-  } else {
+  const type = _setupQuestionType;
+  if (type === 'mixed') {
     const counts = window._cachedTopicCounts || {};
     _setupAvailableCount = topicIds.reduce((sum, id) => sum + (counts[id] || 0), 0) || null;
+  } else {
+    _setupAvailableCount = null; // no cached per-topic estimate for this type; the exact count follows
   }
   renderSetupAvailable();
 
   const req = ++_setupCountRequest;
   try {
+    if (type === 'missed') {
+      // Always re-read the student's history here, so a test finished a moment ago is included
+      const map = await loadMissedQuestions(true);
+      if (req !== _setupCountRequest) return;
+      const wanted = new Set(topicIds);
+      _setupAvailableCount = [...map.values()].filter(t => wanted.has(t)).length;
+      renderSetupAvailable();
+      return;
+    }
     let query = db.from('test_questions')
       .select('*', { count: 'exact', head: true })
       .eq('is_active', true)
       .in('topic_id', topicIds);
-    if (sata) query = query.eq('is_multiple_choice', true);
+    if (type === 'sata') query = query.eq('is_multiple_choice', true);
     const { count, error } = await query;
     if (req !== _setupCountRequest) return;
     if (!error && count != null) {
@@ -9001,6 +9123,11 @@ async function refreshSetupCount() {
     }
   } catch (e) {
     console.warn('Test setup count failed, using cached estimate:', e);
+    if (type === 'missed' && req === _setupCountRequest) {
+      _setupAvailableCount = 0;
+      renderSetupAvailable();
+      showToast('Could not load your past answers. Please try again.', 'error');
+    }
   }
 }
 
@@ -9058,8 +9185,8 @@ function onSetupLimitInput() {
   if (hint) {
     hint.classList.toggle('error', !!error);
     hint.textContent = error || (result
-      ? `${result.toLocaleString('en-US')} questions will be drawn evenly across the selected topics.`
-      : 'Leave blank to include every available question. Questions are distributed evenly across the selected topics.');
+      ? `${result.toLocaleString('en-US')} questions, spread evenly across your topics.`
+      : 'Leave blank for every available question, spread evenly across your topics.');
   }
   document.querySelectorAll('#setupChips .setup-chip').forEach(chip => {
     chip.classList.toggle('active', chip.dataset.value === raw);
@@ -9070,7 +9197,9 @@ function onSetupLimitInput() {
     hint.classList.add('error');
     hint.textContent = _setupQuestionType === 'sata'
       ? 'Your selected topics have no "Select all that apply" questions. Choose Mixed or pick other topics.'
-      : 'Your selected topics have no questions yet.';
+      : _setupQuestionType === 'missed'
+        ? 'You have no missed questions in these topics. Finish a test first, or choose Mixed.'
+        : 'Your selected topics have no questions yet.';
   }
   return result;
 }
@@ -9144,7 +9273,7 @@ async function confirmTestSetup() {
   const mixQAToggle = document.getElementById('mixQAToggle');
   TEST_CONFIG.shuffleQuestions = mixQAToggle ? mixQAToggle.checked : true;
   TEST_CONFIG.shuffleOptions   = true; // answer choices are always shuffled
-  TEST_CONFIG.questionType     = _setupQuestionType === 'sata' ? 'sata' : 'mixed';
+  TEST_CONFIG.questionType     = ['sata', 'missed'].includes(_setupQuestionType) ? _setupQuestionType : 'mixed';
   TEST_CONFIG.questionCount    = limit;
   closeTestSetupModal();
   await launchTestFromSelection();
@@ -9540,7 +9669,7 @@ async function resumeTest(saved) {
   // Fix: treat empty array same as null — empty array is truthy but means "no topics selected"
   const rawTopicIds = TEST_CONFIG.selectedTopicIds;
   const topicIds = (rawTopicIds && rawTopicIds.length > 0) ? rawTopicIds : null;
-  const questions = await loadQuestions(saved.testId, TEST_CONFIG.categoryFilter, null, topicIds);
+  const questions = await loadQuestions(saved.testId, TEST_CONFIG.categoryFilter, null, topicIds, { questionType: 'mixed' });
   
   // Reconstruct questions with the same deterministic seed — produces identical order on every device
   if (TEST_CONFIG.shuffleQuestions) {
@@ -11079,7 +11208,7 @@ function buildSavedSessionPayload(sessionName, extraConfig) {
       openedAt: TEST_CONFIG.openedAt || null,
       categoryFilter: TEST_CONFIG.categoryFilter || null,
       questionCount: TEST_CONFIG.questionCount || null,
-      questionType: TEST_CONFIG.questionType === 'sata' ? 'sata' : 'mixed',
+      questionType: ['sata', 'missed'].includes(TEST_CONFIG.questionType) ? TEST_CONFIG.questionType : 'mixed',
       shuffleOptions: TEST_CONFIG.shuffleOptions,
       timeLimitMinutes: TEST_CONFIG.timeLimitMinutes || null,
       elapsedMs: Math.max(0, Date.now() - testState.startTime),
