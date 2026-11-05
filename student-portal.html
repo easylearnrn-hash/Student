@@ -10754,13 +10754,53 @@
     }
     
     // Practice Tests open in their own window instead of the game modal.
-    function openPracticeTests() {
+    // Testing Studio is for active students only (paused, graduated or any other status is blocked).
+    async function isAllowedToUseTestingStudio() {
+      const viewingAsStudent = sessionStorage.getItem('is_admin_viewing') === 'true' || localStorage.getItem('is_admin_viewing') === 'true';
+      if (typeof isAdmin !== 'undefined' && isAdmin && !viewingAsStudent) return true;
+      const student = window.currentStudent;
+      if (!student || !student.id) return true;
+      let status = student.status;
+      try {
+        const { data } = await supabaseClient.from('students').select('status').eq('id', student.id).maybeSingle();
+        if (data) status = data.status;
+      } catch (e) { /* keep the status already loaded */ }
+      if (status === undefined) return true;
+      return String(status || '').trim().toLowerCase() === 'active';
+    }
+
+    function showTestingStudioBlockedNotice() {
+      if (document.getElementById('testingStudioBlocked')) return;
+      const overlay = document.createElement('div');
+      overlay.id = 'testingStudioBlocked';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(5,8,18,0.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);';
+      overlay.innerHTML = `
+        <div role="alertdialog" aria-modal="true" style="max-width:440px;width:100%;text-align:center;padding:32px 28px;border-radius:20px;background:linear-gradient(160deg,rgba(30,41,59,0.96),rgba(15,23,42,0.98));border:1px solid rgba(201,168,76,0.35);box-shadow:0 24px 60px rgba(0,0,0,0.55);">
+          <div style="font-size:38px;margin-bottom:10px;">🔒</div>
+          <h3 style="margin:0 0 10px;font-size:20px;font-weight:700;color:#c9a84c;">Testing Studio</h3>
+          <p style="margin:0 0 22px;font-size:15.5px;line-height:1.6;color:#e2e8f0;">You must be an active student to be able to use Testing Studio.</p>
+          <button type="button" style="padding:10px 28px;border-radius:12px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.14);color:#c9a84c;font-weight:700;font-size:14px;cursor:pointer;">OK</button>
+        </div>`;
+      const close = () => overlay.remove();
+      overlay.querySelector('button').addEventListener('click', close);
+      overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+      document.body.appendChild(overlay);
+    }
+
+    async function openPracticeTests() {
       localStorage.setItem('isLoggedIn', 'true');
       sessionStorage.setItem('isLoggedIn', 'true');
       stampNoteAccessForTests();
+      // Open the window right away (keeps the click's popup permission), then send it to the test page once the status check passes.
       // No `noopener`: the new window must inherit sessionStorage (role/name) from this one.
-      const win = window.open('Test/test.html', '_blank');
-      if (!win) openGameModal('Test/test.html', 'Practice Tests', '📝'); // popup blocked
+      const win = window.open('', '_blank');
+      if (!(await isAllowedToUseTestingStudio())) {
+        if (win) win.close();
+        showTestingStudioBlockedNotice();
+        return;
+      }
+      if (win) win.location.href = 'Test/test.html';
+      else openGameModal('Test/test.html', 'Practice Tests', '📝'); // popup blocked
     }
 
     // Close Game Modal
