@@ -5656,6 +5656,49 @@ async function detectArnomaAdmin() {
   }
 }
 
+// Testing Studio is for active students only. A student whose record says paused, graduated or anything else
+// other than "active" gets a blocking notice, even when the page is opened directly. Admins/teachers are exempt.
+async function enforceActiveStudentAccess() {
+  if (!SESSION_ROLE.isLoggedIn || SESSION_ROLE.isTeacher) return;
+  try {
+    const client = initSupabase();
+    if (!client) return;
+    const { data: sessionData } = await withTimeout(client.auth.getSession(), 5000, 'Session check timed out');
+    const user = sessionData && sessionData.session && sessionData.session.user;
+    if (!user) return;
+    let row = null;
+    const byId = await withTimeout(client.from('students').select('status').eq('auth_user_id', user.id).limit(1), 5000, 'Status check timed out');
+    if (!byId.error && byId.data && byId.data[0]) row = byId.data[0];
+    if (!row && user.email) {
+      const byEmail = await withTimeout(client.from('students').select('status').ilike('email', user.email).limit(1), 5000, 'Status check timed out');
+      if (!byEmail.error && byEmail.data && byEmail.data[0]) row = byEmail.data[0];
+    }
+    if (!row) return;
+    if (String(row.status || '').trim().toLowerCase() !== 'active') showInactiveStudentBlock();
+  } catch (e) {
+    console.warn('Active-student check skipped:', e && e.message);
+  }
+}
+
+function showInactiveStudentBlock() {
+  if (document.getElementById('inactiveStudentBlock')) return;
+  const overlay = document.createElement('div');
+  overlay.id = 'inactiveStudentBlock';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:20px;background:#0b1120;';
+  overlay.innerHTML = `
+    <div role="alertdialog" aria-modal="true" style="max-width:440px;width:100%;text-align:center;padding:32px 28px;border-radius:20px;background:linear-gradient(160deg,rgba(30,41,59,0.96),rgba(15,23,42,0.98));border:1px solid rgba(201,168,76,0.35);box-shadow:0 24px 60px rgba(0,0,0,0.55);">
+      <div style="font-size:38px;margin-bottom:10px;">🔒</div>
+      <h3 style="margin:0 0 10px;font-size:20px;font-weight:700;color:#c9a84c;">Testing Studio</h3>
+      <p style="margin:0 0 22px;font-size:15.5px;line-height:1.6;color:#e2e8f0;">You must be an active student to be able to use Testing Studio.</p>
+      <button type="button" style="padding:10px 28px;border-radius:12px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.14);color:#c9a84c;font-weight:700;font-size:14px;cursor:pointer;">Back to portal</button>
+    </div>`;
+  overlay.querySelector('button').addEventListener('click', () => {
+    if (window.opener && !window.opener.closed) { window.close(); return; }
+    exitTestToPortal();
+  });
+  document.body.appendChild(overlay);
+}
+
 // The login page stores the display name, but a student can reach this page without passing through it
 // (e.g. an already signed-in portal session). Then look the real name up from the student's own record.
 async function resolveSessionDisplayName() {
@@ -14468,6 +14511,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applySessionRole();
     if (!SESSION_ROLE.isTeacher) showAdminStartButtons(false);
     resolveSessionDisplayName();
+    enforceActiveStudentAccess();
   });
 
   // Initialize Supabase first
