@@ -1337,6 +1337,19 @@ body[data-zoom="large"] .question-type-badge {
 }
 
 .question-header-right { display: flex; align-items: center; gap: 10px; }
+/* Gold star badge for questions written very close to a real NCLEX-RN item; sits next to the question number */
+.nclex-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 0 auto 0 14px;
+  padding: 5px 12px 5px 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #e2c46d, #c9a84c);
+  color: #1b1405;
+  font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
+  box-shadow: 0 2px 10px rgba(201,168,76,0.3);
+  cursor: help; white-space: nowrap;
+}
+body.invert-read .nclex-badge { background: linear-gradient(135deg, #c9a24a, #a8832a); color: #ffffff; box-shadow: 0 2px 8px rgba(168,131,42,0.35); }
 .ask-instructor-btn {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 6px 14px; border-radius: 8px;
@@ -5059,6 +5072,10 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
     <div class="question-panel">
       <div class="question-header">
         <div class="question-number" id="questionNumber">Question 1</div>
+        <span class="nclex-badge" id="nclexBadge" style="display:none" title="Written to closely match a real NCLEX-RN exam question">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7-6.2-3.7-6.2 3.7 1.6-7L2 9.2l7.1-.6z"/></svg>
+          <span>NCLEX</span>
+        </span>
         <div class="question-header-right">
           <!-- Send this question to the instructor (everyone, including administrators) -->
           <button class="ask-instructor-btn" id="askTeacherBtn" type="button" onclick="openAskTeacher()" title="Send this question to your instructor">
@@ -10352,6 +10369,45 @@ function toggleExtraQuestions() {
   // No-op — all questions now in one scrollable grid
 }
 
+// ── "NCLEX" star: questions written very close to a real NCLEX-RN item ──────────────────────────────
+// Decided from the question itself (no database field): a real patient scenario with clinical data,
+// asked the way the exam asks (priority / first / best / next / delegation / report / further teaching,
+// or a data-rich Select-all-that-apply), with plausible 4-6 option answers and a full rationale.
+// Generated "template" questions never qualify.
+const NCLEX_TEMPLATE_RE = /(which clinical judgment|which finding best supports|most accurate regarding|high-priority cardiology triage|which features are consistent|which cues are consistent|in this note|note-based|matches? .{0,40}(pattern|teaching|definition)|for assessment involving|during reassessment|the nurse reviews (post-procedure )?data|subtype differentiation|which options are appropriate|which findings\/actions|\bthis pattern\b)/i;
+const NCLEX_FILLER_RE = /(urgent monitoring is unnecessary|this pattern is more consistent|volume-depleting strategies|these findings are low-risk|universally beneficial|is only caused by|always improves|is always asymptomatic)/i;
+const NCLEX_SUBJECT_RE = /^(A|An|The|During|While|After|Before|At|In|Upon|On)\b[\s\S]{0,160}?\b(nurse|client|patient|newborn|infant|toddler|child|adolescent|woman|man|mother|father|parent|resident|pregnan|postpartum|postoperative|preoperative|neonate|[0-9]+-(year|month|week|day|hour)-old|[0-9]+ (weeks?|years?|months?))/i;
+const NCLEX_DATA_RE = /(\b\d+(\.\d+)?\s?(mm\s?hg|mmhg|\/min|bpm|breaths|beats|°|degrees|%|mg|mcg|mEq|mL|ml|g\/dL|mg\/dL|units?|L\/min|kg|lb|cm|mm|seconds|minutes|hours?|days?|weeks?|months?|years?|-year|-week|-day|-month|IU|mmol)\b|\b\d{2,3}\/\d{2,3}\b|\b(BP|HR|RR|SpO|temperature|pulse|respirations?|oxygen saturation|heart rate|blood pressure|labs?|troponin|potassium|sodium|creatinine|glucose|INR|hemoglobin|WBC)\b)/gi;
+const NCLEX_JUDG_RE = /(\b(first|priority|next|best|immediately|most (appropriate|important|concerning|urgent|effective|likely|serious))\b|should the nurse (take|do|plan|report|question|delegate|clarify|intervene|reassess|implement|notify|anticipate|prioritize|assign)|requires? (immediate|intervention|follow-up|further)|further (teaching|instruction|clarification)|indicates? (understanding|a need)|in which order|select all that apply|\b(delegate|assign|UAP|LPN|unlicensed)\b|report (to|immediately)|notify the (provider|health care provider))/i;
+const NCLEX_PRIO_RE = /(\b(first|priority|next|immediately|initial(ly)?)\b|should the nurse (take|do|report|question|delegate|clarify|intervene|reassess|implement|notify|prioritize|assign)|requires? (immediate|intervention|follow-up)|further teaching|in which order|\b(delegate|assign|UAP|LPN|unlicensed)\b|report (to|immediately)|notify the (provider|health care provider))/i;
+const _nclexMemo = new Map();
+
+function isNclexStyleQuestion(q) {
+  if (!q || q.isDisclaimer || q.id === undefined) return false;
+  if (_nclexMemo.has(q.id)) return _nclexMemo.get(q.id);
+  let ok = false;
+  try {
+    const stem = String(q.stem || '').trim();
+    const opts = (q.options || []).map(o => String(o.text || '').trim());
+    const rat = String(q.rationale || '');
+    const sentences = stem.replace(/([.?!])\s+/g, '$1\u0001').split('\u0001');
+    const lastTwo = sentences.slice(-2).join(' ');
+    const dataCues = new Set((stem.match(NCLEX_DATA_RE) || []).map(m => m.toLowerCase())).size;
+    const common = stem.length >= 125 && opts.length >= 4 && opts.length <= 6
+      && !NCLEX_TEMPLATE_RE.test(stem) && !opts.some(o => NCLEX_FILLER_RE.test(o))
+      && NCLEX_SUBJECT_RE.test(stem) && sentences.length >= 2
+      && new Set(opts.map(o => o.toLowerCase())).size === opts.length
+      && rat.length >= 80 && !/note-based|in the note|listed in/i.test(rat);
+    if (common) {
+      const rich = stem.length >= 150 && dataCues >= 2 && NCLEX_JUDG_RE.test(lastTwo);
+      const priority = dataCues >= 1 && NCLEX_PRIO_RE.test(lastTwo);
+      ok = rich || priority;
+    }
+  } catch (e) { ok = false; }
+  _nclexMemo.set(q.id, ok);
+  return ok;
+}
+
 function renderQuestion() {
   // ── Safety guard ────────────────────────────────────────────────────────
   // If questions aren't loaded yet (or currentIndex is somehow out of range),
@@ -10410,6 +10466,8 @@ function renderQuestion() {
   // Update question number
   document.getElementById('questionNumber').textContent = 
     `Question ${testState.currentIndex + 1} of ${testState.questions.length}`;
+  const nclexBadge = document.getElementById('nclexBadge');
+  if (nclexBadge) nclexBadge.style.display = isNclexStyleQuestion(question) ? 'inline-flex' : 'none';
   
   // Update question type badge
   document.getElementById('questionType').textContent = 
