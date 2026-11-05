@@ -4476,6 +4476,76 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
   align-self: center;
   padding: 2px 6px;
 }
+.gh-attempt-chip .gh-attempt-q {
+  font-weight: 600;
+  opacity: 0.7;
+  font-size: 10px;
+  margin-left: 2px;
+}
+
+/* Roster card: name row + compact stat tiles */
+.gh-student-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.gh-student-top .gh-student-name { margin-bottom: 0; min-width: 0; }
+.gh-student-last {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  color: #64748b;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.gh-student-email {
+  font-family: 'Inter', sans-serif;
+  font-size: 11.5px;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 1px 0 8px;
+}
+.gh-card-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.gh-card-stat {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  min-width: 0;
+}
+.gh-card-stat-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #475569;
+}
+.gh-card-stat-value {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gh-card-stat-value small {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #64748b;
+}
+.gh-card-stat-value .gh-skipped { color: #fb923c; }
+.gh-student-card .gh-attempt-chips { margin-top: 8px; }
+@media (max-width: 560px) {
+  .gh-card-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 
 .gh-detail-back {
@@ -4519,7 +4589,8 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
 }
 .gh-detail-stats {
   display: flex;
-  gap: 24px;
+  flex-wrap: wrap;
+  gap: 14px 28px;
   padding: 12px 16px;
   background: rgba(255,255,255,0.02);
   border: 1px solid rgba(255,255,255,0.06);
@@ -14216,6 +14287,18 @@ function _buildStudentMap(rows) {
   return byStudent;
 }
 
+// Questions the student answered in a graded test (the rest of the chosen questions were skipped or left blank)
+function _ghAnswered(r) {
+  const a = (r.correct_count || 0) + (r.incorrect_count || 0);
+  return Math.min(a, r.total_questions || a);
+}
+function _ghTotals(rows) {
+  const answered = rows.reduce((n, r) => n + _ghAnswered(r), 0);
+  const chosen = rows.reduce((n, r) => n + (r.total_questions || 0), 0);
+  const correct = rows.reduce((n, r) => n + (r.correct_count || 0), 0);
+  return { answered, chosen, correct, skipped: Math.max(0, chosen - answered), accuracy: answered ? Math.round(correct / answered * 100) : 0 };
+}
+
 // ─── View 1: Student roster ───────────────────────────────────────────────────
 function renderGradeModalTable(rows) {
   const body = document.getElementById('gradeModalBody');
@@ -14269,18 +14352,38 @@ function renderGradeModalTable(rows) {
       const gl = r.letter_grade || gradeFromPercent(r.score_percent);
       const passed = r.score_percent >= 70;
       const dateStr = new Date(r.taken_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      return `<span class="gh-attempt-chip ${passed ? 'pass' : 'fail'}" title="${escapeHtml(r.test_title || '')} · ${dateStr}">${r.score_percent}% <span class="gh-attempt-grade">${gl}</span></span>`;
+      return `<span class="gh-attempt-chip ${passed ? 'pass' : 'fail'}" title="${escapeHtml(r.test_title || '')} · ${dateStr} · answered ${_ghAnswered(r)} of ${r.total_questions || 0}">${r.score_percent}% <span class="gh-attempt-grade">${gl}</span><span class="gh-attempt-q"${_ghAnswered(r) < (r.total_questions || 0) ? ' style="color:#fb923c;opacity:1"' : ''}>${_ghAnswered(r)}/${r.total_questions || 0}</span></span>`;
     }).join('');
     const moreLabel = student.rows.length > 6 ? `<span class="gh-attempt-more">+${student.rows.length - 6} more</span>` : '';
+    const tot = _ghTotals(student.rows);
 
     html += `
       <div class="gh-student-card" onclick="showGradeDetail(${safeKey})" role="button" tabindex="0"
            onkeydown="if(event.key==='Enter'||event.key===' ')showGradeDetail(${safeKey})">
         <div class="grade-avg-letter ${avgL}" style="width:42px;height:42px;font-size:19px;border-radius:10px;flex-shrink:0">${avgL}</div>
         <div class="gh-student-card-info">
-          <div class="gh-student-name${isAnon ? ' anon' : ''}">${escapeHtml(student.name)}</div>
-          <div class="gh-student-meta">
-            ${escapeHtml(student.email)}&ensp;·&ensp;${student.rows.length} attempt${student.rows.length !== 1 ? 's' : ''}&ensp;·&ensp;Avg <span class="gh-student-avg ${avgL}">${avg}%</span>&ensp;·&ensp;Last: ${latestDate}
+          <div class="gh-student-top">
+            <div class="gh-student-name${isAnon ? ' anon' : ''}">${escapeHtml(student.name)}</div>
+            <div class="gh-student-last">Last: ${latestDate}</div>
+          </div>
+          <div class="gh-student-email">${escapeHtml(student.email)}</div>
+          <div class="gh-card-stats">
+            <div class="gh-card-stat">
+              <div class="gh-card-stat-label">Attempts</div>
+              <div class="gh-card-stat-value">${student.rows.length}</div>
+            </div>
+            <div class="gh-card-stat">
+              <div class="gh-card-stat-label">Average</div>
+              <div class="gh-card-stat-value gh-student-avg ${avgL}" style="margin-left:0;font-size:14px">${avg}%</div>
+            </div>
+            <div class="gh-card-stat" title="Questions answered out of the questions chosen for these tests">
+              <div class="gh-card-stat-label">Answered</div>
+              <div class="gh-card-stat-value">${tot.answered.toLocaleString()} <small>of ${tot.chosen.toLocaleString()}</small>${tot.skipped ? ` <small class="gh-skipped">· ${tot.skipped.toLocaleString()} skipped</small>` : ''}</div>
+            </div>
+            <div class="gh-card-stat" title="Correct answers out of the questions answered">
+              <div class="gh-card-stat-label">Correct</div>
+              <div class="gh-card-stat-value">${tot.correct.toLocaleString()} <small>· ${tot.accuracy}%</small></div>
+            </div>
           </div>
           <div class="gh-attempt-chips">${chipsHtml}${moreLabel}</div>
         </div>
@@ -14311,23 +14414,31 @@ function showGradeDetail(studentKey) {
   let rowsHtml = '';
   student.rows.forEach(row => {
     const gl = row.letter_grade || gradeFromPercent(row.score_percent);
+    const answered = _ghAnswered(row);
+    const chosen = row.total_questions || 0;
+    const skipped = Math.max(0, chosen - answered);
     rowsHtml += `
       <tr>
         <td>
           <div style="font-family:'Inter',sans-serif;font-size:13px;font-weight:600;color:#e2e8f0">${escapeHtml(cleanTopicLabel(row.test_title || 'Untitled Test'))}</div>
-          ${row.topics ? `<div style="font-family:'Inter',sans-serif;font-size:10px;color:#475569;margin-top:2px">${escapeHtml(cleanTopicLabel(row.topics))}</div>` : ''}
+          ${row.topics ? `<div title="${escapeHtml(cleanTopicLabel(row.topics))}" style="font-family:'Inter',sans-serif;font-size:10px;color:#475569;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escapeHtml(cleanTopicLabel(row.topics))}</div>` : ''}
         </td>
         <td style="white-space:nowrap;font-family:'Inter',sans-serif">
           <div style="font-size:12px;color:#94a3b8">${fmt(row.taken_at)}</div>
           <div style="font-size:10px;color:#475569">${fmtTime(row.taken_at)}</div>
         </td>
-        <td style="text-align:center;font-family:'Inter',sans-serif">
+        <td style="text-align:center;white-space:nowrap;font-family:'Inter',sans-serif">
+          <div style="font-size:13px;font-weight:700;color:#e2e8f0">${answered} <span style="font-size:11px;font-weight:600;color:#64748b">of ${chosen}</span></div>
+          <div style="font-size:10px;color:${skipped ? '#fb923c' : '#475569'}">${skipped ? skipped + ' skipped' : 'all answered'}</div>
+        </td>
+        <td style="text-align:center;white-space:nowrap;font-family:'Inter',sans-serif">
           <div style="font-size:14px;font-weight:800;color:${gradeColor(gl)}">${row.score_percent}%</div>
-          <div style="font-size:10px;color:#475569">${row.correct_count}/${row.total_questions}</div>
+          <div style="font-size:10px;color:#475569"><span style="color:#34d399">✓ ${row.correct_count || 0}</span> · <span style="color:#f87171">✗ ${row.incorrect_count || 0}</span></div>
         </td>
         <td style="text-align:center"><span class="grade-letter-pill ${gl}">${gl}</span></td>
       </tr>`;
   });
+  const tot = _ghTotals(student.rows);
 
   body.innerHTML = `
     <button class="gh-detail-back" onclick="renderGradeModalTable(_gradeRowsForTab())">
@@ -14353,12 +14464,25 @@ function showGradeDetail(studentKey) {
         <div class="gh-detail-stat-label">Best Score</div>
         <div class="gh-detail-stat-value" style="color:${gradeColor(bestL)}">${best}%</div>
       </div>
+      <div class="gh-detail-stat">
+        <div class="gh-detail-stat-label">Questions Answered</div>
+        <div class="gh-detail-stat-value">${tot.answered.toLocaleString()} <span style="font-size:12px;font-weight:600;color:#64748b">of ${tot.chosen.toLocaleString()} chosen</span></div>
+      </div>
+      <div class="gh-detail-stat">
+        <div class="gh-detail-stat-label">Correct</div>
+        <div class="gh-detail-stat-value" style="color:#34d399">${tot.correct.toLocaleString()} <span style="font-size:12px;font-weight:600;color:#64748b">· ${tot.accuracy}% of answered</span></div>
+      </div>
+      <div class="gh-detail-stat">
+        <div class="gh-detail-stat-label">Skipped</div>
+        <div class="gh-detail-stat-value" style="color:${tot.skipped ? '#fb923c' : '#e2e8f0'}">${tot.skipped.toLocaleString()}</div>
+      </div>
     </div>
     <table class="grade-history-table">
       <thead>
         <tr>
           <th>Test</th>
           <th>Date &amp; Time</th>
+          <th style="text-align:center">Answered</th>
           <th style="text-align:center">Score</th>
           <th style="text-align:center">Grade</th>
         </tr>
