@@ -525,6 +525,28 @@ body{
   position: relative;
 }
 
+/* Full screen on a touch device (iPad): the page itself must never scroll, because a page scroll makes Safari leave
+   full screen. Each screen scrolls inside its own fixed box instead, and rubber-band scrolling is switched off. */
+html.fs-lock, html.fs-lock body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+html.fs-lock .start-screen,
+html.fs-lock .test-container,
+html.fs-lock .results-screen {
+  position: fixed;
+  inset: 0;
+  height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+html.fs-lock .start-screen { justify-content: flex-start; }
+html.fs-lock .start-screen > .start-content { margin-top: auto; margin-bottom: auto; } /* centred when short, scrolls when tall */
+
 .test-container::before {
   content: "";
   position: absolute;
@@ -7940,12 +7962,19 @@ function currentFullscreenElement() {
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
 
+// On a touch device (iPad) full screen only ends when the student taps the full screen button.
+// fsWanted is true from the moment the student turns full screen on until the button is tapped again.
+const IS_TOUCH_DEVICE = (navigator.maxTouchPoints || 0) > 0;
+let fsWanted = false;
+
 function toggleFullscreen() {
   if (currentFullscreenElement()) {
+    fsWanted = false;
     const exit = document.exitFullscreen || document.webkitExitFullscreen;
     if (exit) Promise.resolve(exit.call(document)).catch(() => {}).then(syncFullscreenSoon);
     return;
   }
+  fsWanted = false;
   const root = document.documentElement;
   const enter = root.requestFullscreen || root.webkitRequestFullscreen;
   if (!enter) return;
@@ -7954,8 +7983,22 @@ function toggleFullscreen() {
   }).then(syncFullscreenSoon);
 }
 
+// If the system leaves full screen by itself (a scroll or swipe on iPad), the next tap puts it back.
+// Browsers only allow entering full screen from a tap, so this is the earliest it can return.
+function restoreFullscreenOnTap(e) {
+  if (!IS_TOUCH_DEVICE || !fsWanted || currentFullscreenElement()) return;
+  if (e.target && e.target.closest && e.target.closest('.fs-btn')) return; // the full screen button handles itself
+  const root = document.documentElement;
+  const enter = root.requestFullscreen || root.webkitRequestFullscreen;
+  if (enter) Promise.resolve(enter.call(root)).catch(() => {}).then(syncFullscreenSoon);
+}
+document.addEventListener('touchend', restoreFullscreenOnTap, { passive: true });
+document.addEventListener('click', restoreFullscreenOnTap, true);
+
 function syncFullscreenButtons() {
   const on = !!currentFullscreenElement();
+  if (on) fsWanted = true;
+  document.documentElement.classList.toggle('fs-lock', on && IS_TOUCH_DEVICE);
   const csFrame = document.getElementById('caseStudyFrame');
   if (csFrame && csFrame.contentWindow) csFrame.contentWindow.postMessage({ type: 'fullscreen-state', on }, '*');
   const supported = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
