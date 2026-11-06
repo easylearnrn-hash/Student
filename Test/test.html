@@ -8344,7 +8344,7 @@ function isTestFlowActive() {
     const shown = id => { const el = document.getElementById(id); return !!el && getComputedStyle(el).display !== 'none'; };
     if (shown('testContainer') || shown('resultsScreen')) return true;
     if (typeof testState !== 'undefined' && testState && Array.isArray(testState.questions) && testState.questions.length > 0) return true;
-    return !!document.querySelector('.modal-overlay:not(.hidden), .modal.active');
+    return false;
   } catch (e) { return false; }
 }
 
@@ -8352,9 +8352,8 @@ function showToast(message, type = 'info') {
   if (type === 'error') console.error('[Toast]', message);
   else console.log('[Toast]', type, message);
 
-  // From the moment a test is being set up until it is over, the corner pop-ups (info, success, warning) stay hidden
-  // so nothing distracts the student; real errors are still shown. "Being set up" covers the topic picker and the
-  // setup window, "test open" covers the questions screen and everything after it (results, review).
+  // While a test is open (questions screen, results, review) the corner pop-ups stay hidden so nothing distracts
+  // the student; real errors are still shown. Setup-screen validation warnings remain visible.
   if (type !== 'error' && isTestFlowActive()) return;
 
   // Remove any existing toast
@@ -9364,10 +9363,6 @@ async function startFromSubjectModal() {
       .map(id => availableTopics.find(t => t.id === id)?.name)
       .filter(Boolean);
     TEST_CONFIG.selectedGroups = buildSelectedGroups(filledTopicIds);
-    showToast(
-      `${emptyTopicIds.length} topic${emptyTopicIds.length !== 1 ? 's' : ''} skipped (no questions yet)`,
-      'info'
-    );
   }
 
   // Clear any lingering warning banner before hiding the modal
@@ -9846,11 +9841,6 @@ function closeTopicModal() {
 
 function toggleMixQA() {
   const toggle = document.getElementById('mixQAToggle');
-  if (toggle.checked) {
-    showToast('Question shuffle on: questions will appear in random order', 'success');
-  } else {
-    showToast('Question shuffle off: questions will appear in order (answers are always shuffled)', 'info');
-  }
 }
 
 function backToSubjects() {
@@ -9992,7 +9982,6 @@ async function initializeNewTest() {
   saveToLocalStorage();
   ongoingBegin();
   
-  showToast('Test started. Good luck!', 'success');
 }
 
 async function resumeTest(saved) {
@@ -10082,7 +10071,6 @@ async function resumeTest(saved) {
   renderQuestionNavigator();
   renderQuestion();
   
-  showToast('Resumed previous session', 'info');
 }
 
 // ============================================
@@ -12711,7 +12699,6 @@ async function loadSavedSessionInner(sessionId) {
     ongoingReset();
     if (resumedOngoing) ongoingAdopt();
     
-    showToast('Test resumed successfully!', 'success');
     
   } catch (error) {
     console.error('Error loading saved session:', error);
@@ -13098,7 +13085,6 @@ async function resumeOngoingTest() {
     document.addEventListener('visibilitychange', _onVisibilityChange);
     
     console.log('✅ Test resumed successfully');
-    showToast('Resumed ongoing test', 'success');
     
   } catch (error) {
     console.error('❌ Failed to resume test:', error);
