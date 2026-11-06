@@ -16976,7 +16976,7 @@
       allow="payment *; publickey-credentials-get *"
       sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
       title="ARNOMA Secure Payment"
-      onload="var l=document.getElementById('arnomaPaymentLoading');if(l)l.style.display='none';"
+      onload="if(typeof hidePaymentLoader==='function'){hidePaymentLoader();}else{var l=document.getElementById('arnomaPaymentLoading');if(l)l.style.display='none';}"
     ></iframe>
     <div id="arnomaPaymentLoading" style="
       display: none;
@@ -17116,6 +17116,7 @@
           params.set('note_titles', JSON.stringify(noteTitles));
         }
         const src = `payment.html?v=20260414-2&${params.toString()}`;
+        armPaymentLoadWatchdog(src);
         document.getElementById('arnomaPaymentIframe').src = src;
         const overlay = document.getElementById('arnomaPaymentModalOverlay');
         overlay.style.display = 'flex';
@@ -17216,7 +17217,65 @@
       return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     }
 
+    // Pay Now must never spin forever: every step is time-limited, and if the payment page has not
+    // finished loading after 12 s the student gets a clear message with Try again / Open in a new tab.
+    const PAYMENT_LOAD_LIMIT_MS = 12000;
+    function withTimeLimit(promise, ms) {
+      return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+    }
+    function setPaymentLoaderText(html, interactive) {
+      const l = document.getElementById('arnomaPaymentLoading');
+      if (!l) return;
+      l.innerHTML = html;
+      l.style.display = 'flex';
+      l.style.pointerEvents = interactive ? 'auto' : 'none';
+    }
+    function hidePaymentLoader() {
+      clearTimeout(window._paymentWatchdog);
+      const l = document.getElementById('arnomaPaymentLoading');
+      if (l) l.style.display = 'none';
+    }
+    function showPaymentLoadProblem() {
+      setPaymentLoaderText(`
+        <div style="max-width:340px;text-align:center;padding:24px 22px;border-radius:18px;background:rgba(7,10,20,0.96);border:1px solid rgba(201,168,76,0.4);box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+          <div style="font-size:15px;font-weight:700;margin-bottom:8px;letter-spacing:0.02em;">The payment page is taking too long</div>
+          <div style="font-size:12.5px;font-weight:500;letter-spacing:0;line-height:1.55;color:#e2e8f0;margin-bottom:16px;">Please check your internet connection (turn off a VPN or ad blocker if you use one) and try again.</div>
+          <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+            <button type="button" onclick="retryPaymentLoad()" style="padding:9px 18px;border-radius:10px;border:none;background:linear-gradient(135deg,#c9a84c,#e8c97a);color:#0a0a0a;font-weight:800;font-size:12px;cursor:pointer;">Try again</button>
+            <button type="button" onclick="openPaymentInNewTab()" style="padding:9px 18px;border-radius:10px;border:1px solid rgba(201,168,76,0.5);background:transparent;color:#c9a84c;font-weight:700;font-size:12px;cursor:pointer;">Open in a new tab</button>
+            <button type="button" onclick="closePaymentModal()" style="padding:9px 18px;border-radius:10px;border:1px solid rgba(255,255,255,0.18);background:transparent;color:#e2e8f0;font-weight:600;font-size:12px;cursor:pointer;">Close</button>
+          </div>
+        </div>`, true);
+    }
+    function armPaymentLoadWatchdog(src) {
+      window._paymentIframeSrc = src;
+      clearTimeout(window._paymentWatchdog);
+      setPaymentLoaderText('Preparing secure payment…', false);
+      window._paymentWatchdog = setTimeout(showPaymentLoadProblem, PAYMENT_LOAD_LIMIT_MS);
+    }
+    function retryPaymentLoad() {
+      const src = window._paymentIframeSrc;
+      if (!src) { openPaymentModal(); return; }
+      armPaymentLoadWatchdog(src);
+      document.getElementById('arnomaPaymentIframe').src = src + '&retry=' + Date.now();
+    }
+    function openPaymentInNewTab() {
+      const src = window._paymentIframeSrc;
+      if (src) window.open(src, '_blank');
+    }
+
     async function openPaymentModal() {
+      try {
+        await _openPaymentModalInner();
+      } catch (err) {
+        console.error('[ARNOMA] Pay Now failed:', err);
+        const overlay = document.getElementById('arnomaPaymentModalOverlay');
+        if (overlay) { overlay.style.display = 'flex'; document.body.style.overflow = 'hidden'; }
+        showPaymentLoadProblem();
+      }
+    }
+
+    async function _openPaymentModalInner() {
       const student = window.currentStudent;
       const amount  = window.currentTotalUnpaid || 0;
 
@@ -17252,12 +17311,12 @@
         if (!scheduleData || !scheduleData.schedule) {
           const groupName = getStudentGroup(student);
           if (groupName) {
-            scheduleData = await getGroupSchedule(groupName);
+            scheduleData = await withTimeLimit(getGroupSchedule(groupName), 8000);
             currentGroupScheduleData = scheduleData || currentGroupScheduleData;
           }
         }
 
-        const freshResult = await calculateUnpaidFromSchedule(student, [], scheduleData || {}, { fresh: true });
+        const freshResult = await withTimeLimit(calculateUnpaidFromSchedule(student, [], scheduleData || {}, { fresh: true }), 8000);
         const rawUnpaidClasses = freshResult.unpaidClasses || [];
         window.currentUnpaidClasses = rawUnpaidClasses.map(c => c.date);
         window.currentUnpaidClassGroupList = rawUnpaidClasses.map(c => c.group || '');
@@ -17312,6 +17371,7 @@
       });
 
       const src = `payment.html?v=20261009-1&${params.toString()}`;
+      armPaymentLoadWatchdog(src);
       document.getElementById('arnomaPaymentIframe').src = src;
 
       const overlay = document.getElementById('arnomaPaymentModalOverlay');
@@ -17529,6 +17589,7 @@
       document.getElementById('arnomaPaymentIframe').src = '';
       document.body.style.overflow = '';
       window._arnomaPaymentSession = null;
+      hidePaymentLoader();
     }
 
     function stripeUnitKey(dateStr, group) {
@@ -17644,6 +17705,8 @@
       if (!iframeWindow || e.source !== iframeWindow) {
         return;
       }
+
+      if (e.data.type === 'ARNOMA_PAYMENT_READY') { hidePaymentLoader(); return; }
 
       if (e.data.type === 'ARNOMA_PAYMENT_SUCCESS') {
         const activeSession = window._arnomaPaymentSession;

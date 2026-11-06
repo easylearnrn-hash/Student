@@ -8,11 +8,40 @@
     <link rel="preconnect" href="https://api.stripe.com">
     <link rel="preconnect" href="https://zlvnxvrzotamhpezqedr.supabase.co">
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-    <script src="https://js.stripe.com/v3/"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1"></script>
+    <script>
+      /* Stripe.js is loaded without blocking the page, so a slow or blocked connection can never freeze it.
+         init() waits for it (with a time limit) and shows a clear message if it cannot be reached. */
+      function loadStripe() {
+        return new Promise(function (resolve, reject) {
+          if (window.Stripe) return resolve();
+          var old = document.getElementById('stripeJsTag');
+          if (old) old.remove();
+          var s = document.createElement('script');
+          s.id = 'stripeJsTag';
+          s.src = 'https://js.stripe.com/v3/';
+          s.async = true;
+          s.onload = function () { resolve(); };
+          s.onerror = function () { reject(new Error('Stripe could not be loaded')); };
+          document.head.appendChild(s);
+        });
+      }
+      loadStripe().catch(function () {});
+      function waitForStripe(ms) {
+        return Promise.race([
+          window.Stripe ? Promise.resolve() : loadStripe(),
+          new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timeout')); }, ms); })
+        ]).then(function () { if (!window.Stripe) throw new Error('Stripe missing'); });
+      }
+      /* Tell the student portal the page is up so its loading spinner can stop right away */
+      document.addEventListener('DOMContentLoaded', function () {
+        try { window.parent.postMessage({ type: 'ARNOMA_PAYMENT_READY' }, '*'); } catch (e) {}
+      });
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.1" async></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"></noscript>
     <style>
       :root {
         --bg:       #0a0a0a;
@@ -907,8 +936,13 @@
         if (INVOICE.amountDollars > 0 && Math.abs(subtotal - INVOICE.amountDollars) > 0.009) {
           throw new Error('The payment amount must match the full balance shown on this page.');
         }
-        const resp = await fetch(CREATE_PI_ENDPOINT, {
+        const _ctl = new AbortController();
+        const _fetchTimer = setTimeout(() => _ctl.abort(), 25000);
+        let resp;
+        try {
+        resp = await fetch(CREATE_PI_ENDPOINT, {
           method:'POST',
+          signal: _ctl.signal,
           headers:{'Content-Type':'application/json'},
           body: JSON.stringify({
             amount_cents    : Math.round(total * 100),
@@ -927,6 +961,11 @@
             tax_rate        : STRIPE_TAX_RATE,
           }),
         });
+        } catch (netErr) {
+          throw new Error(netErr && netErr.name === 'AbortError'
+            ? 'The payment server did not answer in time. Please check your connection and press Retry.'
+            : 'Could not reach the payment server. Please check your connection and press Retry.');
+        } finally { clearTimeout(_fetchTimer); }
         if (!resp.ok) {
           const err = await resp.text().catch(() => resp.status);
           throw new Error(`Server error (${resp.status}): ${String(err).slice(0,180)}`);
@@ -1129,6 +1168,8 @@
         const redirectSecret = new URLSearchParams(window.location.search).get('payment_intent_client_secret');
         if (redirectSecret) {
           setMsg('info', 'Verifying payment…');
+          try { await waitForStripe(15000); }
+          catch (_) { setMsg('error', 'Could not reach Stripe to verify the payment. Please refresh the page.'); return; }
           stripe = window.Stripe(STRIPE_PK);
           const { paymentIntent, error } = await stripe.retrievePaymentIntent(redirectSecret);
           if (error) {
@@ -1146,6 +1187,8 @@
 
         setMsg('info', 'Preparing secure payment form…');
         try {
+          try { await waitForStripe(15000); }
+          catch (_) { throw new Error('Could not load the secure payment form (Stripe). Please check your connection, turn off a VPN or ad blocker, and press Retry.'); }
           const cs = await fetchClientSecret();
           clearMsg();
           await mountPaymentElement(cs);
