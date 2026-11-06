@@ -5846,9 +5846,12 @@ function initSessionRole() {
 
   // Role is set in sessionStorage/localStorage by login.html when an admin_user logs in.
   // Students do NOT have isAdmin='true' and have no userRole in storage.
+  // 'arnoma:is_admin' is the flag the ARNOMA admin login sets; it is removed only by logging out.
+  // Once an admin is signed in they stay an admin for the whole session, whatever the network does.
   const isAdmin =
     sessionStorage.getItem('isAdmin') === 'true' ||
-    localStorage.getItem('isAdmin') === 'true';
+    localStorage.getItem('isAdmin') === 'true' ||
+    localStorage.getItem('arnoma:is_admin') === 'true';
 
   const storedRole = (
     sessionStorage.getItem('userRole') ||
@@ -11566,7 +11569,11 @@ function closeSaveModal() {
 
 // One shared server-side admin check (admin_accounts row for the signed-in user). The in-flight/positive
 // result is reused so the highlighter and inbox buttons do not each repeat the session + database round trips.
+function adminFlagSet() {
+  try { return localStorage.getItem('arnoma:is_admin') === 'true'; } catch (e) { return false; }
+}
 function adminHintValid() {
+  if (adminFlagSet()) return true;
   try {
     const tok = JSON.parse(localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token') || 'null');
     const uid = tok && tok.user && tok.user.id;
@@ -11581,24 +11588,36 @@ function showAdminStartButtons(on) {
 }
 
 let _adminCheck = null;
+// An admin who is signed in stays an admin: a slow or failed check (timeout, network, token refresh in progress)
+// is retried and, if still unknown, never demotes them. Only a definite "no admin row" for a user who was
+// never flagged as an admin at login says "not an admin".
 function checkAdminAccount(force) {
   if (_adminCheck && !force) return _adminCheck;
   const run = (async () => {
-    try {
-      const uid = await getSignedInUserId();
-      if (!uid) return false;
-      const { data, error } = await withTimeout(
-        db.from('admin_accounts').select('auth_user_id').eq('auth_user_id', uid).maybeSingle(),
-        6000, 'Admin check timed out');
-      const ok = !error && !!data && data.auth_user_id === uid;
-      // Remember the verified admin on this device so the admin buttons can show instantly next time.
-      // It only controls what is displayed early; the server check above always has the last word.
+    const hasToken = (() => { try { return !!localStorage.getItem('sb-zlvnxvrzotamhpezqedr-auth-token'); } catch (e) { return false; } })();
+    const attempts = hasToken ? 3 : 1;
+    for (let i = 0; i < attempts; i++) {
       try {
-        if (ok) localStorage.setItem('arnoma:admin-uid', uid);
-        else if (!error) localStorage.removeItem('arnoma:admin-uid');
-      } catch (e) { /* storage unavailable */ }
-      return ok;
-    } catch (e) { return false; }
+        const uid = await getSignedInUserId();
+        if (uid) {
+          const { data, error } = await withTimeout(
+            db.from('admin_accounts').select('auth_user_id').eq('auth_user_id', uid).maybeSingle(),
+            6000, 'Admin check timed out');
+          if (!error) {
+            const ok = !!data && data.auth_user_id === uid;
+            // Remember the verified admin on this device so the admin buttons show instantly next time.
+            try {
+              if (ok) localStorage.setItem('arnoma:admin-uid', uid);
+              else if (!adminFlagSet()) localStorage.removeItem('arnoma:admin-uid');
+            } catch (e) { /* storage unavailable */ }
+            return ok || adminFlagSet();
+          }
+        }
+      } catch (e) { /* try again below */ }
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, 800 * (i + 1)));
+    }
+    // Still unknown: keep whatever this device already knows instead of switching to the student view
+    return adminHintValid();
   })();
   _adminCheck = run;
   run.then(ok => { if (!ok && _adminCheck === run) _adminCheck = null; });
