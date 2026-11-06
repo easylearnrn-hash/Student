@@ -222,6 +222,7 @@ body{
   display: none;
 }
 
+#startLogo { cursor: pointer; }
 .logo-container {
   margin-bottom: 36px;
   position: relative;
@@ -4827,7 +4828,7 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
     <!-- Seal / Logo -->
     <div class="logo-container">
       <img id="startLogo" src="" alt="ACNHS Seal" data-acnhs-logo
-           style="width:200px;height:200px;object-fit:contain;filter:drop-shadow(0 0 32px rgba(201,168,76,0.22)) drop-shadow(0 0 8px rgba(201,168,76,0.12));">
+           style="width:200px;height:200px;object-fit:contain;filter:drop-shadow(0 0 32px rgba(201,168,76,0.22)) drop-shadow(0 0 8px rgba(201,168,76,0.12));" onclick="logoutFromLogo()" title="Log out" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();logoutFromLogo();}">
     </div>
 
     <!-- Eyebrow -->
@@ -5976,6 +5977,26 @@ async function resolveSessionDisplayName() {
   } catch (e) {
     console.warn('Name lookup skipped:', e && e.message);
   }
+}
+
+// Clicking the logo on the start screen logs the user out and returns to the ARNOMA login page.
+let _loggingOut = false;
+async function logoutFromLogo() {
+  if (_loggingOut) return;
+  _loggingOut = true;
+  try {
+    const client = (typeof initSupabase === 'function') ? initSupabase() : null;
+    if (client && client.auth) await Promise.race([client.auth.signOut(), new Promise(r => setTimeout(r, 4000))]);
+  } catch (e) { /* sign out failed or timed out: the local session is wiped below either way */ }
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('sb-') || k.startsWith('arnoma:') || ['isLoggedIn', 'isAdmin', 'userRole', 'userName', 'userEmail', 'teacherEmail', 'teacherName', 'student_login_id', 'student_login_name', 'is_admin_viewing'].includes(k))
+      .forEach(k => localStorage.removeItem(k));
+    sessionStorage.clear();
+  } catch (e) { /* storage unavailable */ }
+  const loginUrl = new URL('../index.html', window.location.href).href;
+  try { (window.top || window).location.replace(loginUrl); }
+  catch (e) { window.location.replace(loginUrl); }
 }
 
 // Leave the test: close the portal's test window when embedded, otherwise go to the ARNOMA home page
