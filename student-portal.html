@@ -9227,7 +9227,14 @@
         // Cross-group-tagged rows belong to a DIFFERENT group's one-time class — they must
         // NOT also mark the student's own home-group class as paid on a coincidental same date.
         // (Mirrors crossGroupClasses below, which looks these up separately by class_group.)
-        if (pr.class_group && String(pr.class_group) !== String(studentGroup)) return;
+        // A tag only counts as "another group's class" when this student really is enrolled in that group
+        // on that date. Without that enrollment the tag is a stray label (e.g. one Stripe payment covering an
+        // F class and a G class tagged both rows F) and the row still pays the home-group class.
+        if (pr.class_group && String(pr.class_group) !== String(studentGroup)) {
+          const prDate = (pr.date || '').split('T')[0];
+          const hasCrossEnrollment = crossGroupManualEnrollments.some(e => e.date === prDate && e.group === String(pr.class_group));
+          if (hasCrossEnrollment) return;
+        }
         const fallback = (pr.date || '').split('T')[0];
         const resolved = extractForClassDates(pr, fallback);
         const isIgnoredRecord = String(pr.status || '').toLowerCase() === 'ignored' || String(pr.payment_method || '').toLowerCase() === 'ignored';
