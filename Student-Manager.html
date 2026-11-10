@@ -3850,6 +3850,107 @@
       // "ignored" for the student, the same record Calendar's "Ignore This Class Day"
       // writes. Days that already have a payment, credit, absence or any payment_records
       // row are left alone, because an ignored day overrides a payment in Calendar.
+      // ============================================================
+      // KEEP OLD-GROUP DEBT ON GROUP CHANGE
+      // ============================================================
+      // The portal and Calendar only know the student's CURRENT group schedule, so after a move the classes
+      // the student really attended (and did not pay) in the OLD group would vanish. Each one is kept as an
+      // explicit "added to class" row for the old group (the same record Calendar's "Add student to class"
+      // writes). Days that are paid, absent, ignored, cancelled by the old group, credited or while the student
+      // was paused are left alone. Returns the dates (dryRun = only report them).
+      async function keepOldGroupDebtOnMove(student, oldGroupCode, previousStartDate, dryRun) {
+        const FLOOR = '2026-05-01'; // debt floor shared with student-portal / Calendar
+        const toDay = value => String(value || '').split('T')[0];
+        const todayLA = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit'
+        }).format(new Date());
+        const startDay = toDay(previousStartDate) || toDay(student.created_at);
+        const fromDate = startDay > FLOOR ? startDay : FLOOR;
+        if (String(student.notes || '').includes(FREE_STUDENT_MARKER) || !(Number(student.price_per_class) > 0)) return [];
+
+        const groupNames = [oldGroupCode, `Group ${oldGroupCode}`];
+        const aliases = Array.isArray(student.aliases) ? student.aliases : String(student.aliases || '').split(',');
+        const names = [student.name, ...aliases].map(n => String(n || '').replace(/[^a-zA-Z0-9 ]/g, '').trim()).filter(Boolean);
+        const nameFilters = names.map(n => `,payer_name.ilike.%${n}%,resolved_student_name.ilike.%${n}%`).join('');
+        const [groupRes, skippedRes, recordsRes, creditsRes, absencesRes, zelleRes, visibilityRes] = await Promise.all([
+          supabaseClient.from('groups').select('group_name, schedule, one_time_schedules').in('group_name', groupNames),
+          supabaseClient.from('skipped_classes').select('class_date').in('group_name', groupNames),
+          supabaseClient.from('payment_records').select('date, status, payment_method, class_group, notes').eq('student_id', student.id),
+          supabaseClient.from('credit_payments').select('class_date, applied_class_date').eq('student_id', student.id),
+          supabaseClient.from('student_absences').select('class_date').eq('student_id', student.id),
+          supabaseClient.from('payments')
+            .select('for_class, for_class_dates, payer_name, resolved_student_name, student_id, linked_student_id')
+            .or(`student_id.eq.${student.id},linked_student_id.eq.${student.id}${nameFilters}`),
+          supabaseClient.from('student_visibility_history').select('visible, effective_date').eq('student_id', student.id)
+            .order('effective_date', { ascending: true }).order('id', { ascending: true })
+        ]);
+        const failed = [groupRes, skippedRes, recordsRes, creditsRes, absencesRes, zelleRes, visibilityRes].find(r => r.error);
+        if (failed) throw failed.error;
+
+        const group = (groupRes.data || [])[0];
+        const scheduleStr = group && group.schedule ? group.schedule : '';
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const scheduleDays = new Set(dayNames.filter(d => scheduleStr.includes(d) || scheduleStr.includes(d.slice(0, 3))));
+        const classDates = new Set();
+        for (let d = new Date(`${fromDate}T12:00:00`), guard = 0; guard < 800; d.setDate(d.getDate() + 1), guard++) {
+          const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          if (iso >= todayLA) break;
+          if (scheduleDays.has(dayNames[d.getDay()])) classDates.add(iso);
+        }
+        (Array.isArray(group && group.one_time_schedules) ? group.one_time_schedules : []).forEach(ot => {
+          const day = toDay(ot && ot.date);
+          if (day && day >= fromDate && day < todayLA) classDates.add(day);
+        });
+        (skippedRes.data || []).forEach(r => classDates.delete(toDay(r.class_date)));
+        (absencesRes.data || []).forEach(r => classDates.delete(toDay(r.class_date)));
+        (creditsRes.data || []).forEach(r => classDates.delete(toDay(r.applied_class_date || r.class_date)));
+
+        // A row pays/ignores/replaces an old-group day when it is untagged or tagged with the old group
+        (recordsRes.data || []).forEach(r => {
+          const tag = String(r.class_group || '').trim();
+          if (tag && tag !== oldGroupCode) return;
+          const method = String(r.payment_method || '').toLowerCase();
+          const status = String(r.status || '').toLowerCase();
+          if (method === 'manual_enrollment' && String(r.notes || '') !== oldGroupCode && String(r.notes || '') !== '') return;
+          if (['paid', 'excused', 'ignored', 'absent'].includes(status) || method === 'ignored' || method === 'manual_enrollment') {
+            classDates.delete(toDay(r.date));
+          }
+        });
+
+        const normalizeName = value => String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const ownNames = new Set(names.map(normalizeName).filter(Boolean));
+        (zelleRes.data || []).forEach(p => {
+          const isOwn = String(p.student_id) === String(student.id) || String(p.linked_student_id) === String(student.id) ||
+            [p.payer_name, p.resolved_student_name].some(n => ownNames.has(normalizeName(n)));
+          if (!isOwn) return;
+          let paidFor = p.for_class_dates != null ? p.for_class_dates : (p.for_class != null ? p.for_class : []);
+          if (!Array.isArray(paidFor)) paidFor = [paidFor];
+          paidFor.forEach(entry => classDates.delete(toDay(entry && typeof entry === 'object' ? (entry.class_date || entry.date) : entry)));
+        });
+
+        const history = (visibilityRes.data || []).map(r => ({ date: toDay(r.effective_date), visible: r.visible === true || String(r.visible).toLowerCase() === 'true' }));
+        const activeOn = dateStr => {
+          let last = null;
+          for (const event of history) { if (event.date <= dateStr) last = event; else break; }
+          return last ? last.visible : String(student.status || '').toLowerCase() !== 'graduated';
+        };
+
+        const dates = Array.from(classDates).filter(activeOn).sort();
+        if (dates.length === 0 || dryRun) return dates;
+
+        const { error: insertError } = await supabaseClient.from('payment_records').insert(dates.map(date => ({
+          student_id: student.id,
+          date,
+          amount: 0,
+          status: 'unpaid',
+          payment_method: 'manual_enrollment',
+          notes: oldGroupCode,
+          class_group: oldGroupCode
+        })));
+        if (insertError) throw insertError;
+        return dates;
+      }
+
       async function carryForwardCancelledClassDays(student, oldGroupCode, newGroupCode) {
         try {
           const FLOOR = '2026-05-01'; // debt floor shared with student-portal / Calendar
@@ -3972,6 +4073,7 @@
           // their OLD group into individual permission rows BEFORE the group_name
           // changes, so they don't lose visibility of notes they already had access to.
           let movedFromGroupCode = null;
+          let movedFromStartDate = null;
           if (student.id) {
             const { data: existingStudentRow } = await supabaseClient
               .from('students')
@@ -3982,7 +4084,18 @@
             if (oldGroupCode && resolvedGroupCode && oldGroupCode !== resolvedGroupCode) {
               await carryForwardGroupNotePermissions(student.id, oldGroupCode);
               const oldCanonical = canonicalizeGroupCode(oldGroupCode);
-              if (oldCanonical && oldCanonical !== resolvedGroupCode) movedFromGroupCode = oldCanonical;
+              if (oldCanonical && oldCanonical !== resolvedGroupCode) {
+                movedFromGroupCode = oldCanonical;
+                // No group history exists, so the new group's schedule would otherwise be charged back to May 1
+                // for classes the student never attended. Debt for the new group starts the day of the move
+                // (Los Angeles date, like student-portal), and today's class counts.
+                const moveParts = new Intl.DateTimeFormat('en-CA', {
+                  timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit'
+                }).format(new Date());
+                const currentStart = String(student.start_date || '').split('T')[0];
+                movedFromStartDate = currentStart || null;
+                if (!currentStart || currentStart < moveParts) student.start_date = moveParts;
+              }
             }
           }
           
@@ -4093,6 +4206,24 @@
           // After the move is saved, stop the old group's cancelled days becoming debt.
           if (movedFromGroupCode) {
             await carryForwardCancelledClassDays(result.data[0], movedFromGroupCode, resolvedGroupCode);
+            let keptDates = [];
+            let keepFailed = false;
+            try {
+              keptDates = await keepOldGroupDebtOnMove(result.data[0], movedFromGroupCode, movedFromStartDate, false);
+            } catch (e) {
+              keepFailed = true;
+              console.warn('⚠️ keepOldGroupDebtOnMove failed:', e);
+            }
+            const startShown = String(result.data[0].start_date || student.start_date).split('T')[0];
+            await customAlert(
+              'Group Changed',
+              `${student.name} moved from Group ${movedFromGroupCode} to Group ${resolvedGroupCode}. Group ${resolvedGroupCode} classes count as debt from ${startShown} (today's class included), so past weeks are not charged to the new group. ` +
+              (keepFailed
+                ? `Group ${movedFromGroupCode} classes could not be checked: open the Calendar and use "Add student to class" for any Group ${movedFromGroupCode} class the student still owes.`
+                : keptDates.length
+                  ? `Unpaid Group ${movedFromGroupCode} classes were kept as debt: ${keptDates.join(', ')}.`
+                  : `There are no unpaid Group ${movedFromGroupCode} classes.`)
+            );
           }
           return result.data[0];
         } catch (e) {
