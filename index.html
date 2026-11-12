@@ -1467,29 +1467,27 @@
         if (session) {
           console.log('✅ Session found, validating against current database...');
           
-          // Check user role and redirect appropriately
-          const { data: studentData, error: studentError } = await supabase
-            .from('students')
-            .select('role, id, name, auth_user_id')
-            .eq('auth_user_id', session.user.id)
-            .maybeSingle();
+          // Check user role and redirect appropriately.
+          // A failed lookup (weak connection, timeout, server hiccup) must NEVER sign the user out:
+          // "Remember me for 30 days" has to survive it. Only a clear "no such user" answer clears the session.
+          const isHardError = err => !!err && err.code !== 'PGRST116';
+          const lookupRole = async () => {
+            const [stu, adm] = await Promise.all([
+              supabase.from('students').select('role, id, name, auth_user_id').eq('auth_user_id', session.user.id).maybeSingle(),
+              supabase.from('admin_accounts').select('email').eq('auth_user_id', session.user.id).maybeSingle()
+            ]);
+            return { studentData: stu.data, studentError: stu.error, adminData: adm.data, adminError: adm.error };
+          };
 
-          // Check if admin
-          const { data: adminData, error: adminError } = await supabase
-            .from('admin_accounts')
-            .select('email')
-            .eq('auth_user_id', session.user.id)
-            .maybeSingle();
-
-          // Only treat studentError as fatal if it's a real error (not just "row not found")
-          // adminError is non-fatal — RLS can block admin_accounts reads even for valid admins
-          const isHardStudentError = studentError && studentError.code !== 'PGRST116';
-          if (isHardStudentError) {
-            console.error('❌ Student DB check failed, clearing invalid session:', studentError);
-            await supabase.auth.signOut();
-            localStorage.clear();
-            sessionStorage.clear();
-            console.log('🔄 Session cleared, please log in again');
+          let { studentData, studentError, adminData, adminError } = await lookupRole();
+          if (isHardError(studentError)) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            ({ studentData, studentError, adminData, adminError } = await lookupRole());
+          }
+          if (isHardError(studentError)) {
+            console.warn('⚠️ Student check failed (connection problem?), keeping the saved login:', studentError);
+            errorMessage.textContent = 'Could not reach the server. Your login is saved - please check your connection and reload the page.';
+            errorMessage.style.display = 'block';
             return;
           }
 
@@ -1500,6 +1498,22 @@
           // Also check hardcoded admin email as fallback if DB admin check failed
           const HARDCODED_ADMIN_EMAILS = ['hrachfilm@gmail.com'];
           const isHardcodedAdmin = HARDCODED_ADMIN_EMAILS.includes((session.user.email || '').toLowerCase());
+
+          // Students whose account was never linked by auth_user_id are found by email, exactly like the portal does
+          if (!studentData && !adminData && !isHardcodedAdmin && !adminError && session.user.email) {
+            const byEmail = await supabase
+              .from('students')
+              .select('role, id, name, auth_user_id')
+              .ilike('email', session.user.email.trim())
+              .maybeSingle();
+            if (isHardError(byEmail.error)) {
+              console.warn('⚠️ Email check failed (connection problem?), keeping the saved login:', byEmail.error);
+              errorMessage.textContent = 'Could not reach the server. Your login is saved - please check your connection and reload the page.';
+              errorMessage.style.display = 'block';
+              return;
+            }
+            if (byEmail.data) studentData = byEmail.data;
+          }
 
           if (studentData && studentData.role !== 'admin') {
             // Check for a pending post-login redirect (e.g. from Protected-PDF-Viewer)
@@ -1514,8 +1528,11 @@
           } else if (adminData || (studentData && studentData.role === 'admin') || isHardcodedAdmin) {
             console.log('👑 Admin detected, redirecting to Payment Records');
             window.location.href = 'Payment-Records.html';
+          } else if (adminError) {
+            // The admin check could not run, so we cannot say this user has no account: keep the login
+            console.warn('⚠️ Could not confirm the account (admin check failed), keeping the saved login');
           } else {
-            // No student OR admin found with this auth_user_id - clear session
+            // Every check ran and no student or admin exists for this session - clear it
             console.log('❌ No matching student or admin found for this session, clearing...');
             await supabase.auth.signOut();
             localStorage.clear();
