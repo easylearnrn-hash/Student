@@ -5970,6 +5970,23 @@
      *   await loadPortal(student);
      * }
      */
+    // A failed load (weak connection, timeout, server hiccup) must never sign the student out: "Remember me for 30 days"
+    // has to survive it. The saved login stays and the student gets a retry button.
+    function showPortalConnectionProblem() {
+      try { _hideBootLoader(); } catch (_) {}
+      if (document.getElementById('arnomaConnectionProblem')) return;
+      const box = document.createElement('div');
+      box.id = 'arnomaConnectionProblem';
+      box.style.cssText = 'position:fixed;inset:0;z-index:999999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.72);backdrop-filter:blur(12px);font-family:inherit;';
+      box.innerHTML = `
+        <div style="max-width:360px;margin:20px;text-align:center;padding:26px 24px;border-radius:18px;background:rgba(10,14,26,0.97);border:1px solid rgba(201,168,76,0.4);box-shadow:0 20px 60px rgba(0,0,0,0.6);color:#f5f0e8;">
+          <div style="font-size:16px;font-weight:700;margin-bottom:8px;">Could not load your account</div>
+          <div style="font-size:13px;line-height:1.55;color:#cbd5e1;margin-bottom:18px;">This looks like a connection problem. You are still logged in. Please check your internet and try again.</div>
+          <button type="button" onclick="window.location.reload()" style="padding:10px 22px;border-radius:10px;border:none;background:linear-gradient(135deg,#c9a84c,#e8c97a);color:#0a0a0a;font-weight:800;font-size:12px;letter-spacing:0.08em;text-transform:uppercase;cursor:pointer;">Try again</button>
+        </div>`;
+      document.body.appendChild(box);
+    }
+
     async function checkAuthentication() {
       // ---------- Check for Admin Chat Mode ----------
       const adminChatTokenStr = localStorage.getItem('admin_chat_token') || sessionStorage.getItem('admin_chat_token');
@@ -6286,7 +6303,10 @@
         
         // Check if admin chat mode before showing error
         const adminChatCheck = localStorage.getItem('admin_chat_token') || sessionStorage.getItem('admin_chat_token');
-        if (!adminChatCheck) {
+        if (!adminChatCheck && error && error.code !== 'PGRST116') {
+          // The lookup itself failed (not "no such student"): keep the login and offer a retry
+          showPortalConnectionProblem();
+        } else if (!adminChatCheck) {
           const errorMsg = error?.message || 'Unknown error';
           alert(`Your account is not set up correctly.\n\nError: ${errorMsg}\n\nEmail: ${session.user.email}\n\nPlease contact the administrator.`);
           await supabaseClient.auth.signOut();
@@ -8132,6 +8152,11 @@
             window.currentStudent = studentRecord; // Also set window property
             swrSave(currentEmail, 'student', studentRecord); // 💾 persist for instant next load
             await loadPortalData();
+          } else if (studentError && studentError.code !== 'PGRST116') {
+            // The lookup itself failed (not "no such student"): keep the login and offer a retry
+            console.warn('Student lookup failed, keeping the saved login:', studentError);
+            showPortalConnectionProblem();
+            return;
           } else {
             // No student record and not admin - deny access
             console.error('Access denied - no student or admin record found for:', currentEmail);
@@ -8697,9 +8722,8 @@
         
       } catch (error) {
         console.error('Critical error loading portal:', error);
-        // Sign out and redirect only on critical failures
-        await supabaseClient.auth.signOut();
-        window.location.href = 'index.html';
+        // Never sign the student out because of a failed load: keep the login and offer a retry
+        showPortalConnectionProblem();
       }
 
       // AUTO-REFRESH payments every 2 MINUTES (reduced from 30s for performance)

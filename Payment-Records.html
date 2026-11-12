@@ -5894,13 +5894,24 @@ ORDER BY timestamp DESC;</pre>
               console.log('✅ Session found for:', session.user.email);
 
               // Check if user is in admin_accounts table
-              const { data: adminCheck, error: adminError } = await supabaseClient
+              const checkAdminRow = () => supabaseClient
                 .from('admin_accounts')
                 .select('email')
                 .eq('email', session.user.email)
                 .maybeSingle();
+              let { data: adminCheck, error: adminError } = await checkAdminRow();
+              if (adminError) {
+                // A failed check (connection problem) is retried and never signs the admin out
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                ({ data: adminCheck, error: adminError } = await checkAdminRow());
+              }
+              if (adminError) {
+                console.error('⚠️ Admin check failed (connection problem?), keeping the saved login:', adminError);
+                alert('Could not verify your admin access (connection problem).\n\nYou are still logged in. Please check your internet and reload the page.');
+                throw new Error('ADMIN_CHECK_FAILED');
+              }
 
-              if (adminError || !adminCheck) {
+              if (!adminCheck) {
                 console.error('❌ Access denied - not an admin:', session.user.email);
                 alert('Access Denied\n\nThis page is for administrators only.\n\nRedirecting to student portal...');
                 await supabaseClient.auth.signOut();
@@ -5915,7 +5926,7 @@ ORDER BY timestamp DESC;</pre>
               return session;
             } catch (error) {
               console.error('❌ Admin session verification failed:', error);
-              if (error.message !== 'ACCESS_DENIED' && error.message !== 'NO_SESSION') {
+              if (error.message !== 'ACCESS_DENIED' && error.message !== 'NO_SESSION' && error.message !== 'ADMIN_CHECK_FAILED') {
                 window.location.href = 'index.html';
               }
               throw error;
