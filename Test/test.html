@@ -10504,17 +10504,32 @@ function isNclexStyleQuestion(q) {
   return ok;
 }
 
+// Last time the student touched, scrolled or typed. Delayed resets are skipped after that, so they never undo
+// scrolling the student has already started on the new question.
+let _questionUserActivityAt = 0;
+['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(ev =>
+  document.addEventListener(ev, () => { _questionUserActivityAt = Date.now(); }, { passive: true, capture: true }));
+
 function scrollQuestionToTop() {
-  const reset = () => {
+  const startedAt = Date.now();
+  const reset = (isRetry) => {
+    if (isRetry && _questionUserActivityAt > startedAt) return;
     const box = document.querySelector('.question-panel-scrollable');
     if (box) box.scrollTop = 0;
     const tc = document.getElementById('testContainer');
     if (tc && tc.scrollTop > 0) tc.scrollTop = 0;
-    if (window.scrollY > 0 || document.scrollingElement && document.scrollingElement.scrollTop > 0) window.scrollTo(0, 0);
+    // html has scroll-behavior: smooth, so ask explicitly for an instant jump
+    const root = document.scrollingElement;
+    if (window.scrollY > 0 || (root && root.scrollTop > 0)) {
+      try { window.scrollTo({ top: 0, behavior: 'instant' }); } catch (e) { window.scrollTo(0, 0); }
+    }
   };
-  reset();
-  // The new question's content is drawn right after this call, so reset again once it is in place
-  requestAnimationFrame(reset);
+  reset(false);
+  // The new question is drawn right after this call, and a smooth scroll to the previous answer's feedback or
+  // touch momentum may still be running, so reset again once everything has settled.
+  requestAnimationFrame(() => reset(true));
+  setTimeout(() => reset(true), 150);
+  setTimeout(() => reset(true), 500);
 }
 
 function renderQuestion() {
@@ -10535,8 +10550,9 @@ function renderQuestion() {
   }
 
   // A different question always opens at its top (Next, Back, navigator), not where the previous one was scrolled to
-  if (renderQuestion._shownIndex !== testState.currentIndex) {
-    renderQuestion._shownIndex = testState.currentIndex;
+  const shownKey = String(baseQuestion.id) + '#' + testState.currentIndex;
+  if (renderQuestion._shownKey !== shownKey) {
+    renderQuestion._shownKey = shownKey;
     scrollQuestionToTop();
   }
 
