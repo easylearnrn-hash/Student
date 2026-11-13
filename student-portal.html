@@ -13850,6 +13850,19 @@
           });
           if (DEBUG_MODE && beforeFilter !== allSystemNotes.length) debugLog(`📅 New-student filter: hid ${beforeFilter - allSystemNotes.length} old notes (before ${effectiveStartStr})`);
         }
+
+        // Old and new versions of one topic are separate notes that open the SAME page (for example an old
+        // "Bipolar Disorder & Personality Disorders" and the new "Bipolar & Personality Disorders"). When the student
+        // can open that page through one of them, a locked twin only shows a misleading "payment required" for
+        // content she already has open, so it is not listed. Pages with no open card stay locked as before.
+        {
+          const htmlPathOf = n => { const a = n.attachments && n.attachments[0]; return (a && a.type === 'html' && a.url) || null; };
+          const isOpenNote = n => !!n.isPaid && !n.isAbsent;
+          const openHtmlPaths = new Set(allSystemNotes.filter(isOpenNote).map(htmlPathOf).filter(Boolean));
+          const beforeTwins = allSystemNotes.length;
+          allSystemNotes = allSystemNotes.filter(n => isOpenNote(n) || !htmlPathOf(n) || !openHtmlPaths.has(htmlPathOf(n)));
+          if (DEBUG_MODE && beforeTwins !== allSystemNotes.length) debugLog(`🔁 Hid ${beforeTwins - allSystemNotes.length} locked duplicate card(s) of pages already open`);
+        }
         refreshSystemAssignmentStats();
         
         if (DEBUG_MODE) debugLog('✅ ALL SYSTEM NOTES SET:', allSystemNotes.length);
