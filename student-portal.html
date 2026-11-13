@@ -13243,16 +13243,30 @@
 
         // Start the queries that don't depend on the one-time-class rows now, so they run in
         // parallel with that query instead of waiting a full network round trip behind it.
-        const earlyStudentPermQuery = Promise.resolve(
+        // The database returns at most 1000 rows per request. A student can have far more grant rows than that
+        // (one has 2,000+), and every row past the cut-off used to be silently dropped, so granted notes vanished.
+        // Read every page so no grant is ever missed.
+        const fetchAllGrantRows = async (buildQuery) => {
+          const PAGE = 1000;
+          let all = [];
+          for (let from = 0; ; from += PAGE) {
+            const { data, error } = await buildQuery().order('id', { ascending: true }).range(from, from + PAGE - 1);
+            if (error) return { data: null, error };
+            all = all.concat(data || []);
+            if (!data || data.length < PAGE) break;
+          }
+          return { data: all, error: null };
+        };
+        const earlyStudentPermQuery = fetchAllGrantRows(() =>
           supabaseClient
             .from('student_note_permissions')
             .select('id, note_id, is_accessible, class_date, group_name, student_id')
             .eq('student_id', studentId)
         );
-        const earlyFreeIndividualQuery = Promise.resolve(
+        const earlyFreeIndividualQuery = fetchAllGrantRows(() =>
           supabaseClient
             .from('note_free_access')
-            .select('note_id, access_type, group_letter, student_id, class_date')
+            .select('id, note_id, access_type, group_letter, student_id, class_date')
             .eq('student_id', studentId)
         );
         const earlyPaymentsQuery = ensurePaymentsData().catch((err) => {
@@ -13346,12 +13360,12 @@
 
           // 2. Group-level permissions — filtered by group_name at the DB level to cut payload
           groupNameCandidates.length > 0
-            ? supabaseClient
+            ? fetchAllGrantRows(() => supabaseClient
                 .from('student_note_permissions')
                 .select('id, note_id, is_accessible, class_date, group_name, student_id')
                 .is('student_id', null)
                 .eq('is_accessible', true)
-                .in('group_name', groupNameCandidates)
+                .in('group_name', groupNameCandidates))
             : Promise.resolve({ data: [], error: null }),
 
           // 3. Individual free-access grants — started early above
@@ -13359,11 +13373,11 @@
 
           // 4. Group free-access grants
           groupFreeAccessCandidates.length > 0
-            ? supabaseClient
+            ? fetchAllGrantRows(() => supabaseClient
                 .from('note_free_access')
-                .select('note_id, access_type, group_letter, student_id, class_date')
+                .select('id, note_id, access_type, group_letter, student_id, class_date')
                 .eq('access_type', 'group')
-                .in('group_letter', groupFreeAccessCandidates)
+                .in('group_letter', groupFreeAccessCandidates))
             : Promise.resolve({ data: [], error: null }),
 
           // 5. Payment data — started early above
@@ -13619,6 +13633,12 @@
           .map(p => p.note_id);
 
         const freeNoteIds = new Set([...(freeAccessNoteIds || []), ...individualAccessNoteIds]);
+        // Notes granted to THIS student by name (the Free, Share and Access buttons all write one of these rows)
+        const individualFreeGrantNoteIds = new Set(
+          (freeIndividualRes.data || [])
+            .filter(g => g.student_id != null && String(g.student_id) === String(studentId))
+            .map(g => g.note_id)
+        );
         
         if (DEBUG_MODE && individualAccessNoteIds.length > 0) debugLog('✅ Individual Access grants (unconditional free):', individualAccessNoteIds);
         
@@ -13815,6 +13835,9 @@
             // per-student row) are filtered by effectiveStartStr.
             if (individualAccessNoteIds.includes(note.id)) return true;
             if (explicitStudentPermissionNoteIds.includes(note.id)) return true;
+            // Free / Share / Access grants made for this student (note_free_access, individual) are unconditional:
+            // they are never hidden by the new-student date window, whatever the note's date or her payment/absence.
+            if (individualFreeGrantNoteIds.has(note.id)) return true;
 
             // Use posting date (when this note was assigned to this group for a class).
             // Fall back to the note's own class_date only if no posting record exists.
