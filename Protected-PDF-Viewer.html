@@ -336,12 +336,14 @@
 
       if (currentNoteId) {
         const [freeRes, groupFreeRes, individualPermRes, groupPermRes] = await Promise.all([
+          // .limit(1) instead of .maybeSingle(): more than one matching row made the lookup fail, the grant was
+          // ignored and the payment check then locked a note the admin had granted for free.
           supabaseClient
             .from('note_free_access')
             .select('id')
             .eq('note_id', currentNoteId)
             .eq('student_id', sid)
-            .maybeSingle(),
+            .limit(1),
           groupFreeCandidates.length > 0
             ? supabaseClient
                 .from('note_free_access')
@@ -356,7 +358,7 @@
             .eq('note_id', currentNoteId)
             .eq('student_id', sid)
             .eq('is_accessible', true)
-            .maybeSingle(),
+            .limit(1),
           groupCandidates.length > 0
             ? supabaseClient
                 .from('student_note_permissions')
@@ -384,16 +386,18 @@
           return !!postDate && paidOneTimeGroupDates.get(code)?.has(postDate);
         });
 
-        const permissionDate = normalizeDate(individualPermRes.data?.class_date)
+        const individualPerm = (individualPermRes.data || [])[0] || null;
+        const individualFree = (freeRes.data || [])[0] || null;
+        const permissionDate = normalizeDate(individualPerm?.class_date)
           || normalizeDate(matchingGroupPerms[0]?.class_date)
           || normalizeDate(matchingGroupFree[0]?.class_date);
         if (permissionDate) effectiveCheckDate = permissionDate;
 
-        hasPermissionAccess = !!(individualPermRes.data || matchingGroupPerms.length > 0);
+        hasPermissionAccess = !!(individualPerm || matchingGroupPerms.length > 0);
 
         // Individual free/permission grants bypass payment lock; group free grants
         // bypass only when they belong to the home group or paid one-time class date.
-        if (freeRes.data || individualPermRes.data || matchingGroupFree.length > 0) {
+        if (individualFree || individualPerm || matchingGroupFree.length > 0) {
           return true;
         }
       }
