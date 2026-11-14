@@ -1400,6 +1400,24 @@ body.invert-read .nclex-badge { background: linear-gradient(135deg, #c9a24a, #a8
   cursor: pointer; transition: all 0.15s;
 }
 .ask-instructor-btn:hover { background: rgba(201,168,76,0.16); border-color: rgba(201,168,76,0.75); }
+/* Focus mode: full screen with ONLY the question box (no question list / cold call on the right) */
+.focus-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 29px; padding: 0; border-radius: 8px;
+  border: 1.5px solid rgba(201,168,76,0.4);
+  background: rgba(201,168,76,0.08);
+  color: var(--gold-primary);
+  cursor: pointer; transition: all 0.15s;
+}
+.focus-btn:hover { background: rgba(201,168,76,0.16); border-color: rgba(201,168,76,0.75); }
+.focus-btn.active { background: rgba(201,168,76,0.22); border-color: var(--gold-primary); }
+.focus-btn .focus-exit { display: none; }
+.focus-btn.active .focus-enter { display: none; }
+.focus-btn.active .focus-exit { display: block; }
+body.invert-read .focus-btn { background: #fdf3d0; color: #6b4e0a; border-color: #a8832a; }
+html.focus-box .test-right-col { display: none; }
+html.focus-box .test-layout { grid-template-columns: 1fr; max-width: none; padding: 16px 28px; }
+html.focus-box .question-panel { height: calc(100vh - 112px); min-height: 360px; }
 /* Answer feedback box: dark, high-contrast text on a pale tint (its normal colours are inline) */
 body.invert-read #answerFeedback[data-fb="correct"] { background: #dcfce7 !important; border-color: #15803d !important; color: #14532d !important; }
 body.invert-read #answerFeedback[data-fb="wrong"]   { background: #fee2e2 !important; border-color: #b91c1c !important; color: #450a0a !important; }
@@ -5131,6 +5149,11 @@ body.invert-read .end-test-btn.confirming { background: #fef3c7; border-color: #
           <span>NCLEX</span>
         </span>
         <div class="question-header-right">
+          <!-- Full screen with only this question box (hides the question list and cold call) -->
+          <button class="focus-btn" id="focusBoxBtn" type="button" onclick="toggleFocusBox()" title="Full screen: question box only" aria-label="Full screen: question box only" aria-pressed="false">
+            <svg class="focus-enter" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            <svg class="focus-exit" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          </button>
           <!-- Send this question to the instructor (everyone, including administrators) -->
           <button class="ask-instructor-btn" id="askTeacherBtn" type="button" onclick="openAskTeacher()" title="Send this question to your instructor">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -8063,6 +8086,66 @@ document.addEventListener('fullscreenchange', syncFullscreenButtons);
 document.addEventListener('webkitfullscreenchange', syncFullscreenButtons);
 window.addEventListener('resize', syncFullscreenButtons);
 syncFullscreenButtons();
+
+// ── FOCUS MODE: full screen with only the question box ────────────────────
+// Hides the question list and cold call on the right so the question box fills the screen. It is the page's own
+// full screen plus a layout class (not element full screen), so End Test, Submit, Ask the instructor and the
+// other dialogs keep working. It leaves full screen again only if it was the one that started it.
+let focusStartedFullscreen = false;
+
+function setFocusBox(on) {
+  document.documentElement.classList.toggle('focus-box', on);
+  const btn = document.getElementById('focusBoxBtn');
+  if (btn) {
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const label = on ? 'Back to the normal layout' : 'Full screen: question box only';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+  }
+}
+
+function toggleFocusBox() {
+  const isOn = document.documentElement.classList.contains('focus-box');
+  if (isOn) {
+    setFocusBox(false);
+    if (focusStartedFullscreen && currentFullscreenElement()) toggleFullscreen();
+    focusStartedFullscreen = false;
+    return;
+  }
+  setFocusBox(true);
+  if (!currentFullscreenElement()) {
+    focusStartedFullscreen = true;
+    toggleFullscreen();
+  } else {
+    focusStartedFullscreen = false;
+  }
+}
+
+// On a computer, Esc (or the full screen button) leaving full screen also leaves focus mode. On iPad the
+// layout stays until the button is tapped, because the system can drop full screen by itself while scrolling.
+function syncFocusWithFullscreen() {
+  if (IS_TOUCH_DEVICE) return;
+  if (!currentFullscreenElement() && document.documentElement.classList.contains('focus-box')) {
+    setFocusBox(false);
+    focusStartedFullscreen = false;
+  }
+}
+document.addEventListener('fullscreenchange', syncFocusWithFullscreen);
+document.addEventListener('webkitfullscreenchange', syncFocusWithFullscreen);
+
+// Focus mode belongs to one test: it ends when the test screen goes away
+(function watchTestScreenForFocus() {
+  const tc = document.getElementById('testContainer');
+  if (!tc || typeof MutationObserver === 'undefined') return;
+  new MutationObserver(() => {
+    if (getComputedStyle(tc).display === 'none' && document.documentElement.classList.contains('focus-box')) {
+      setFocusBox(false);
+      if (focusStartedFullscreen && currentFullscreenElement()) toggleFullscreen();
+      focusStartedFullscreen = false;
+    }
+  }).observe(tc, { attributes: true, attributeFilter: ['style'] });
+})();
 
 // ── HIGHLIGHTER (administrators only) ─────────────────────────────────────
 // With the highlighter on, a click highlights the word under the cursor (click it again to remove it)
