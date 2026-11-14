@@ -286,6 +286,18 @@
     /* Skip if nav already injected */
     if (document.querySelector('.acnhs-site-nav')) return;
 
+    /* textContent drops <br> line breaks, which glued the two parts of a title together
+       ("Spinal Cord Injury (SCI)" + "Spinal Shock ..." became "...(SCI)Spinal Shock ...").
+       Turn every line break into a space and collapse repeated whitespace. */
+    function _plainText(el) {
+      if (!el) return '';
+      var clone = el.cloneNode(true);
+      Array.prototype.forEach.call(clone.querySelectorAll('br'), function (br) {
+        br.parentNode.replaceChild(document.createTextNode(' '), br);
+      });
+      return clone.textContent.replace(/\s+/g, ' ').trim();
+    }
+
     var oldHeader = document.querySelector('header.note-header');
     var category, title, subtitle;
 
@@ -295,9 +307,9 @@
       var titleEl    = oldHeader.querySelector('h1');
       var subtitleEl = oldHeader.querySelector('.subtitle, p.subtitle, .note-subtitle');
 
-      category = tagEl      ? tagEl.textContent.trim()      : 'ACNHS Notes';
-      title    = titleEl    ? titleEl.textContent.trim()     : document.title.replace(/\s*[\|–-].*$/, '').trim();
-      subtitle = subtitleEl ? subtitleEl.textContent.trim()  : '';
+      category = tagEl      ? _plainText(tagEl)      : 'ACNHS Notes';
+      title    = titleEl    ? _plainText(titleEl)     : document.title.replace(/\s*[\|–-].*$/, '').trim();
+      subtitle = subtitleEl ? _plainText(subtitleEl)  : '';
     } else {
       /* ── New-style: bare <h1> + <p class="subtitle"> directly in body ── */
       var h1El  = document.querySelector('body > div h1, body > h1, .container h1, header h1');
@@ -307,8 +319,8 @@
       var rawTitle = document.title || '';
       var dashIdx  = rawTitle.search(/[\|–-]/);
       category = dashIdx !== -1 ? rawTitle.slice(dashIdx + 1).trim() : 'ACNHS Notes';
-      title    = h1El  ? h1El.textContent.trim()  : rawTitle.replace(/\s*[\|–-].*$/, '').trim();
-      subtitle = subEl ? subEl.textContent.replace(/^Maternal Health\s*[·\-]\s*/i, '').trim() : '';
+      title    = h1El  ? _plainText(h1El)  : rawTitle.replace(/\s*[\|–-].*$/, '').trim();
+      subtitle = subEl ? _plainText(subEl).replace(/^Maternal Health\s*[·\-]\s*/i, '').trim() : '';
 
       /* Hide the bare h1 + subtitle so they don't double-render under the hero */
       if (h1El)  h1El.style.display  = 'none';
