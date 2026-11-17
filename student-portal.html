@@ -9451,13 +9451,31 @@
       crossGroupManualEnrollments.forEach(({ date, group }) => {
         if (date < PORTAL_HISTORY_FLOOR_STR || date > todayDateStr) return;
         if (!isStudentActiveOnDate(date)) return;
-        const groupPaymentRecord = prRecords.find(pr => {
+        let groupPaymentRecord = prRecords.find(pr => {
           if (pr.class_group !== group) return false;
           if ((pr.date || '').split('T')[0] !== date) return false;
           const method = String(pr.payment_method || '').toLowerCase();
           const status = String(pr.status || '').toLowerCase();
           return status !== 'absent' && status !== 'ignored' && method !== 'ignored';
         });
+        // A payment made for that day WITHOUT a group tag still pays the one-time class when the student's own group
+        // has no class that day (so it cannot be meant for the home group). Without this, a student who paid for a
+        // class she was added to as a guest kept showing it as unpaid.
+        if (!groupPaymentRecord) {
+          const [cy, cm, cd] = date.split('-').map(Number);
+          const homeGroupMeets = scheduleActiveDays.includes(daysOfWeek[new Date(cy, cm - 1, cd).getDay()])
+            || oneTimeSchedules.some(ot => ot && ot.date && ot.date.substring(0, 10) === date);
+          if (!homeGroupMeets) {
+            groupPaymentRecord = prRecords.find(pr => {
+              if (pr.class_group) return false;
+              const method = String(pr.payment_method || '').toLowerCase();
+              const status = String(pr.status || '').toLowerCase();
+              if (status !== 'paid' && status !== 'excused') return false;
+              if (method === 'manual_enrollment' || method === 'ignored') return false;
+              return extractForClassDates(pr, pr.date).includes(date);
+            });
+          }
+        }
         const isGroupPaid = !!groupPaymentRecord;
         // An absence (student_absences, keyed by date) always wins over unpaid — same as the home-group loop.
         const isGroupAbsent = !isGroupPaid && absentDates.has(date);

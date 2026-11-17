@@ -2191,8 +2191,26 @@
         const lookupKey = isCrossGroup ? `${studentId}::${groupContext}` : String(studentId);
 
         // ⚡ OPTIMIZED: Use payment index for O(1) lookup instead of O(n) scan
-        const hasPayment = paymentIndex.has(normalizedDateStr) &&
+        let hasPayment = paymentIndex.has(normalizedDateStr) &&
                           paymentIndex.get(normalizedDateStr).has(lookupKey);
+
+        // A payment made for that day WITHOUT a group tag still pays the one-time class when the student's own group
+        // has no class that day (so it cannot be meant for the home group).
+        if (!hasPayment && isCrossGroup) {
+          const [cy, cm, cd] = normalizedDateStr.split('-').map(Number);
+          const homeGroup = (groupsData || []).find(g => String(g.group_name) === String(student.group_name));
+          const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+          const dow = dayNames[new Date(cy, cm - 1, cd).getDay()];
+          const homeMeets = !!(homeGroup && homeGroup.schedule && (homeGroup.schedule.includes(dow) || homeGroup.schedule.includes(dow.slice(0, 3))));
+          const homeOneTime = !!(homeGroup && Array.isArray(homeGroup.one_time_schedules) && homeGroup.one_time_schedules.some(ot => ot && ot.date && String(ot.date).substring(0, 10) === normalizedDateStr));
+          if (!homeMeets && !homeOneTime) {
+            hasPayment = (paymentRecordsData || []).some(pr =>
+              String(pr.student_id) === String(studentId) && !pr.class_group &&
+              ['paid', 'excused'].includes(String(pr.status || '').toLowerCase()) &&
+              !['manual_enrollment', 'ignored'].includes(String(pr.payment_method || '').toLowerCase()) &&
+              extractForClassDates(pr, pr.date).map(normalizeDateString).includes(normalizedDateStr));
+          }
+        }
         
         // Check if payment is manual (from payment_records table with payment_method='cash')
         let isManual = false;
